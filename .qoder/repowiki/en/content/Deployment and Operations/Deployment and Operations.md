@@ -102,15 +102,18 @@
 - [samples/web-checks/password-reset/README.md](file://samples/web-checks/password-reset/README.md)
 - [samples/web-checks/password-reset/skill/ResetUserPassword.md](file://samples/web-checks/password-reset/skill/ResetUserPassword.md)
 - [samples/web-checks/password-reset/demo/demo.sh](file://samples/web-checks/password-reset/demo/demo.sh)
+- [samples/web-checks/skill-graduation/README.md](file://samples/web-checks/skill-graduation/README.md)
+- [samples/web-checks/skill-graduation/WALKTHROUGH.md](file://samples/web-checks/skill-graduation/WALKTHROUGH.md)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for sample skill deployment system including deploy-samples.sh script and Makefile targets
-- Documented the optional ConfigMap mounting mechanism for tutorial samples at /skills/samples
-- Added detailed coverage of the password-reset demo sample with browser web-check tools
-- Updated skills-hub integration section to cover the new samples source configuration
-- Enhanced operational procedures to include sample skill lifecycle management (deploy/undeploy)
+- Enhanced documentation of the new skill-graduation sample under web-checks category, which differs from other samples by producing rather than consuming a skill document
+- Added comprehensive coverage of manual ConfigMap patching requirements since the sample is intentionally invisible to the standard installer
+- Updated sample deployment system section to highlight the unique characteristics of the skill-graduation sample
+- Enhanced troubleshooting guide with specific guidance for skill-graduation sample issues
+- Updated operational procedures to include skill-graduation sample lifecycle management
 
 ## Table of Contents
 1. Introduction
@@ -125,7 +128,7 @@
 10. Appendices
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, comprehensive audit secrets synchronization with skills-hub support, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.23.4 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration. **Enhanced**: Build-time version injection now captures locked dependency versions for accurate version display in the operator portal. **Updated**: Sample skill deployment system enables easy installation of tutorial examples into running clusters via optional ConfigMap mounting.
+This document provides comprehensive deployment and operations guidance for the Luban AIOps Platform. It focuses on Kubernetes deployment using GitOps with Kustomize overlays, container build processes, image management, automation scripts, environment configuration, secrets management (including enhanced delegation secret auto-provisioning, comprehensive audit secrets synchronization with skills-hub support, OpenTelemetry credential provisioning, and team-hosted LLM model server management), scaling strategies, monitoring setup (Prometheus metrics, structured logging, health checks, and OpenTelemetry push pipeline), operational procedures (updates, rollbacks, disaster recovery, capacity planning), performance tuning, resource optimization, and troubleshooting common issues. The platform now operates at version 0.23.4 with synchronized service versions across all components. Enhanced model pinning best practices ensure better audit attribution and traceability through fixed-point model IDs rather than rolling tier aliases. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration. **Enhanced**: Build-time version injection now captures locked dependency versions for accurate version display in the operator portal. **Updated**: Sample skill deployment system enables easy installation of tutorial examples into running clusters via optional ConfigMap mounting, with special handling for the skill-graduation sample that produces rather than consumes skill documents.
 
 ## Project Structure
 The platform is organized into multiple products and shared operational assets:
@@ -136,7 +139,7 @@ The platform is organized into multiple products and shared operational assets:
 - Model catalog: Multi-provider model management with live discovery, curated series, and team-hosted model support
 - **Team-hosted LLM hosting**: Reference manifests for self-hosted model servers (Ollama, vLLM, llama.cpp) with bearer-token authentication
 - **Enhanced Operator Portal**: Build-time version injection capturing locked dependency versions for accurate platform component inventory
-- **Sample Skills System**: Optional tutorial samples deployed via ConfigMap mounting at /skills/samples with automated lifecycle management
+- **Sample Skills System**: Optional tutorial samples deployed via ConfigMap mounting at /skills/samples with automated lifecycle management, including special handling for the skill-graduation sample that produces skill documents rather than consuming them
 
 ```mermaid
 graph TB
@@ -161,6 +164,7 @@ VM["Version Management"]
 MC["Model Catalog"]
 LH["LLM Hosting"]
 SS["Sample Skills"]
+SG["Skill Graduation"]
 end
 subgraph "Infrastructure"
 Redis["Redis"]
@@ -190,6 +194,7 @@ VM --> BASE
 MC --> AP
 LH --> MC
 SS --> SH
+SG --> SS
 Redis --> AS
 Postgres --> AS
 PMK --> MK
@@ -238,9 +243,9 @@ Ollama --> AP
 - Platform Gateway: Central gateway that handles user authentication and delegates tokens to downstream services through the identity broker.
 - **Audit Service**: Durable audit trail service that ingests, stores, and queries audit events from all platform components with PostgreSQL persistence.
 - **Incident Service**: Incident management service providing intake, triage, and collaboration capabilities with version 0.23.4 synchronization.
-- **Skills Hub**: Skills management service providing reusable capabilities across the platform with integrated audit event emission for usage tracking. **Updated**: Now supports optional tutorial samples via ConfigMap mounting at /skills/samples.
+- **Skills Hub**: Skills management service providing reusable capabilities across the platform with integrated audit event emission for usage tracking. **Updated**: Now supports optional tutorial samples via ConfigMap mounting at /skills/samples, with special handling for the skill-graduation sample that produces skill documents.
 - **Team-Hosted LLM Provider**: Self-hosted model server support via the `luban` provider, enabling local/on-premises model execution with bearer-token authentication.
-- **Sample Skills System**: Tutorial examples deployed via optional ConfigMap mounting, enabling easy demonstration of platform capabilities without modifying base overlays.
+- **Sample Skills System**: Tutorial examples deployed via optional ConfigMap mounting, enabling easy demonstration of platform capabilities without modifying base overlays. **Special**: The skill-graduation sample is intentionally invisible to the standard installer and requires manual ConfigMap patching since it produces rather than consumes skill documents.
 
 Key operational artifacts:
 - Dockerfiles per product define container images.
@@ -251,7 +256,7 @@ Key operational artifacts:
 - **Version Management**: Centralized version validation ensuring all services maintain consistent version 0.23.4.
 - **Model Catalog**: Multi-provider model management with live discovery, curated series, credential gating, and team-hosted model support.
 - **Enhanced Build Process**: Vite configuration captures locked dependency versions for accurate version display.
-- **Sample Deployment**: Automated sample skill installation via ConfigMap mounting with lifecycle management.
+- **Sample Deployment**: Automated sample skill installation via ConfigMap mounting with lifecycle management, including special handling for skill-graduation sample.
 
 **Section sources**
 - [products/agent-platform/Dockerfile](file://products/agent-platform/Dockerfile)
@@ -270,7 +275,7 @@ Key operational artifacts:
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
 
 ## Architecture Overview
-The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, comprehensive audit trail storage with skills-hub integration, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.23.4, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution. **Enhanced**: Build-time version injection ensures accurate dependency version display in the operator portal. **Updated**: Optional tutorial samples are deployed via ConfigMap mounting at /skills/samples, enabling easy demonstration of platform capabilities without modifying base overlays.
+The platform deploys as a set of Kubernetes workloads orchestrated via Kustomize. The GitOps workflow uses overlays to compose base manifests with environment-specific settings and runtime profiles. Enhanced with automated delegation secret provisioning for secure cross-service communication, comprehensive audit trail storage with skills-hub integration, OpenTelemetry credential provisioning for centralized observability, centralized version management ensuring all services operate at version 0.23.4, advanced model catalog management with live discovery capabilities, and team-hosted model server support for local/on-premises model execution. **Enhanced**: Build-time version injection ensures accurate dependency version display in the operator portal. **Updated**: Optional tutorial samples are deployed via ConfigMap mounting at /skills/samples, with special handling for the skill-graduation sample that produces skill documents rather than consuming them, requiring manual ConfigMap patching.
 
 ```mermaid
 graph TB
@@ -283,6 +288,7 @@ ModelCatalog["Model Catalog"]
 LLMHosting["Team-Hosted LLM"]
 ViteBuild["Vite Build Process"]
 SampleDeploy["Sample Deploy Script"]
+SkillGraduation["Skill Graduation Demo"]
 K8s["Kubernetes Cluster"]
 subgraph "Base Manifests"
 BaseNS["Namespace"]
@@ -312,6 +318,7 @@ end
 subgraph "Tutorial Samples"
 SamplesCM["skills-samples ConfigMap"]
 SamplesMount["/skills/samples Mount"]
+GraduationPatch["Manual ConfigMap Patch"]
 end
 DevOps --> Git
 Git --> Kustomize
@@ -321,6 +328,7 @@ Git --> ModelCatalog
 Git --> LLMHosting
 Git --> ViteBuild
 Git --> SampleDeploy
+Git --> SkillGraduation
 Kustomize --> BaseNS
 Kustomize --> BaseInfra
 Kustomize --> BaseAP
@@ -341,6 +349,8 @@ LLMHosting --> vLLM
 LLMHosting --> Llama
 ViteBuild --> BaseOP
 SampleDeploy --> SamplesCM
+SkillGraduation --> GraduationPatch
+GraduationPatch --> SamplesCM
 SamplesCM --> SamplesMount
 SamplesMount --> BaseSH
 Ollama --> BaseAP
@@ -807,9 +817,9 @@ Ollama-->>Platform : Response
 - [products/agent-platform/src/agent_service/providers/luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
 
 ### Sample Skill Deployment System
-**New Section** Comprehensive tutorial sample deployment system enabling easy installation of demonstration skills into running clusters.
+**Enhanced Section** Comprehensive tutorial sample deployment system enabling easy installation of demonstration skills into running clusters, with special handling for the skill-graduation sample.
 
-The platform now includes a robust sample skill deployment system that allows operators to easily install tutorial examples without modifying base overlays:
+The platform includes a robust sample skill deployment system that allows operators to easily install tutorial examples without modifying base overlays:
 
 - **Optional ConfigMap Mounting**: Tutorial samples are deployed via an optional `skills-samples` ConfigMap mounted read-only at `/skills/samples`
 - **Automated Lifecycle Management**: `make deploy-samples` and `make undeploy-samples` targets provide simple CLI interface
@@ -818,23 +828,34 @@ The platform now includes a robust sample skill deployment system that allows op
 - **Idempotent Operations**: ConfigMap-based approach ensures declarative state management
 - **Skill ID Generation**: Automatic slug generation creates predictable skill IDs based on file structure
 
+**Special Handling for Skill-Graduation Sample**: The skill-graduation sample is intentionally invisible to the standard installer because it produces rather than consumes skill documents. Unlike other samples that ship a `skill/` directory, this sample demonstrates SPEC-055's graduation path end-to-end, where the skill itself is the artifact produced by the demo. This means:
+
+- **Manual ConfigMap Patching Required**: The sample requires manual patching of the `skills-samples` ConfigMap after the graduation process completes
+- **Demo Script Integration**: The demo script handles the mechanical half of merging the graduated draft into the ConfigMap
+- **Cleanup Procedures**: The demo script includes cleanup procedures to remove the graduated skill after testing unless `KEEP_GRADUATED_SKILL=true` is set
+- **Unique Installation Pattern**: Requires `make deploy-samples` to run first to create the base ConfigMap, then the demo script patches it with the generated skill
+
 Key capabilities:
 - **Flexible Installation**: Install all samples or select specific ones via `SAMPLE=<path>` parameter
 - **Automatic Restart**: Skills-hub is automatically restarted after sample changes to re-ingest new content
-- **Tutorial Examples**: Includes password-reset demo demonstrating browser web-check tools with HITL approval gates
+- **Tutorial Examples**: Includes password-reset demo demonstrating browser web-check tools with HITL approval gates, plus the unique skill-graduation sample
 - **No Base Overlay Coupling**: Samples remain independent from platform deployment, maintaining clean separation
 - **Easy Removal**: Simple `make undeploy-samples` command removes all tutorial content
 
 Usage patterns:
 ```bash
-# Install all available samples
+# Install all available samples (required before running skill-graduation demo)
 make deploy-samples
 
-# Install specific sample
+# Install specific sample (not applicable for skill-graduation due to no skill/ directory)
 make deploy-samples SAMPLE=web-checks/password-reset
 
 # Remove all samples
 make undeploy-samples
+
+# For skill-graduation: run the demo script which handles manual ConfigMap patching
+cd samples/web-checks/skill-graduation
+bash demo/demo.sh
 
 # Verify installed samples
 kubectl -n dev-luban-aiops exec deployment/skills-hub -- ls -1 /skills/samples
@@ -843,6 +864,9 @@ kubectl -n dev-luban-aiops exec deployment/skills-hub -- ls -1 /skills/samples
 **Section sources**
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
 - [samples/README.md](file://samples/README.md)
+- [samples/web-checks/skill-graduation/README.md](file://samples/web-checks/skill-graduation/README.md)
+- [samples/web-checks/skill-graduation/WALKTHROUGH.md](file://samples/web-checks/skill-graduation/WALKTHROUGH.md)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [Makefile:181-187](file://Makefile#L181-L187)
@@ -856,7 +880,7 @@ kubectl -n dev-luban-aiops exec deployment/skills-hub -- ls -1 /skills/samples
 - **Observability Scaling**: Scale OpenObserve instances based on telemetry volume and query patterns.
 - **Model Catalog Scaling**: Monitor model discovery refresh rates and cache hit ratios for optimal performance.
 - **Team-Hosted Model Scaling**: Scale model servers by replicating stacks rather than increasing replicas; consider GPU node pools for high-throughput scenarios.
-- **Sample Skills Scaling**: Sample skills are lightweight and scale with skills-hub; no additional scaling considerations needed.
+- **Sample Skills Scaling**: Sample skills are lightweight and scale with skills-hub; no additional scaling considerations needed. **Special**: The skill-graduation sample's graduated skills are temporary and cleaned up after demo runs unless explicitly preserved.
 - **Version 0.23.4 Considerations**: All services optimized for consistent scaling behavior across the platform.
 
 Guidelines:
@@ -889,7 +913,7 @@ Guidelines:
 - **Skills Hub Monitoring**: Audit emission metrics for skill usage tracking (SPEC-029).
 - **Version 0.23.4 Monitoring**: All services emit consistent version metadata for accurate monitoring and alerting.
 - **Enhanced Operator Portal Monitoring**: Accurate version display showing locked dependency versions for React and Ant Design components.
-- **Sample Skills Monitoring**: Skills-hub metrics include sample skill ingestion and usage tracking.
+- **Sample Skills Monitoring**: Skills-hub metrics include sample skill ingestion and usage tracking. **Special**: Monitor skill-graduation sample activity and graduated skill lifecycle.
 
 Implementation notes:
 - Integrate Prometheus scraping via ServiceMonitors or scrape configs targeting service ports.
@@ -906,6 +930,7 @@ Implementation notes:
 - Monitor skills-hub audit emission metrics for usage tracking.
 - Verify operator portal displays accurate dependency versions in Settings view.
 - Monitor sample skill ingestion and usage patterns for tutorial effectiveness.
+- **Skill-Graduation Monitoring**: Track graduation success rates, draft generation metrics, and ConfigMap patch operations.
 
 ```mermaid
 graph TB
@@ -919,6 +944,7 @@ LLMMetrics["Team-Hosted Model Metrics"]
 SkillsMetrics["Skills Hub Audit Metrics"]
 PortalMetrics["Operator Portal Version Display"]
 SampleMetrics["Sample Skills Metrics"]
+GraduationMetrics["Skill Graduation Metrics"]
 Prometheus["Prometheus"]
 Grafana["Grafana Dashboards"]
 OpenObserve["OpenObserve Backend"]
@@ -932,11 +958,13 @@ Services --> LLMMetrics
 Services --> SkillsMetrics
 Services --> PortalMetrics
 Services --> SampleMetrics
+Services --> GraduationMetrics
 Prometheus --> Metrics
 Prometheus --> ModelMetrics
 Prometheus --> LLMMetrics
 Prometheus --> SkillsMetrics
 Prometheus --> SampleMetrics
+Prometheus --> GraduationMetrics
 Grafana --> Prometheus
 OTel --> OpenObserve
 VersionMonitor --> Services
@@ -968,7 +996,7 @@ VersionMonitor --> Services
   - **Model Catalog Updates**: Refresh model discovery if provider model lineups change significantly.
   - **Team-Hosted Model Updates**: Update model weights, rotate bearer tokens, or upgrade model server software as needed.
   - **Operator Portal Updates**: Rebuild to capture updated locked dependency versions for accurate version display.
-  - **Sample Skills Updates**: Use `make deploy-samples` to update tutorial content without affecting base platform.
+  - **Sample Skills Updates**: Use `make deploy-samples` to update tutorial content without affecting base platform. **Special**: For skill-graduation sample updates, rerun the demo script to regenerate and patch the ConfigMap with the latest graduated skill.
 - Rollbacks:
   - Revert overlay commits to previous known-good tags.
   - Apply reverted overlay; confirm rollback success.
@@ -979,7 +1007,7 @@ VersionMonitor --> Services
   - **Model Catalog Rollback**: Revert to curated series if live discovery causes issues.
   - **Team-Hosted Model Rollback**: Revert to previous model versions or server configurations.
   - **Operator Portal Rollback**: Rebuild to restore previous locked dependency versions.
-  - **Sample Skills Rollback**: Use `make undeploy-samples` to remove tutorial content, then reinstall desired version.
+  - **Sample Skills Rollback**: Use `make undeploy-samples` to remove tutorial content, then reinstall desired version. **Special**: For skill-graduation sample rollback, the demo script automatically cleans up graduated skills unless `KEEP_GRADUATED_SKILL=true` was set.
 - Disaster Recovery:
   - Back up persistent data (e.g., Redis volumes, PostgreSQL data, model weight PVCs).
   - Restore from backups and reapply overlays.
@@ -987,7 +1015,7 @@ VersionMonitor --> Services
   - Re-provision comprehensive audit secrets and validate audit ingestion from all components including skills-hub.
   - Re-provision OpenTelemetry credentials and validate telemetry flow.
   - Restore team-hosted model weights and validate model availability.
-  - Restore sample skills using `make deploy-samples`.
+  - Restore sample skills using `make deploy-samples`. **Special**: For skill-graduation sample recovery, rerun the demo script to regenerate the graduated skill and patch the ConfigMap.
   - Confirm data integrity and service functionality.
   - **Version Verification**: Validate all services restored to consistent version 0.23.4.
   - **Model Catalog Recovery**: Rebuild model catalog from curated series if discovery cache is corrupted.
@@ -1004,7 +1032,7 @@ VersionMonitor --> Services
   - **Team-Hosted Model Capacity**: Plan GPU node capacity, model weight storage, and concurrent inference capacity based on usage patterns.
   - **Skills Hub Capacity**: Monitor skill usage patterns and audit event volume for capacity planning.
   - **Operator Portal Capacity**: Monitor version display accuracy and dependency resolution performance.
-  - **Sample Skills Capacity**: Tutorial samples are lightweight and scale with skills-hub; minimal additional capacity planning needed.
+  - **Sample Skills Capacity**: Tutorial samples are lightweight and scale with skills-hub; minimal additional capacity planning needed. **Special**: The skill-graduation sample's graduated skills are temporary and don't require long-term capacity planning.
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
@@ -1019,7 +1047,7 @@ VersionMonitor --> Services
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
 
 ## Dependency Analysis
-The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, team-hosted model server support, and optional tutorial sample deployment. **Enhanced**: Vite build configuration now depends on package-lock.json for locked dependency version resolution. **Updated**: Sample skill deployment system adds optional dependency on skills-hub deployment for ConfigMap mounting.
+The platform's dependencies span build tools, container images, Kubernetes resources, runtime profiles, delegation secret management, comprehensive audit secret management (including skills-hub), OpenTelemetry credential provisioning, centralized version management, advanced model catalog management, team-hosted model server support, and optional tutorial sample deployment. **Enhanced**: Vite build configuration now depends on package-lock.json for locked dependency version resolution. **Updated**: Sample skill deployment system adds optional dependency on skills-hub deployment for ConfigMap mounting, with special handling for the skill-graduation sample that requires manual ConfigMap patching.
 
 ```mermaid
 graph LR
@@ -1060,6 +1088,8 @@ LockFile --> VersionConstants["Version Constants"]
 VersionConstants --> PortalUI["Operator Portal UI"]
 SampleDeploy["deploy-samples.sh"] --> SampleMount
 SampleMount --> SHRes
+SkillGraduation["skill-graduation demo"] --> ManualPatch["Manual ConfigMap Patch"]
+ManualPatch --> SampleMount
 ```
 
 **Diagram sources**
@@ -1083,6 +1113,7 @@ SampleMount --> SHRes
 - [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 - [products/operator-portal/web-ui/app/package-lock.json](file://products/operator-portal/web-ui/app/package-lock.json)
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 
 **Section sources**
 - [Makefile](file://Makefile)
@@ -1137,7 +1168,7 @@ SampleMount --> SHRes
   - Monitor audit emission performance and event delivery success rates.
   - Optimize skill search and retrieval operations for better user experience.
   - Monitor audit event volume from skills-hub for capacity planning.
-  - **Sample Skills Performance**: Tutorial samples are lightweight and have minimal performance impact.
+  - **Sample Skills Performance**: Tutorial samples are lightweight and have minimal performance impact. **Special**: The skill-graduation sample's ConfigMap patch operations are infrequent and don't impact overall performance.
 - **Version 0.23.4 Optimizations**:
   - All services benefit from consistent version optimizations and performance improvements.
   - Leverage synchronized service versions for predictable performance characteristics.
@@ -1212,6 +1243,13 @@ Common issues and resolutions:
   - Check that sample skill files are properly mounted at `/skills/samples`.
   - Verify skill IDs are generated correctly (format: `samples/<slug>`).
   - Use `kubectl -n <namespace> exec deployment/skills-hub -- ls -1 /skills/samples` to verify mounted content.
+- **Skill-Graduation Sample Specific Issues**:
+  - **ConfigMap Missing**: Ensure `make deploy-samples` has been run at least once to create the base `skills-samples` ConfigMap before running the skill-graduation demo.
+  - **Manual Patching Required**: The skill-graduation sample is intentionally invisible to the standard installer; you must run the demo script which handles manual ConfigMap patching.
+  - **Graduated Skill Cleanup**: By default, the demo script removes the graduated skill after completion. Set `KEEP_GRADUATED_SKILL=true` to preserve it for inspection.
+  - **ConfigMap Key Format**: The graduated skill is patched under the key format `skill-graduation-<filename>.md` following the same convention as other samples.
+  - **Skills-Hub Restart**: After manual ConfigMap patching, skills-hub must be restarted to re-ingest the new skill.
+  - **Skill ID Generation**: The graduated skill gets a predictable ID like `samples/skill-graduation-batch-password-reset-graduation-demo` based on the filename.
 - **Version Consistency Issues**:
   - Use `validate_version.py` to check version drift across all services.
   - Ensure all services maintain version 0.23.4 consistency.
@@ -1236,6 +1274,7 @@ Operational commands:
 - Use team-hosted model health checks to verify model server availability and model loading status.
 - Use skills-hub audit metrics to monitor skill usage tracking and audit emission performance.
 - Use sample skill deployment commands to manage tutorial content.
+- **For skill-graduation sample**: Run the demo script to handle manual ConfigMap patching and graduated skill lifecycle management.
 - Verify operator portal Settings view displays accurate dependency versions.
 
 **Section sources**
@@ -1252,9 +1291,12 @@ Operational commands:
 - [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 - [products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx)
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
+- [samples/web-checks/skill-graduation/README.md](file://samples/web-checks/skill-graduation/README.md)
+- [samples/web-checks/skill-graduation/WALKTHROUGH.md](file://samples/web-checks/skill-graduation/WALKTHROUGH.md)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 
 ## Conclusion
-This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing comprehensive audit secrets (including skills-hub integration), provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The comprehensive audit service provides durable audit trail storage with PostgreSQL persistence, enabling complete compliance and security monitoring across all platform components including skills-hub usage tracking. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.23.4 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. **Updated**: The sample skill deployment system provides easy tutorial example installation via optional ConfigMap mounting, enabling demonstration of platform capabilities without modifying base overlays. **Enhanced**: Build-time version injection in the operator portal now captures locked dependency versions from package-lock.json, providing accurate React and Ant Design version display that matches the actual shipped bundles. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, comprehensive audit ingestion, telemetry export, model catalog performance, team-hosted model server health, skills-hub audit emissions, version consistency, accurate dependency version display, and effective tutorial sample management are essential for maintaining stability and performance.
+This guide outlines the end-to-end deployment and operations for the Luban AIOps Platform using GitOps and Kustomize. By following the documented processes for building images, managing overlays, configuring environments, provisioning delegation secrets, synchronizing comprehensive audit secrets (including skills-hub integration), provisioning OpenTelemetry credentials, and setting up monitoring, teams can reliably operate the platform at scale. The enhanced delegation secret auto-provisioning ensures secure cross-service authentication while maintaining operational simplicity. The comprehensive audit service provides durable audit trail storage with PostgreSQL persistence, enabling complete compliance and security monitoring across all platform components including skills-hub usage tracking. The integrated OpenTelemetry pipeline with automated credential provisioning delivers centralized observability with fail-safe design and enhanced CI/CD support. The centralized version management system ensures all services operate at version 0.23.4 with consistent behavior across the platform. The advanced model catalog system with live discovery and enhanced model pinning best practices provides robust LLM model management with fixed-point model IDs for better audit attribution and traceability. **New**: Team-hosted LLM model hosting capabilities enable running small models locally or on-premises with full platform integration, supporting Ollama, vLLM, and llama.cpp backends with bearer-token authentication and reference Kubernetes manifests. **Updated**: The sample skill deployment system provides easy tutorial example installation via optional ConfigMap mounting, with special handling for the skill-graduation sample that produces rather than consumes skill documents, requiring manual ConfigMap patching. **Enhanced**: Build-time version injection in the operator portal now captures locked dependency versions from package-lock.json, providing accurate React and Ant Design version display that matches the actual shipped bundles. Continuous validation, robust secret management, proactive capacity planning, careful monitoring of token delegation flows, comprehensive audit ingestion, telemetry export, model catalog performance, team-hosted model server health, skills-hub audit emissions, version consistency, accurate dependency version display, and effective tutorial sample management (including the unique skill-graduation sample workflow) are essential for maintaining stability and performance.
 
 ## Appendices
 
@@ -1269,7 +1311,8 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - reconcile-portal-oidc-client.sh: Ensures OIDC client configuration remains consistent with Keycloak.
 - **validate_version.py**: Validates version consistency across all platform services and ensures version 0.23.4 synchronization.
 - **llm-hosting manifests**: Reference Kubernetes manifests for team-hosted model server deployment (free-standing, not part of main overlay).
-- **deploy-samples.sh**: Manages tutorial sample skill deployment via ConfigMap mounting at /skills/samples.
+- **deploy-samples.sh**: Manages tutorial sample skill deployment via ConfigMap mounting at /skills/samples. **Special**: Handles all samples except skill-graduation, which requires manual ConfigMap patching.
+- **skill-graduation demo script**: Handles the complete SPEC-055 graduation workflow including manual ConfigMap patching for the produced skill document.
 - **Makefile targets**: `deploy-samples` and `undeploy-samples` provide simple CLI interface for sample lifecycle management.
 - **Vite Build Process**: Captures locked dependency versions for accurate version display in operator portal.
 
@@ -1285,6 +1328,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [shared/platform-ops/gitops/llm-hosting/README.md](file://shared/platform-ops/gitops/llm-hosting/README.md)
 - [samples/deploy-samples.sh](file://samples/deploy-samples.sh)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 - [Makefile:181-187](file://Makefile#L181-L187)
 - [products/operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
 
@@ -1300,7 +1344,7 @@ This guide outlines the end-to-end deployment and operations for the Luban AIOps
 - **Model Catalog Configuration**: AGENT_MODEL_DISCOVERY_ENABLED for live discovery, AGENT_MODEL_DISCOVERY_REFRESH_SECONDS for refresh intervals, AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS for API timeouts.
 - **Team-Hosted Model Configuration**: LUBAN_API_KEY for bearer-token authentication, LUBAN_BASE_URL for model server endpoint, LUBAN_MODEL_NAME for default model, LUBAN_MODELS for model pinning.
 - **Skills Hub Configuration**: SKILLS_AUDIT_SERVICE_URL for audit event emission, SKILLS_AUDIT_CLIENT_ID for client identification, SKILLS_AUDIT_CLIENT_SECRET for audit authentication.
-- **Sample Skills Configuration**: SKILLS_SOURCES includes generic `samples` source pointing to /skills/samples mount path.
+- **Sample Skills Configuration**: SKILLS_SOURCES includes generic `samples` source pointing to /skills/samples mount path. **Special**: The skill-graduation sample requires manual ConfigMap patching and is intentionally invisible to the standard installer.
 - **Model Pinning Best Practices**: Use fixed-point model IDs (e.g., qwen3.8-max) over rolling tier aliases (e.g., qwen-plus) for better audit attribution and traceability.
 - **Operator Portal Configuration**: Build-time version injection automatically captures locked dependency versions from package-lock.json for accurate version display.
 - Ensure consistency across environments by pinning versions and tags.
@@ -1662,7 +1706,7 @@ Benefits:
 - [products/operator-portal/Makefile](file://products/operator-portal/Makefile)
 
 ### Appendix K: Sample Skill Deployment Guide
-**New Section** Complete guide for deploying and managing tutorial sample skills.
+**Enhanced Section** Complete guide for deploying and managing tutorial sample skills, with special handling for the skill-graduation sample.
 
 The sample skill deployment system provides easy installation of tutorial examples without modifying base platform overlays:
 
@@ -1673,25 +1717,34 @@ samples/
 └── <category>/
     └── <sample-name>/
         ├── README.md           # Tutorial walkthrough
+        ├── WALKTHROUGH.md      # Live, click-by-click run against a cluster (optional)
         ├── skill/              # Skill document(s) — installed by `make deploy-samples`
         ├── demo/               # Demo/test script(s)
         └── target/             # Sample-specific target infrastructure (optional)
 ```
 
+**Special Case - Skill-Graduation Sample**: This sample intentionally omits the `skill/` directory because it demonstrates SPEC-055's graduation path where the skill itself is the artifact produced by the demo. This makes it invisible to the standard installer and requires manual ConfigMap patching.
+
 #### Available Samples
 Currently available tutorial samples:
 - **web-checks/password-reset**: Demonstrates browser web-check tools with HITL approval gates for password reset workflows
+- **web-checks/adhoc-password-reset**: Demonstrates ad-hoc skill authoring with per-action approval cards
+- **web-checks/skill-graduation**: **Unique** - Demonstrates the complete SPEC-055 graduation workflow, producing rather than consuming skill documents
 
 #### Installation Commands
 ```bash
-# Install all available samples
+# Install all available samples (required prerequisite for skill-graduation demo)
 make deploy-samples
 
-# Install specific sample
+# Install specific sample (not applicable for skill-graduation due to no skill/ directory)
 make deploy-samples SAMPLE=web-checks/password-reset
 
 # Remove all samples
 make undeploy-samples
+
+# For skill-graduation: run the demo script which handles manual ConfigMap patching
+cd samples/web-checks/skill-graduation
+bash demo/demo.sh
 ```
 
 #### How It Works
@@ -1701,11 +1754,21 @@ make undeploy-samples
 4. **Ingestion**: Skills-hub automatically ingests skills from the mounted location
 5. **Restart**: Skills-hub deployment is restarted to re-ingest new content
 
+**Skill-Graduation Special Workflow**:
+1. **Prerequisite**: Run `make deploy-samples` to create the base `skills-samples` ConfigMap
+2. **Author**: Demo script guides through ad-hoc skill authoring with per-action approvals
+3. **Graduate**: Demo script triggers graduation process to produce executable-flow skill
+4. **Manual Patch**: Demo script patches the graduated skill into the ConfigMap
+5. **Replay**: Demo script demonstrates replaying the graduated skill under one gate
+6. **Cleanup**: Demo script removes the graduated skill unless `KEEP_GRADUATED_SKILL=true`
+
 #### Skill ID Generation
 Skill IDs follow the pattern `samples/<slug>` where slug is generated from file paths:
 - File: `web-checks/password-reset/skill/ResetUserPassword.md`
 - ConfigMap key: `password-reset-ResetUserPassword.md`
 - Skill ID: `samples/password-reset-resetuserpassword`
+
+**Skill-Graduation ID Pattern**: Graduated skills get IDs like `samples/skill-graduation-batch-password-reset-graduation-demo` based on the filename.
 
 #### Verification
 ```bash
@@ -1717,6 +1780,9 @@ kubectl -n dev-luban-aiops exec deployment/skills-hub -- cat /skills/samples/pas
 
 # Check skills-hub logs for ingestion
 kubectl -n dev-luban-aiops logs deployment/skills-hub | grep -i "samples"
+
+# For skill-graduation: verify graduated skill was patched
+kubectl -n dev-luban-aiops get configmap skills-samples -o jsonpath='{.data}' | grep skill-graduation
 ```
 
 #### Password Reset Demo
@@ -1737,11 +1803,14 @@ RUN_CHAT_LEG=true bash demo/demo.sh
 ```
 
 #### Adding New Samples
-1. Create directory structure: `samples/<category>/<sample-name>/`
-2. Add skill document: `skill/<Name>.md`
-3. Add tutorial documentation: `README.md`
-4. Add demo script: `demo/demo.sh`
-5. Install with: `make deploy-samples SAMPLE=<category>/<sample-name>`
+1. Create a directory under the appropriate category
+2. Add a `README.md` explaining the automation pattern
+3. Add the skill document under `skill/` — unless the sample's point is that the platform produces it, in which case say so in the README
+4. Add a demo script under `demo/`
+5. If your sample needs its own target infrastructure, add it under `target/` (shared infra used by more than one consumer stays in platform GitOps)
+6. Install it into your cluster with `make deploy-samples SAMPLE=<category>/<sample-name>` — no GitOps edits needed; the platform exposes one generic `samples` skill source
+
+**Special Case for Skill-Producing Samples**: If creating a sample that produces rather than consumes skill documents (like skill-graduation), document the manual ConfigMap patching requirement and provide clear instructions for the demo script's patching workflow.
 
 **Section sources**
 - [samples/README.md](file://samples/README.md)
@@ -1749,6 +1818,9 @@ RUN_CHAT_LEG=true bash demo/demo.sh
 - [samples/web-checks/password-reset/README.md](file://samples/web-checks/password-reset/README.md)
 - [samples/web-checks/password-reset/skill/ResetUserPassword.md](file://samples/web-checks/password-reset/skill/ResetUserPassword.md)
 - [samples/web-checks/password-reset/demo/demo.sh](file://samples/web-checks/password-reset/demo/demo.sh)
+- [samples/web-checks/skill-graduation/README.md](file://samples/web-checks/skill-graduation/README.md)
+- [samples/web-checks/skill-graduation/WALKTHROUGH.md](file://samples/web-checks/skill-graduation/WALKTHROUGH.md)
+- [samples/web-checks/skill-graduation/demo/demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [Makefile:181-187](file://Makefile#L181-L187)

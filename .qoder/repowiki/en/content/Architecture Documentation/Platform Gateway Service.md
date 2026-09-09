@@ -36,16 +36,17 @@
 - [SPEC-039 spec.md](file://docs/specs/SPEC-039-operations-document-repository/spec.md)
 - [SPEC-043 spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [SPEC-052 spec.md](file://docs/specs/SPEC-052-skill-content-viewer/spec.md)
+- [SPEC-055 spec.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md)
 - [ADR-0005](file://docs/adr/0005-platform-gateway-extraction.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added new single-skill detail proxy endpoint GET /api/v1/skills/{skill_id:path} for SPEC-052 implementation with skills-hub client integration
-- Enhanced skills inventory functionality to support full skill record retrieval including body content
-- Updated skills hub client with get_skill method for detailed skill access
-- Added comprehensive testing for the new single-skill detail endpoint
-- Updated architecture diagrams to reflect the enhanced skills capability
+- Added new skill target declaration endpoint POST /api/v1/sessions/{session_id}/skill-target for SPEC-055 implementation with session:skill_graduate policy enforcement
+- Enhanced policy engine with new ACTION_SESSION_SKILL_GRADUATE constant and protected action registration
+- Updated default policy bundle to include session:skill_graduate action with appropriate role-based access control
+- Improved error handling for skill target validation failures with proper 4xx passthrough and 5xx mapping
+- Added comprehensive testing coverage for skill target declaration functionality
 
 ## Table of Contents
 1. Introduction
@@ -59,11 +60,11 @@
 9. Conclusion
 
 ## Introduction
-The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes a single-skill detail proxy endpoint for reading full skill records including body content. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
+The Platform Gateway Service is the portal-facing edge service for the Luban AIOps platform. It authenticates portal users via JWT verification, enforces deny-by-default action policies, proxies chat and session requests to the agent-platform service, mediates short-lived delegated tokens through the identity-broker for downstream tool access, provides unified API access to the incident service with policy enforcement for incident operations, exposes live permission matrix evaluation, offers workspace inventory discovery for tools and skills, handles human-in-the-loop (HITL) confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping to caller's own sessions, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, includes single-skill detail proxy functionality for reading full skill records including body content, and now supports skill target declaration for develop-as-you-go sessions with proper authorization controls. It exposes health, metrics, and runtime endpoints and maintains request correlation across hops.
 
 Key responsibilities:
 - Verify portal bearer tokens (issuer/audience JWKS validation; audience bound to platform-gateway).
-- Enforce deny-by-default policy bundle on every portal-facing action (e.g., chat, sessions:*, incidents:*, policy:read, tools:list, skills:read, models:list, chat:confirm, session:list, session:delete, documents:create, documents:read, session:update).
+- Enforce deny-by-default policy bundle on every portal-facing action (e.g., chat, sessions:*, incidents:*, policy:read, tools:list, skills:read, models:list, chat:confirm, session:list, session:delete, documents:create, documents:read, session:update, session:skill_graduate).
 - Proxy chat/session traffic to agent-platform, exchanging the portal token for a short-lived delegated token (aud = tool-gateway, act.sub = platform-gateway) via identity-broker before forwarding.
 - Handle HITL confirmations via POST /api/v1/chat/confirm with identity delegation and SSE streaming, emitting confirmation_decided audit events when decisions are applied.
 - Provide unified API access to incident-service with per-action policy enforcement (incident:read, incident:create, incident:triage) and Basic credential authentication upstream.
@@ -74,6 +75,7 @@ Key responsibilities:
 - Expose platform version through /api/v1/runtime endpoint by merging SERVICE_VERSION into payload, enabling better version tracking and monitoring capabilities across the platform.
 - Session workspace management now includes owner-only session rename capability behind `session:update` action with server-side ownership verification.
 - Manage session workspace lifecycle (create, list, read, delete, update title) with server-side scoping to caller's own sessions and deny-by-default policy enforcement.
+- Support skill target declaration for develop-as-you-go sessions behind `session:skill_graduate` policy action with proper authorization controls.
 - Relay auth/identity/runtime endpoints to identity-broker and agent-platform as needed.
 - Expose /health/live, /health/ready, and /metrics.
 
@@ -84,6 +86,7 @@ Key responsibilities:
 - [SPEC-039 spec.md:1-268](file://docs/specs/SPEC-039-operations-document-repository/spec.md#L1-L268)
 - [SPEC-043 spec.md:1-293](file://docs/specs/SPEC-043-incident-report-document-type/spec.md#L1-L293)
 - [SPEC-052 spec.md:1-185](file://docs/specs/SPEC-052-skill-content-viewer/spec.md#L1-L185)
+- [SPEC-055 spec.md:1-200](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L1-L200)
 - [ADR-0005:1-47](file://docs/adr/0005-platform-gateway-extraction.md#L1-L47)
 
 ## Project Structure
@@ -169,7 +172,7 @@ A --> RTS
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 - [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [sessions.py:1-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L283)
 - [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -178,17 +181,17 @@ A --> RTS
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 - [health.py:1-17](file://products/platform-gateway/src/platform_gateway/api/routes/health.py#L1-L17)
-- [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
-- [agent_client.py:1-487](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L487)
+- [gateway_service.py:1-1313](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1313)
+- [agent_client.py:1-521](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L521)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
+- [policy_engine.py:1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
+- [policy-default.yaml:1-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L326)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 
@@ -204,6 +207,7 @@ A --> RTS
 - API routes:
   - Chat and Sessions endpoints enforcing identity and policy, delegating to gateway service.
   - Complete session workspace lifecycle management (create, list, read, delete, update title) with server-side scoping to caller's own sessions.
+  - Skill target declaration endpoint for develop-as-you-go sessions with `session:skill_graduate` policy enforcement.
   - Operations document repository routes (create, list, fetch, publish, delete) with policy enforcement, trusted foreign-session coverage computation, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
   - Incident proxy routes providing unified API access to incident-service with per-action policy enforcement.
   - Policy matrix endpoint serving live permission evaluation with role-scoped visibility.
@@ -213,6 +217,7 @@ A --> RTS
 - Gateway service:
   - Identity resolution, policy enforcement, proxying to agent-platform, streaming chat support.
   - Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
+  - Skill target declaration proxy with improved error handling for target validation failures.
   - Chat confirm handling with audit trail integration for confirmation_decided events.
   - Document repository proxy with trusted foreign-session coverage decision computation, dual-action authorization for incident reports, and type-specific payload handling.
   - Model catalog proxy with consistent error handling patterns matching other proxy endpoints.
@@ -232,11 +237,11 @@ A --> RTS
   - Local JWT verification using JWKS with issuer/audience checks and actor extraction.
 - Policy engine:
   - Loads YAML bundle and evaluates actions against roles with deny-by-default semantics.
-  - Includes new protected actions (policy:read, tools:list, skills:read, chat:confirm, session:list, session:delete, models:list, documents:create, documents:read, session:update) with appropriate role-based access control.
+  - Includes new protected actions (policy:read, tools:list, skills:read, chat:confirm, session:list, session:delete, models:list, documents:create, documents:read, session:update, session:skill_graduate) with appropriate role-based access control.
 - Policy matrix service:
   - Builds live permission matrix from loaded bundle with role-scoped visibility and metadata.
 - Audit emitter:
-  - Fire-and-forget delivery of audit events including confirmation_decided, session_deleted, document_created, document_published, document_deleted, and chat_completed events with non-blocking operation.
+  - Fire-and-forget delivery of audit events including confirmation_decided, session_deleted, document_created, document_published, document_deleted, chat_completed, and skill_target_declared events with non-blocking operation.
   - Chat completed events now include model attribution with fallback support for complete operational visibility.
   - Document repository audit events with foreign-session coverage tracking and incident_id for incident reports.
 
@@ -246,7 +251,7 @@ A --> RTS
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 - [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [sessions.py:1-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L283)
 - [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -255,42 +260,40 @@ A --> RTS
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
 - [health.py:1-17](file://products/platform-gateway/src/platform_gateway/api/routes/health.py#L1-L17)
-- [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
-- [agent_client.py:1-487](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L487)
+- [gateway_service.py:1-1313](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1313)
+- [agent_client.py:1-521](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L521)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
+- [policy_engine.py:1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
+- [policy-default.yaml:1-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L326)
 
 ## Architecture Overview
-The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes single-skill detail proxy functionality for reading full skill records including body content. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, enhanced audit trail coverage with model attribution for complete operational visibility, secure document repository operations with cross-session coverage capabilities, enhanced runtime version exposure, and enhanced skills content viewing capabilities.
+The gateway sits between the portal and backend services. It authenticates users, authorizes actions, proxies requests, obtains delegated tokens for tool execution paths, serves live permission matrices, provides workspace inventory discovery, handles HITL confirmations with durable audit trails, manages session workspace lifecycle with server-side scoping, provides credential-gated model catalog discovery with per-turn model selection passthrough, implements operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, includes single-skill detail proxy functionality for reading full skill records including body content, and now supports skill target declaration for develop-as-you-go sessions with proper authorization controls. The architecture includes comprehensive transparency features, workspace capability visibility, human-in-the-loop confirmation bridging, complete session workspace management, enhanced audit trail coverage with model attribution for complete operational visibility, secure document repository operations with cross-session coverage capabilities, enhanced runtime version exposure, enhanced skills content viewing capabilities, and robust skill development workflow support.
 
 ```mermaid
 sequenceDiagram
 participant Portal as "Portal Client"
 participant GW as "Platform Gateway"
-participant ID as "Identity Broker"
 participant AG as "Agent Platform"
-participant IS as "Incident Service"
-participant TG as "Tool Gateway"
-participant SH as "Skills Hub"
 participant AUD as "Audit Service"
-Note over Portal,AUD : Single-Skill Detail Access
-Portal->>GW : GET /api/v1/skills/{skill_id : path}
-GW->>GW : Enforce skills : read policy
-GW->>SH : GET /api/v1/skills/{skill_id : path}
-SH-->>GW : Full skill record with body
-GW-->>Portal : Skill detail response
+Note over Portal,AUD : Skill Target Declaration Flow
+Portal->>GW : POST /api/v1/sessions/{session_id}/skill-target
+GW->>GW : Enforce session : skill_graduate policy
+GW->>AG : POST /api/v2/sessions/{session_id}/skill-target
+AG-->>GW : Skill target declared response
+GW-->>Portal : Success response
+GW->>AUD : Emit skill_target_declared event
 ```
 
 **Diagram sources**
-- [skills.py:55-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L55-L78)
-- [skills_hub_client.py:81-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L81-L109)
+- [sessions.py:166-211](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L166-L211)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+- [agent_client.py:32-51](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L51)
 
 ## Detailed Component Analysis
 
@@ -298,6 +301,7 @@ GW-->>Portal : Skill detail response
 - The router aggregates health, runtime, auth, identity, sessions, chat, audit, incidents, newly added policy, tools, skills, models, approvals, and documents routes.
 - Chat, Sessions, and Incident routes enforce identity and policy before delegating to their respective service functions.
 - Complete session workspace lifecycle management with deny-by-default policy enforcement for all session operations including owner-only rename.
+- Skill target declaration route for develop-as-you-go sessions with `session:skill_graduate` policy enforcement.
 - Operations document repository routes provide create, list, fetch, publish, and delete functionality with policy enforcement, trusted foreign-session coverage computation, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
 - Chat Confirm route for HITL confirmation bridging with identity delegation and SSE streaming.
 - Policy routes provide live permission matrix evaluation with role-scoped visibility.
@@ -334,6 +338,8 @@ class SessionsRoutes {
 +GET /api/v1/sessions/{session_id}
 +DELETE /api/v1/sessions/{session_id}
 +PATCH /api/v1/sessions/{session_id}/title
++POST /api/v1/sessions/{session_id}/skill-target
++POST /api/v1/sessions/{session_id}/skill-draft
 }
 class DocumentsRoutes {
 +POST /api/v1/documents
@@ -379,7 +385,7 @@ Router --> RuntimeRoutes : "includes"
 **Diagram sources**
 - [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [sessions.py:1-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L283)
 - [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -391,7 +397,7 @@ Router --> RuntimeRoutes : "includes"
 **Section sources**
 - [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [sessions.py:1-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L283)
 - [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -399,6 +405,518 @@ Router --> RuntimeRoutes : "includes"
 - [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
+
+### Enhanced Session Workspace with Skill Target Declaration
+**Updated** - Enhanced session workspace functionality with new skill target declaration endpoint for develop-as-you-go sessions, requiring `session:skill_graduate` policy action enforcement.
+
+#### Skill Target Declaration Endpoint
+- **Endpoint**: POST /api/v1/sessions/{session_id}/skill-target
+- **Authentication**: Requires `session:skill_graduate` action enforcement with identity verification
+- **Functionality**: Declares the web target a skill-development session works against (SPEC-055 R-4)
+- **Response**: Skill target declaration result with already_declared flag
+- **Purpose**: Enables operators to declare the web target for develop-as-you-go skill development sessions
+
+#### Implementation Details
+- **Authorization**: Uses `session:skill_graduate` policy action - higher trust level than draft grants
+- **Ownership**: Server-side ownership re-checked by agent layer (foreign/unknown sessions return 404)
+- **Error Handling**: Upstream 4xx passes through with structured detail (foreign/unknown session, invalid target); 5xx maps to 502
+- **Audit Trail**: Emits `skill_target_declared` event with request_id, session_id, user_id, and already_declared flag
+- **Security**: Deliberately unaudited at gateway level - declaration scope becomes consequential only at graduation
+
+Key capabilities:
+- Higher trust level than session:skill_draft - output declares risk_class: write and machine-readable replay steps
+- Same operational-role posture as skill drafting (platform-admin, approver, operator)
+- Prevents widening of first-wins scope declarations
+- Supports namespaced skill targets with embedded slashes
+- Integrates seamlessly with existing session workspace infrastructure
+- Provides clear error messages for invalid or unnormalizable targets
+
+```mermaid
+flowchart TD
+Start(["Skill Target Declaration"]) --> ResolveId["Resolve Request Identity"]
+ResolveId --> AuthCheck{"Auth Required?"}
+AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
+AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
+AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
+Verify --> Valid{"Valid?"}
+Valid --> |No| Deny401
+Valid --> |Yes| PolicyEnf["Enforce session:skill_graduate"]
+PolicyEnf --> Allowed{"Allowed?"}
+Allowed --> |No| Deny403["HTTP 403"]
+Allowed --> |Yes| ProxyTarget["Proxy to Agent Platform"]
+ProxyTarget --> Response{"Upstream Response?"}
+Response --> |4xx| PassThrough["Pass Through 4xx with Detail"]
+Response --> |5xx| Map502["Map to 502"]
+Response --> |Success| LogEvent["Log skill_target_declared"]
+PassThrough --> Return(["Return Response"])
+Map502 --> Return
+LogEvent --> Return
+```
+
+**Diagram sources**
+- [sessions.py:166-211](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L166-L211)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+
+**Section sources**
+- [sessions.py:166-211](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L166-L211)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+- [SPEC-055 spec.md:150-200](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L150-L200)
+
+### Enhanced Policy Engine with Skill Graduation Action
+**Updated** - Enhanced policy engine with new ACTION_SESSION_SKILL_GRADUATE constant and protected action registration for skill target declaration and graduation workflows.
+
+#### New Protected Action
+- **Action Name**: `session:skill_graduate`
+- **Purpose**: Gates both skill target declaration and graduation of captured authoring traces
+- **Trust Level**: Higher than session:skill_draft - requires operational roles only
+- **Protected Actions Set**: Added to PROTECTED_ACTIONS frozenset for policy enforcement
+
+#### Default Policy Bundle Updates
+- **Role Grants**: platform-admin, approver, and operator roles granted session:skill_graduate action
+- **Denial Posture**: developer and read-only-observer roles denied by default
+- **Bundle Version**: Updated to v1 with new rule for skill graduation
+- **Rule ID**: allow-operators-skill-graduate with priority 100
+
+Key capabilities:
+- Single action gates both declaration and graduation phases
+- Prevents partial capability grants that could bypass security controls
+- Maintains consistency with existing operational role postures
+- Supports high-trust skill development workflows
+- Enables proper audit trail coverage for skill graduation activities
+
+```mermaid
+flowchart TD
+Load["Load Policy Bundle"] --> Evaluate["Evaluate session:skill_graduate Action"]
+Evaluate --> Match{"Any Rule Matches?"}
+Match --> |No| Deny["Deny (default)"]
+Match --> |Yes| Priority["Apply Priority & Explicit Deny"]
+Priority --> Decision["Decision: Allow/Deny"]
+Decision --> Record["Record Metrics & Log"]
+```
+
+**Diagram sources**
+- [policy_engine.py:82-91](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L82-L91)
+- [policy_engine.py:92-117](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L92-L117)
+- [policy-default.yaml:309-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L309-L326)
+
+**Section sources**
+- [policy_engine.py:82-117](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L82-L117)
+- [policy-default.yaml:309-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L309-L326)
+
+### Enhanced Error Handling for Target Validation Failures
+**Enhanced** - Improved error handling for skill target declaration with proper 4xx passthrough and 5xx mapping for target validation failures.
+
+#### Error Handling Strategy
+- **4xx Passthrough**: Unknown/foreign sessions (404), invalid targets (422) pass through with structured detail
+- **5xx Mapping**: All server errors map to 502 with descriptive error messages
+- **Detail Extraction**: Uses `_upstream_detail()` helper to extract structured error details from agent responses
+- **Fallback Messages**: Provides meaningful fallback messages when structured details unavailable
+
+#### Validation Failure Scenarios
+- **Foreign Session**: Returns 404 with anti-enumeration protection
+- **Unknown Session**: Returns 404 with anti-enumeration protection  
+- **Invalid Target**: Returns 422 with detailed validation failure reason
+- **Unnormalizable Origin**: Returns 422 when target cannot be normalized for corroboration
+- **Service Unavailable**: Returns 502 when agent service is unreachable
+
+Key capabilities:
+- Consistent error handling pattern matching other proxy endpoints
+- Preserves agent service structured error details for better debugging
+- Provides clear user feedback for different types of validation failures
+- Maintains security posture with anti-enumeration protection
+- Enables proper troubleshooting through detailed error messages
+
+```mermaid
+flowchart TD
+Start(["Target Declaration Request"]) --> Proxy["Proxy to Agent Service"]
+Proxy --> Status{"Status Code?"}
+Status --> |4xx| ExtractDetail["Extract Structured Detail"]
+Status --> |5xx| Map502["Map to 502"]
+Status --> |Success| Return["Return Success"]
+ExtractDetail --> Return4xx["Return 4xx with Detail"]
+Map502 --> Return502["Return 502 with Fallback"]
+Return4xx --> End(["Response"])
+Return502 --> End
+Return --> End
+```
+
+**Diagram sources**
+- [gateway_service.py:575-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L575-L595)
+- [gateway_service.py:677-690](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L677-L690)
+
+**Section sources**
+- [gateway_service.py:575-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L575-L595)
+- [gateway_service.py:677-690](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L677-L690)
+
+### Enhanced Streaming Chat Audit System
+**Enhanced** - Implements robust error handling for streaming chat with comprehensive state tracking and fallback model attribution for streams closing without message_end frames.
+
+#### Robust State Tracking
+- **State Variables**: `saw_delta`, `parked`, `last_frame_session` track stream progress and context
+- **Frame Parsing**: New helper functions `_frame_type()` and `_frame_session_id()` provide best-effort SSE frame parsing
+- **Stream Completion Logic**: Handles both normal completion with message_end frames and abnormal closure without them
+
+#### Fallback Model Attribution
+- **Fallback Mechanism**: When streams close without message_end frames, uses requested model as fallback attribution
+- **SPEC-024 Compliance**: Ensures complete audit coverage per SPEC-024 R-4 requirements
+- **Model Resolution**: Request model > pinned model > default model resolution order maintained
+
+#### Enhanced Error Handling
+- **Early Status Checking**: Upstream status checked before any SSE frames yielded
+- **Resource Cleanup**: Proper finally-block guards prevent resource leaks
+- **Error Propagation**: Consistent 4xx passthrough and 5xx mapping to 502 errors
+
+```mermaid
+flowchart TD
+Start(["Open Chat Stream"]) --> InitState["Initialize State: saw_delta=false, parked=false"]
+InitState --> BuildRequest["Build Request with Model"]
+BuildRequest --> SendRequest["Send Request"]
+SendRequest --> CheckStatus{"Status Code?"}
+CheckStatus --> |4xx| Raise4xx["Raise HTTPStatusError"]
+CheckStatus --> |5xx| Raise502["Raise HTTPStatusError"]
+CheckStatus --> |200| StartStream["Start Streaming"]
+StartStream --> IterateLines["Iterate Lines"]
+IterateLines --> ParseFrame["Parse Frame with _frame_type()"]
+ParseFrame --> CheckType{"Frame Type?"}
+CheckType --> |message_delta| SetDelta["Set saw_delta=true"]
+CheckType --> |confirmation_request| SetParked["Set parked=true"]
+CheckType --> |other| NextLine["Next Line"]
+SetDelta --> ExtractSession["Extract session_id with _frame_session_id()"]
+SetParked --> ExtractSession
+ExtractSession --> UpdateLast["Update last_frame_session"]
+UpdateLast --> YieldFrame["Yield Frame"]
+NextLine --> YieldFrame
+YieldFrame --> EndStream{"End of Stream?"}
+EndStream --> |No| IterateLines
+EndStream --> |Yes| CheckCompletion{"Complete Without message_end?"}
+CheckCompletion --> |Yes & saw_delta & !parked| EmitFallback["Emit chat_completed with fallback_model"]
+CheckCompletion --> |No| Cleanup["Cleanup Resources"]
+EmitFallback --> Cleanup
+Cleanup --> Return(["Return Response"])
+```
+
+**Diagram sources**
+- [gateway_service.py:1201-1227](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1201-L1227)
+- [gateway_service.py:1229-1267](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1229-L1267)
+
+**Section sources**
+- [gateway_service.py:1201-1267](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1201-L1267)
+
+### Enhanced Agent Client
+**Updated** - Added new document repository methods, session title update method, and enhanced error handling for all operations.
+
+- **New Methods**: 
+  - `create_document()` creates documents with trusted foreign-session coverage header and type-specific payload handling
+  - `list_documents()` lists documents with scope filtering
+  - `fetch_document()` retrieves individual documents with anti-enumeration protection
+  - `publish_document()` publishes documents for broader visibility
+  - `delete_document()` deletes owner documents
+  - `update_session_title()` updates session titles with ownership verification
+  - **Enhanced**: `runtime_metadata()` method for retrieving agent-platform runtime information
+- **Enhanced Methods**: `list_sessions()`, `delete_session()`, `get_session()` with proper error handling
+- **Renamed Method**: `stream_chat` → `open_chat_stream` with eager upstream status checking
+- **Error Handling**: Eager status checking prevents corrupt SSE streams by reading error responses before streaming
+- **Resource Management**: Proper cleanup of HTTP connections and async resources in finally blocks
+- **SSE Processing**: Filters and yields only data frames with proper SSE formatting
+
+Key capabilities:
+- Async streaming with configurable timeouts (connect: 5s, read/write: None for long-running streams)
+- Status code validation before streaming begins (4xx errors raised immediately)
+- Connection cleanup in finally blocks to prevent resource leaks
+- SSE frame filtering to extract only relevant data frames
+- Session workspace methods with consistent error handling patterns
+- Document repository operations with trusted foreign-session coverage and type-specific payload handling
+- Model catalog discovery with credential gating
+- Runtime metadata retrieval for agent-platform communication
+- Improved error propagation with proper HTTP status mapping
+
+```mermaid
+classDiagram
+class AgentClient {
++create_session(settings, request_id, user_id, skill_target) dict
++get_session(settings, request_id, session_id, user_id) dict
++list_sessions(settings, request_id, user_id) dict
++delete_session(settings, request_id, session_id, user_id) dict
++update_session_title(settings, request_id, session_id, user_id, title) dict
++create_document(settings, request_id, user_id, payload, foreign_coverage) dict
++list_documents(settings, request_id, user_id, scope) dict
++fetch_document(settings, request_id, document_id, user_id) dict
++publish_document(settings, request_id, document_id, user_id) dict
++delete_document(settings, request_id, document_id, user_id) dict
++list_models(settings, request_id, user_id) dict
++runtime_metadata(settings) dict
++chat(settings, request_id, user_id, message, session_id, delegated_token) dict
++open_chat_stream(settings, request_id, user_id, message, session_id, delegated_token, input_modality, model) AsyncIterator[str]
++open_chat_confirm_stream(settings, request_id, user_id, session_id, confirm_id, decision, delegated_token) AsyncIterator[str]
++health(settings) dict
+}
+class ConfirmStream {
++_iter() AsyncIterator[str]
++status_check() bool
++resource_cleanup() void
+}
+AgentClient --> ConfirmStream : "uses"
+```
+
+**Diagram sources**
+- [agent_client.py:32-51](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L51)
+- [agent_client.py:145-200](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L145-L200)
+
+**Section sources**
+- [agent_client.py:1-200](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L200)
+
+### Enhanced Gateway Service
+**Enhanced** - Enhanced with skill target declaration proxy functionality, improved error handling for target validation failures, session title update capability, enhanced chat streaming with robust state tracking and fallback model attribution, dual-action authorization for incident reports, improved error handling, enhanced runtime version exposure, and single-skill detail proxy functionality.
+
+- Identity resolution supports local JWT verification and synthetic dev identity when auth is optional.
+- Policy enforcement uses evaluate() from the policy engine; denies by default and records decisions.
+- Proxies chat and session operations to agent-platform via agent_client.
+- Provides streaming chat via StreamingResponse.
+- Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
+- Skill target declaration proxy with improved error handling for target validation failures.
+- Chat confirm handling with SSE streaming and confirmation_decided audit event emission.
+- Document repository proxy with trusted foreign-session coverage computation, dual-action authorization for incident reports, and type-specific payload handling.
+- Model catalog proxy with consistent error handling pattern matching other proxy endpoints.
+- Chat streaming with robust state tracking (saw_delta, parked, last_frame_session) and fallback model attribution for streams closing without message_end frames.
+- Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking and monitoring capabilities.
+- Enhanced streaming architecture with improved error propagation using helper functions (_frame_type, _frame_session_id).
+
+```mermaid
+flowchart TD
+Start(["Request Entry"]) --> ResolveId["Resolve Request Identity"]
+ResolveId --> AuthCheck{"Auth Required?"}
+AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
+AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
+AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
+Verify --> Valid{"Valid?"}
+Valid --> |No| Deny401
+Valid --> |Yes| PolicyEnf["Enforce Policy (action)"]
+PolicyEnf --> Allowed{"Allowed?"}
+Allowed --> |No| Deny403["HTTP 403"]
+Allowed --> |Yes| CheckType{"Operation Type?"}
+CheckType --> |Chat/Session| Delegate["Obtain Delegated Token"]
+CheckType --> |Confirm| Delegate
+CheckType --> |Session Workspace| Proxy["Proxy to Agent Platform"]
+CheckType --> |SkillTarget| SkillProxy["Proxy Skill Target Declaration"]
+CheckType --> |Documents| DocProxy["Proxy Document Operations with Dual-Action Gate"]
+CheckType --> |Stream| OpenStream["Open Chat Stream with State Tracking"]
+CheckType --> |Models| ModelProxy["Proxy Model Catalog"]
+CheckType --> |Runtime| RuntimeProxy["Proxy Runtime with Version Merge"]
+CheckType --> |SkillDetail| DetailProxy["Proxy Single-Skill Detail"]
+Delegate --> Proxy
+SkillProxy --> SkillService["Skill Target Service with Validation & Error Handling"]
+DocProxy --> DocService["Document Service with Foreign Coverage & Type Validation"]
+OpenStream --> StreamProxy["Stream Proxy with Robust Audit Coverage"]
+ModelProxy --> Return(["Return Response/Stream"])
+StreamProxy --> Return
+DocService --> Return
+RuntimeProxy --> Return
+DetailProxy --> Return
+SkillService --> Return
+```
+
+**Diagram sources**
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+- [gateway_service.py:1201-1267](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1201-L1267)
+- [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
+- [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
+
+**Section sources**
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+- [gateway_service.py:1201-1267](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1201-L1267)
+
+### Enhanced Operations Document Repository
+**Enhanced** - Implements operations document repository functionality with policy enforcement, trusted foreign-session coverage decisions, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
+
+#### Document Creation with Dual-Action Authorization
+- **Endpoint**: POST /api/v1/documents
+- **Authentication**: Requires `documents:create` action enforcement with identity verification
+- **Dual-Action Gate**: For incident_report documents, additionally requires `incident:read` action enforcement
+- **Foreign Coverage Computation**: Evaluates `approvals:list` capability to determine if user can cover foreign sessions
+- **Type-Specific Payload Handling**: Removes cross-type fields (session_ids for incident_report, incident_id for shift_summary) before forwarding
+- **Trusted Header**: Forwards `X-Foreign-Coverage: allowed|denied` to agent service
+- **Response**: Created document with digest containing type-specific metadata (session IDs for shift_summary, incident_id for incident_report)
+- **Audit Trail**: Emits `document_created` event with document_type, foreign coverage information, and incident_id for incident reports
+
+#### Document Listing and Reading
+- **Endpoints**: GET /api/v1/documents (list), GET /api/v1/documents/{document_id} (fetch)
+- **Authentication**: Requires `documents:read` action enforcement with identity verification
+- **Scoping**: Supports `mine` (includes drafts) and `published` scopes
+- **Response**: Document list or single document with appropriate visibility
+- **Security**: Foreign draft reads return 404 for anti-enumeration protection
+
+#### Document Publishing and Deletion
+- **Endpoints**: POST /api/v1/documents/{document_id}/publish (publish), DELETE /api/v1/documents/{document_id} (delete)
+- **Authentication**: Requires `documents:create` action enforcement with identity verification
+- **Publishing**: One-way owner publish that exposes document to all `documents:read` holders
+- **Deletion**: Owner-only document deletion with anti-enumeration protection
+- **Audit Trail**: Emits `document_published` and `document_deleted` events
+
+Key capabilities:
+- Deny-by-default policy enforcement for document operations
+- Dual-action authorization for incident_report documents requiring both `documents:create` and `incident:read`
+- Trusted foreign-session coverage computation prevents unauthorized access to foreign session data
+- Type-specific payload validation ensuring shift_summary uses session_ids and incident_report uses incident_id
+- Server-side visibility matrix enforcement ensures proper document access control
+- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
+- Comprehensive audit trail coverage for document lifecycle events with type-specific metadata
+- Request correlation via x-request-id headers throughout the chain
+- Role-based access control restricted to platform-admin, approver, and operator roles
+
+```mermaid
+flowchart TD
+Start(["Document Create Request"]) --> ResolveId["Resolve Request Identity"]
+ResolveId --> AuthCheck{"Auth Required?"}
+AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
+AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
+AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
+Verify --> Valid{"Valid?"}
+Valid --> |No| Deny401
+Valid --> |Yes| PolicyEnf["Enforce documents:create"]
+PolicyEnf --> CheckType{"Document Type?"}
+CheckType --> |shift_summary| ComputeCoverage["Evaluate approvals:list"]
+CheckType --> |incident_report| EnforceIncident["Enforce incident:read"]
+ComputeCoverage --> SetHeader["Set X-Foreign-Coverage header"]
+EnforceIncident --> ComputeCoverage
+SetHeader --> TypePayload{"Type-Specific Payload"}
+TypePayload --> |shift_summary| RemoveIncident["Remove incident_id"]
+TypePayload --> |incident_report| RemoveSessions["Remove session_ids"]
+RemoveIncident --> Proxy["Proxy to Agent Service"]
+RemoveSessions --> Proxy
+Proxy --> Response["Return Document"]
+Response --> Audit["Emit document_created with type metadata"]
+Audit --> Return(["Return Response"])
+```
+
+**Diagram sources**
+- [documents.py:30-86](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L30-L86)
+- [gateway_service.py:692-729](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L692-L729)
+- [agent_client.py:320-337](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L337)
+
+**Section sources**
+- [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
+- [gateway_service.py:692-729](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L692-L729)
+- [agent_client.py:320-402](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L402)
+- [api.py:68-105](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L68-L105)
+
+### Enhanced Session Workspace Proxy Routes
+**Updated** - Provides complete session workspace lifecycle management with deny-by-default policy enforcement, server-side scoping to caller's own sessions, new owner-only session rename capability, and skill target declaration for develop-as-you-go sessions.
+
+#### Session Creation
+- **Endpoint**: POST /api/v1/sessions
+- **Authentication**: Requires `session:create` action enforcement with identity verification
+- **Request Body**: Session creation parameters
+- **Response**: Created session details with session_id
+- **Audit Trail**: Emits `session_created` audit event with success outcome
+
+#### Session Listing  
+- **Endpoint**: GET /api/v1/sessions
+- **Authentication**: Requires `session:list` action enforcement with identity verification
+- **Scoping**: Server-side filtering returns only caller's own sessions (SPEC-022 R-1)
+- **Response**: List of sessions belonging to the authenticated user
+- **Logging**: Tracks session count and user context
+- **Error Handling**: Upstream 4xx errors pass through unchanged, transport failures and upstream 5xx map to 502
+
+#### Session Reading
+- **Endpoint**: GET /api/v1/sessions/{session_id}
+- **Authentication**: Requires `session:read` action enforcement with identity verification
+- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions) pass through unchanged for anti-enumeration
+- **Response**: Session details if accessible to caller
+- **Security**: Foreign session access results in 404 to prevent enumeration
+
+#### Session Deletion
+- **Endpoint**: DELETE /api/v1/sessions/{session_id}
+- **Authentication**: Requires `session:delete` action enforcement with identity verification
+- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged
+- **Audit Trail**: Emits `session_deleted` audit event with success outcome
+- **Security**: Owner-only deletion with server-side ownership verification
+
+#### Session Title Update (New)
+- **Endpoint**: PATCH /api/v1/sessions/{session_id}/title
+- **Authentication**: Requires `session:update` action enforcement with identity verification
+- **Ownership**: Server-side ownership verification ensures callers can only rename their own sessions
+- **Error Handling**: Upstream 4xx errors (blank/overlong titles, unknown/foreign sessions) pass through unchanged
+- **Security**: Anti-enumeration protection returns 404 for foreign/unknown sessions
+- **Scope**: Mirrors session:create grants across all roles with server-side scoping
+
+#### Skill Target Declaration (New)
+- **Endpoint**: POST /api/v1/sessions/{session_id}/skill-target
+- **Authentication**: Requires `session:skill_graduate` action enforcement with identity verification
+- **Functionality**: Declares web target for develop-as-you-go skill development sessions
+- **Error Handling**: Upstream 4xx errors (invalid targets, foreign sessions) pass through with structured detail
+- **Security**: Higher trust level than skill drafting - requires operational roles only
+- **Audit Trail**: Emits `skill_target_declared` event with already_declared flag
+
+Key capabilities:
+- Deny-by-default policy enforcement for all session operations including owner rename and skill target declaration
+- Server-side scoping ensures callers can only access and modify their own sessions
+- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
+- Durable audit trail coverage for session lifecycle events
+- Request correlation via x-request-id headers throughout the chain
+- Owner-only session rename with validation and anti-enumeration protection
+- High-trust skill target declaration with proper authorization controls
+
+```mermaid
+flowchart TD
+Start(["Session Request"]) --> Type{"Operation Type?"}
+Type --> |Create| CreateFlow["Create Session Flow"]
+Type --> |List| ListFlow["List Sessions Flow"]
+Type --> |Read| ReadFlow["Read Session Flow"]
+Type --> |Delete| DeleteFlow["Delete Session Flow"]
+Type --> |UpdateTitle| UpdateFlow["Update Session Title Flow"]
+Type --> |SkillTarget| SkillTargetFlow["Skill Target Declaration Flow"]
+subgraph CreateFlow
+C1["Enforce session:create"] --> C2["Resolve Identity"]
+C2 --> C3["Proxy to Agent Platform"]
+C3 --> C4["Emit session_created audit"]
+C4 --> CReturn(["Return Session"])
+end
+subgraph ListFlow
+L1["Enforce session:list"] --> L2["Resolve Identity"]
+L2 --> L3["List Caller's Sessions"]
+L3 --> LReturn(["Return Session List"])
+end
+subgraph ReadFlow
+R1["Enforce session:read"] --> R2["Resolve Identity"]
+R2 --> R3{"Upstream 4xx?"}
+R3 --> |Yes| RPass["Pass Through 4xx"]
+R3 --> |No| RProxy["Proxy to Agent Platform"]
+RProxy --> RReturn(["Return Session"])
+end
+subgraph DeleteFlow
+D1["Enforce session:delete"] --> D2["Resolve Identity"]
+D2 --> D3{"Upstream 4xx?"}
+D3 --> |Yes| DPass["Pass Through 4xx"]
+D3 --> |No| DProxy["Proxy to Agent Platform"]
+DProxy --> DAudit["Emit session_deleted audit"]
+DAudit --> DReturn(["Return Result"])
+end
+subgraph UpdateFlow
+U1["Enforce session:update"] --> U2["Resolve Identity"]
+U2 --> U3{"Upstream 4xx?"}
+U3 --> |Yes| UPass["Pass Through 4xx"]
+U3 --> |No| UProxy["Proxy to Agent Platform"]
+UProxy --> UReturn(["Return Updated Title"])
+end
+subgraph SkillTargetFlow
+ST1["Enforce session:skill_graduate"] --> ST2["Resolve Identity"]
+ST2 --> ST3{"Upstream 4xx?"}
+ST3 --> |Yes| STPass["Pass Through 4xx"]
+ST3 --> |No| STProxy["Proxy to Agent Platform"]
+STProxy --> STAudit["Emit skill_target_declared"]
+STAudit --> STReturn(["Return Declaration Result"])
+end
+```
+
+**Diagram sources**
+- [sessions.py:39-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L39-L283)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
+- [agent_client.py:32-51](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L51)
+- [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
+
+**Section sources**
+- [sessions.py:39-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L39-L283)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
 
 ### Enhanced Skills Inventory with Single-Skill Detail Access
 **Updated** - Enhanced skills inventory functionality to support full skill record retrieval including body content through the new single-skill detail proxy endpoint.
@@ -492,308 +1010,13 @@ ReturnPayload --> End(["Response with version info"])
 
 **Diagram sources**
 - [runtime.py:9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
-- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+- [gateway_service.py:90-95](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L90-L95)
 - [agent_client.py:471-477](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L471-L477)
 
 **Section sources**
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
-- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+- [gateway_service.py:90-95](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L90-L95)
 - [metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
-
-### Enhanced Operations Document Repository
-**Enhanced** - Implements operations document repository functionality with policy enforcement, trusted foreign-session coverage decisions, and support for both shift_summary and incident_report document types with dual-action authorization for incident reports.
-
-#### Document Creation with Dual-Action Authorization
-- **Endpoint**: POST /api/v1/documents
-- **Authentication**: Requires `documents:create` action enforcement with identity verification
-- **Dual-Action Gate**: For incident_report documents, additionally requires `incident:read` action enforcement
-- **Foreign Coverage Computation**: Evaluates `approvals:list` capability to determine if user can cover foreign sessions
-- **Type-Specific Payload Handling**: Removes cross-type fields (session_ids for incident_report, incident_id for shift_summary) before forwarding
-- **Trusted Header**: Forwards `X-Foreign-Coverage: allowed|denied` to agent service
-- **Response**: Created document with digest containing type-specific metadata (session IDs for shift_summary, incident_id for incident_report)
-- **Audit Trail**: Emits `document_created` event with document_type, foreign coverage information, and incident_id for incident reports
-
-#### Document Listing and Reading
-- **Endpoints**: GET /api/v1/documents (list), GET /api/v1/documents/{document_id} (fetch)
-- **Authentication**: Requires `documents:read` action enforcement with identity verification
-- **Scoping**: Supports `mine` (includes drafts) and `published` scopes
-- **Response**: Document list or single document with appropriate visibility
-- **Security**: Foreign draft reads return 404 for anti-enumeration protection
-
-#### Document Publishing and Deletion
-- **Endpoints**: POST /api/v1/documents/{document_id}/publish (publish), DELETE /api/v1/documents/{document_id} (delete)
-- **Authentication**: Requires `documents:create` action enforcement with identity verification
-- **Publishing**: One-way owner publish that exposes document to all `documents:read` holders
-- **Deletion**: Owner-only document deletion with anti-enumeration protection
-- **Audit Trail**: Emits `document_published` and `document_deleted` events
-
-Key capabilities:
-- Deny-by-default policy enforcement for document operations
-- Dual-action authorization for incident_report documents requiring both `documents:create` and `incident:read`
-- Trusted foreign-session coverage computation prevents unauthorized access to foreign session data
-- Type-specific payload validation ensuring shift_summary uses session_ids and incident_report uses incident_id
-- Server-side visibility matrix enforcement ensures proper document access control
-- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
-- Comprehensive audit trail coverage for document lifecycle events with type-specific metadata
-- Request correlation via x-request-id headers throughout the chain
-- Role-based access control restricted to platform-admin, approver, and operator roles
-
-```mermaid
-flowchart TD
-Start(["Document Create Request"]) --> ResolveId["Resolve Request Identity"]
-ResolveId --> AuthCheck{"Auth Required?"}
-AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
-AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
-AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
-Verify --> Valid{"Valid?"}
-Valid --> |No| Deny401
-Valid --> |Yes| PolicyEnf["Enforce documents:create"]
-PolicyEnf --> CheckType{"Document Type?"}
-CheckType --> |shift_summary| ComputeCoverage["Evaluate approvals:list"]
-CheckType --> |incident_report| EnforceIncident["Enforce incident:read"]
-ComputeCoverage --> SetHeader["Set X-Foreign-Coverage header"]
-EnforceIncident --> ComputeCoverage
-SetHeader --> TypePayload{"Type-Specific Payload"}
-TypePayload --> |shift_summary| RemoveIncident["Remove incident_id"]
-TypePayload --> |incident_report| RemoveSessions["Remove session_ids"]
-RemoveIncident --> Proxy["Proxy to Agent Service"]
-RemoveSessions --> Proxy
-Proxy --> Response["Return Document"]
-Response --> Audit["Emit document_created with type metadata"]
-Audit --> Return(["Return Response"])
-```
-
-**Diagram sources**
-- [documents.py:30-86](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L30-L86)
-- [gateway_service.py:514-551](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L514-L551)
-- [agent_client.py:320-337](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L337)
-
-**Section sources**
-- [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
-- [gateway_service.py:514-663](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L514-L663)
-- [agent_client.py:320-402](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L320-L402)
-- [api.py:68-105](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L68-L105)
-
-### Enhanced Session Workspace Proxy Routes
-**Updated** - Provides complete session workspace lifecycle management with deny-by-default policy enforcement, server-side scoping to caller's own sessions, and new owner-only session rename capability.
-
-#### Session Creation
-- **Endpoint**: POST /api/v1/sessions
-- **Authentication**: Requires `session:create` action enforcement with identity verification
-- **Request Body**: Session creation parameters
-- **Response**: Created session details with session_id
-- **Audit Trail**: Emits `session_created` audit event with success outcome
-
-#### Session Listing  
-- **Endpoint**: GET /api/v1/sessions
-- **Authentication**: Requires `session:list` action enforcement with identity verification
-- **Scoping**: Server-side filtering returns only caller's own sessions (SPEC-022 R-1)
-- **Response**: List of sessions belonging to the authenticated user
-- **Logging**: Tracks session count and user context
-- **Error Handling**: Upstream 4xx errors pass through unchanged, transport failures and upstream 5xx map to 502
-
-#### Session Reading
-- **Endpoint**: GET /api/v1/sessions/{session_id}
-- **Authentication**: Requires `session:read` action enforcement with identity verification
-- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions) pass through unchanged for anti-enumeration
-- **Response**: Session details if accessible to caller
-- **Security**: Foreign session access results in 404 to prevent enumeration
-
-#### Session Deletion
-- **Endpoint**: DELETE /api/v1/sessions/{session_id}
-- **Authentication**: Requires `session:delete` action enforcement with identity verification
-- **Error Handling**: Upstream 4xx errors (unknown/foreign sessions, parked confirmations) pass through unchanged
-- **Audit Trail**: Emits `session_deleted` audit event with success outcome
-- **Security**: Owner-only deletion with server-side ownership verification
-
-#### Session Title Update (New)
-- **Endpoint**: PATCH /api/v1/sessions/{session_id}/title
-- **Authentication**: Requires `session:update` action enforcement with identity verification
-- **Ownership**: Server-side ownership verification ensures callers can only rename their own sessions
-- **Error Handling**: Upstream 4xx errors (blank/overlong titles, unknown/foreign sessions) pass through unchanged
-- **Security**: Anti-enumeration protection returns 404 for foreign/unknown sessions
-- **Scope**: Mirrors session:create grants across all roles with server-side scoping
-
-Key capabilities:
-- Deny-by-default policy enforcement for all session operations including owner rename
-- Server-side scoping ensures callers can only access and modify their own sessions
-- Consistent error handling: upstream 4xx passthrough, transport failures map to 502
-- Durable audit trail coverage for session lifecycle events
-- Request correlation via x-request-id headers throughout the chain
-- Owner-only session rename with validation and anti-enumeration protection
-
-```mermaid
-flowchart TD
-Start(["Session Request"]) --> Type{"Operation Type?"}
-Type --> |Create| CreateFlow["Create Session Flow"]
-Type --> |List| ListFlow["List Sessions Flow"]
-Type --> |Read| ReadFlow["Read Session Flow"]
-Type --> |Delete| DeleteFlow["Delete Session Flow"]
-Type --> |UpdateTitle| UpdateFlow["Update Session Title Flow"]
-subgraph CreateFlow
-C1["Enforce session:create"] --> C2["Resolve Identity"]
-C2 --> C3["Proxy to Agent Platform"]
-C3 --> C4["Emit session_created audit"]
-C4 --> CReturn(["Return Session"])
-end
-subgraph ListFlow
-L1["Enforce session:list"] --> L2["Resolve Identity"]
-L2 --> L3["List Caller's Sessions"]
-L3 --> LReturn(["Return Session List"])
-end
-subgraph ReadFlow
-R1["Enforce session:read"] --> R2["Resolve Identity"]
-R2 --> R3{"Upstream 4xx?"}
-R3 --> |Yes| RPass["Pass Through 4xx"]
-R3 --> |No| RProxy["Proxy to Agent Platform"]
-RProxy --> RReturn(["Return Session"])
-end
-subgraph DeleteFlow
-D1["Enforce session:delete"] --> D2["Resolve Identity"]
-D2 --> D3{"Upstream 4xx?"}
-D3 --> |Yes| DPass["Pass Through 4xx"]
-D3 --> |No| DProxy["Proxy to Agent Platform"]
-DProxy --> DAudit["Emit session_deleted audit"]
-DAudit --> DReturn(["Return Result"])
-end
-subgraph UpdateFlow
-U1["Enforce session:update"] --> U2["Resolve Identity"]
-U2 --> U3{"Upstream 4xx?"}
-U3 --> |Yes| UPass["Pass Through 4xx"]
-U3 --> |No| UProxy["Proxy to Agent Platform"]
-UProxy --> UReturn(["Return Updated Title"])
-end
-```
-
-**Diagram sources**
-- [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
-- [gateway_service.py:289-481](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L481)
-- [agent_client.py:32-89](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L89)
-- [agent_client.py:405-420](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L405-L420)
-- [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-
-**Section sources**
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
-- [gateway_service.py:289-481](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L481)
-
-### Enhanced Streaming Chat Audit System
-**Enhanced** - Implements robust error handling for streaming chat with comprehensive state tracking and fallback model attribution for streams closing without message_end frames.
-
-#### Robust State Tracking
-- **State Variables**: `saw_delta`, `parked`, `last_frame_session` track stream progress and context
-- **Frame Parsing**: New helper functions `_frame_type()` and `_frame_session_id()` provide best-effort SSE frame parsing
-- **Stream Completion Logic**: Handles both normal completion with message_end frames and abnormal closure without them
-
-#### Fallback Model Attribution
-- **Fallback Mechanism**: When streams close without message_end frames, uses requested model as fallback attribution
-- **SPEC-024 Compliance**: Ensures complete audit coverage per SPEC-024 R-4 requirements
-- **Model Resolution**: Request model > pinned model > default model resolution order maintained
-
-#### Enhanced Error Handling
-- **Early Status Checking**: Upstream status checked before any SSE frames yielded
-- **Resource Cleanup**: Proper finally-block guards prevent resource leaks
-- **Error Propagation**: Consistent 4xx passthrough and 5xx mapping to 502 errors
-
-```mermaid
-flowchart TD
-Start(["Open Chat Stream"]) --> InitState["Initialize State: saw_delta=false, parked=false"]
-InitState --> BuildRequest["Build Request with Model"]
-BuildRequest --> SendRequest["Send Request"]
-SendRequest --> CheckStatus{"Status Code?"}
-CheckStatus --> |4xx| Raise4xx["Raise HTTPStatusError"]
-CheckStatus --> |5xx| Raise502["Raise HTTPStatusError"]
-CheckStatus --> |200| StartStream["Start Streaming"]
-StartStream --> IterateLines["Iterate Lines"]
-IterateLines --> ParseFrame["Parse Frame with _frame_type()"]
-ParseFrame --> CheckType{"Frame Type?"}
-CheckType --> |message_delta| SetDelta["Set saw_delta=true"]
-CheckType --> |confirmation_request| SetParked["Set parked=true"]
-CheckType --> |other| NextLine["Next Line"]
-SetDelta --> ExtractSession["Extract session_id with _frame_session_id()"]
-SetParked --> ExtractSession
-ExtractSession --> UpdateLast["Update last_frame_session"]
-UpdateLast --> YieldFrame["Yield Frame"]
-NextLine --> YieldFrame
-YieldFrame --> EndStream{"End of Stream?"}
-EndStream --> |No| IterateLines
-EndStream --> |Yes| CheckCompletion{"Complete Without message_end?"}
-CheckCompletion --> |Yes & saw_delta & !parked| EmitFallback["Emit chat_completed with fallback_model"]
-CheckCompletion --> |No| Cleanup["Cleanup Resources"]
-EmitFallback --> Cleanup
-Cleanup --> Return(["Return Response"])
-```
-
-**Diagram sources**
-- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
-- [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
-- [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
-
-**Section sources**
-- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
-- [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
-- [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
-
-### Enhanced Agent Client
-**Updated** - Added new document repository methods, session title update method, and enhanced error handling for all operations.
-
-- **New Methods**: 
-  - `create_document()` creates documents with trusted foreign-session coverage header and type-specific payload handling
-  - `list_documents()` lists documents with scope filtering
-  - `fetch_document()` retrieves individual documents with anti-enumeration protection
-  - `publish_document()` publishes documents for broader visibility
-  - `delete_document()` deletes owner documents
-  - `update_session_title()` updates session titles with ownership verification
-  - **Enhanced**: `runtime_metadata()` method for retrieving agent-platform runtime information
-- **Enhanced Methods**: `list_sessions()`, `delete_session()`, `get_session()` with proper error handling
-- **Renamed Method**: `stream_chat` → `open_chat_stream` with eager upstream status checking
-- **Error Handling**: Eager status checking prevents corrupt SSE streams by reading error responses before streaming
-- **Resource Management**: Proper cleanup of HTTP connections and async resources in finally blocks
-- **SSE Processing**: Filters and yields only data frames with proper SSE formatting
-
-Key capabilities:
-- Async streaming with configurable timeouts (connect: 5s, read/write: None for long-running streams)
-- Status code validation before streaming begins (4xx errors raised immediately)
-- Connection cleanup in finally blocks to prevent resource leaks
-- SSE frame filtering to extract only relevant data frames
-- Session workspace methods with consistent error handling patterns
-- Document repository operations with trusted foreign-session coverage and type-specific payload handling
-- Model catalog discovery with credential gating
-- Runtime metadata retrieval for agent-platform communication
-- Improved error propagation with proper HTTP status mapping
-
-```mermaid
-classDiagram
-class AgentClient {
-+create_session(settings, request_id, user_id) dict
-+get_session(settings, request_id, session_id, user_id) dict
-+list_sessions(settings, request_id, user_id) dict
-+delete_session(settings, request_id, session_id, user_id) dict
-+update_session_title(settings, request_id, session_id, user_id, title) dict
-+create_document(settings, request_id, user_id, payload, foreign_coverage) dict
-+list_documents(settings, request_id, user_id, scope) dict
-+fetch_document(settings, request_id, document_id, user_id) dict
-+publish_document(settings, request_id, document_id, user_id) dict
-+delete_document(settings, request_id, document_id, user_id) dict
-+list_models(settings, request_id, user_id) dict
-+runtime_metadata(settings) dict
-+chat(settings, request_id, user_id, message, session_id, delegated_token) dict
-+open_chat_stream(settings, request_id, user_id, message, session_id, delegated_token, input_modality, model) AsyncIterator[str]
-+open_chat_confirm_stream(settings, request_id, user_id, session_id, confirm_id, decision, delegated_token) AsyncIterator[str]
-+health(settings) dict
-}
-class ConfirmStream {
-+_iter() AsyncIterator[str]
-+status_check() bool
-+resource_cleanup() void
-}
-AgentClient --> ConfirmStream : "uses"
-```
-
-**Diagram sources**
-- [agent_client.py:32-487](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L32-L487)
-
-**Section sources**
-- [agent_client.py:1-487](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L487)
 
 ### Chat Confirm Endpoint
 **Existing** - Provides Human-in-the-Loop (HITL) confirmation bridging for parked kernel confirmations with identity delegation and SSE streaming.
@@ -1009,62 +1232,8 @@ Proxy --> Return(["Return Response"])
 **Section sources**
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 
-### Enhanced Gateway Service
-**Enhanced** - Enhanced with document repository proxy functionality, session title update capability, enhanced chat streaming with robust state tracking and fallback model attribution, dual-action authorization for incident reports, improved error handling, enhanced runtime version exposure, and single-skill detail proxy functionality.
-
-- Identity resolution supports local JWT verification and synthetic dev identity when auth is optional.
-- Policy enforcement uses evaluate() from the policy engine; denies by default and records decisions.
-- Proxies chat and session operations to agent-platform via agent_client.
-- Provides streaming chat via StreamingResponse.
-- Session workspace proxy with proper error handling (upstream 4xx passthrough, transport failures map to 502).
-- Chat confirm handling with SSE streaming and confirmation_decided audit event emission.
-- Document repository proxy with trusted foreign-session coverage computation, dual-action authorization for incident reports, and type-specific payload handling.
-- Model catalog proxy with consistent error handling pattern matching other proxy endpoints.
-- Chat streaming with robust state tracking (saw_delta, parked, last_frame_session) and fallback model attribution for streams closing without message_end frames.
-- Runtime status function that merges platform version from SERVICE_VERSION into the runtime payload for enhanced version tracking and monitoring capabilities.
-- Enhanced streaming architecture with improved error propagation using helper functions (_frame_type, _frame_session_id).
-
-```mermaid
-flowchart TD
-Start(["Request Entry"]) --> ResolveId["Resolve Request Identity"]
-ResolveId --> AuthCheck{"Auth Required?"}
-AuthCheck --> |Yes & No Token| Deny401["HTTP 401"]
-AuthCheck --> |No Token & Optional| Synthetic["Create Synthetic Dev Identity"]
-AuthCheck --> |Has Token| Verify["Verify JWT Locally"]
-Verify --> Valid{"Valid?"}
-Valid --> |No| Deny401
-Valid --> |Yes| PolicyEnf["Enforce Policy (action)"]
-PolicyEnf --> Allowed{"Allowed?"}
-Allowed --> |No| Deny403["HTTP 403"]
-Allowed --> |Yes| CheckType{"Operation Type?"}
-CheckType --> |Chat/Session| Delegate["Obtain Delegated Token"]
-CheckType --> |Confirm| Delegate
-CheckType --> |Session Workspace| Proxy["Proxy to Agent Platform"]
-CheckType --> |Documents| DocProxy["Proxy Document Operations with Dual-Action Gate"]
-CheckType --> |Stream| OpenStream["Open Chat Stream with State Tracking"]
-CheckType --> |Models| ModelProxy["Proxy Model Catalog"]
-CheckType --> |Runtime| RuntimeProxy["Proxy Runtime with Version Merge"]
-CheckType --> |SkillDetail| SkillProxy["Proxy Single-Skill Detail"]
-Delegate --> Proxy
-DocProxy --> DocService["Document Service with Foreign Coverage & Type Validation"]
-OpenStream --> StreamProxy["Stream Proxy with Robust Audit Coverage"]
-ModelProxy --> Return(["Return Response/Stream"])
-StreamProxy --> Return
-DocService --> Return
-RuntimeProxy --> Return
-SkillProxy --> Return
-```
-
-**Diagram sources**
-- [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
-- [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
-
-**Section sources**
-- [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
-
 ### Policy Engine and Default Bundle
-**Updated** - Enhanced with new document repository and session update actions and role-based access control.
+**Updated** - Enhanced with new session:skill_graduate action and role-based access control for skill graduation workflows.
 
 - Loads YAML policy bundle and evaluates actions against roles with deny-by-default semantics.
 - Explicit deny overrides allow; higher priority rules win among allows; disabled rules ignored.
@@ -1077,6 +1246,7 @@ SkillProxy --> Return
   - `session:list` and `session:delete` mirror `session:create` grants with server-side scoping to caller's own sessions
   - `documents:create` and `documents:read` granted to platform-admin, approver, and operator roles for document operations with dual-action authorization for incident reports
   - `session:update` mirrors session lifecycle grants with server-side ownership verification
+  - **New**: `session:skill_graduate` granted to platform-admin, approver, and operator roles for skill target declaration and graduation
 
 ```mermaid
 flowchart TD
@@ -1089,12 +1259,12 @@ Decision --> Record["Record Metrics & Log"]
 ```
 
 **Diagram sources**
-- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
+- [policy-default.yaml:309-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L309-L326)
 - [gateway_service.py:222-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L222-L254)
 - [policy_engine.py:25-55](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L25-L55)
 
 **Section sources**
-- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
+- [policy-default.yaml:309-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L309-L326)
 - [gateway_service.py:222-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L222-L254)
 - [policy_engine.py:25-55](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L25-L55)
 
@@ -1129,13 +1299,14 @@ MW-->>Uvicorn : response with logs/metrics
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 
 ## Dependency Analysis
-**Enhanced** - Enhanced with new single-skill detail proxy dependencies and improved error handling patterns.
+**Enhanced** - Enhanced with new skill target declaration dependencies and improved error handling patterns.
 
 High-level dependencies:
 - main.py depends on app.py and runtime settings.
 - app.py depends on router, metrics, observability, request context, telemetry, and metadata.
 - api routes depend on gateway_service, config, schemas, and delegation_client.
 - Sessions route depends on gateway_service for session workspace operations and audit_emitter for session lifecycle events.
+- Skill target declaration route depends on gateway_service for policy enforcement and agent_client for target validation.
 - Documents route depends on gateway_service for document repository operations with dual-action authorization and audit_emitter for document lifecycle events.
 - Chat confirm route depends on gateway_service for confirm handling and audit_emitter for confirmation_decided events.
 - Policy routes depend on policy_engine and policy_matrix for live permission evaluation.
@@ -1188,7 +1359,7 @@ ShClient --> SkillsHub["skills-hub service"]
 - [app.py:1-44](file://products/platform-gateway/src/platform_gateway/app.py#L1-L44)
 - [router.py:1-35](file://products/platform-gateway/src/platform_gateway/api/router.py#L1-L35)
 - [chat.py:1-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L187)
-- [sessions.py:1-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L154)
+- [sessions.py:1-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L283)
 - [documents.py:1-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L1-L188)
 - [incidents.py:1-183](file://products/platform-gateway/src/platform_gateway/api/routes/incidents.py#L1-L183)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
@@ -1196,17 +1367,17 @@ ShClient --> SkillsHub["skills-hub service"]
 - [skills.py:1-79](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L1-L79)
 - [models.py:1-46](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L1-L46)
 - [runtime.py:1-14](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L14)
-- [gateway_service.py:1-1238](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1238)
+- [gateway_service.py:1-1313](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1-L1313)
 - [incident_client.py:1-193](file://products/platform-gateway/src/platform_gateway/services/incident_client.py#L1-L193)
-- [agent_client.py:1-487](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L487)
+- [agent_client.py:1-521](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L521)
 - [delegation_client.py:1-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L1-L229)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
-- [policy_engine.py:1-405](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L405)
+- [policy_engine.py:1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
 - [policy_matrix.py:1-62](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L62)
 - [tool_gateway_client.py:1-76](file://products/platform-gateway/src/platform_gateway/services/tool_gateway_client.py#L1-L76)
 - [skills_hub_client.py:1-110](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L1-L110)
 - [audit_emitter.py:1-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L1-L99)
-- [policy-default.yaml:1-267](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L267)
+- [policy-default.yaml:1-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L326)
 - [config.py:1-117](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L117)
 - [runtime.py:1-30](file://products/platform-gateway/src/platform_gateway/core/runtime.py#L1-L30)
 
@@ -1214,7 +1385,7 @@ ShClient --> SkillsHub["skills-hub service"]
 - [README.md:1-46](file://products/platform-gateway/README.md#L1-L46)
 
 ## Performance Considerations
-**Enhanced** - Enhanced with new single-skill detail proxy performance considerations and improved error handling efficiency.
+**Enhanced** - Enhanced with new skill target declaration performance considerations and improved error handling efficiency.
 
 - JWKS client caching reduces repeated key fetches; lifespan controlled by environment.
 - Delegated token per-user cache avoids frequent broker exchanges; refresh fraction triggers early renewal.
@@ -1248,11 +1419,14 @@ ShClient --> SkillsHub["skills-hub service"]
 - **Enhanced**: Single-skill detail proxy has minimal overhead with single HTTP call to skills-hub plus policy enforcement.
 - **Enhanced**: Skill detail retrieval reuses existing skills:read policy action without additional authentication overhead.
 - **Enhanced**: Namespaced skill ID format preserves slashes without additional encoding overhead.
+- **Enhanced**: Skill target declaration has minimal overhead with single HTTP call to agent-platform plus policy enforcement.
+- **Enhanced**: Skill target validation occurs at agent layer with efficient error handling patterns.
+- **Enhanced**: session:skill_graduate policy action uses cached bundle evaluation for fast authorization checks.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-**Enhanced** - Enhanced with new single-skill detail proxy troubleshooting with specific guidance on skill content viewing issues and enhanced error handling patterns.
+**Enhanced** - Enhanced with new skill target declaration troubleshooting with specific guidance on skill development workflow issues and enhanced error handling patterns.
 
 Common issues and diagnostics:
 - Authentication failures:
@@ -1262,7 +1436,7 @@ Common issues and diagnostics:
   - Actions not matching any allow rule are denied by default; check role membership and action names.
   - Session workspace actions require appropriate roles (session:list, session:delete mirror session:create grants).
   - `chat:confirm` action requires operator, developer, approver, or platform admin roles.
-  - New protected actions require appropriate roles (policy:read for observers, tools:list for operators/developers, skills:read for observers, models:list for operators and observers, documents:create and documents:read for platform-admin, approver, and operator roles with dual-action authorization for incident reports, session:update mirrors session lifecycle grants).
+  - New protected actions require appropriate roles (policy:read for observers, tools:list for operators/developers, skills:read for observers, models:list for operators and observers, documents:create and documents:read for platform-admin, approver, and operator roles with dual-action authorization for incident reports, session:update mirrors session lifecycle grants, session:skill_graduate for platform-admin, approver, and operator roles).
 - Dual-action authorization issues for incident reports:
   - Incident report creation requires both `documents:create` AND `incident:read` permissions
   - Missing either permission results in 403 with the first failing action identified
@@ -1281,6 +1455,14 @@ Common issues and diagnostics:
   - Server-side scoping ensures callers can only access their own sessions.
   - Consistent error handling across all session operations (create, list, read, delete, update title).
   - Session title update operations follow same error handling pattern with 4xx passthrough for blank/overlong titles and foreign/unknown sessions.
+- Skill target declaration issues:
+  - Upstream 4xx errors (invalid targets, foreign sessions) pass through with structured detail for better error visibility.
+  - Transport failures and upstream 5xx errors map to 502 with "agent service skill target failed" detail.
+  - Invalid target formats result in 422 with descriptive validation failure messages.
+  - Foreign session access results in 404 with anti-enumeration protection.
+  - session:skill_graduate policy action requires platform-admin, approver, or operator roles.
+  - Already declared targets return success with already_declared flag set to true.
+  - Network timeouts (10 seconds) prevent hanging requests during target validation.
 - Document repository endpoint issues:
   - Upstream 4xx errors (validation failures, foreign-session denial, unknown documents) pass through unchanged for better error visibility.
   - Transport failures and upstream 5xx errors map to 502 with "agent service document [operation] failed" detail.
@@ -1321,6 +1503,7 @@ Common issues and diagnostics:
   - `models_listed` events capture model count and user context for catalog operations.
   - Document repository audit events (`document_created`, `document_published`, `document_deleted`) include foreign coverage information, document_type, and incident_id for incident reports.
   - Single-skill detail operations emit `skill_detail_proxied` events with request_id, user_id, and skill_id.
+  - **New**: Skill target declaration emits `skill_target_declared` events with request_id, session_id, user_id, and already_declared flag.
   - Audit service connectivity failures are non-fatal and don't affect session or confirm operations.
   - Event emission uses fire-and-forget pattern to avoid blocking operations.
 - Policy matrix endpoint issues:
@@ -1370,6 +1553,11 @@ Operational tips:
 - **Enhanced**: Validate skills:read policy rules and role assignments for skill content access workflows.
 - **Enhanced**: Monitor skill_detail_proxied audit events and verify proper skill_id tracking with namespaced paths.
 - **Enhanced**: Check skills-hub Basic credential configuration (SKILLS_CLIENT_ID, SKILLS_CLIENT_SECRET) for skill detail access.
+- **Enhanced**: Monitor skill target declaration endpoint performance and verify proper target validation through /api/v1/sessions/{session_id}/skill-target.
+- **Enhanced**: Check agent-platform connectivity and skill target endpoint availability for develop-as-you-go sessions.
+- **Enhanced**: Validate session:skill_graduate policy rules and role assignments for skill development workflows.
+- **Enhanced**: Monitor skill_target_declared audit events and verify proper session_id and already_declared flag tracking.
+- **Enhanced**: Check agent-platform skill target validation error handling and proper 4xx passthrough behavior.
 
 **Section sources**
 - [gateway_service.py:159-254](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L159-L254)
@@ -1381,25 +1569,25 @@ Operational tips:
 - [tools.py:53-59](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L53-59)
 - [skills.py:30-31](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L30-L31)
 - [models.py:36-44](file://products/platform-gateway/src/platform_gateway/api/routes/models.py#L36-L44)
-- [sessions.py:29-154](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L29-L154)
+- [sessions.py:39-283](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L39-L283)
 - [documents.py:30-188](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L30-L188)
+- [gateway_service.py:556-595](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L556-L595)
 - [gateway_service.py:289-663](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L289-L663)
 - [chat.py:146-187](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L146-L187)
 - [gateway_service.py:503-563](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L503-L563)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
 - [agent_client.py:137-198](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L137-L198)
 - [gateway_service.py:592-624](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L592-L624)
-- [gateway_service.py:652-718](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L652-L718)
-- [gateway_service.py:616-641](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L616-L641)
-- [gateway_service.py:644-681](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L644-L681)
+- [gateway_service.py:1201-1267](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1201-L1267)
+- [gateway_service.py:677-690](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L677-L690)
 - [runtime.py:9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
-- [gateway_service.py:87-92](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L87-L92)
+- [gateway_service.py:90-95](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L90-L95)
 - [metadata.py:1-6](file://products/platform-gateway/src/platform_gateway/metadata.py#L1-L6)
 - [skills.py:55-78](file://products/platform-gateway/src/platform_gateway/api/routes/skills.py#L55-L78)
 - [skills_hub_client.py:81-109](file://products/platform-gateway/src/platform_gateway/services/skills_hub_client.py#L81-L109)
 
 ## Conclusion
-The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, credential-gated model catalog discovery, operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, and now includes single-skill detail proxy functionality for reading full skill records including body content. The addition of complete session workspace lifecycle management including owner-only session rename demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility.
+The Platform Gateway Service cleanly separates portal-facing security and control-plane concerns from tool execution capabilities. It enforces strong authentication and authorization, proxies to agent-platform securely with least-privilege delegated tokens, provides unified API access to the incident service with comprehensive policy enforcement and credential management, offers transparency through live permission matrix evaluation, workspace inventory discovery, Human-in-the-Loop confirmation bridging with durable audit trails, credential-gated model catalog discovery, operations document repository functionality with trusted foreign-session coverage decisions supporting both shift_summary and incident_report document types with dual-action authorization for incident reports, exposes platform version information through the /api/v1/runtime endpoint for enhanced version tracking and monitoring capabilities across the platform, includes single-skill detail proxy functionality for reading full skill records including body content, and now supports skill target declaration for develop-as-you-go sessions with proper authorization controls. The addition of complete session workspace lifecycle management including owner-only session rename demonstrates the gateway's extensibility in supporting complex interactive workflows while maintaining consistent security patterns and operational visibility.
 
 The enhanced streaming architecture represents a significant improvement in error handling and reliability. The renaming of `stream_chat` to `open_chat_stream` reflects the more explicit nature of the function's purpose and its enhanced error propagation capabilities. By eagerly checking upstream status before any SSE frames are yielded, the gateway now properly distinguishes between client errors (4xx) and server errors (5xx), mapping them appropriately to HTTP status codes rather than returning empty streams. This change eliminates the previous issue where upstream errors would only be detected after the response had already been committed, resulting in confusing 200 responses with no content. The improved error handling ensures that clients receive meaningful HTTP status codes that accurately reflect the underlying conditions, making debugging and troubleshooting significantly more straightforward.
 
@@ -1415,4 +1603,6 @@ The enhanced runtime endpoint functionality provides platform version informatio
 
 The new single-skill detail proxy functionality addresses a critical gap in operator transparency by enabling direct access to full skill records including body content. This enhancement reuses the existing `skills:read` policy action and skills-hub's existing `get_skill` endpoint, maintaining consistency with the established security and operational patterns. The implementation supports namespaced skill IDs with embedded slashes, preserves URL safety, and provides consistent error handling that matches the existing skills list proxy. This capability is essential for operators to understand what skills actually do, particularly for validating where HITL gates land in browser-flow tests and ensuring proper skill behavior validation.
 
-These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting. The operations document repository with trusted foreign-session coverage enables secure collaborative documentation while protecting sensitive session data, and the enhanced session workspace management provides comprehensive session lifecycle control with proper ownership enforcement and audit coverage. The dual-action authorization for incident reports ensures that incident data remains protected while enabling comprehensive incident reporting capabilities. The enhanced runtime version exposure provides essential infrastructure information for platform monitoring and version management across distributed components. The single-skill detail proxy completes the skills transparency picture by enabling operators to read the actual content of ingested skills that drive tool behavior and HITL gates, addressing a critical need identified during live browser-flow testing.
+The new skill target declaration functionality completes the develop-as-you-go skill development workflow by enabling operators to declare the web target that a skill-development session will work against. This enhancement requires the higher-trust `session:skill_graduate` policy action, ensuring that only authorized operational roles can configure skill development targets. The implementation provides robust error handling for target validation failures, proper audit trail coverage through `skill_target_declared` events, and seamless integration with existing session workspace infrastructure. This capability is crucial for establishing the foundation for skill graduation workflows where captured authoring traces can be converted into executable-flow skill drafts.
+
+These enhancements collectively demonstrate the platform's commitment to providing secure, observable, and reliable AI operations infrastructure while maintaining flexibility for evolving requirements and operational needs. The robust streaming audit system ensures that all chat operations are properly attributed and audited, regardless of how they terminate, providing operators with complete visibility into model usage and stream behavior for effective monitoring and troubleshooting. The operations document repository with trusted foreign-session coverage enables secure collaborative documentation while protecting sensitive session data, and the enhanced session workspace management provides comprehensive session lifecycle control with proper ownership enforcement and audit coverage. The dual-action authorization for incident reports ensures that incident data remains protected while enabling comprehensive incident reporting capabilities. The enhanced runtime version exposure provides essential infrastructure information for platform monitoring and version management across distributed components. The single-skill detail proxy completes the skills transparency picture by enabling operators to read the actual content of ingested skills that drive tool behavior and HITL gates, addressing a critical need identified during live browser-flow testing. The skill target declaration capability establishes the foundation for advanced skill development workflows with proper authorization controls and comprehensive audit coverage.

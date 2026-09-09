@@ -18,6 +18,8 @@
 - [skill.py](file://products/skills-hub/src/skills_hub/schemas/skill.py)
 - [skill.schema.json](file://shared/shared-contracts/schemas/skill.schema.json)
 - [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
+- [create-skills-db.sql](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-skills-db.sql)
+- [.sqlcheck-spec055-s5.sql](file://.sqlcheck-spec055-s5.sql)
 - [skills-guide.md](file://docs/guides/skills-guide.md)
 - [SPEC-049 spec.md](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md)
 - [SPEC-053 spec.md](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md)
@@ -27,10 +29,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced flow_intent field validation in ingestion.py enforcing strict constraints (non-empty string ≤ 200 chars, requires web_target)
-- Updated schema definitions in skill.schema.json to include flow_intent field with proper validation rules
-- Added comprehensive test coverage for flow_intent edge cases including validation failures and valid scenarios
-- Updated documentation to reflect the enhanced validation logic and testing coverage
+- Enhanced ingestion pipeline with comprehensive executable-flow validation supporting SPEC-055 R-3
+- Updated database schema to support kind discriminator and steps storage for executable flows
+- Updated skill format specification to v2 with new `kind` and `steps` fields
+- Added comprehensive testing coverage for executable flow scenarios including validation failures and valid scenarios
+- Decoupled `risk_class` from `web_target` allowing non-browser mutating skills to declare write operations
+- Enhanced flow_intent validation requiring web_target presence and strict constraints (non-empty string ≤ 200 chars)
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -55,7 +59,8 @@ Key responsibilities:
 - Query authentication via static Basic credentials or projected workload tokens
 - Durable audit trail integration with fire-and-forget audit event emission for all user-facing operations and sync cycles
 - Web-check flow declaration support with optional web_target and risk_class frontmatter fields for browser-driven interactive steps
-- **Enhanced**: Browser flow intent declarations with comprehensive validation ensuring flow_intent is a non-empty string ≤ 200 chars and requires web_target presence
+- **Enhanced**: Executable-flow support with machine-readable step replay lists, kind discriminator, and comprehensive validation per SPEC-055 R-3
+- **Enhanced**: Flow intent declarations with comprehensive validation ensuring flow_intent is a non-empty string ≤ 200 chars and requires web_target presence
 - Operational status reporting and metrics
 
 **Section sources**
@@ -84,6 +89,7 @@ D --> J["services/audit_emitter.py<br/>fire-and-forget audit events"]
 F --> K["schemas/skill.py<br/>Skill model"]
 J --> L["shared/shared-contracts/schemas/audit-event.schema.json"]
 K --> M["shared/shared-contracts/schemas/skill.schema.json"]
+G --> N["PostgreSQL<br/>skills table"]
 ```
 
 **Diagram sources**
@@ -115,9 +121,10 @@ K --> M["shared/shared-contracts/schemas/skill.schema.json"]
 - Query auth: supports HTTP Basic against a static registry and projected workload tokens validated against cluster OIDC issuer JWKS.
 - Audit emitter: fire-and-forget delivery of usage events to the audit service with non-blocking thread-based emission and comprehensive error handling.
 - Web-check flow support: optional web_target and risk_class frontmatter fields for declaring browser-driven check flows with interactive step risk levels.
+- **Enhanced**: Executable-flow support with kind discriminator and machine-readable step replay lists per SPEC-055 R-3.
 - **Enhanced**: Flow intent support: optional flow_intent field with comprehensive validation ensuring it's a non-empty string ≤ 200 chars and requires web_target presence.
 
-**Updated** Enhanced with comprehensive flow_intent field validation enforcing strict constraints (non-empty string ≤ 200 chars, requires web_target), updated schema definitions, and comprehensive test coverage for edge cases.
+**Updated** Enhanced with comprehensive executable-flow validation supporting SPEC-055 R-3, including kind discriminator, step replay lists, decoupled risk_class from web_target, updated schema definitions, and comprehensive test coverage for edge cases.
 
 **Section sources**
 - [runtime.py:19-30](file://products/skills-hub/src/skills_hub/core/runtime.py#L19-L30)
@@ -145,7 +152,7 @@ participant Agent as "Agent"
 Note over Team,Hub : Periodic sync with subpath support
 Team->>Hub : Local dir / Git repo (with optional subpath)
 Hub->>Hub : Materialize source (git checkout + subpath validation)
-Hub->>Hub : Ingest & validate docs (including web-check flow declarations)
+Hub->>Hub : Ingest & validate docs (including executable flows)
 Hub->>Store : Atomic replace_source(source_id, records)
 Note over Agent,GW : Query path with audit emission
 Agent->>GW : tools.skills.search/list/get
@@ -232,6 +239,45 @@ RCOK -- Yes --> ValidFlow["Valid: Web-check flow"]
 - [skill.py:27-31](file://products/skills-hub/src/skills_hub/schemas/skill.py#L27-L31)
 - [skill.schema.json:63-73](file://shared/shared-contracts/schemas/skill.schema.json#L63-L73)
 
+### Executable Flow Support (SPEC-055 R-3)
+- **New**: Optional `kind` discriminator field with values "knowledge" (default) or "executable_flow".
+- **New**: Optional `steps` array containing machine-readable replay steps for executable flows.
+- Each step includes `tool`, `args`, and optional `expect` fields with comprehensive validation.
+- Executable flows require `risk_class: write` unconditionally for safety.
+- Browser steps (`web.*`) require `web_target` declaration for origin binding and budget enforcement.
+- Credential references use named credential sets instead of literal values for security.
+- Comprehensive validation includes step count limits (MAX_STEPS=200), byte size limits (MAX_STEPS_BYTES=65536), and JSON compatibility checks.
+
+```mermaid
+flowchart TD
+FM["Frontmatter"] --> CheckKind{"kind present?"}
+CheckKind -- No --> Knowledge["Valid: knowledge skill"]
+CheckKind -- Yes --> ValidateKind{"Valid kind?"}
+ValidateKind -- No --> RejectKind["Reject: invalid kind"]
+ValidateKind -- Yes --> CheckSteps{"steps present?"}
+CheckSteps -- No --> RejectNoSteps["Reject: executable_flow requires steps"]
+CheckSteps -- Yes --> ValidateSteps["Validate step list"]
+ValidateSteps --> StepCount{"Within limits?"}
+StepCount -- No --> RejectSteps["Reject: too many steps or oversized"]
+StepCount -- Yes --> CheckRisk{"risk_class: write?"}
+CheckRisk -- No --> RejectWrite["Reject: executable_flow requires write"]
+CheckRisk -- Yes --> ValidateBrowser{"Any web.* steps?"}
+ValidateBrowser -- Yes --> CheckWebTarget{"web_target present?"}
+ValidateBrowser -- No --> ValidExecutable["Valid: executable flow"]
+CheckWebTarget -- No --> RejectWebTarget["Reject: web.* steps require web_target"]
+CheckWebTarget -- Yes --> ValidExecutable
+```
+
+**Diagram sources**
+- [ingestion.py:375-460](file://products/skills-hub/src/skills_hub/services/ingestion.py#L375-L460)
+- [skill.py:15-29](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L29)
+
+**Section sources**
+- [ingestion.py:41-75](file://products/skills-hub/src/skills_hub/services/ingestion.py#L41-L75)
+- [ingestion.py:375-460](file://products/skills-hub/src/skills_hub/services/ingestion.py#L375-L460)
+- [skill.py:15-29](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L29)
+- [skill.schema.json:80-111](file://shared/shared-contracts/schemas/skill.schema.json#L80-L111)
+
 ### Flow Intent Declaration Support
 - **Enhanced**: Optional flow_intent frontmatter field for author-written descriptions of gated mutating steps per SPEC-053.
 - **Enhanced Validation**: flow_intent must be a non-empty string with maximum 200 characters and requires web_target to be present.
@@ -301,6 +347,7 @@ LogOnly --> Done
 - Derives deterministic slugs from file paths; rejects duplicate slugs within a source.
 - Produces an IngestResult with accepted records and bounded rejection details.
 - Validates web-check flow declarations including web_target URL format and risk_class values.
+- **Enhanced**: Validates executable-flow declarations with kind discriminator, step replay lists, and comprehensive validation rules.
 - **Enhanced**: Validates flow_intent declarations requiring web_target presence and proper formatting with strict constraints (non-empty string ≤ 200 chars).
 
 ```mermaid
@@ -332,13 +379,14 @@ NextFile --> End
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
 
 **Section sources**
-- [ingestion.py:1-316](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L316)
+- [ingestion.py:1-559](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L559)
 
 ### Storage Backends
 - Strategy interface defines initialize, replace_source, prune_sources, get, list, search, count, ready, close.
 - InMemory backend maintains per-source snapshots with atomic swap semantics.
 - Postgres backend creates table/index on initialize, performs atomic per-source delete+insert, and uses GIN full-text search with candidate pre-filtering followed by shared scorer re-ranking.
-- Postgres schema includes flow_intent column with idempotent ALTER statement for migration support.
+- **Enhanced**: Postgres schema includes `kind`, `steps`, `flow_intent`, `web_target`, and `risk_class` columns with idempotent ALTER statements for migration support.
+- **Enhanced**: Steps stored as JSONB type with proper serialization/deserialization handling.
 
 ```mermaid
 classDiagram
@@ -514,7 +562,7 @@ AE --> METRICS["core/metrics.py"]
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
 - [scoring.py:1-97](file://products/skills-hub/src/skills_hub/services/scoring.py#L1-L97)
 - [sync.py:1-316](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L316)
-- [ingestion.py:1-316](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L316)
+- [ingestion.py:1-559](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L559)
 - [app.py:20-86](file://products/skills-hub/src/skills_hub/app.py#L20-86)
 - [config.py:1-209](file://products/skills-hub/src/skills_hub/core/config.py#L1-L209)
 - [audit_emitter.py:1-98](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L1-L98)
@@ -531,11 +579,13 @@ AE --> METRICS["core/metrics.py"]
 - Ingestion:
   - Directory walk is deterministic (sorted paths); duplicate-slug detection is O(n) per source with early rejection.
   - Body size caps prevent oversized payloads.
+  - **Enhanced**: Executable flow validation includes comprehensive step validation with resource limits (MAX_STEPS=200, MAX_STEPS_BYTES=65536).
 - Concurrency:
   - Per-source sync loops run independently with jitter to avoid stampedes.
   - Git operations run in threads to avoid blocking the event loop.
 - Storage:
   - In-memory store offers fast reads/writes for dev/test; Postgres provides durability and scalable indexing.
+  - **Enhanced**: JSONB storage for steps with proper serialization handling.
 - Git operations include timeout protection and efficient shallow cloning for better performance.
 - Audit emission uses fire-and-forget pattern with daemon threads and short timeouts (2 seconds) to prevent any impact on query latency.
 - Credential scrubbing in error messages and traces prevents accidental secret exposure while maintaining observability.
@@ -549,7 +599,11 @@ Common operational issues and resolutions:
 - Source reports last_error:
   - Check unreachable Git URL, invalid token, or unreadable path; previous snapshot remains served until recovery.
 - Web-check flow validation errors:
-  - Verify web_target is a valid absolute http(s) URL; ensure risk_class is either "read" or "write"; note that risk_class requires web_target to be present.
+  - Verify web_target is a valid absolute http(s) URL; ensure risk_class is either "read" or "write"; note that risk_class no longer requires web_target for executable flows.
+- **Enhanced**: Executable flow validation errors:
+  - Verify kind is either "knowledge" or "executable_flow"; ensure executable flows have non-empty steps list; confirm risk_class is "write" for executable flows.
+  - For browser steps, verify web_target is present; check step validation rules (tool, args, expect formats).
+  - Common validation failures include unknown step keys, missing required fields, oversized step lists, and unresolved credential holes.
 - **Enhanced**: Flow intent validation errors:
   - Verify flow_intent is a non-empty string ≤ 200 chars; ensure it requires web_target to be present; note that flow_intent does not require risk_class: write.
   - Common validation failures include empty strings, strings exceeding 200 characters, and flow_intent without web_target.
@@ -578,14 +632,15 @@ Operational endpoints and metrics:
 ## Conclusion
 The Skills Hub Service provides a robust, deterministic, and secure foundation for serving grounded guidance to agents. Its design emphasizes fail-fast configuration, resilient per-source sync, deterministic ranking, and clear operational surfaces. Integration through the tool-gateway ensures consistent policy enforcement, auditability, and evidence presentation.
 
-**Updated** The recent enhancements add comprehensive Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, a complete audit trail integration through the fire-and-forget audit emitter service, web-check flow declaration support per SPEC-049, and enhanced browser flow intent declarations per SPEC-053 with comprehensive validation. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking, enhanced observability, and browser-driven interactive workflow capabilities.
+**Updated** The recent enhancements add comprehensive executable-flow support per SPEC-055 R-3 with kind discriminator and machine-readable step replay lists, enhanced Git repository support with subpath specification for monorepo scenarios, robust security validation, improved error handling with credential scrubbing, a complete audit trail integration through the fire-and-forget audit emitter service, web-check flow declaration support per SPEC-049, enhanced browser flow intent declarations per SPEC-053 with comprehensive validation, and updated skill format specification to v2. These improvements make it suitable for enterprise-scale federated skill management with durable usage tracking, enhanced observability, and browser-driven interactive workflow capabilities.
 
 ## Appendices
 
-### Data Model: Skill Envelope
+### Data Model: Skill Envelope (v2)
 - Fields include identifiers, provenance, human-readable metadata, optional version/attribution, timestamps, and body.
 - Constraints and formats are defined by the shared schema.
-- Optional web_target, risk_class, and flow_intent fields for web-check flow declarations and browser flow intent.
+- **Enhanced**: Optional `kind` discriminator ("knowledge" or "executable_flow") and `steps` array for executable flows.
+- **Enhanced**: Optional `flow_intent`, `web_target`, `risk_class` fields for web-check flow declarations and browser flow intent.
 
 ```mermaid
 erDiagram
@@ -604,16 +659,18 @@ string body
 string web_target
 string risk_class
 string flow_intent
+string kind
+jsonb steps
 }
 ```
 
 **Diagram sources**
-- [skill.schema.json:1-93](file://shared/shared-contracts/schemas/skill.schema.json#L1-L93)
-- [skill.py:15-38](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L38)
+- [skill.schema.json:1-125](file://shared/shared-contracts/schemas/skill.schema.json#L1-L125)
+- [skill.py:15-66](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L66)
 
 **Section sources**
-- [skill.schema.json:1-93](file://shared/shared-contracts/schemas/skill.schema.json#L1-L93)
-- [skill.py:1-43](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L43)
+- [skill.schema.json:1-125](file://shared/shared-contracts/schemas/skill.schema.json#L1-L125)
+- [skill.py:1-66](file://products/skills-hub/src/skills_hub/schemas/skill.py#L1-L66)
 
 ### Web-Check Flow Declaration Examples
 
@@ -676,13 +733,77 @@ flow_intent: "Reset user password to allow account access restoration"
 Navigate to the password reset interface and perform the reset operation...
 ```
 
-### Flow Intent Validation Rules
+### Executable Flow Examples
+
+#### Knowledge Skill (Default)
+```yaml
+---
+title: "Pod Restart Procedure"
+description: "Restart a failed pod in the inventory namespace"
+tags: ["kubernetes", "pod-restart"]
+kind: knowledge
+---
+
+# Pod Restart Procedure
+
+Use kubectl to restart the failed pod...
+```
+
+#### Executable Flow with Browser Steps
+```yaml
+---
+title: "Admin Portal Login Flow"
+description: "Automated login sequence for the admin portal"
+tags: ["admin", "browser-flow"]
+kind: executable_flow
+web_target: "https://admin.example.com/login"
+risk_class: write
+steps:
+  - tool: web.navigate
+    args: {url: "https://admin.example.com/login"}
+  - tool: web.fill_credential
+    args: {ref: 1, credential_set: admin-portal, field: username}
+  - tool: web.fill_credential
+    args: {ref: 2, credential_set: admin-portal, field: password}
+  - tool: web.click
+    args: {selector: "#login-button"}
+    expect: "Dashboard should load"
+---
+
+# Admin Portal Login Flow
+
+This executable flow automates the login process...
+```
+
+#### Non-Browser Executable Flow
+```yaml
+---
+title: "Service Restart Flow"
+description: "Restart a specific service in the inventory system"
+tags: ["infrastructure", "service-management"]
+kind: executable_flow
+risk_class: write
+steps:
+  - tool: k8s.restart_service
+    args: {namespace: inventory, name: api-service}
+  - tool: k8s.wait_for_healthy
+    args: {namespace: inventory, name: api-service, timeout: 300}
+---
+
+# Service Restart Flow
+
+This executable flow restarts the API service...
+```
+
+### Flow Validation Rules
 - **Enhanced**: flow_intent must be a non-empty string with maximum 200 characters
 - **Enhanced**: flow_intent requires web_target to be present
 - flow_intent does not require risk_class: write (display-only field)
-- flow_intent is validated during ingestion and stored verbatim
-- flow_intent appears in full-record responses but not in list/search summaries
-- **New**: Comprehensive test coverage for edge cases including empty strings, oversized content, and missing web_target dependencies
+- **Enhanced**: executable_flow requires kind discriminator and non-empty steps list
+- **Enhanced**: executable_flow requires risk_class: write unconditionally
+- **Enhanced**: Browser steps (web.*) require web_target declaration
+- **Enhanced**: Steps must be JSON-compatible with proper credential references
+- **New**: Comprehensive test coverage for edge cases including empty strings, oversized content, missing dependencies, and validation failures
 
 ### Audit Event Schema
 - Events follow the shared audit-event schema with correlation via x-request-id.
@@ -758,18 +879,20 @@ SKILLS_AUDIT_CLIENT_ID=skills-hub
 SKILLS_AUDIT_CLIENT_SECRET=your-audit-secret
 ```
 
-### Postgres Migration Notes
-- The Postgres schema includes idempotent ALTER statements for adding flow_intent column
-- Migration supports existing tables created before flow_intent was added
-- New rows automatically include flow_intent field; existing rows have NULL values
-- The INSERT statement includes flow_intent in the payload mapping
-- Row-to-Skill mapping includes flow_intent field for proper deserialization
+### Database Schema Migration Notes
+- **Enhanced**: Postgres schema includes idempotent ALTER statements for adding `kind`, `steps`, `flow_intent`, `web_target`, and `risk_class` columns
+- Migration supports existing tables created before these features were added
+- New rows automatically include all new fields; existing rows have NULL values
+- The INSERT statement includes all new fields in the payload mapping
+- Row-to-Skill mapping includes all new fields for proper deserialization
+- **Enhanced**: Steps stored as JSONB type with proper psycopg Jsonb wrapper for serialization
 
 **Section sources**
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [sync.py:87-112](file://products/skills-hub/src/skills_hub/services/sync.py#L87-L112)
-- [test_ingestion.py:295-443](file://products/skills-hub/tests/test_ingestion.py#L295-L443)
+- [test_ingestion.py:295-757](file://products/skills-hub/tests/test_ingestion.py#L295-L757)
 - [config.py:175-203](file://products/skills-hub/src/skills_hub/core/config.py#L175-L203)
-- [skill_store.py:173-182](file://products/skills-hub/src/skills_hub/services/skill_store.py#L173-L182)
-- [skill_store.py:195-218](file://products/skills-hub/src/skills_hub/services/skill_store.py#L195-L218)
-- [skill_store.py:220-260](file://products/skills-hub/src/skills_hub/services/skill_store.py#L220-L260)
+- [skill_store.py:158-190](file://products/skills-hub/src/skills_hub/services/skill_store.py#L158-L190)
+- [skill_store.py:202-234](file://products/skills-hub/src/skills_hub/services/skill_store.py#L202-L234)
+- [skill_store.py:254-276](file://products/skills-hub/src/skills_hub/services/skill_store.py#L254-L276)
+- [.sqlcheck-spec055-s5.sql:1-78](file://.sqlcheck-spec055-s5.sql#L1-L78)

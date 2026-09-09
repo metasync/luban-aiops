@@ -41,12 +41,15 @@
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [models.py](file://products/platform-gateway/src/platform_gateway/api/routes/models.py)
 - [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [incident_client.py](file://products/platform-gateway/src/platform_gateway/services/incident_client.py)
 - [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
+- [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
 - [ModelSelect.tsx](file://products/operator-portal/web-ui/app/src/chat/ModelSelect.tsx)
 - [models.ts](file://products/operator-portal/web-ui/app/src/api/models.ts)
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
@@ -70,6 +73,11 @@
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
 - [test_flow_approvals.py](file://products/agent-platform/tests/test_flow_approvals.py)
+- [test_authoring_trace.py](file://products/agent-platform/tests/test_authoring_trace.py)
+- [test_secret_params.py](file://products/agent-platform/tests/test_secret_params.py)
+- [test_session_service.py](file://products/agent-platform/tests/test_session_service.py)
+- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
@@ -77,6 +85,8 @@
 - [SPEC-041-documents-readability-and-digest-reference/spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-043-incident-report-document-type/spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [SPEC-050-browser-tools-expansion-and-samples/spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+- [SPEC-055-develop-as-you-go-skill-graduation/tasks.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md)
+- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
 - [document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 - [documents-readability-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md)
 - [incident-report-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md)
@@ -90,12 +100,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities
-- Integrated new flow_approvals.py service (244 lines) implementing session-scoped flow context and approval tracking with FlowContextStore and FlowApprovalStore
-- Enhanced execution signing capabilities with flow request building for isolated tool execution workflows
-- Added browser write tools classification and BROWSER_WRITE_TOOLS constant for proper risk assessment
-- Updated middleware stack to include flow signing capability through GatewayPermissionMiddleware
-- Implemented process-wide singletons for flow contexts and approvals with TTL-based expiration handling
+- Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins
+- Enhanced session management with skill_target validation and new API routes for skill target declaration
+- Improved runtime kernel with automatic step origin observation for browser write operations
+- Updated Authoring Trace Store Service section to document the new dual-target mechanism and step origin tracking
+- Enhanced documentation for browser tool surface expansion with flow binding and origin verification
+- Added detailed examples of skill target declaration workflow and graduation correlation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -107,33 +117,35 @@
 7. [Incident Report Document Type](#incident-report-document-type)
 8. [Shift Summary Digest Assembly](#shift-summary-digest-assembly)
 9. [Optional Prose Generation](#optional-prose-generation)
-10. [Document API Endpoints](#document-api-endpoints)
-11. [Execution Worker Integration](#execution-worker-integration)
-12. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
-13. [Session Store Enhancements](#session-store-enhancements)
-14. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
-15. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
-16. [Flow Authority Management](#flow-authority-management)
-17. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
-18. [Voice Readiness Support](#voice-readiness-support)
-19. [Per-Request Trace Queues](#per-request-trace-queues)
-20. [Delegated Token Management](#delegated-token-management)
-21. [Evidence Store Service](#evidence-store-service)
-22. [Model Catalog Service](#model-catalog-service)
-23. [Live Model Discovery Service](#live-model-discovery-service)
-24. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
-25. [Decision Sync Robustness](#decision-sync-robustness)
-26. [Browser Tool Surface Expansion](#browser-tool-surface-expansion)
-27. [Dependency Analysis](#dependency-analysis)
-28. [Performance Considerations](#performance-considerations)
-29. [Troubleshooting Guide](#troubleshooting-guide)
-30. [Conclusion](#conclusion)
-31. [Appendices](#appendices)
+10. [Authoring Trace Store Service](#authoring-trace-store-service)
+11. [Skill Target Declaration and Flow Binding](#skill-target-declaration-and-flow-binding)
+12. [Browser Tool Surface Expansion](#browser-tool-surface-expansion)
+13. [Document API Endpoints](#document-api-endpoints)
+14. [Execution Worker Integration](#execution-worker-integration)
+15. [Multi-Session Operator Workspace](#multi-session-operator-workspace)
+16. [Session Store Enhancements](#session-store-enhancements)
+17. [Enhanced Transcript Reconstruction](#enhanced-transcript-reconstruction)
+18. [HITL Confirmation Registry Integration](#hitl-confirmation-registry-integration)
+19. [Flow Authority Management](#flow-authority-management)
+20. [Enhanced Streaming Architecture](#enhanced-streaming-architecture)
+21. [Voice Readiness Support](#voice-readiness-support)
+22. [Per-Request Trace Queues](#per-request-trace-queues)
+23. [Delegated Token Management](#delegated-token-management)
+24. [Evidence Store Service](#evidence-store-service)
+25. [Model Catalog Service](#model-catalog-service)
+26. [Live Model Discovery Service](#live-model-discovery-service)
+27. [Multi-Model Runtime Capability](#multi-model-runtime-capability)
+28. [Decision Sync Robustness](#decision-sync-robustness)
+29. [Dependency Analysis](#dependency-analysis)
+30. [Performance Considerations](#performance-considerations)
+31. [Troubleshooting Guide](#troubleshooting-guide)
+32. [Conclusion](#conclusion)
+33. [Appendices](#appendices)
 
 ## Introduction
 The Agent Platform Service is the core orchestration engine of the Luban AIOps Platform. It provides a runtime kernel for agent execution, a provider registry for multi-model backends (OpenAI, DashScope, DeepSeek, and Luban), and robust session management with durable storage. The service exposes REST APIs for agent interactions, streaming responses, and configuration management, enabling scalable and observable AI operations across diverse model providers.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations, improved pending decision polling, and better transcript handling for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file with human-readable element descriptions. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs, role-based access controls, and deterministic counts-only summaries computed at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint, ensuring cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations, improved pending decision polling, and better transcript handling for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file with human-readable element descriptions. **NEW AUTHORING TRACE STORE**: Added comprehensive authoring trace store service with dual backend support for capturing approved mutations during execution, featuring bounded retention policies with configurable step limits and idle day thresholds, process-wide singleton management, and seamless integration with execution workflows for audit trail purposes. **SECURITY ENHANCEMENT**: Added comprehensive secret parameterization system with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions for secure credential handling in authoring traces, ensuring sensitive information like passwords, tokens, and API keys are automatically masked before being persisted in trace data. **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations.
 
 ## Project Structure
 The Agent Platform Service is implemented as a Python FastAPI application organized by feature layers:
@@ -149,7 +161,9 @@ The Agent Platform Service is implemented as a Python FastAPI application organi
 - **Incident report service with incident service client, digest assembly, and dual-action authorization**
 - **Shift summary digest assembly from multiple durable stores with handover skeleton computation**
 - **Optional prose generation with fail-soft behavior, prompt safety, and AI-generated blurb extraction**
+- **Authoring trace store service with dual backend support for capturing approved mutations during execution and comprehensive secret parameterization**
 - **Flow authority management with session-scoped flow context and approval tracking**
+- **Skill target declaration and flow binding with dual-target mechanism for authorization scope vs observed origins**
 - Execution worker client for isolated tool execution with fail-closed behavior
 - Execution record persistence for signed execution lifecycle tracking
 - Tools and integrations
@@ -193,6 +207,13 @@ shift_sum["services/shift_summary.py"]
 doc_prose["services/document_prose.py"]
 inc_client["services/incident_client.py"]
 inc_report["services/incident_report.py"]
+end
+subgraph "Authoring Traces"
+auth_trace["services/authoring_trace.py"]
+trace_backend["Dual Backend Support"]
+trace_config["Runtime Settings"]
+secret_params["services/secret_params.py"]
+target_tracking["Target Tracking"]
 end
 subgraph "Flow Authorities"
 flow_approvals["services/flow_approvals.py"]
@@ -260,6 +281,9 @@ kernel --> exec_records
 kernel --> flow_approvals
 kernel --> flow_contexts
 kernel --> flow_approvals_store
+kernel --> auth_trace
+auth_trace --> secret_params
+auth_trace --> target_tracking
 gw_tools --> exec_worker
 exec_worker --> exec_runtime
 model_disc --> model_cat
@@ -276,6 +300,7 @@ inc_report --> metrics
 flow_approvals --> metrics
 flow_contexts --> metrics
 flow_approvals_store --> metrics
+auth_trace --> metrics
 app --> metrics
 app --> obs
 app --> tel
@@ -317,6 +342,8 @@ settings --> env
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [incident_report.py](file://products/agent-platform/src/agent_service/services/incident_report.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
@@ -336,7 +363,9 @@ settings --> env
 - **Incident Report Service**: Provides specialized document type for incident analysis with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows.
 - **Shift Summary Assembly**: Builds deterministic digests from multiple durable stores with role-based coverage, provenance tracking, and handover skeleton generation for summary computation.
 - **Optional Prose Generation**: Generates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format.
+- **Authoring Trace Store**: Captures approved mutations during execution with dual backend support (in-memory and Postgres), bounded retention policies with configurable step limits and idle day thresholds, process-wide singleton management, seamless integration with execution workflows for audit trail purposes, comprehensive secret parameterization for secure credential handling, and dual-target mechanism distinguishing between declared authorization scope and observed landing origins.
 - **Flow Authority Management**: Implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows.
+- **Skill Target Declaration**: Manages skill development targets with first-wins authorization scope enforcement and graduation correlation.
 - **Execution Worker Client**: Provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior, signature verification, and receipt tracking.
 - **Execution Record Store**: Persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics for late arrivals.
 - Enhanced Confirmation Records: Provides persistent storage for HITL confirmation lifecycle with turn_index field support, idempotent resolution, startup sweep scoping, and cross-replica consistency guarantees.
@@ -353,6 +382,8 @@ Key responsibilities:
 - Evidence Capture: Persist tool_call and tool_result frames with size caps and automatic eviction.
 - **Document Creation**: Generate typed operation documents with deterministic digests, optional prose summaries with AI-generated blurbs, deterministic counts-only summaries derived from handover skeletons, and role-based access controls.
 - **Incident Report Creation**: Generate incident report documents with incident service integration, dual-action authorization, and structured error handling.
+- **Authoring Trace Capture**: Record approved mutations during execution with bounded retention policies, dual backend support, comprehensive secret parameterization, seamless integration with execution workflows for comprehensive audit trails, and dual-target tracking for authorization scope vs observed origins.
+- **Skill Target Management**: Manage skill development targets with first-wins authorization scope enforcement and graduation correlation.
 - **Flow Authority Management**: Manage session-scoped flow contexts and approvals with TTL-based expiration for secure isolated tool execution.
 - **Role-Based Access**: Enforce owner-only draft visibility and team-wide published document access with envelope-only listings for security.
 - **Isolated Execution**: Route approved mutating tool calls to execution-runtime service with signature verification and receipt tracking.
@@ -373,7 +404,7 @@ Key responsibilities:
 - HITL Integration: Support human-in-the-loop workflows with parked confirmation management and durable state.
 - Observability: Emit structured logs, metrics, and traces for each operation with per-request audit trails.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service client, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service client, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations. **NEW AUTHORING TRACE STORE**: Added comprehensive authoring trace store service with dual backend support for capturing approved mutations during execution, featuring bounded retention policies with configurable step limits and idle day thresholds, process-wide singleton management, and seamless integration with execution workflows for comprehensive audit trails. **SECURITY ENHANCEMENT**: Added comprehensive secret parameterization system with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions for secure credential handling in authoring traces, ensuring sensitive information like passwords, tokens, and API keys are automatically masked before being persisted in trace data.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -385,6 +416,8 @@ Key responsibilities:
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
@@ -409,7 +442,9 @@ The service follows a layered architecture with enhanced security and anti-hallu
 - **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling for incident-specific workflows**.
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking, role-based coverage, and handover skeleton generation for summary computation**.
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior, prompt safety guarantees, and AI-generated blurb extraction using SUMMARY marker format**.
+- **Authoring trace store captures approved mutations during execution with dual backend support, bounded retention policies, comprehensive secret parameterization, seamless integration with execution workflows for comprehensive audit trails, and dual-target tracking for authorization scope vs observed origins**.
 - **Flow authority management implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows**.
+- **Skill target declaration manages skill development targets with first-wins authorization scope enforcement and graduation correlation**.
 - **Execution worker client provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior and signature verification**.
 - **Execution record store persists signed execution request/receipt lifecycle with durable storage and first-write-wins semantics**.
 - Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support, idempotent resolution, and cross-replica consistency.
@@ -431,6 +466,8 @@ participant ShiftSum as "ShiftSummary"
 participant IncClient as "IncidentClient"
 participant IncReport as "IncidentReport"
 participant DocProse as "DocumentProse"
+participant AuthTrace as "AuthoringTraceStore"
+participant SecretParams as "SecretParameterizer"
 participant FlowAuth as "FlowAuthorityManager"
 participant ExecWorker as "ExecutionWorkerClient"
 participant ExecRuntime as "ExecutionRuntime"
@@ -471,9 +508,14 @@ else Authorization denied
 API-->>Gateway : 403 Forbidden
 Gateway-->>Client : 403 Forbidden
 end
-Note over ExecWorker : Isolated Execution Flow with Flow Authority
+Note over ExecWorker : Isolated Execution Flow with Authoring Trace Capture and Secret Parameterization
 Client->>API : Chat with approved mutating tool
 API->>Kernel : execute(message, sessionId, bearerToken)
+Kernel->>AuthTrace : capture_approved_mutation(execution_data)
+AuthTrace->>SecretParams : parameterize_for_trace(tool_name, args)
+SecretParams-->>AuthTrace : Safe parameters with masked credentials
+AuthTrace->>AuthTrace : Apply retention policy and store
+AuthTrace-->>Kernel : mutation recorded with retention policy
 Kernel->>FlowAuth : Check flow authority for session
 FlowAuth-->>Kernel : Flow approval status
 Kernel->>ExecWorker : handoff(envelope, arguments, delegated_token)
@@ -487,7 +529,7 @@ ExecRecords-->>Kernel : execution recorded
 end
 ```
 
-**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the incident report document creation flow with dual-action authorization gates requiring both documents:create and incident:read permissions, incident service client integration with structured error handling, and comprehensive degradation strategies for dependency failures.** **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the flow authority management with session-scoped flow context and approval tracking, TTL-based authorities for secure isolated tool execution, and comprehensive flow approval system integration.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
+**Updated** The sequence diagram now shows the complete multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated validation, and the full model resolution hierarchy (request > pinned > default). **It also includes the incident report document creation flow with dual-action authorization gates requiring both documents:create and incident:read permissions, incident service client integration with structured error handling, and comprehensive degradation strategies for dependency failures.** **It also includes the document repository workflow with shift summary digest assembly, deterministic counts-only summary computation from handover skeletons, optional prose generation with AI-generated blurb extraction using SUMMARY marker format, persistent document storage with role-based access controls, envelope-only listings for security, and PostgreSQL migration support for the summary and blurb columns.** **It also includes the authoring trace store integration for capturing approved mutations during execution with bounded retention policies, dual backend support, comprehensive secret parameterization, seamless integration with execution workflows for comprehensive audit trails, and dual-target tracking for authorization scope vs observed origins.** **It also includes the flow authority management with session-scoped flow context and approval tracking, TTL-based authorities for secure isolated tool execution, and comprehensive flow approval system integration.** **It also includes the execution worker integration for isolated tool execution with signature verification and receipt tracking, enhanced confirmation record storage layer with turn_index field support for precise confirmation card anchoring, idempotent resolution, startup sweep scoping to prevent sibling replica interference, and cross-replica consistency guarantees.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools. **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations. **SECURITY ENHANCEMENT**: Added comprehensive secret parameterization system with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions for secure credential handling in authoring traces, ensuring sensitive information like passwords, tokens, and API keys are automatically masked before being persisted in trace data.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -500,6 +542,8 @@ end
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
@@ -528,9 +572,10 @@ The runtime kernel is the central orchestrator for agent execution with enhanced
 - Anti-hallucination guard system with NO_TOOLS_NOTICE injection
 - Auto-approval mechanism for vetted read-only tools to prevent headless stream stalls
 - Voice readiness support through input_modality parameter passthrough
-- **Isolated execution routing for approved mutating tools through execution-runtime service with flow authority management**
+- **Isolated execution routing for approved mutating tools through execution-runtime service with authoring trace capture and flow authority management**
 - **Enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency**
 - **Flow authority management with session-scoped flow context and approval tracking using TTL-based authorities**
+- **Automatic step origin observation for browser write operations with dual-target tracking**
 
 ```mermaid
 classDiagram
@@ -559,6 +604,7 @@ class AgentKernel {
 +_build_confirmation_frame(event, session_id, user_name, toolkit, turn_index)
 +_prepare_executions(pending, user_name, confirmed, request_id, session_id)
 +_sign_flow_execution(flow_request)
++_observe_tool_result(frame, requests)
 }
 class SessionService {
 +load(sessionId)
@@ -605,6 +651,23 @@ class DocumentProse {
 +generate_prose(kernel, document_type, digest)
 +build_prose_prompt(document_type, digest)
 +parse_blurb(text)
+}
+class AuthoringTraceStore {
+<<interface>>
++backend_name : str
++capture_approved_mutation(execution_data)
++get_traces(session_id)
++cleanup_expired_traces()
++is_ready()
++declare_target(session_id, target)
++trace_target(session_id)
++record_step_origin(session_id, execution_id, origin)
+}
+class SecretParameterizer {
+<<interface>>
++parameterize_for_trace(tool_name, parameters)
++is_secret_value(value)
++_parameterize_nested(tool_name, value)
 }
 class FlowAuthorityManager {
 <<interface>>
@@ -681,6 +744,8 @@ AgentKernel --> IncidentClient : "fetches incident bundles"
 AgentKernel --> IncidentReport : "assembles incident digests"
 AgentKernel --> ShiftSummary : "generates digests"
 AgentKernel --> DocumentProse : "generates prose"
+AgentKernel --> AuthoringTraceStore : "captures approved mutations"
+AuthoringTraceStore --> SecretParameterizer : "parameterizes secrets"
 AgentKernel --> FlowAuthorityManager : "manages flow authorities"
 AgentKernel --> ExecutionWorkerClient : "routes approved mutations"
 AgentKernel --> ExecutionRecordStore : "persists execution records"
@@ -697,7 +762,7 @@ GatewayTools --> ModelProvider : "secure invocation"
 GatewayTools --> ExecutionWorkerClient : "isolated execution"
 ```
 
-**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification, receipt tracking, and comprehensive flow authority management, enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees, and incident report document type support with dedicated incident service client integration and dual-action authorization enforcement.** **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools like web.click, web.type, web.select, web.press_key, and web.upload_file.
+**Updated** The runtime kernel now includes AgentScope 2.x toolkit registration, per-request toolkit rebuilding with trace queues, anti-hallucination guard system, auto-approval mechanism for preventing headless stream stalls, enhanced session management methods for multi-session workspace operations and model pinning, evidence capture and persistence for tool execution frames, model normalization for legacy provider name aliases, voice readiness support through input_modality parameter passthrough, **authoring trace capture for approved mutations during execution with bounded retention policies, dual backend support, comprehensive secret parameterization for secure credential handling, dual-target tracking for authorization scope vs observed origins, isolated execution routing for approved mutating tools through the execution-runtime service with signature verification, receipt tracking, and comprehensive flow authority management, enhanced durable confirmation management with turn_index field support, idempotent resolution, and cross-replica consistency guarantees, automatic step origin observation for browser write operations, and incident report document type support with dedicated incident service client integration and dual-action authorization enforcement.** **SPEC-055 Enhancement**: Added automatic step origin observation for browser write operations with `_observe_tool_result` method that extracts URL origins from successful browser tool results and records them in the authoring trace store for graduation correlation. **NEW AUTHORING TRACE STORE**: Added comprehensive authoring trace store integration with runtime kernel for capturing approved mutations during execution, featuring bounded retention policies with configurable step limits and idle day thresholds, dual backend support, comprehensive secret parameterization with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions, dual-target mechanism for authorization scope vs observed origins, and seamless integration with execution workflows for comprehensive audit trails. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools like web.click, web.type, web.select, web.press_key, and web.upload_file.
 
 **Diagram sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -707,6 +772,8 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
@@ -721,140 +788,265 @@ GatewayTools --> ExecutionWorkerClient : "isolated execution"
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 
-### Flow Authority Management
+### Authoring Trace Store Service
 
 #### Overview
-The flow authority management system provides comprehensive session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows. This enhancement addresses the need for granular control over tool execution flows within specific sessions, ensuring that only authorized operations can proceed within their designated time windows.
+The authoring trace store service provides comprehensive capture and management of approved mutations during execution with dual backend support (in-memory and Postgres). This enhancement addresses the need for detailed audit trails of approved mutations with bounded retention policies and configurable thresholds for operational efficiency. **Security Enhancement**: The service now includes comprehensive secret parameterization system with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions for secure credential handling in authoring traces, ensuring sensitive information like passwords, tokens, and API keys are automatically masked before being persisted in trace data. **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new `declare_target()` and `trace_target()` methods for session-scoped target management, and `record_step_origin()` method for automatic step origin observation from browser write operations.
 
 #### Key Features
-- **Session-Scoped Flow Context**: Each session maintains its own flow context with isolated approval tracking
-- **TTL-Based Authorities**: Flow approvals expire after configured time periods to prevent indefinite access
-- **Process-Wide Singletons**: Flow contexts and approvals are managed through process-wide singletons for efficient sharing
-- **BROWSER_WRITE_TOOLS Classification**: Proper classification of browser interaction tools as write-tier operations requiring confirmation
-- **Build Flow Request Function**: Comprehensive flow request building for isolated tool execution workflows
-- **Approval Tracking**: Complete tracking of flow approvals with owner and decider user identification
-- **Expiration Handling**: Automatic expiration of flow authorities with safe failure modes
+- **Dual Backend Support**: In-memory for development/testing, Postgres for production with graceful fallback
+- **Bounded Retention Policies**: Configurable step limits (`AGENT_AUTHORING_TRACE_MAX_STEPS`) and idle day thresholds (`AGENT_AUTHORING_TRACE_IDLE_DAYS`)
+- **Process-Wide Singletons**: Efficient sharing of trace contexts across the application lifecycle
+- **Approved Mutation Capture**: Seamless integration with execution workflows to capture approved mutations
+- **Retention Management**: Automatic cleanup of expired traces based on configured thresholds
+- **Operational Visibility**: Comprehensive metrics and monitoring for trace capture and retention operations
+- **Comprehensive Secret Parameterization**: Automatic masking of sensitive credentials including passwords, tokens, API keys, and other secret values using sophisticated detection algorithms
+- **Dual-Target Mechanism**: Distinguishes between declared authorization scope and observed landing origins for graduation correlation
 
-#### Flow Approval Architecture
+#### Secret Parameterization System
+The secret parameterization system ensures that sensitive credentials are never persisted in authoring traces through three core functions:
+
+- **`parameterize_for_trace()`**: Main entry point that creates a safe copy of parameters with credentials masked
+- **`is_secret_value()`**: Detects whether a value contains sensitive information like passwords, tokens, or API keys
+- **`_parameterize_nested()`**: Recursively processes nested structures to find and mask credentials at any depth
+
 ```mermaid
 flowchart TD
-A["Tool Execution Request"] --> B{"Check Flow Authority"}
-B --> C{"Session Has Active Approval?"}
-C --> |Yes| D["Execute Tool Call"]
-C --> |No| E{"Requires Confirmation?"}
-E --> |Yes| F["Park for Human Approval"]
-E --> |No| G["Execute Directly"]
-F --> H["Await User Decision"]
-H --> I{"Decision Received?"}
-I --> |Approve| J["Record Flow Approval"]
-I --> |Deny| K["Reject Execution"]
-J --> L["Set TTL-Based Authority"]
-L --> M["Execute Tool Call"]
-D --> N["Complete Execution"]
-G --> N
-K --> O["Return Rejection"]
-M --> N
+A["Original Parameters"] --> B{"parameterize_for_trace()"}
+B --> C{"Top-level Field Check"}
+C --> |Secret Field| D["Replace with Placeholder"]
+C --> |Safe Field| E{"Nested Structure?"}
+E --> |Yes| F{"_parameterize_nested()"}
+F --> G{"Recursive Processing"}
+G --> H{"Field Name Check"}
+H --> |Secret| I["Replace with Placeholder"]
+H --> |Safe| J{"Continue Recursion"}
+J --> K{"Value Type Check"}
+K --> |Dict| L["Process Each Key"]
+K --> |List| M["Process Each Item"]
+K --> |Primitive| N["Return Value"]
+E --> |No| O["Return Original Value"]
+D --> P["Safe Parameters"]
+I --> P
+N --> P
+M --> P
+L --> P
+O --> P
 ```
 
 **Diagram sources**
-- [flow_approvals.py:176-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L176-L244)
-- [runtime_kernel.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
+- [secret_params.py:265-300](file://products/agent-platform/src/agent_service/services/secret_params.py#L265-L300)
+- [secret_params.py:236-262](file://products/agent-platform/src/agent_service/services/secret_params.py#L236-L262)
+- [secret_params.py:219-234](file://products/agent-platform/src/agent_service/services/secret_params.py#L219-L234)
 
-#### Flow Context Store Implementation
-The FlowContextStore manages session-scoped flow contexts with comprehensive approval tracking:
+#### Dual-Target Mechanism
+The dual-target mechanism distinguishes between declared authorization scope and observed landing origins:
 
+- **Declared Target**: First-wins authorization scope set via `declare_target()` method
+- **Observed Origin**: Automatically captured from successful browser write operations via `record_step_origin()`
+- **Graduation Correlation**: Declared target must be established before first mutation for graduation eligibility
+- **Session Scoping**: Targets are scoped per session with isolation between different sessions
+
+```mermaid
+flowchart TD
+A["Session Start"] --> B{"Declare Target?"}
+B --> |Yes| C["declare_target(session_id, target)"]
+C --> D["First-wins enforcement"]
+D --> E["Store declared_at timestamp"]
+B --> |No| F["Proceed without declared target"]
+E --> G["Browser Write Operation"]
+F --> G
+G --> H{"Successful Browser Write?"}
+H --> |Yes| I["record_step_origin(session_id, execution_id, origin)"]
+I --> J["Extract URL origin"]
+J --> K["Store captured_at timestamp"]
+H --> |No| L["No origin recorded"]
+K --> M["Graduation Correlation"]
+L --> M
+M --> N{"Declared Before First Step?"}
+N --> |Yes| O["Eligible for Graduation"]
+N --> |No| P["Not Eligible - Unknown Origin"]
+```
+
+**Diagram sources**
+- [authoring_trace.py:652-661](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L652-L661)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+- [test_authoring_trace.py:668-689](file://products/agent-platform/tests/test_authoring_trace.py#L668-L689)
+
+#### Architecture
+```mermaid
+flowchart TD
+A["Approved Mutation Event"] --> B{"Capture Request"}
+B --> C{"Backend Available?"}
+C --> |Yes| D{"Write to Backend"}
+C --> |No| E{"Fallback to In-Memory"}
+D --> F{"Apply Retention Policy"}
+E --> F
+F --> G{"Exceed Step Limit?"}
+G --> |Yes| H{"Cleanup Oldest Traces"}
+G --> |No| I{"Keep All Traces"}
+H --> J{"Idle Days Threshold?"}
+I --> J
+J --> |Yes| K{"Remove Expired Traces"}
+J --> |No| L{"Keep Active Traces"}
+K --> M["Return Success"]
+L --> M
+```
+
+**Diagram sources**
+- [authoring_trace.py:23-26](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L23-L26)
+- [authoring_trace.py:652-661](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L652-L661)
+
+#### Configuration and Environment Variables
+- **AGENT_AUTHORING_TRACE_MAX_STEPS**: Maximum number of steps to retain per session (default: 100)
+- **AGENT_AUTHORING_TRACE_IDLE_DAYS**: Number of idle days before trace cleanup (default: 180)
+- **AGENT_STATE_STORE_BACKEND**: Selects backend ("memory" or "postgres")
+- **AGENT_STATE_DB_URL**: Database connection string for Postgres backend
+
+#### Implementation Details
+```mermaid
+sequenceDiagram
+participant Kernel as "RuntimeKernel"
+participant TraceStore as "AuthoringTraceStore"
+participant SecretParams as "SecretParameterizer"
+participant Backend as "Storage Backend"
+Note over Kernel,Backend : Approved Mutation Capture Flow with Secret Parameterization
+Kernel->>TraceStore : capture_approved_mutation(execution_data)
+TraceStore->>SecretParams : parameterize_for_trace(tool_name, args)
+SecretParams->>SecretParams : is_secret_value() for each field
+SecretParams->>SecretParams : _parameterize_nested() for complex structures
+SecretParams-->>TraceStore : Safe parameters with masked credentials
+TraceStore->>Backend : Write trace with retention metadata
+Backend-->>TraceStore : Success/Failure
+alt Success
+TraceStore->>TraceStore : Apply retention policy
+TraceStore->>Backend : Cleanup expired traces if needed
+TraceStore-->>Kernel : Trace captured successfully
+else Failure
+TraceStore->>TraceStore : Fallback to alternative backend
+TraceStore-->>Kernel : Fallback success/failure
+end
+```
+
+**Diagram sources**
+- [authoring_trace.py:652-661](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L652-L661)
+- [secret_params.py:265-300](file://products/agent-platform/src/agent_service/services/secret_params.py#L265-L300)
+- [runtime_settings.py:297-299](file://products/agent-platform/src/agent_service/runtime_settings.py#L297-L299)
+
+#### Test Coverage
+The implementation includes comprehensive test coverage for authoring trace scenarios:
+
+- **Configuration Validation**: Tests for MAX_STEPS >= 1 and IDLE_DAYS >= 0 validation
+- **Default Behavior**: Validates default values when environment variables are not set
+- **Backend Fallback**: Tests graceful fallback between in-memory and Postgres backends
+- **Retention Policy**: Verifies proper cleanup of expired traces based on configured thresholds
+- **Process Singleton Management**: Ensures efficient sharing of trace contexts across application lifecycle
+- **Secret Parameterization**: Tests for credential detection, nested structure processing, and safe field preservation
+- **Dual-Target Mechanism**: Tests for first-wins target declaration, session scoping, and graduation correlation
+
+**Section sources**
+- [authoring_trace.py:1-700](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L1-L700)
+- [secret_params.py:1-300](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L300)
+- [runtime_settings.py:297-299](file://products/agent-platform/src/agent_service/runtime_settings.py#L297-L299)
+- [runtime_settings.py:476-479](file://products/agent-platform/src/agent_service/runtime_settings.py#L476-L479)
+- [test_authoring_trace.py:66-67](file://products/agent-platform/tests/test_authoring_trace.py#L66-L67)
+- [test_authoring_trace.py:656-695](file://products/agent-platform/tests/test_authoring_trace.py#L656-L695)
+- [test_secret_params.py:1-210](file://products/agent-platform/tests/test_secret_params.py#L1-L210)
+- [test_runtime_settings.py:233-242](file://products/agent-platform/tests/test_runtime_settings.py#L233-L242)
+
+### Skill Target Declaration and Flow Binding
+
+#### Overview
+The skill target declaration system provides comprehensive management of skill development targets with first-wins authorization scope enforcement and graduation correlation. This enhancement addresses SPEC-055 by adding new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations.
+
+#### Key Features
+- **First-Wins Authorization Scope**: Declared targets are immutable once set, preventing scope widening attacks
+- **Session Scoping**: Targets are isolated per session with proper separation between different sessions
+- **Graduation Correlation**: Declared targets must be established before first mutation for graduation eligibility
+- **API Integration**: New `/api/v1/sessions/{session_id}/skill-target` endpoint for target declaration
+- **Audit Trail**: Unaudited at gateway level but logged structurally with rejection details
+- **Origin Extraction**: Automatic extraction of URL origins from browser write operations for comparison
+- **TTL-Based Expiration**: Targets expire after skill graduation or session termination
+
+#### Target Declaration Flow
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
-participant Kernel as "RuntimeKernel"
-participant FlowStore as "FlowContextStore"
-participant ApprovalStore as "FlowApprovalStore"
-Note over Client,ApprovalStore : Flow Authority Management
-Client->>Kernel : Execute tool with session_id
-Kernel->>FlowStore : get(session_id)
-FlowStore-->>Kernel : FlowContext or None
-alt No active approval
-Kernel->>ApprovalStore : has_approval(session_id)
-ApprovalStore-->>Kernel : False
-Kernel->>Kernel : Park for human approval
-Kernel->>ApprovalStore : record_approval(...)
-ApprovalStore-->>Kernel : FlowApproval with TTL
-Kernel->>Kernel : Set TTL-based authority
-else Active approval exists
-Kernel->>Kernel : Proceed with execution
+participant Gateway as "Platform Gateway"
+participant API as "Agent Platform API"
+participant TraceStore as "AuthoringTraceStore"
+Note over Client,TraceStore : Skill Target Declaration Flow
+Client->>Gateway : POST /api/v1/sessions/{id}/skill-target {target}
+Gateway->>Gateway : Enforce session : skill_graduate permission
+Gateway->>API : Forward with authorization headers
+API->>TraceStore : declare_target(session_id, target)
+TraceStore->>TraceStore : Check if target already declared
+alt First Declaration
+TraceStore->>TraceStore : Store target with declared_at timestamp
+TraceStore-->>API : {already_declared : false}
+else Already Declared
+TraceStore->>TraceStore : Return existing target
+TraceStore-->>API : {already_declared : true, target : existing_target}
 end
-Kernel-->>Client : Tool execution result
+API-->>Gateway : Response with declaration status
+Gateway-->>Client : 200 OK with target information
 ```
 
 **Diagram sources**
-- [flow_approvals.py:241-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L241-L244)
-- [flow_approvals.py:188-208](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L188-L208)
+- [sessions.py:166-211](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L166-L211)
+- [authoring_trace.py:652-661](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L652-L661)
+- [test_authoring_trace.py:668-689](file://products/agent-platform/tests/test_authoring_trace.py#L668-L689)
 
-#### TTL-Based Expiration Handling
-Flow authorities use TTL-based expiration to ensure temporary access:
+#### Automatic Step Origin Observation
+The runtime kernel automatically observes step origins from successful browser write operations:
 
 ```mermaid
 flowchart TD
-A["Flow Approval Recorded"] --> B["Set approved_at timestamp"]
-B --> C["Configure TTL period"]
-C --> D{"Check if expired?"}
-D --> |No| E["Allow execution"]
-D --> |Yes| F["Reject execution"]
-E --> G["Execute tool call"]
-F --> H["Return unauthorized"]
-G --> I["Complete execution"]
-H --> J["Log rejection"]
+A["Browser Write Tool Result"] --> B{"Status == 'succeeded'?"}
+B --> |No| C["Skip Origin Observation"]
+B --> |Yes| D{"Tool in BROWSER_WRITE_TOOLS?"}
+D --> |No| E["Skip Non-Browser Tools"]
+D --> |Yes| F["Extract URL from data"]
+F --> G{"URL Valid?"}
+G --> |No| H["Skip Invalid URLs"]
+G --> |Yes| I["Extract Origin from URL"]
+I --> J["record_step_origin(session_id, execution_id, origin)"]
+J --> K["Store captured_at timestamp"]
+K --> L["Graduation Correlation"]
 ```
 
 **Diagram sources**
-- [flow_approvals.py:188-208](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L188-L208)
-- [test_flow_approvals.py:168-184](file://products/agent-platform/tests/test_flow_approvals.py#L168-L184)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+- [test_runtime_kernel.py:2363-2415](file://products/agent-platform/tests/test_runtime_kernel.py#L2363-L2415)
 
-#### Browser Write Tools Classification
-The system includes proper classification for browser interaction tools as write-tier operations:
-
-```mermaid
-flowchart TD
-A["Browser Tool Invocation"] --> B{"Tool Type?"}
-B --> |web.click| C["Write-Tier Operation"]
-B --> |web.type| D["Write-Tier Operation"]
-B --> |web.select| E["Write-Tier Operation"]
-B --> |web.press_key| F["Write-Tier Operation"]
-B --> |web.upload_file| G["Write-Tier Operation"]
-C --> H["Require Flow Authority"]
-D --> H
-E --> H
-F --> H
-G --> H
-H --> I["Check Flow Approval"]
-I --> J{"Has Active Approval?"}
-J --> |Yes| K["Execute Tool"]
-J --> |No| L["Park for Approval"]
-```
-
-**Diagram sources**
-- [flow_approvals.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
-- [flow_approvals.py:176-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L176-L244)
+#### Error Handling and Validation
+- **Permission Enforcement**: Requires `session:skill_graduate` action for target declaration
+- **Ownership Validation**: Foreign sessions return structural 404 same as unknown sessions
+- **First-Wins Enforcement**: Subsequent declarations return existing target without modification
+- **Origin Validation**: Only valid URLs with extractable origins are recorded
+- **Graceful Degradation**: Failed origin observations don't affect tool execution
 
 #### Test Coverage
-The implementation includes comprehensive test coverage for flow authority scenarios:
+The implementation includes comprehensive test coverage for skill target scenarios:
 
-- **TTL Expiration Testing**: Validates proper expiration behavior for various TTL values
-- **Zero TTL Handling**: Tests that TTL <= 0 disables flow unlock for security
-- **Negative TTL Support**: Handles negative TTL values as expired authorities
-- **Stale Approval Detection**: Verifies detection of expired approvals based on timestamps
-- **Store Operations**: Tests recording, retrieval, and clearing of flow approvals
-- **Session Isolation**: Ensures proper isolation between different session contexts
+- **First Declaration**: Validates initial target declaration with proper timestamp recording
+- **First-Wins Enforcement**: Confirms subsequent declarations return existing target
+- **Session Scoping**: Verifies targets are isolated between different sessions
+- **Origin Observation**: Tests automatic origin extraction from successful browser writes
+- **Failed Operations**: Validates that failed browser writes don't record origins
+- **Invalid URLs**: Tests handling of malformed or non-extractable URLs
 
 **Section sources**
-- [flow_approvals.py:1-244](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L244)
-- [runtime_kernel.py:40-44](file://products/agent-platform/src/agent_service/runtime_kernel.py#L40-L44)
-- [test_flow_approvals.py:168-201](file://products/agent-platform/tests/test_flow_approvals.py#L168-L201)
+- [sessions.py:166-211](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L166-L211)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+- [authoring_trace.py:652-661](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L652-L661)
+- [test_authoring_trace.py:668-689](file://products/agent-platform/tests/test_authoring_trace.py#L668-L689)
+- [test_runtime_kernel.py:2363-2415](file://products/agent-platform/tests/test_runtime_kernel.py#L2363-L2415)
 
 ### Browser Tool Surface Expansion
 
 #### Overview
-The browser tool surface has been significantly expanded to support comprehensive web automation capabilities with enhanced HITL confirmation handling for write-tier operations. This enhancement addresses SPEC-050 by adding support for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for better user experience.
+The browser tool surface has been significantly expanded to support comprehensive web automation capabilities with enhanced HITL confirmation handling for write-tier operations. This enhancement addresses SPEC-050 by adding support for browser interaction tools including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for better user experience. **SPEC-055 Enhancement**: Added flow binding and origin verification to ensure browser interactions land on authorized targets, with automatic step origin observation for graduation correlation.
 
 #### Key Features
 - **Expanded Tool Surface**: Support for web.click, web.type, web.select, web.press_key, and web.upload_file operations
@@ -863,6 +1055,8 @@ The browser tool surface has been significantly expanded to support comprehensiv
 - **Improved Pending Decision Polling**: Enhanced polling mechanisms for browser tool confirmations with better timeout handling
 - **Transcript Handling**: Better transcript reconstruction for browser tool operations with proper markdown rendering
 - **Element Reference Mapping**: Support for snapshot element references in browser tool parameters with display hints
+- **Flow Binding**: Automatic binding of browser interactions to skill flows with origin verification
+- **Step Origin Observation**: Automatic recording of landing origins for successful browser write operations
 
 #### Browser Tool Risk Classification
 ```mermaid
@@ -882,11 +1076,42 @@ H --> I["Generate Confirmation Request"]
 I --> J["Include Display Hint"]
 J --> K["Show Human-Readable Description"]
 K --> L["Await User Approval"]
+L --> M["Bind to Skill Flow"]
+M --> N["Verify Target Origin"]
+N --> O["Execute with Flow Authority"]
 ```
 
 **Diagram sources**
 - [hitl_confirmations.py:76-101](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L76-L101)
-- [decoder.ts:78-103](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L78-L103)
+- [browser_connector.py:442-466](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L442-L466)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+
+#### Flow Binding and Origin Verification
+The system now includes flow binding and origin verification for browser interactions:
+
+```mermaid
+sequenceDiagram
+participant Kernel as "Runtime Kernel"
+participant FlowAuth as "FlowAuthorityManager"
+participant Browser as "Browser Connector"
+participant TraceStore as "AuthoringTraceStore"
+Note over Kernel,TraceStore : Browser Tool Flow Binding
+Kernel->>FlowAuth : Check flow authority for session
+FlowAuth-->>Kernel : Flow approval status
+Kernel->>Browser : Execute browser tool with flow context
+Browser->>Browser : Verify target origin matches flow binding
+alt Origin Matches
+Browser->>TraceStore : record_step_origin(session_id, execution_id, origin)
+TraceStore-->>Browser : Origin recorded
+Browser-->>Kernel : Tool execution result
+else Origin Mismatch
+Browser-->>Kernel : Refuse execution - off-origin interaction
+end
+```
+
+**Diagram sources**
+- [browser_connector.py:442-466](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L442-L466)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
 
 #### Display Hint Implementation
 The system now includes human-readable element descriptions for browser interaction tools that reference snapshot elements:
@@ -949,12 +1174,16 @@ The implementation includes comprehensive test coverage for browser tool scenari
 - **Display Hint Rendering**: Ensures human-readable descriptions are properly included in confirmation requests
 - **Risk Level Classification**: Verifies that browser tools are correctly classified as write-tier operations
 - **Element Reference Handling**: Tests proper handling of snapshot element references in tool parameters
+- **Flow Binding**: Tests automatic binding of browser interactions to skill flows with origin verification
+- **Step Origin Observation**: Tests automatic recording of landing origins from successful browser writes
 
 **Section sources**
 - [hitl_confirmations.py:76-101](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L76-L101)
 - [decoder.ts:78-103](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L78-L103)
 - [sessions.ts:44-56](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L44-L56)
 - [usePendingDecisionPoll.ts:56-169](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L56-L169)
+- [browser_connector.py:442-466](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L442-L466)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
 - [test_browser_connector.py:1500-1530](file://products/tool-gateway/tests/test_browser_connector.py#L1500-L1530)
 
 ### Document Repository Service
@@ -982,7 +1211,7 @@ A["Create Document"] --> B{"Type: shift_summary or incident_report"}
 B --> |shift_summary| C["Compute Summary from Handover"]
 B --> |incident_report| D["Fetch Incident Bundle"]
 C --> E{"Generate Prose with Blurb Extraction"}
-D --> F{"Build Incident Digest"}
+D --> F["Build Incident Digest"]
 F --> G{"Generate Prose with Blurb Extraction"}
 E --> H{"Owner Action Required"}
 G --> H
@@ -1213,6 +1442,103 @@ N --> O["Log Warning + Return None + 'failed'"]
 **Section sources**
 - [document_prose.py:1-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L158)
 
+### Document API Endpoints
+
+#### Overview
+The document API endpoints provide complete CRUD operations for typed operation documents with role-based access controls and comprehensive audit trails. **Critical Security Enhancement v0.21.1**: Implements envelope-only document listings to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints. **SPEC-041 Enhancement**: Adds deterministic counts-only summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Adds AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
+
+#### Available Endpoints
+- **POST /api/v2/documents**: Create a typed operation document with optional prose generation, automatic summary computation, and AI-generated blurb extraction
+- **GET /api/v2/documents**: List document envelopes with scope filtering (mine/published) - **ENVELOPE-ONLY with summary and blurb fields**
+- **GET /api/v2/documents/{document_id}**: Read a specific document with ownership validation - **AUDITED FETCH**
+- **POST /api/v2/documents/{document_id}/publish**: Publish a draft document (owner-only)
+- **DELETE /api/v2/documents/{document_id}**: Delete a document (owner-only)
+
+#### Authorization Model
+- **documents:create**: Required for document creation (enforced by platform-gateway)
+- **incident:read**: Additional requirement for incident_report documents (enforced by platform-gateway)
+- **X-Foreign-Coverage Header**: Trusted internal header for foreign session access control
+- **Owner Validation**: Draft documents visible only to creators, published documents team-wide
+- **Audit Trail**: All document operations emit audit events with correlation IDs
+
+#### Security Enhancement: Envelope-Only Listings
+The v0.21.1 security fix implements envelope-only document listings to address a critical vulnerability where list endpoints returned full document content (digest and prose) without proper audit trails. Now:
+
+- **GET /documents**: Returns envelope-only rows with `digest` and `prose` fields stripped, but includes `summary` and `blurb` fields
+- **GET /documents/{id}**: Returns full document content with proper audit trail for cross-owner reads
+- **Portal Integration**: Documents view drawer now issues audited single fetch instead of rendering from list results
+
+#### Summary and Blurb Computation
+**SPEC-041 R-4**: Deterministic counts-only summaries are computed from the document's handover skeleton at creation time:
+
+- **Quiet Shifts**: "Quiet shift — no recorded decisions or executions."
+- **Busy Shifts**: "N session · M decision · K execution · O open item" format
+- **Counts Only**: Never contains session titles, record ids, decision outcomes, or narrative text
+- **Creation Time**: Computed once during document creation, not recalculated on list renders
+- **Legacy Support**: Documents created before SPEC-041 carry no summary field and degrade gracefully
+
+**v0.23.3 Enhancement**: AI-generated one-line blurbs are extracted from prose responses using SUMMARY marker format:
+
+- **Marker Format**: First line beginning with "SUMMARY:" followed by the one-liner
+- **Character Limit**: Bounded to 240 characters maximum to prevent envelope bloat
+- **Robust Parsing**: Case-insensitive marker detection with forgiving parsing logic
+- **Fallback Behavior**: If no marker found, entire response becomes prose without blurb
+- **Operator-Friendly**: Human handover voice with plain, direct, and concise language
+
+#### Request/Response Examples
+```mermaid
+sequenceDiagram
+participant Client as "Client"
+participant API as "Document API"
+participant ShiftSum as "Shift Summary"
+participant IncClient as "IncidentClient"
+participant IncReport as "IncidentReport"
+participant DocProse as "Document Prose"
+participant DocStore as "Document Store"
+Note over Client,DocStore : Document Creation Flow with Summary and Blurb
+Client->>API : POST /api/v2/documents {type, sessions, label, include_prose}
+alt shift_summary
+API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
+ShiftSum-->>API : digest + provenance + handover skeleton
+else incident_report
+API->>IncClient : fetch_incident_bundle(incident_id)
+IncClient-->>API : incident bundle
+API->>IncReport : build_digest(user_id, bundle, can_view_foreign)
+IncReport-->>API : digest + provenance + handover skeleton
+end
+API->>API : document_summary(digest) - compute counts-only summary
+alt include_prose = true
+API->>DocProse : generate_prose(kernel, type, digest)
+DocProse-->>API : prose + blurb + status
+else include_prose = false
+API-->>API : prose_status = not_requested
+end
+API->>DocStore : create(document with summary, blurb)
+DocStore-->>API : persisted document
+API-->>Client : 201 Created + document with summary and blurb
+```
+
+**Diagram sources**
+- [routes.py:763-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L855)
+- [shift_summary.py:432-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L432-L460)
+- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
+- [incident_client.py:77-121](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L121)
+- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
+- [document_prose.py:114-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L114-L158)
+
+#### Error Handling
+- **400 Bad Request**: Invalid label length, unknown session IDs, digest input errors
+- **403 Forbidden**: Foreign session coverage without approvals:list capability, missing incident:read permission for incident reports
+- **404 Not Found**: Document not found or foreign draft access
+- **409 Conflict**: Already published document
+- **503 Not Configured**: Missing incident service configuration for incident reports
+- **502 Service Unavailable**: Incident service transport failure or upstream 5xx errors
+- **Audit Events**: All operations emit structured audit events with correlation
+
+**Section sources**
+- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+- [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
+
 ### Execution Worker Integration
 
 #### Overview
@@ -1269,270 +1595,6 @@ The execution worker client implements comprehensive error handling with distinc
 - [handoff.py:1-344](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L1-L344)
 - [gateway_tools.py:247-302](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L247-L302)
 - [runtime_settings.py:166-173](file://products/agent-platform/src/agent_service/runtime_settings.py#L166-L173)
-
-### Enhanced Confirmation Record Storage Layer with Turn Index Support
-
-#### Overview
-The enhanced confirmation record storage layer provides durable persistence for HITL (Human-In-The-Loop) confirmation lifecycle with turn_index field support for SPEC-033, idempotent resolution, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts.
-
-#### Key Features
-- **Turn Index Field Support**: Each confirmation record now stores the ordinal of the user turn under which the park occurred, using the same convention as persisted evidence (`_count_user_turns`, 0-based over the seeded turn timeline)
-- **Precise Card Anchoring**: Confirmation cards are anchored under their specific parking turn instead of stacking under the newest turn, improving operator experience
-- **Idempotent Resolution**: SQL-level guards ensure confirmation outcomes are applied exactly once, preventing race conditions between concurrent approvers
-- **Startup Sweep Scoping**: Scoped cleanup of stale pending confirmations based on HITL confirmation TTL to prevent sibling replica interference
-- **Cross-Replica Consistency**: Durable records survive process restarts and replica boundaries while maintaining consistency guarantees
-- **Claim-Time Persistence**: Outcomes are persisted immediately upon claim, providing structured 409 responses to racing approvers
-- **TTL-Aware Cleanup**: Opportunistic sweep of old resolved records beyond inbox history window
-- **Dual Backend Support**: In-memory for development/testing, Postgres for production with graceful fallback
-
-#### Turn Index Implementation
-```mermaid
-flowchart TD
-A["User Turn #N"] --> B["Agent executes tool calls"]
-B --> C{"Tool requires confirmation?"}
-C --> |Yes| D["Compute turn_index = _count_user_turns(agent)"]
-D --> E["Create confirmation record with turn_index"]
-E --> F["Persist to confirmation store"]
-F --> G["Return confirmation_request frame"]
-G --> H["Portal anchors card under turn #N"]
-C --> |No| I["Continue processing"]
-I --> J["Next turn"]
-```
-
-**Diagram sources**
-- [runtime_kernel.py:869-924](file://products/agent-platform/src/agent_service/runtime_kernel.py#L869-L924)
-- [runtime_kernel.py:1133-1177](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1133-L1177)
-- [confirmation_records.py:52-76](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L52-L76)
-
-#### Idempotent Resolution Implementation
-```mermaid
-flowchart TD
-A["Concurrent Approval Request"] --> B{"SQL UPDATE with WHERE status = 'pending'"}
-B --> |Success| C["Mark as approved/denied"]
-B --> |No rows affected| D["Return structured 409 with winner's outcome"]
-C --> E["Persist decider_user_id and decision"]
-E --> F["Resume confirmation workflow"]
-D --> G["Show winner's outcome to loser"]
-```
-
-**Diagram sources**
-- [confirmation_records.py:262-274](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L262-274)
-- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-294)
-
-#### Startup Sweep Scoping
-The startup sweep is carefully scoped to only close pending confirmations that have exceeded the HITL confirmation TTL, ensuring that sibling replicas' live parks are never expired:
-
-```mermaid
-sequenceDiagram
-participant App as "Application Startup"
-participant Store as "ConfirmationRecordStore"
-participant DB as "PostgreSQL"
-Note over App,DB : Startup Sweep Process
-App->>Store : initialize(stale_after_seconds=AGENT_HITL_CONFIRM_TIMEOUT)
-Store->>DB : CREATE TABLE IF NOT EXISTS confirmation_records
-Store->>DB : ALTER TABLE ADD COLUMN IF NOT EXISTS turn_index INTEGER
-Store->>DB : UPDATE confirmation_records SET status='expired' WHERE status='pending' AND parked_at <= now() - make_interval(secs => stale_after_seconds)
-Note right of DB : Only closes rows older than HITL TTL<br/>Younger rows stay pending for live replicas
-DB-->>Store : Rows affected
-Store-->>App : Initialization complete
-```
-
-**Diagram sources**
-- [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
-- [confirmation_records.py:330-341](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L330-L341)
-
-#### Error Handling for Concurrent Approvals
-The system provides structured error responses for concurrent approval attempts:
-
-```mermaid
-stateDiagram-v2
-[*] --> Pending : Parked Confirmation
-Pending --> Approved : First Approver Claims
-Pending --> Denied : First Approver Claims
-Approved --> Resolved : Winner Streams Resume
-Denied --> Resolved : Winner Streams Resume
-Pending --> Expired : TTL Exceeded
-Resolved --> [*] : Cleanup Complete
-note right of Resolved
-Racing approvers receive structured 409<br/>with winner's outcome instead of 404
-end note
-```
-
-**Diagram sources**
-- [routes.py:276-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-294)
-- [test_confirmation_records.py:413-497](file://products/agent-platform/tests/test_confirmation_records.py#L413-L497)
-
-#### Backend Implementations
-Both in-memory and Postgres backends support the enhanced confirmation record functionality with turn_index field:
-
-- **In-Memory Store**: Single-replica and non-persistent; suitable for development, CI, and as a fallback when Postgres is unreachable
-- **Postgres Store**: Production-grade with SQL-level idempotency, turn_index column support, bounded opportunistic sweep, and startup sweep scoping
-
-**Section sources**
-- [confirmation_records.py:1-621](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L1-L621)
-- [routes.py:276-410](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L410)
-- [test_confirmation_records.py:1-695](file://products/agent-platform/tests/test_confirmation_records.py#L1-L695)
-
-### Provider Registry and Implementations
-The provider registry supports multiple model backends through a common interface. Implementations include OpenAI, DashScope, DeepSeek, and Luban, all updated to use AgentScope 2.x model construction patterns with enhanced parameter support.
-
-```mermaid
-classDiagram
-class BaseProvider {
-<<abstract>>
-+streamChat(messages, options)
-+healthCheck()
-+build_model(settings)
-+discover_filter(model_id)
-+discover_family_prefixes
-+discover_exclude_markers
-}
-class OpenAIProvider {
-+build_model(settings)
-+provider_name = "openai"
-+default_model = "gpt-4o-mini"
-+discover_family_prefixes = ("gpt-", "o1", "o3", "o4", "chatgpt-")
-}
-class DashScopeProvider {
-+build_model(settings)
-+provider_name = "dashscope"
-+default_model = "qwen-plus"
-+discover_family_prefixes = ("qwen",)
-+discover_exclude_markers _NON_CHAT_MARKERS + ("-vl", "-mt", "-ocr", "omni")
-}
-class DeepSeekProvider {
-+build_model(settings)
-+provider_name = "deepseek"
-+default_model = "deepseek-v4-flash"
-+discover_family_prefixes = ("deepseek",)
-}
-class LubanProvider {
-+build_model(settings)
-+provider_name = "luban"
-+default_model = "qwen3-8b"
-+discover_family_prefixes = ()
-+validate(settings)
-}
-class ProviderRegistry {
-+register(name, provider)
-+resolve(name)
-+list()
-}
-BaseProvider <|-- OpenAIProvider
-BaseProvider <|-- DashScopeProvider
-BaseProvider <|-- DeepSeekProvider
-BaseProvider <|-- LubanProvider
-ProviderRegistry --> BaseProvider : "manages"
-```
-
-Configuration examples:
-- OpenAI: Configure API key, model name, organization, and reasoning effort via environment variables or runtime settings.
-- DashScope: Set endpoint URL, credentials, thinking budget, and parallel tool calls; select model variant.
-- DeepSeek: Provide authentication token, target model identifier, and reasoning effort level.
-- **Luban**: Configure LUBAN_API_KEY and mandatory LUBAN_BASE_URL for self-hosted OpenAI-compatible endpoints; supports bearer token authentication with no default endpoint.
-
-**Updated** All provider implementations now use AgentScope 2.x model construction patterns with enhanced parameter support including reasoning effort, thinking enable flags, and parallel tool calls. Voice readiness is supported through consistent parameter passing across all modalities. Provider implementations include sophisticated filtering mechanisms for live model discovery, with family prefix restrictions and non-chat modality exclusion markers to ensure only chat-capable models are discovered. The new Luban provider enables self-hosted OpenAI-compatible endpoints with strict bearer token requirements and no default base URL.
-
-**Section sources**
-- [base.py](file://products/agent-platform/src/agent_service/providers/base.py)
-- [openai.py](file://products/agent-platform/src/agent_service/providers/openai.py)
-- [dashscope.py](file://products/agent-platform/src/agent_service/providers/dashscope.py)
-- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
-- [luban.py](file://products/agent-platform/src/agent_service/providers/luban.py)
-- [registry.py](file://products/agent-platform/src/agent_service/providers/registry.py)
-- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
-- [config.py](file://products/agent-platform/src/agent_service/core/config.py)
-- [env.py](file://products/agent-platform/src/agent_service/core/env.py)
-
-### Multi-Model Runtime Capability
-
-#### Overview
-The multi-model runtime capability enables dynamic model selection at runtime through a sophisticated resolution hierarchy that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. This provides flexibility for operators to switch between different models without restarting sessions or affecting other users.
-
-#### Model Resolution Hierarchy
-```mermaid
-flowchart TD
-A["Chat Request"] --> B{"Explicit model requested?"}
-B --> |Yes| C{"Model exists in catalog?"}
-C --> |No| D["Return 422 Unknown Model Error"]
-C --> |Yes| E["Use explicit model"]
-B --> |No| F{"Pinned model exists?"}
-F --> |Yes| G{"Pinned model still valid?"}
-G --> |Yes| H["Use pinned model"]
-G --> |No| I["Fallback to default"]
-F --> |No| J["Use default model"]
-E --> K["Pin model to session"]
-H --> L["Continue processing"]
-I --> M["Continue processing"]
-J --> N["Continue processing"]
-K --> L
-```
-
-**Diagram sources**
-- [routes.py:112-137](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L137)
-- [session_service.py:105-120](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L120)
-
-#### Key Features
-- **Priority-Based Resolution**: Explicit requests take precedence over pinned sessions, which override defaults
-- **Credential-Gated Validation**: All model selections must exist in the credential-gated catalog
-- **Session Persistence**: Model selections persist across turns within a session with TTL-aware storage
-- **Graceful Degradation**: Invalid pinned models automatically fall back to defaults without errors
-- **Error Handling**: Unknown models return 422 status codes with descriptive error messages
-- **Audit Trail**: Model resolution decisions are logged with request and session context
-
-#### Implementation Details
-```mermaid
-sequenceDiagram
-participant Client as "Client"
-participant API as "API Route"
-participant Session as "Session"
-participant Catalog as "ModelCatalog"
-participant Store as "SessionStore"
-Note over Client,Store : Model Resolution Flow
-Client->>API : POST /api/v2/chat {model : "qwen-plus"}
-API->>Session : ensure_session(session_id, user_id)
-Session-->>API : SessionRecord with model field
-API->>API : _resolve_model("qwen-plus", session.model)
-alt Explicit model provided
-API->>Catalog : get("qwen-plus")
-Catalog-->>API : ModelCatalogEntry or None
-alt Model exists
-API->>Store : set_session_model(session_id, "qwen-plus")
-Store-->>API : success
-API-->>Client : Process with qwen-plus
-else Model missing
-API-->>Client : 422 Unknown Model Error
-end
-else No explicit model
-API->>Catalog : get(session.model)
-Catalog-->>API : Pinned model or None
-alt Pinned model valid
-API-->>Client : Process with pinned model
-else Pinned invalid
-API->>Catalog : default_entry()
-Catalog-->>API : Default model
-API-->>Client : Process with default model
-end
-end
-```
-
-**Diagram sources**
-- [routes.py:142-182](file://products/agent-platform/src/agent_service/api/v2/routes.py#L142-L182)
-- [routes.py:185-230](file://products/agent-platform/src/agent_service/api/v2/routes.py#L185-L230)
-- [session_store.py:349-364](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L364)
-
-#### Session-Based Model Pinning
-Model pinning persists the selected model for each session with TTL-aware storage across all backend types:
-
-- **Memory Backend**: In-memory dictionary with TTL expiration
-- **Redis Backend**: JSON serialization with key expiration
-- **Postgres Backend**: Native SQL UPDATE statements with TTL conditions
-
-**Section sources**
-- [routes.py:112-137](file://products/agent-platform/src/agent_service/api/v2/routes.py#L112-L137)
-- [session_service.py:105-120](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L120)
-- [session_store.py:349-364](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L364)
-- [session_store.py:471-477](file://products/agent-platform/src/agent_service/services/session_store.py#L471-L477)
 
 ### Multi-Session Operator Workspace
 The multi-session operator workspace provides comprehensive session lifecycle management for operators to organize and manage conversation workspaces.
@@ -1720,492 +1782,52 @@ Core functionality:
 - [hitl_confirmations.py:1-256](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L256)
 - [routes.py:71-100](file://products/agent-platform/src/agent_service/api/v2/routes.py#L71-100)
 
-### API Endpoints
-The API layer exposes REST endpoints for agent interactions, session management, model discovery, documents, and health checks. Requests are validated against schemas and routed to the runtime kernel with v3 streaming protocol support.
+### Flow Authority Management
+The flow authority management system implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution workflows. **SPEC-055 Enhancement**: Enhanced with skill target declaration integration and flow binding for browser tool operations with origin verification.
 
-Typical endpoints:
-- Chat: POST /chat with message, optional session ID, and delegated token
-- Sessions: GET/POST/DELETE /sessions for lifecycle management with evidence retrieval
-- Models: GET /models for credential-safe model discovery
-- **Documents**: POST /documents for creation, GET /documents for listing, GET /documents/{id} for reading, POST /documents/{id}/publish for publishing, DELETE /documents/{id} for deletion
-- Health: GET /health for readiness and liveness probes
-- Streaming: Server-sent events for incremental responses with v3 tool_call/tool_result frames
-- **Confirmations**: POST /chat/confirm for approval workflows with structured error handling
-
-Request/response validation uses Pydantic models defined in schemas with enhanced v3 streaming event types.
-
-**Updated** Chat endpoints now accept delegated tokens for secure tool execution and support v3 streaming protocol with tool_call/tool_result frames for comprehensive audit trails. Both POST /chat and GET /chat/stream endpoints accept input_modality parameters for voice-readiness parity. Session endpoints provide multi-session workspace operations with proper authorization, audit trails, and evidence turn retrieval. Model endpoints provide credential-safe enumeration of available models with public schema compliance. **Document endpoints provide complete CRUD operations with role-based access controls, draft/published states, audit trail integration, envelope-only listings for security, deterministic counts-only summaries derived from handover skeletons, and AI-generated one-line blurbs extracted from prose responses. Confirmation endpoints provide structured 409 responses for racing approvers with winner attribution and durable outcome persistence, plus turn_index field support for precise confirmation card anchoring. Incident report document creation enforces dual-action authorization gates requiring both documents:create and incident:read permissions. Browser tool enhancements include improved pending decision polling and transcript handling for write-tier operations with human-readable element descriptions. Flow authority management integrates with execution workflows for secure isolated tool execution with session-scoped approvals and TTL-based authorities.**
-
-**Section sources**
-- [routes.py:106-235](file://products/agent-platform/src/agent_service/api/v2/routes.py#L106-L235)
-- [routes.py:334-419](file://products/agent-platform/src/agent_service/api/v2/routes.py#L334-L419)
-- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
-- [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-L544)
-- [api.py:8-18](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L18)
-- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
-
-### Tools Integration
-The service integrates with external tools through a gateway abstraction. Tools can be invoked during agent execution to perform actions like Kubernetes operations or data retrieval with enhanced AgentScope 2.x compatibility.
-
-```mermaid
-sequenceDiagram
-participant Kernel as "RuntimeKernel"
-participant GatewayTools as "GatewayTools"
-participant External as "External Tool"
-participant Trace as "TraceQueue"
-participant HITL as "ConfirmationRegistry"
-participant EvStore as "EvidenceStore"
-participant ConfirmStore as "ConfirmationRecordStore"
-participant ExecWorker as "ExecutionWorkerClient"
-participant ExecRuntime as "ExecutionRuntime"
-participant FlowAuth as "FlowAuthorityManager"
-Kernel->>GatewayTools : build_gateway_toolkit(definitions, bearerToken, traceQueue)
-GatewayTools->>External : discover_tools(bearerToken)
-External-->>GatewayTools : availableTools
-GatewayTools->>Trace : emit tool_call trace event
-GatewayTools->>HITL : check_auto_approval(tool_name)
-alt Tool requires confirmation
-HITL->>ConfirmStore : save_parked(record with turn_index)
-ConfirmStore-->>HITL : persisted confirmation with turn_index
-HITL-->>GatewayTools : ASK decision
-GatewayTools->>Kernel : stall until user confirms
-else Tool auto-approved
-HITL-->>GatewayTools : ALLOW decision
-GatewayTools->>External : invoke("k8s_connector", action, params, bearerToken)
-External-->>GatewayTools : result
-GatewayTools->>Trace : emit tool_result trace event
-Trace-->>Kernel : audit trail data
-Kernel->>EvStore : persist evidence frames
-EvStore-->>Kernel : evidence stored
-GatewayTools-->>Kernel : toolResult
-else Approved mutating tool
-GatewayTools->>FlowAuth : Check flow authority
-FlowAuth-->>GatewayTools : Flow approval status
-alt Has flow authority
-GatewayTools->>ExecWorker : handoff(envelope, arguments, delegated_token)
-ExecWorker->>ExecRuntime : POST /api/v1/executions/handoff
-ExecRuntime-->>ExecWorker : result + receipt
-ExecWorker-->>GatewayTools : tool result
-GatewayTools->>Trace : emit tool_result trace event
-Trace-->>Kernel : audit trail data
-Kernel->>EvStore : persist evidence frames
-EvStore-->>Kernel : evidence stored
-GatewayTools-->>Kernel : toolResult
-else No flow authority
-GatewayTools-->>Kernel : Reject execution
-end
-end
-```
-
-**Updated** The tools integration now includes AgentScope 2.x toolkit registration pattern, per-request trace queues for audit trails, v3 streaming support with tool_call/tool_result frames, auto-approval mechanism for vetted read-only tools, HITL confirmation registry integration with durable storage for interactive workflows, evidence store integration for persistent tool execution records, **isolated execution routing for approved mutating tools through the execution-runtime service with signature verification, receipt tracking, and comprehensive flow authority management, enhanced confirmation record persistence with turn_index field support, idempotent resolution, and cross-replica consistency**. Voice readiness is maintained throughout the tool execution pipeline. **SPEC-050 Enhancement**: Enhanced browser tool surface with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with session-scoped flow context and approval tracking for secure isolated tool execution workflows.
-
-**Diagram sources**
-- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
-- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
-- [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
-- [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
-- [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
-- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
-
-**Section sources**
-- [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
-
-## Document Repository Service
-
-### Overview
-The document repository service provides persistent storage for typed operation documents with role-based access controls, draft/published states, and comprehensive audit trails. It implements SPEC-039 R-1/R-2 with two-tier coverage (owner vs foreign sessions) and bounded retention policies. **Critical Security Enhancement v0.21.1**: Implements envelope-only document listings for GET /documents endpoint to ensure cross-owner reads are properly audited by stripping sensitive fields (digest and prose) from list responses while maintaining full content access through single-document fetch endpoints. **SPEC-041 Enhancement**: Adds deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Adds AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
-
-### Key Features
-- **Typed Documents**: Supports `shift_summary` and `incident_report` document types with extensible discriminator pattern
-- **Draft/Published States**: One-way transition from draft to published with owner-only actions
-- **Role-Based Access**: Owner-only draft visibility, team-wide published document access
-- **Bounded Storage**: PER_OWNER_CAP (20) limit per owner with oldest-first eviction
-- **Retention Policy**: RETENTION_DAYS (30) automatic cleanup with opportunistic sweeping
-- **Dual Backend Support**: In-memory for development/testing, Postgres for production with graceful fallback
-- **Provenance Tracking**: Complete source record references for audit and traceability
-- **Audit Trail Integration**: Fire-and-forget audit events for all document operations
-- **Envelope-Only Listings**: Security enhancement that strips digest and prose from list responses to prevent unauthorized content access
-- **Deterministic Summaries**: Counts-only summaries derived from handover skeletons at creation time, never containing titles, record ids, decision outcomes, or narrative text
-- **AI-Generated Blurbs**: Bounded one-line stories extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings
-
-### Document Lifecycle
 ```mermaid
 flowchart TD
-A["Create Document"] --> B{"State: draft"}
-B --> C{"Compute Summary from Handover"}
-C --> D{"Generate Prose with Blurb Extraction"}
-D --> E{"Owner Action Required"}
-E --> |Publish| F{"State: published"}
-F --> G{"Team-Wide Access"}
-G --> H{"Delete Allowed"}
-H --> I["Document Removed"]
-E --> |Delete| J["Document Removed"]
-B --> K{"Non-Owner Access"}
-K --> L{"404 Not Found"}
-F --> M{"Read Access"}
-M --> N["Document Returned"]
+A["Browser Tool Invocation"] --> B{"Flow Context Exists?"}
+B --> |No| C["Create Flow Context"]
+B --> |Yes| D["Check Existing Context"]
+C --> E["Bind to Skill Target"]
+D --> F{"Target Matches?"}
+F --> |Yes| G["Use Existing Context"]
+F --> |No| H["Create New Context"]
+E --> I["Set TTL-Based Expiration"]
+G --> J["Check Flow Authority"]
+H --> I
+I --> J
+J --> K{"Authority Valid?"}
+K --> |Yes| L["Execute Tool"]
+K --> |No| M["Park for Approval"]
+L --> N["Record Step Origin"]
+M --> O["Await User Decision"]
+N --> P["Graduation Correlation"]
+O --> P
 ```
 
 **Diagram sources**
-- [operation_documents.py:129-168](file://products/agent-platform/src/agent_service/services/operation_documents.py#L129-L168)
-- [routes.py:910-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L910-L956)
+- [flow_approvals.py:1-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L200)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+- [browser_connector.py:442-466](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L442-L466)
 
-### Data Model
-Each document contains:
-- **Identity**: document_id, document_type, owner_user_id, label
-- **Lifecycle**: created_at, published_at, state (draft/published)
-- **Content**: provenance (source references), digest (assembled facts), prose (optional narrative)
-- **Metadata**: prose_status (included/failed/not_requested), **summary (deterministic counts-only string)**, **blurb (AI-generated one-liner)**
-
-### Backend Implementations
-Both in-memory and Postgres backends support the complete document repository functionality:
-
-- **In-Memory Store**: Single-replica and non-persistent; suitable for development, CI, and as a fallback when Postgres is unreachable
-- **Postgres Store**: Production-grade with SQL-level idempotency, bounded opportunistic sweep, startup sweep scoping, and **additive migrations for summary and blurb column support**
+Key features:
+- **Session-Scoped Contexts**: Flow contexts are isolated per session with proper separation
+- **TTL-Based Expiration**: Authorities expire after configured timeout periods
+- **Skill Target Binding**: Flow contexts bind to specific skill targets with origin verification
+- **Approval Tracking**: Comprehensive tracking of flow approvals with owner and decider user identification
+- **Graduation Correlation**: Flow authorities correlate with skill graduation for audit trails
+- **Process-Wide Singletons**: Efficient sharing of flow contexts across application lifecycle
 
 **Section sources**
-- [operation_documents.py:1-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L573)
-- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
+- [flow_approvals.py:1-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L200)
+- [runtime_kernel.py:1776-1804](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1776-L1804)
+- [browser_connector.py:442-466](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L442-L466)
 
-## Shift Summary Digest Assembly
-
-### Overview
-The shift summary digest assembly builds deterministic digests from four durable stores: kernel state snapshot (turn counts only), evidence store, confirmation records, and execution records. Facts are copied verbatim with source record IDs for provenance anchors. **SPEC-041 Enhancement**: Now includes deterministic counts-only summary computation from the handover skeleton at creation time.
-
-### Coverage Tiers
-- **Owner-Covered Sessions**: Full digest including title, turn counts, evidence counts per turn, confirmation decisions, execution receipts, and still-pending items
-- **Foreign Sessions**: Metadata-level digest only (when requester holds approvals:list): confirmation decisions, execution receipts, and record counts — never titles, transcript excerpts, or evidence content
-
-### Key Features
-- **Deterministic Assembly**: Mechanical fact copying from durable stores with no fabrication
-- **Role-Based Filtering**: Foreign session access requires approvals:list capability
-- **Graceful Degradation**: Unreadable secondary stores report unavailable without 500 errors
-- **Input Validation**: Bounded session IDs (MAX_SESSION_IDS = 20) with deduplication
-- **Provenance Tracking**: Complete source record references for audit and traceability
-- **Handover Skeleton**: Deterministic handover section with covered-session counts, decision/execution details, open items, and quiet flag
-- **Summary Computation**: Deterministic counts-only one-liner derived from handover skeleton for list surfaces
-
-### Digest Structure
-```mermaid
-flowchart TD
-A["Session IDs Input"] --> B{"Validate & Deduplicate"}
-B --> C{"Load Sessions"}
-C --> D{"Coverage Type?"}
-D --> |Owner| E["Full Digest Assembly"]
-D --> |Foreign| F["Metadata-Only Digest"]
-E --> G["Transcript Section"]
-E --> H["Evidence Section"]
-E --> I["Confirmation Entries"]
-E --> J["Execution Entries"]
-F --> K["Confirmation Decisions Only"]
-F --> L["Execution Receipts Only"]
-F --> M["Record Counts Only"]
-G --> N["Open Items Summary"]
-H --> N
-I --> N
-J --> N
-K --> O["Provenance Tracking"]
-L --> O
-M --> O
-N --> O
-O --> P["Final Digest + Provenance + Handover"]
-P --> Q["document_summary(handover)"]
-Q --> R["Counts-Only Summary String"]
-```
-
-**Diagram sources**
-- [shift_summary.py:77-90](file://products/agent-platform/src/agent_service/services/shift_summary.py#L77-L90)
-- [shift_summary.py:182-263](file://products/agent-platform/src/agent_service/services/shift_summary.py#L182-L263)
-- [shift_summary.py:266-322](file://products/agent-platform/src/agent_service/services/shift_summary.py#L266-322)
-- [shift_summary.py:432-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L432-L460)
-
-### Error Handling
-- **DigestInputError**: Structural input violations (empty session IDs, too many sessions)
-- **UnknownSessionError**: Non-existent session IDs with offending IDs exposed
-- **ForeignSessionDenied**: Foreign coverage requested without approvals:list capability
-
-**Section sources**
-- [shift_summary.py:1-323](file://products/agent-platform/src/agent_service/services/shift_summary.py#L1-L323)
-
-## Optional Prose Generation
-
-### Overview
-The optional prose generation service creates AI-powered narratives from digests with fail-soft behavior and strict prompt safety guarantees. It uses the runtime's default model with hard timeout protection. **v0.23.3 Enhancement**: Now includes AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
-
-### Safety Guarantees
-- **Prompt Contract**: Model receives digest JSON only — never raw transcripts, evidence payloads, or argument bodies
-- **Fail-Soft Behavior**: Any model error or timeout yields prose_status=failed and document ships digest-only
-- **Hard Timeout**: PROSE_TIMEOUT_SECONDS (30.0) prevents hung model from blocking create route
-- **No Fabrication**: Prompt explicitly instructs model to state only what facts contain, never invent details
-- **Blurb Extraction**: Robust parsing logic handles missing markers, case-insensitive matching, and character bounding
-
-### Key Features
-- **Digest-Only Input**: Strict separation between factual digest and generated narrative
-- **Type Adaptation**: document_type parameter allows future prompt customization per document type
-- **Streaming Support**: Handles both streaming and non-streaming model responses
-- **Empty Response Handling**: Validates non-empty responses and treats empty replies as failures
-- **Blurb Parsing**: Forgiving parser handles missing markers, case-insensitive matching, and character bounding
-- **Operator-Friendly Blurbs**: Human handover voice with plain, direct, and concise one-liners
-
-### Implementation Details
-```mermaid
-flowchart TD
-A["Generate Prose Request"] --> B["Build Prompt from Digest"]
-B --> C["Create Model Instance"]
-C --> D["Send Message with Prompt"]
-D --> E{"Response Type?"}
-E --> |Streaming| F["Drain Async Generator"]
-E --> |Non-Streaming| G["Extract Content Directly"]
-F --> H["Extract Text Content"]
-G --> H
-H --> I{"Text Empty?"}
-I --> |Yes| J["Raise RuntimeError"]
-I --> |No| K["Parse Blurb from SUMMARY Marker"]
-K --> L["Extract Blurb and Prose"]
-L --> M["Return Prose + Blurb + Status"]
-J --> N["Catch Exception"]
-N --> O["Log Warning + Return None + 'failed'"]
-```
-
-**Diagram sources**
-- [document_prose.py:44-56](file://products/agent-platform/src/agent_service/services/document_prose.py#L44-L56)
-- [document_prose.py:59-99](file://products/agent-platform/src/agent_service/services/document_prose.py#L59-L99)
-- [document_prose.py:70-96](file://products/agent-platform/src/agent_service/services/document_prose.py#L70-L96)
-
-**Section sources**
-- [document_prose.py:1-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L1-L158)
-
-## Document API Endpoints
-
-### Overview
-The document API endpoints provide complete CRUD operations for typed operation documents with role-based access controls and comprehensive audit trails. **Critical Security Enhancement v0.21.1**: Implements envelope-only document listings to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints. **SPEC-041 Enhancement**: Adds deterministic counts-only summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Adds AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic.
-
-### Available Endpoints
-- **POST /api/v2/documents**: Create a typed operation document with optional prose generation, automatic summary computation, and AI-generated blurb extraction
-- **GET /api/v2/documents**: List document envelopes with scope filtering (mine/published) - **ENVELOPE-ONLY with summary and blurb fields**
-- **GET /api/v2/documents/{document_id}**: Read a specific document with ownership validation - **AUDITED FETCH**
-- **POST /api/v2/documents/{document_id}/publish**: Publish a draft document (owner-only)
-- **DELETE /api/v2/documents/{document_id}**: Delete a document (owner-only)
-
-### Authorization Model
-- **documents:create**: Required for document creation (enforced by platform-gateway)
-- **incident:read**: Additional requirement for incident_report documents (enforced by platform-gateway)
-- **X-Foreign-Coverage Header**: Trusted internal header for foreign session access control
-- **Owner Validation**: Draft documents visible only to creators, published documents team-wide
-- **Audit Trail**: All document operations emit audit events with correlation IDs
-
-### Security Enhancement: Envelope-Only Listings
-The v0.21.1 security fix implements envelope-only document listings to address a critical vulnerability where list endpoints returned full document content (digest and prose) without proper audit trails. Now:
-
-- **GET /documents**: Returns envelope-only rows with `digest` and `prose` fields stripped, but includes `summary` and `blurb` fields
-- **GET /documents/{id}**: Returns full document content with proper audit trail for cross-owner reads
-- **Portal Integration**: Documents view drawer now issues audited single fetch instead of rendering from list results
-
-### Summary and Blurb Computation
-**SPEC-041 R-4**: Deterministic counts-only summaries are computed from the document's handover skeleton at creation time:
-
-- **Quiet Shifts**: "Quiet shift — no recorded decisions or executions."
-- **Busy Shifts**: "N session · M decision · K execution · O open item" format
-- **Counts Only**: Never contains session titles, record ids, decision outcomes, or narrative text
-- **Creation Time**: Computed once during document creation, not recalculated on list renders
-- **Legacy Support**: Documents created before SPEC-041 carry no summary field and degrade gracefully
-
-**v0.23.3 Enhancement**: AI-generated one-line blurbs are extracted from prose responses using SUMMARY marker format:
-
-- **Marker Format**: First line beginning with "SUMMARY:" followed by the one-liner
-- **Character Limit**: Bounded to 240 characters maximum to prevent envelope bloat
-- **Robust Parsing**: Case-insensitive marker detection with forgiving parsing logic
-- **Fallback Behavior**: If no marker found, entire response becomes prose without blurb
-- **Operator-Friendly**: Human handover voice with plain, direct, and concise language
-
-### Request/Response Examples
-```mermaid
-sequenceDiagram
-participant Client as "Client"
-participant API as "Document API"
-participant ShiftSum as "Shift Summary"
-participant IncClient as "IncidentClient"
-participant IncReport as "IncidentReport"
-participant DocProse as "Document Prose"
-participant DocStore as "Document Store"
-Note over Client,DocStore : Document Creation Flow with Summary and Blurb
-Client->>API : POST /api/v2/documents {type, sessions, label, include_prose}
-alt shift_summary
-API->>ShiftSum : build_digest(user_id, session_ids, can_view_foreign)
-ShiftSum-->>API : digest + provenance + handover skeleton
-else incident_report
-API->>IncClient : fetch_incident_bundle(incident_id)
-IncClient-->>API : incident bundle
-API->>IncReport : build_digest(user_id, bundle, can_view_foreign)
-IncReport-->>API : digest + provenance + handover skeleton
-end
-API->>API : document_summary(digest) - compute counts-only summary
-alt include_prose = true
-API->>DocProse : generate_prose(kernel, type, digest)
-DocProse-->>API : prose + blurb + status
-else include_prose = false
-API-->>API : prose_status = not_requested
-end
-API->>DocStore : create(document with summary, blurb)
-DocStore-->>API : persisted document
-API-->>Client : 201 Created + document with summary and blurb
-```
-
-**Diagram sources**
-- [routes.py:763-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L763-L855)
-- [shift_summary.py:432-460](file://products/agent-platform/src/agent_service/services/shift_summary.py#L432-L460)
-- [incident_report.py:126-167](file://products/agent-platform/src/agent_service/services/incident_report.py#L126-L167)
-- [incident_client.py:77-121](file://products/agent-platform/src/agent_service/services/incident_client.py#L77-L121)
-- [operation_documents.py:488-531](file://products/agent-platform/src/agent_service/services/operation_documents.py#L488-L531)
-- [document_prose.py:114-158](file://products/agent-platform/src/agent_service/services/document_prose.py#L114-L158)
-
-### Error Handling
-- **400 Bad Request**: Invalid label length, unknown session IDs, digest input errors
-- **403 Forbidden**: Foreign session coverage without approvals:list capability, missing incident:read permission for incident reports
-- **404 Not Found**: Document not found or foreign draft access
-- **409 Conflict**: Already published document
-- **503 Not Configured**: Missing incident service configuration for incident reports
-- **502 Service Unavailable**: Incident service transport failure or upstream 5xx errors
-- **Audit Events**: All operations emit structured audit events with correlation
-
-**Section sources**
-- [routes.py:738-956](file://products/agent-platform/src/agent_service/api/v2/routes.py#L738-L956)
-- [v2.py:335-367](file://products/agent-platform/src/agent_service/schemas/v2.py#L335-L367)
-
-### Execution Worker Integration
+### Enhanced Streaming Architecture
 
 #### Overview
-The execution worker integration provides isolated execution of approved mutating tools through the execution-runtime service with fail-closed behavior, signature verification, and receipt tracking. This implementation addresses SPEC-038 R-4 by separating the execution boundary from the agent process, reducing blast radius and improving security posture.
-
-#### Key Features
-- **Fail-Closed Behavior**: Missing worker URL or handoff token rejects before any network call with `worker_unavailable` reason
-- **Blocking Handoff**: Approved mutating calls block on worker response with bounded timeout (`AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS`)
-- **Signature Verification**: Execution-runtime service verifies signed execution request envelopes and argument digests
-- **Receipt Tracking**: Durable execution records track request/receipt lifecycle with first-write-wins semantics
-- **Structured Error Handling**: Timeout exceptions raise `WorkerHandoffTimeout`, transport errors raise `WorkerHandoffError` with `worker_unavailable`
-- **Audit Trail Integration**: All rejections and completions are audited with correlation to resume requests
-- **Single-Flight Idempotency**: Worker executes each `execution_id` at most once with concurrent duplicate joining
-
-#### Execution Flow
-```mermaid
-flowchart TD
-A["Approved Mutating Tool Call"] --> B{"Worker Configured?"}
-B --> |No| C["Reject with worker_unavailable"]
-B --> |Yes| D["Build Signed Envelope"]
-D --> E["Handoff to Execution Runtime"]
-E --> F{"Signature Valid?"}
-F --> |No| G["Reject with signature_invalid"]
-F --> |Yes| H{"Digest Match?"}
-H --> |No| I["Reject with args_digest_mismatch"]
-H --> |Yes| J["Execute Tool Call"]
-J --> K["Write Receipt"]
-K --> L["Return Result"]
-C --> M["Structured Rejection Result"]
-G --> M
-I --> M
-L --> N["Tool Result to Stream"]
-```
-
-**Diagram sources**
-- [execution_worker_client.py:54-145](file://products/agent-platform/src/agent_service/services/execution_worker_client.py#L54-L145)
-- [handoff.py:66-169](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L66-L169)
-- [gateway_tools.py:247-302](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L247-L302)
-
-#### Error Handling Strategy
-The execution worker client implements comprehensive error handling with distinct exception types:
-
-- **WorkerHandoffError**: Raised for missing configuration, transport failures, or malformed responses with `worker_unavailable` reason
-- **WorkerHandoffTimeout**: Raised when worker doesn't respond within timeout budget, allowing resumed streams to surface structured timeout results
-- **Structured Rejections**: Worker-side verification failures return specific reasons (signature_invalid, args_digest_mismatch, unauthorized)
-
-#### Configuration Requirements
-- **AGENT_EXECUTION_WORKER_URL**: URL of the execution-runtime service
-- **AGENT_EXECUTION_HANDOFF_TOKEN**: Static handoff token for authentication
-- **AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS**: Bounded timeout for handoff calls (default: 60.0)
-
-**Section sources**
-- [execution_worker_client.py:1-145](file://products/agent-platform/src/agent_service/services/execution_worker_client.py#L1-L145)
-- [handoff.py:1-344](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py#L1-L344)
-- [gateway_tools.py:247-302](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L247-L302)
-- [runtime_settings.py:166-173](file://products/agent-platform/src/agent_service/runtime_settings.py#L166-L173)
-
-## Decision Sync Robustness
-
-### Overview
-The decision sync robustness improvements address critical issues exposed during live approval testing where resumed replies after external decisions could require manual browser refreshes to appear in the owner window. The enhancements include time-based settle windows, progressive arrival presentation, and improved markdown rendering for resumed content.
-
-### Time-Based Settle Window (SPEC-035 R-3)
-```mermaid
-sequenceDiagram
-participant Owner as "Owner Window"
-participant Poll as "Pending Decision Poll"
-participant Approver as "Approver Window"
-participant Kernel as "Runtime Kernel"
-Note over Owner,Poll : Decision Landing Process
-Approver->>Kernel : Submit decision (approve/deny)
-Kernel->>Kernel : Execute tool calls and generate summary
-Note over Poll : Old : 12 ticks × 5s = 60s budget<br/>New : 5-minute deadline with resets
-Poll->>Poll : Reset settle window on each change
-Poll->>Owner : Apply changes with typewriter reveal
-Note over Owner : Background tabs throttle timers,<br/>so deadline approach is more reliable
-```
-
-**Diagram sources**
-- [usePendingDecisionPoll.ts:1-23](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L23)
-- [spec.md:87-99](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L87-L99)
-
-### Progressive Arrival Presentation (SPEC-035 R-4)
-When a reseed delivers new content after an external decision, the system now reveals it progressively instead of appearing in one silent jump:
-
-```mermaid
-flowchart TD
-A["External Decision Received"] --> B["Detect Changed Turns"]
-B --> C["Calculate Previous Reply Length"]
-C --> D["Start Typewriter Reveal"]
-D --> E["Apply Flash Highlight"]
-E --> F["Scroll Into View"]
-F --> G["Complete Progressive Display"]
-```
-
-**Diagram sources**
-- [spec.md:101-119](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L101-L119)
-
-### Enhanced Markdown Rendering
-The transcript reconstruction now properly joins text blocks with blank lines to preserve markdown formatting:
-
-```mermaid
-flowchart TD
-A["Assistant Message with Tool Calls"] --> B["Text Block 1: 'Checking controller...'"]
-A --> C["Tool Call Execution"]
-A --> D["Text Block 2: '## Pod Restart Summary'"]
-B --> E["Join with \\n\\n"]
-D --> E
-E --> F["Proper Markdown Rendering"]
-F --> G["Heading Renders Correctly"]
-```
-
-**Diagram sources**
-- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
-- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
-
-### Key Improvements
-- **Reliable Content Delivery**: Resumed turns now reach owner window without manual refresh
-- **Better Visual Feedback**: Progressive reveal makes arrived content noticeable
-- **Proper Markdown Rendering**: Headings, lists, and other block elements render correctly
-- **Robust Timing**: Time-based settle window works reliably even with background tab throttling
-- **Improved User Experience**: Stronger flash effects and scroll-to-view behavior
-
-**Section sources**
-- [spec.md:1-183](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L1-L183)
-- [decision-sync-release-notes.md:1-82](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md#L1-L82)
-- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
-- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
-
-## Enhanced Streaming Architecture
-
-### Overview
 The streaming architecture has been enhanced with v3 protocol support, including dedicated tool_call and tool_result frames for comprehensive audit trails and evidence panel rendering.
 
 ### V3 Protocol Features
@@ -2256,9 +1878,9 @@ The v3 protocol supports rich evidence data including:
 - [routes.py:105-150](file://products/agent-platform/src/agent_service/api/v2/routes.py#L105-L150)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
-## Voice Readiness Support
+### Voice Readiness Support
 
-### Overview
+#### Overview
 The Agent Platform Service now provides comprehensive voice-readiness support through the addition of input_modality parameters to both POST /chat and GET /chat/stream endpoints. This enhancement ensures parity between synchronous and asynchronous chat interfaces while maintaining consistent policy enforcement and HITL workflows.
 
 ### Input Modality Implementation
@@ -2321,9 +1943,9 @@ The implementation includes comprehensive test coverage:
 - [test_chat_stream_modality.py:1-63](file://products/agent-platform/tests/test_chat_stream_modality.py#L1-L63)
 - [chat.py:90-143](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L90-L143)
 
-## Per-Request Trace Queues
+### Per-Request Trace Queues
 
-### Overview
+#### Overview
 Per-request trace queues provide comprehensive audit trails for tool execution, enabling evidence panel rendering and detailed monitoring of tool usage patterns.
 
 ### Queue Architecture
@@ -2347,7 +1969,7 @@ Kernel-->>Client : stream with trace events
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-L447)
+- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-447)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
 ### Key Features
@@ -2364,12 +1986,12 @@ Each trace event includes:
 - **Evidence Data**: Tool-specific evidence and data summaries
 
 **Section sources**
-- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-L447)
+- [runtime_kernel.py:404-447](file://products/agent-platform/src/agent_service/runtime_kernel.py#L404-447)
 - [gateway_tools.py:212-251](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L212-L251)
 
-## Delegated Token Management
+### Delegated Token Management
 
-### Overview
+#### Overview
 The Agent Platform Service implements comprehensive delegated token management to ensure secure tool discovery and invocation. The runtime kernel manages per-user toolkit closures that are bound to delegated tokens, providing a secure execution context for all tool operations.
 
 ### Token Flow Architecture
@@ -2420,9 +2042,9 @@ API-->>Client : Response with results
 - [gateway_tools.py:99-126](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L99-L126)
 - [routes.py:40-47](file://products/agent-platform/src/agent_service/api/v2/routes.py#L40-L47)
 
-## Evidence Store Service
+### Evidence Store Service
 
-### Overview
+#### Overview
 The evidence store service provides persistent storage for tool execution evidence with dual backend support (in-memory and Postgres). It captures tool_call and tool_result frames from streaming operations, applies size-capped retention policies, and provides evidence retrieval for session replay and audit purposes.
 
 ### Architecture
@@ -2530,9 +2152,9 @@ The evidence store follows the session-evidence schema with structured turn grou
 - [metrics.py:158-186](file://products/agent-platform/src/agent_service/core/metrics.py#L158-L186)
 - [runtime_settings.py:145-150](file://products/agent-platform/src/agent_service/runtime_settings.py#L145-L150)
 
-## Model Catalog Service
+### Model Catalog Service
 
-### Overview
+#### Overview
 The model catalog service provides credential-gated discovery of available LLM models across multiple providers (OpenAI, DashScope, DeepSeek, and Luban). It derives the set of selectable models from per-provider environment configuration at startup, ensuring that only configured providers with resolvable API keys contribute to the catalog.
 
 ### Architecture
@@ -2581,7 +2203,7 @@ ModelCatalog --> RuntimeSettings : "uses for defaults"
 **Diagram sources**
 - [model_catalog.py:42-61](file://products/agent-platform/src/agent_service/services/model_catalog.py#L42-L61)
 - [model_catalog.py:149-185](file://products/agent-platform/src/agent_service/services/model_catalog.py#L149-L185)
-- [model_catalog.py:223-280](file://products/agent-platform/src/agent_service/services/model_catalog.py#L223-280)
+- [model_catalog.py:223-280](file://products/agent-platform/src/agent_service/services/model_catalog.py#L223-L280)
 
 ### Key Features
 - **Credential-Gated Discovery**: Only providers with resolvable API keys contribute to the catalog
@@ -2621,7 +2243,7 @@ API-->>Client : Response with selected model
 **Diagram sources**
 - [routes.py:534-544](file://products/agent-platform/src/agent_service/api/v2/routes.py#L534-544)
 - [model_catalog.py:168-174](file://products/agent-platform/src/agent_service/services/model_catalog.py#L168-L174)
-- [runtime_kernel.py:248-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-L261)
+- [runtime_kernel.py:248-261](file://products/agent-platform/src/agent_service/runtime_kernel.py#L248-261)
 
 ### Configuration Examples
 - **OpenAI**: Set `OPENAI_API_KEY`, optionally `OPENAI_MODEL_NAME`, `OPENAI_BASE_URL`, `OPENAI_MODELS`
@@ -2646,9 +2268,9 @@ The operator portal UI displays models grouped by provider with credential-gated
 - [models.ts:1-30](file://products/operator-portal/web-ui/app/src/api/models.ts#L1-L30)
 - [test_model_catalog.py:196-244](file://products/agent-platform/tests/test_model_catalog.py#L196-L244)
 
-## Live Model Discovery Service
+### Live Model Discovery Service
 
-### Overview
+#### Overview
 The live model discovery service implements background task management for automatic model discovery from configured providers. It provides a fail-soft ladder system that falls back through multiple tiers (live fetch → in-memory cache → Postgres cache → curated series) to ensure continuous model availability even when providers are temporarily unavailable.
 
 ### Architecture
@@ -2691,7 +2313,7 @@ ModelDiscoveryService --> ProviderCredentials : "processes"
 **Diagram sources**
 - [model_discovery.py:196-283](file://products/agent-platform/src/agent_service/services/model_discovery.py#L196-L283)
 - [model_discovery.py:69-153](file://products/agent-platform/src/agent_service/services/model_discovery.py#L69-L153)
-- [model_catalog.py:283-303](file://products/agent-platform/src/agent_service/services/model_catalog.py#L283-L303)
+- [model_catalog.py:283-303](file://products/agent-platform/src/agent_service/services/model_catalog.py#L283-303)
 
 ### Key Features
 - **Background Task Management**: Runs as an asyncio task managed by FastAPI lifespan context
@@ -2786,9 +2408,9 @@ The discovery service provides comprehensive metrics:
 - [runtime_settings.py:152-157](file://products/agent-platform/src/agent_service/runtime_settings.py#L152-L157)
 - [test_model_discovery.py:1-421](file://products/agent-platform/tests/test_model_discovery.py#L1-L421)
 
-## Multi-Model Runtime Capability
+### Multi-Model Runtime Capability
 
-### Overview
+#### Overview
 The multi-model runtime capability enables dynamic model selection at runtime through a sophisticated resolution hierarchy that prioritizes explicit requests over pinned sessions, falling back to defaults when needed. This provides flexibility for operators to switch between different models without restarting sessions or affecting other users.
 
 ### Model Resolution Hierarchy
@@ -2876,6 +2498,78 @@ Model pinning persists the selected model for each session with TTL-aware storag
 - [session_store.py:349-364](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L364)
 - [session_store.py:471-477](file://products/agent-platform/src/agent_service/services/session_store.py#L471-L477)
 
+### Decision Sync Robustness
+
+#### Overview
+The decision sync robustness improvements address critical issues exposed during live approval testing where resumed replies after external decisions could require manual browser refreshes to appear in the owner window. The enhancements include time-based settle windows, progressive arrival presentation, and improved markdown rendering for resumed content.
+
+### Time-Based Settle Window (SPEC-035 R-3)
+```mermaid
+sequenceDiagram
+participant Owner as "Owner Window"
+participant Poll as "Pending Decision Poll"
+participant Approver as "Approver Window"
+participant Kernel as "Runtime Kernel"
+Note over Owner,Poll : Decision Landing Process
+Approver->>Kernel : Submit decision (approve/deny)
+Kernel->>Kernel : Execute tool calls and generate summary
+Note over Poll : Old : 12 ticks × 5s = 60s budget<br/>New : 5-minute deadline with resets
+Poll->>Poll : Reset settle window on each change
+Poll->>Owner : Apply changes with typewriter reveal
+Note over Owner : Background tabs throttle timers,<br/>so deadline approach is more reliable
+```
+
+**Diagram sources**
+- [usePendingDecisionPoll.ts:1-23](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L1-L23)
+- [spec.md:87-99](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L87-L99)
+
+### Progressive Arrival Presentation (SPEC-035 R-4)
+When a reseed delivers new content after an external decision, the system now reveals it progressively instead of appearing in one silent jump:
+
+```mermaid
+flowchart TD
+A["External Decision Received"] --> B["Detect Changed Turns"]
+B --> C["Calculate Previous Reply Length"]
+C --> D["Start Typewriter Reveal"]
+D --> E["Apply Flash Highlight"]
+E --> F["Scroll Into View"]
+F --> G["Complete Progressive Display"]
+```
+
+**Diagram sources**
+- [spec.md:101-119](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L101-L119)
+
+### Enhanced Markdown Rendering
+The transcript reconstruction now properly joins text blocks with blank lines to preserve markdown formatting:
+
+```mermaid
+flowchart TD
+A["Assistant Message with Tool Calls"] --> B["Text Block 1: 'Checking controller...'"]
+A --> C["Tool Call Execution"]
+A --> D["Text Block 2: '## Pod Restart Summary'"]
+B --> E["Join with \\n\\n"]
+D --> E
+E --> F["Proper Markdown Rendering"]
+F --> G["Heading Renders Correctly"]
+```
+
+**Diagram sources**
+- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
+
+### Key Improvements
+- **Reliable Content Delivery**: Resumed turns now reach owner window without manual refresh
+- **Better Visual Feedback**: Progressive reveal makes arrived content noticeable
+- **Proper Markdown Rendering**: Headings, lists, and other block elements render correctly
+- **Robust Timing**: Time-based settle window works reliably even with background tab throttling
+- **Improved User Experience**: Stronger flash effects and scroll-to-view behavior
+
+**Section sources**
+- [spec.md:1-183](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md#L1-L183)
+- [decision-sync-release-notes.md:1-82](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md#L1-L82)
+- [session_transcript.py:67-87](file://products/agent-platform/src/agent_service/services/session_transcript.py#L67-L87)
+- [test_session_workspace.py:178-221](file://products/agent-platform/tests/test_session_workspace.py#L178-L221)
+
 ## Dependency Analysis
 The service has clear separation of concerns with minimal coupling between layers:
 - API depends on schemas and kernel
@@ -2888,7 +2582,9 @@ The service has clear separation of concerns with minimal coupling between layer
 - **Incident report service provides specialized document type with incident service integration, dual-action authorization gates, and structured error handling**
 - **Shift summary assembly builds deterministic digests from multiple durable stores with provenance tracking and handover skeleton computation**
 - **Optional prose generation creates AI-powered narratives from digests with fail-soft behavior and AI-generated blurb extraction**
+- **Authoring trace store provides comprehensive capture and management of approved mutations during execution with dual backend support, bounded retention policies, comprehensive secret parameterization, seamless integration with execution workflows, and dual-target tracking for authorization scope vs observed origins**
 - **Flow authority management implements session-scoped flow context and approval tracking with TTL-based authorities for secure isolated tool execution**
+- **Skill target declaration manages skill development targets with first-wins authorization scope enforcement and graduation correlation**
 - **Execution worker client provides isolated execution through execution-runtime service with fail-closed behavior**
 - **Execution record store provides durable persistence for signed execution lifecycle tracking**
 - **Enhanced confirmation record store provides durable HITL confirmation lifecycle management with turn_index field support and idempotent resolution**
@@ -2909,6 +2605,7 @@ Kernel --> Registry["ProviderRegistry"]
 Kernel --> Tools["GatewayTools"]
 Kernel --> Closure["ToolkitClosure"]
 Kernel --> FlowAuth["FlowAuthorityManager"]
+Kernel --> AuthTrace["AuthoringTraceStore"]
 Registry --> Base["BaseProvider"]
 Base --> OpenAI["OpenAIProvider"]
 Base --> DashScope["DashScopeProvider"]
@@ -2947,9 +2644,14 @@ FlowAuth --> FlowContexts["FlowContextStore"]
 FlowAuth --> FlowApprovals["FlowApprovalStore"]
 FlowContexts --> Metrics
 FlowApprovals --> Metrics
+AuthTrace --> Metrics
+AuthTrace --> SecretParams["SecretParameterizer"]
+AuthTrace --> TargetTracking["Target Tracking"]
+SecretParams --> Metrics
+TargetTracking --> Metrics
 ```
 
-**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, incident report service integration with incident service client, dual-action authorization gates, and structured error handling, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, flow authority management with session-scoped flow context and approval tracking for secure isolated tool execution, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.** **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
+**Updated** The dependency graph now shows the enhanced toolkit registration pattern with per-request trace queues, auto-approval mechanism, v3 streaming support, multi-session workspace foundations, evidence store integration with dual backend support, **authoring trace store integration for comprehensive capture and management of approved mutations during execution with dual backend support, bounded retention policies, comprehensive secret parameterization for secure credential handling, dual-target tracking for authorization scope vs observed origins, seamless integration with execution workflows for audit trail purposes, skill target declaration integration with first-wins authorization scope enforcement and graduation correlation, document repository integration with persistent typed documents, role-based access controls, envelope-only listings, deterministic summary generation, and AI-generated blurb extraction using SUMMARY marker format, incident report service integration with incident service client, dual-action authorization gates, and structured error handling, shift summary assembly for deterministic digest generation with handover skeleton computation, optional prose generation with fail-soft behavior and AI-generated blurb extraction, flow authority management with session-scoped flow context and approval tracking for secure isolated tool execution, execution worker integration for isolated tool execution with fail-closed behavior and signature verification, execution record persistence for signed execution lifecycle tracking, enhanced confirmation record store with turn_index field support, idempotent resolution, and cross-replica consistency, model catalog service with credential-gated discovery and legacy alias resolution, live model discovery service with background task management, voice-readiness support through input_modality parameter passthrough, and the new Luban provider for self-hosted OpenAI-compatible endpoints.** **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations. **SPEC-050 Enhancement**: Added browser tool surface expansion with improved pending decision polling and transcript handling for write-tier operations, supporting human-readable element descriptions for browser interaction tools.
 
 **Diagram sources**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -2960,6 +2662,8 @@ FlowApprovals --> Metrics
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [execution_worker_client.py](file://products/agent-platform/src/agent_service/services/execution_worker_client.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
@@ -2982,6 +2686,7 @@ FlowApprovals --> Metrics
 - [telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
 - [gateway_tools.py](file://products/agent-platform/src/agent_service/tools/gateway_tools.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
+- [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
 
 **Section sources**
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
@@ -3064,8 +2769,14 @@ FlowApprovals --> Metrics
 - **Build Flow Request Function**: Optimized flow request building for isolated tool execution workflows
 - **Approval Tracking**: Efficient approval tracking with owner and decider user identification
 - **Expiration Handling**: Automatic expiration of flow authorities with safe failure modes and minimal overhead
+- **Authoring Trace Store Optimization**: Efficient capture and management of approved mutations with bounded retention policies, dual backend support, comprehensive secret parameterization for secure credential handling, seamless integration with execution workflows for comprehensive audit trails, and dual-target tracking for authorization scope vs observed origins
+- **Skill Target Declaration Optimization**: First-wins authorization scope enforcement with efficient target management and graduation correlation
+- **Step Origin Observation Optimization**: Automatic origin extraction from successful browser writes with efficient URL parsing and origin validation
+- **Flow Binding Optimization**: Efficient flow context management with proper session scoping and TTL-based expiration
+- **Origin Verification Optimization**: Fast origin comparison and flow binding validation with minimal overhead
+- **Graduation Correlation Optimization**: Efficient correlation between declared targets and observed origins for graduation eligibility
 
-**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **document repository optimization with bounded storage, role-based access control efficiency, audit trail integration, dual backend fallback, retention policy enforcement, provenance tracking efficiency, envelope-only listings for security, deterministic summary computation with lightweight handover skeleton processing, and AI-generated blurb extraction with bounded character limits and efficient parsing logic, incident report optimization with structured error handling, dual-action authorization efficiency, incident service client performance tuning, and digest assembly optimization with mechanical fact copying, shift summary assembly optimization with deterministic digest generation and graceful degradation, optional prose generation optimization with hard timeout protection, fail-soft behavior, and AI-generated blurb extraction, flow authority management optimization with session-scoped flow context, efficient TTL-based expiration handling, process-wide singleton management, browser write tools classification, optimized flow request building, efficient approval tracking, and safe expiration handling, execution worker optimization with fail-closed behavior preventing unnecessary network calls, signature verification efficiency with constant-time comparison, receipt tracking with first-write-wins semantics, single-flight idempotency preventing redundant executions, timeout handling with bounded budgets, and structured error responses for targeted troubleshooting, browser tool surface optimization with enhanced pending decision polling, improved timeout handling, better user feedback, efficient display hint generation, proper risk classification for write-tier operations, optimized transcript handling for browser tools, and efficient element reference mapping for human-readable descriptions.**
+**Updated** Performance considerations now include enhanced multi-session workspace optimizations, server-side sorting capabilities, TTL-aware operations, fail-open workspace bookkeeping that doesn't impact core chat performance, evidence store optimization with size-capped storage and automatic eviction, dual backend failover for resilience, voice-readiness support with minimal overhead through metadata-only processing, model catalog optimization with startup-derived catalog and efficient legacy alias resolution, live model discovery optimization with background task management, multi-tier caching strategies, atomic catalog updates with lock protection, multi-model runtime optimization with priority-based resolution and session-based caching, enhanced confirmation record optimization with turn_index field support, SQL-level idempotency, startup sweep scoping, cross-replica consistency guarantees, Luban provider optimization for self-hosted OpenAI-compatible endpoints with strict security requirements, decision sync robustness with time-based settle windows, progressive arrival presentation for improved user experience, blank-line block joining for efficient markdown rendering, **authoring trace store optimization with efficient capture and management of approved mutations during execution, bounded retention policies with configurable step limits and idle day thresholds, dual backend support with graceful fallback, comprehensive secret parameterization for secure credential handling, process-wide singleton management for efficient sharing, seamless integration with execution workflows for comprehensive audit trails, and dual-target tracking for authorization scope vs observed origins with efficient origin extraction and validation, skill target declaration optimization with first-wins authorization scope enforcement, efficient target management, and graduation correlation, flow binding optimization with efficient flow context management, proper session scoping, and TTL-based expiration, origin verification optimization with fast origin comparison and flow binding validation, step origin observation optimization with automatic origin extraction from successful browser writes, efficient URL parsing and origin validation, and graduation correlation optimization with efficient correlation between declared targets and observed origins for graduation eligibility, browser tool surface optimization with enhanced pending decision polling, improved timeout handling, better user feedback, efficient display hint generation, proper risk classification for write-tier operations, optimized transcript handling for browser tools, and efficient element reference mapping for human-readable descriptions.**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -3172,6 +2883,26 @@ Common issues and resolutions:
 - **Process Singleton Issues**: Verify flow contexts and approvals singleton management and thread safety
 - **TTL Configuration**: Check TTL-based authority expiration and proper timeout handling
 - **Session Isolation**: Validate proper isolation between different session contexts for flow authorities
+- **Authoring Trace Store Issues**: Verify backend connectivity, retention policy configuration, and approved mutation capture functionality
+- **Authoring Trace Configuration**: Check AGENT_AUTHORING_TRACE_MAX_STEPS and AGENT_AUTHORING_TRACE_IDLE_DAYS environment variables
+- **Authoring Trace Retention**: Validate step limit and idle day threshold enforcement for trace cleanup
+- **Authoring Trace Backend Fallback**: Verify graceful fallback between in-memory and Postgres backends
+- **Authoring Trace Integration**: Check integration with execution workflows for approved mutation capture
+- **Authoring Trace Metrics**: Monitor trace capture and retention operations for operational insights
+- **Secret Parameterization Issues**: Verify credential detection accuracy, nested structure processing, and safe field preservation
+- **Secret Parameterization Configuration**: Check KNOWN_SAFE_FIELDS configuration and per-tool opaque field definitions
+- **Credential Masking**: Validate that sensitive values are properly replaced with placeholders in trace data
+- **Nested Secret Detection**: Test deeply nested credential structures and complex parameter objects
+- **Safe Field Preservation**: Verify that known safe fields like credential_set references are not masked
+- **Performance Impact**: Monitor performance overhead of secret parameterization on trace capture operations
+- **Skill Target Declaration Issues**: Verify skill target declaration endpoint connectivity, permission enforcement, and first-wins target management
+- **Target Declaration Problems**: Check session:skill_graduate permission validation and target storage functionality
+- **Origin Observation Issues**: Verify automatic step origin observation from successful browser writes and URL parsing
+- **Flow Binding Problems**: Check flow context creation, skill target binding, and origin verification functionality
+- **Graduation Correlation Issues**: Verify correlation between declared targets and observed origins for graduation eligibility
+- **Browser Tool Flow Binding**: Validate browser tool flow binding with origin verification and flow authority management
+- **Step Origin Recording**: Check automatic recording of landing origins from successful browser write operations
+- **Target Expiration**: Verify skill target expiration behavior and session scoping functionality
 
 Debugging utilities:
 - Health check endpoints for service status
@@ -3246,8 +2977,27 @@ Debugging utilities:
 - **Browser Write Tools Debugging**: Validate browser tool classification as write-tier operations and proper confirmation flow
 - **Build Flow Request Debugging**: Check flow request building for isolated tool execution workflows and proper parameter handling
 - **Process Singleton Debugging**: Verify flow contexts and approvals singleton management, thread safety, and memory efficiency
+- **Authoring Trace Debugging**: Verify backend connectivity, retention policy configuration, approved mutation capture functionality, and integration with execution workflows
+- **Authoring Trace Configuration Debugging**: Check AGENT_AUTHORING_TRACE_MAX_STEPS and AGENT_AUTHORING_TRACE_IDLE_DAYS environment variables, validation, and default behavior
+- **Authoring Trace Retention Debugging**: Validate step limit and idle day threshold enforcement, trace cleanup operations, and retention policy effectiveness
+- **Authoring Trace Backend Debugging**: Verify graceful fallback between in-memory and Postgres backends, database connectivity, and persistence operations
+- **Authoring Trace Integration Debugging**: Check integration with execution workflows, approved mutation capture, and audit trail generation
+- **Authoring Trace Metrics Debugging**: Monitor trace capture and retention operations, backend performance, and operational insights
+- **Secret Parameterization Debugging**: Verify credential detection accuracy, nested structure processing, safe field preservation, and performance impact
+- **Credential Masking Debugging**: Test that sensitive values are properly replaced with placeholders in trace data and verify placeholder format
+- **Nested Secret Detection Debugging**: Validate detection of credentials in deeply nested structures and complex parameter objects
+- **Safe Field Preservation Debugging**: Ensure known safe fields like credential_set references are not masked and maintain structural integrity
+- **Performance Impact Debugging**: Monitor performance overhead of secret parameterization on trace capture operations and identify bottlenecks
+- **Skill Target Declaration Debugging**: Verify skill target declaration endpoint connectivity, permission enforcement, first-wins target management, and graduation correlation
+- **Target Declaration Debugging**: Check session:skill_graduate permission validation, target storage functionality, and session scoping
+- **Origin Observation Debugging**: Verify automatic step origin observation from successful browser writes, URL parsing, and origin validation
+- **Flow Binding Debugging**: Check flow context creation, skill target binding, origin verification, and flow authority management
+- **Graduation Correlation Debugging**: Verify correlation between declared targets and observed origins for graduation eligibility and target expiration handling
+- **Browser Tool Flow Binding Debugging**: Validate browser tool flow binding with origin verification, flow authority management, and step origin recording
+- **Step Origin Recording Debugging**: Check automatic recording of landing origins from successful browser write operations and URL origin extraction
+- **Target Expiration Debugging**: Verify skill target expiration behavior, session scoping functionality, and first-wins enforcement
 
-**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, incident report troubleshooting with incident service client validation, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary troubleshooting with deterministic digest generation and graceful degradation, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, flow authority management troubleshooting with flow context store validation, approval tracking verification, TTL-based expiration testing, session-scoped context management, process-wide singleton operations, browser write tools classification, flow request building validation, and safe expiration handling, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis, browser tool troubleshooting with browser tool configuration validation, element reference handling verification, display hint generation testing, pending decision polling debugging, transcript handling validation, risk classification verification, and comprehensive test coverage for browser tool scenarios.**
+**Updated** Troubleshooting guide now includes enhanced multi-session workspace troubleshooting, enhanced transcript extraction debugging strategies with blank-line block joining, HITL confirmation registry diagnostics, workspace operation monitoring, evidence store troubleshooting with dual backend support, voice-readiness debugging with input_modality parameter validation and parity testing, comprehensive evidence persistence monitoring and debugging, model catalog troubleshooting with provider configuration validation, model selection debugging, and operator portal model display verification, plus live model discovery troubleshooting with background task monitoring, provider filtering validation, cache tier diagnostics, and discovery performance optimization, and multi-model runtime troubleshooting with model resolution debugging and session pinning diagnostics, enhanced confirmation record troubleshooting with turn_index field support, SQL-level idempotency validation, startup sweep scoping verification, and cross-replica consistency testing, Luban provider troubleshooting with self-hosted endpoint configuration and bearer token authentication, decision sync robustness troubleshooting with time-based settle window validation, progressive arrival presentation debugging, and markdown rendering verification for resumed content, **authoring trace store troubleshooting with backend connectivity validation, retention policy configuration verification, approved mutation capture testing, integration with execution workflows validation, comprehensive operational monitoring, comprehensive secret parameterization troubleshooting with credential detection validation, nested structure processing testing, safe field preservation verification, and performance impact assessment, skill target declaration troubleshooting with endpoint connectivity validation, permission enforcement testing, first-wins target management verification, and graduation correlation testing, flow binding troubleshooting with flow context creation validation, skill target binding verification, origin verification testing, and flow authority management validation, step origin observation troubleshooting with automatic origin extraction validation, URL parsing verification, and origin recording testing, browser tool flow binding troubleshooting with origin verification validation, flow authority management testing, and step origin recording verification, document repository troubleshooting with backend connectivity validation, ownership verification, draft/published state management, role-based access control testing, envelope-only listing verification, summary computation debugging, PostgreSQL migration validation, legacy record degradation testing, AI-generated blurb extraction debugging, incident report troubleshooting with incident service client validation, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary troubleshooting with deterministic digest generation and graceful degradation, optional prose generation troubleshooting with model availability checking, timeout configuration validation, prompt contract adherence verification, fail-soft behavior testing, and AI-generated blurb extraction debugging, flow authority management troubleshooting with flow context store validation, approval tracking verification, TTL-based expiration testing, session-scoped context management, process-wide singleton operations, browser write tools classification, flow request building validation, and safe expiration handling, execution worker troubleshooting with worker URL configuration validation, handoff token setup verification, signature verification debugging, receipt tracking diagnostics, timeout handling validation, and structured rejection reason analysis, browser tool troubleshooting with browser tool configuration validation, element reference handling verification, display hint generation testing, pending decision polling debugging, transcript handling validation, risk classification verification, and comprehensive test coverage for browser tool scenarios.**
 
 **Section sources**
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -3258,7 +3008,7 @@ Debugging utilities:
 ## Conclusion
 The Agent Platform Service provides a robust foundation for AI agent orchestration with multi-provider support, durable session management, and comprehensive observability. Its modular architecture enables easy customization and scaling while maintaining high performance and reliability.
 
-**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **NEW FLOW AUTHORITY MANAGEMENT**: Added comprehensive flow authority management with 240+ lines of enhanced runtime kernel integration including build_flow_request function, flow approval system integration, and TTL-based flow authorities for secure isolated tool execution workflows with session-scoped flow context and approval tracking. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
+**Updated** The service now includes comprehensive multi-model runtime capability with per-turn model selection, session-based model pinning, credential-gated model catalogs, live model discovery with background task management, sophisticated error handling for model resolution failures, and enhanced operational visibility through detailed logging and metrics collection. **Additionally, the service now features a complete document repository system that enables operators to create durable, typed operation documents with deterministic digests assembled from multiple data sources, optional AI-generated prose summaries with AI-generated one-line blurbs using SUMMARY marker format, role-based access controls with draft/published states, envelope-only listings for security, and deterministic counts-only summaries computed from handover skeletons at creation time.** The addition of the Luban provider enables self-hosted OpenAI-compatible endpoints with strict security requirements. **The enhanced confirmation record storage layer provides turn_index field support for precise confirmation card anchoring, idempotent resolution with SQL-level guards, improved startup sweep scoping to prevent sibling replica interference, and better error handling for concurrent approval attempts with structured 409 responses. The service also features enhanced decision sync robustness with time-based settle windows, improved session transcript reconstruction with blank-line block joining for proper markdown rendering, and progressive arrival presentation for resumed content.** **Critical Security Fix v0.21.1**: Implemented envelope-only document listings for GET /documents endpoint to prevent unauthorized content access while maintaining full content access through audited single-document fetch endpoints, ensuring cross-owner reads are properly audited. **SPEC-041 Enhancement**: Added deterministic counts-only document summaries computed from handover skeletons at creation time, stored in the operation documents table with PostgreSQL migration support, and surfaced in envelope-only list responses without breaking security posture. **v0.23.3 Enhancement**: Added AI-generated one-line blurbs extracted from prose responses using SUMMARY marker format, providing operator-friendly briefings with bounded character limits and robust parsing logic. **SPEC-043 Enhancement**: Added incident report document type support with dedicated incident service integration, dual-action authorization gates requiring both documents:create and incident:read permissions, structured error handling for incident service dependencies, and comprehensive test coverage for incident-specific workflows. **SPEC-050 Enhancement**: Enhanced browser tool surface with expanded write-tier operations including web.click, web.type, web.select, web.press_key, and web.upload_file, with improved pending decision polling and transcript handling for browser interaction tools featuring human-readable element descriptions and proper risk classification. **SPEC-055 Enhancement**: Added comprehensive authoring trace target tracking capabilities with dual-target mechanism distinguishing between declared authorization scope and observed landing origins, including new API routes for skill target declaration, enhanced session management with skill_target validation, and improved runtime kernel with automatic step origin observation for browser write operations. **NEW AUTHORING TRACE STORE**: Added comprehensive authoring trace store service with dual backend support for capturing approved mutations during execution, featuring bounded retention policies with configurable step limits and idle day thresholds, process-wide singleton management, and seamless integration with execution workflows for comprehensive audit trails. **SECURITY ENHANCEMENT**: Added comprehensive secret parameterization system with parameterize_for_trace(), is_secret_value(), and _parameterize_nested() functions for secure credential handling in authoring traces, ensuring sensitive information like passwords, tokens, and API keys are automatically masked before being persisted in trace data. These enhancements strengthen the platform's flexibility, enable dynamic model management, provide detailed operational visibility, ensure cross-replica consistency for HITL workflows, improve user experience with reliable content delivery, and maintain the performance characteristics that make it suitable for production AI operations.
 
 ## Appendices
 
@@ -3462,7 +3212,38 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - **Security**: Ensure proper session-scoped flow context management and approval validation
 - **Integration**: Test flow authority integration with execution worker and tool execution workflows
 
-**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **document repository configuration with backend setup, retention policies, capacity limits, authorization configuration, foreign coverage handling, audit trail verification, provenance tracking, role-based access control, envelope-only listing verification, summary computation validation, PostgreSQL migration testing, legacy record degradation testing, AI-generated blurb extraction validation, and prose generation configuration with SUMMARY marker format, incident report configuration with incident service client setup, dual-action authorization testing, structured error handling verification, and digest assembly verification, shift summary configuration with session coverage limits, label length constraints, foreign access validation, graceful degradation testing, provenance integrity verification, coverage tier testing, error scenario validation, handover skeleton generation, and deterministic summary computation, optional prose generation configuration with timeout settings, model availability verification, fail-soft behavior testing, prompt safety validation, streaming support testing, empty response handling, integration testing, and AI-generated blurb extraction with robust parsing logic, flow authority management configuration with session-scoped flow context, approval tracking setup, TTL-based expiration handling, browser write tools classification, flow request building validation, process-wide singleton management, and safe expiration handling, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution, browser tool surface configuration with browser tool setup, pending decision polling optimization, transcript handling validation, risk classification verification, element reference mapping, confirmation request payload validation, comprehensive test coverage, user experience testing, performance optimization, and error handling, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.**
+#### Authoring Trace Store Configuration
+- **Backend Selection**: Configure AGENT_STATE_STORE_BACKEND for memory or postgres
+- **Database Setup**: Set AGENT_STATE_DB_URL for Postgres authoring trace persistence
+- **Step Limit Configuration**: Set AGENT_AUTHORING_TRACE_MAX_STEPS for maximum steps per session (default: 100)
+- **Idle Day Configuration**: Set AGENT_AUTHORING_TRACE_IDLE_DAYS for trace cleanup threshold (default: 180)
+- **Retention Policy Testing**: Verify step limit and idle day threshold enforcement for trace cleanup
+- **Backend Fallback**: Test graceful fallback between in-memory and Postgres backends
+- **Integration Testing**: Validate integration with execution workflows for approved mutation capture
+- **Monitoring**: Track trace capture and retention operations for operational insights
+- **Validation**: Test environment variable validation for MAX_STEPS >= 1 and IDLE_DAYS >= 0
+- **Default Behavior**: Verify default values when environment variables are not set
+- **Process Singleton Management**: Ensure efficient sharing of trace contexts across application lifecycle
+- **Operational Visibility**: Monitor authoring trace metrics and retention events
+- **Secret Parameterization**: Verify credential detection accuracy, nested structure processing, and safe field preservation
+- **Credential Masking**: Test that sensitive values are properly replaced with placeholders in trace data
+- **Nested Secret Detection**: Validate detection of credentials in deeply nested structures and complex parameter objects
+- **Safe Field Preservation**: Ensure known safe fields like credential_set references are not masked
+- **Performance Impact**: Monitor performance overhead of secret parameterization on trace capture operations
+
+#### Skill Target Declaration Configuration
+- **Endpoint Setup**: Configure `/api/v1/sessions/{session_id}/skill-target` endpoint with proper authorization
+- **Permission Configuration**: Set `session:skill_graduate` permission for target declaration
+- **Target Validation**: Verify first-wins authorization scope enforcement and session scoping
+- **Origin Observation**: Test automatic step origin observation from successful browser writes
+- **Flow Binding**: Validate flow context creation and skill target binding with origin verification
+- **Graduation Correlation**: Test correlation between declared targets and observed origins for graduation eligibility
+- **Target Expiration**: Verify skill target expiration behavior and session scoping functionality
+- **Monitoring**: Track skill target declaration metrics and graduation correlation events
+- **Error Handling**: Test permission validation, target storage failures, and origin observation errors
+- **Integration Testing**: Validate end-to-end flow from target declaration through graduation correlation
+
+**Updated** Practical examples now include guidance on leveraging AgentScope 2.x toolkit registration, anti-hallucination guards, auto-approval mechanism, v3 streaming protocols, per-request trace queues, comprehensive multi-session workspace operations, evidence store configuration and management, model catalog setup with multi-provider support, live model discovery configuration with background task management, provider filtering mechanisms, cache tier optimization, atomic catalog updates with lock protection, multi-model runtime configuration with per-turn selection and session-based pinning, enhanced confirmation record store configuration with turn_index field support, idempotent resolution, startup sweep scoping, cross-replica consistency validation, Luban provider configuration for self-hosted OpenAI-compatible endpoints with complete operator workflow management, **authoring trace store configuration with backend setup, retention policy configuration, step limit and idle day threshold validation, backend fallback testing, integration with execution workflows, comprehensive operational monitoring, and comprehensive secret parameterization with credential detection validation, nested structure processing testing, safe field preservation verification, and performance impact assessment, skill target declaration configuration with endpoint setup, permission configuration, target validation, origin observation testing, flow binding validation, graduation correlation testing, target expiration verification, monitoring setup, error handling testing, and integration testing, flow authority management configuration with session-scoped flow context, approval tracking setup, TTL-based expiration handling, browser write tools classification, flow request building validation, process-wide singleton management, and safe expiration handling, execution worker configuration with fail-closed behavior, signature verification, receipt tracking, and isolated tool execution, browser tool surface configuration with browser tool setup, pending decision polling optimization, transcript handling validation, risk classification verification, element reference mapping, confirmation request payload validation, comprehensive test coverage, user experience testing, performance optimization, and error handling, decision sync robustness configuration with time-based settle windows, progressive arrival presentation, and blank-line block joining for proper markdown rendering.**
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -3486,6 +3267,8 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [incident_client.py](file://products/agent-platform/src/agent_service/services/incident_client.py)
 - [shift_summary.py](file://products/agent-platform/src/agent_service/services/shift_summary.py)
 - [document_prose.py](file://products/agent-platform/src/agent_service/services/document_prose.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [handoff.py](file://products/execution-runtime/src/execution_runtime/api/routes/handoff.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
@@ -3505,6 +3288,12 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
 - [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
 - [test_flow_approvals.py](file://products/agent-platform/tests/test_flow_approvals.py)
+- [test_authoring_trace.py](file://products/agent-platform/tests/test_authoring_trace.py)
+- [test_secret_params.py](file://products/agent-platform/tests/test_secret_params.py)
+- [test_session_service.py](file://products/agent-platform/tests/test_session_service.py)
+- [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
+- [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
 - [spec.md](file://docs/specs/SPEC-035-decision-sync-arrival-polish/spec.md)
 - [decision-sync-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-26-decision-sync-arrival-polish.md)
 - [SPEC-038-isolated-execution-worker/spec.md](file://docs/specs/SPEC-038-isolated-execution-worker/spec.md)
@@ -3512,6 +3301,8 @@ The Agent Platform Service provides a robust foundation for AI agent orchestrati
 - [SPEC-041-documents-readability-and-digest-reference/spec.md](file://docs/specs/SPEC-041-documents-readability-and-digest-reference/spec.md)
 - [SPEC-043-incident-report-document-type/spec.md](file://docs/specs/SPEC-043-incident-report-document-type/spec.md)
 - [SPEC-050-browser-tools-expansion-and-samples/spec.md](file://docs/specs/SPEC-050-browser-tools-expansion-and-samples/spec.md)
+- [SPEC-055-develop-as-you-go-skill-graduation/tasks.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md)
+- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
 - [document-read-audit-integrity.md](file://docs/agentic-aiops-platform/release-notes/2026-08-27-document-read-audit-integrity.md)
 - [documents-readability-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-28-documents-readability-and-digest-reference.md)
 - [incident-report-release-notes.md](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md)

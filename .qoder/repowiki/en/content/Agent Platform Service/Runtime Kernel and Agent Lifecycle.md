@@ -27,14 +27,19 @@
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
+- [test_authoring_trace.py](file://products/agent-platform/tests/test_authoring_trace.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced `resume_confirmation` method with `owner_user_name` parameter for proper attribution of re-parked cards to session owner while maintaining approver as decider
-- Added robust default behavior falling back to decider identity when no explicit session owner provided
-- Updated HITL confirmation system to support tier_2 approval scenarios where approver differs from session owner
-- Improved confirmation card ownership attribution to prevent self-approval rule conflicts in multi-step approval workflows
+- Added comprehensive authoring-trace capture capabilities at both per-action card path and flow-unlock path
+- Implemented durable dual-backend authoring trace store with in-memory and Postgres backends
+- Integrated trace capture into runtime kernel to ensure mixed sessions graduate as coherent ordered traces
+- Added best-effort failure handling for trace capture that degrades gracefully without affecting execution
+- Enhanced session service integration for authoring trace cleanup during session deletion
+- Updated tests to verify both approval kinds contribute to one session-scoped trace
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,24 +53,25 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming operations, and **newly added** runtime model resolution logic with credential-gated catalog validation and session-level model persistence. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, evidence capture and persistence for streaming tool calls, runtime model switching with fail-closed validation, and session-level model affinity tracking while maintaining robust operation even when authentication tokens are unavailable or state persistence fails. **Enhanced**: The model resolution system now includes a `_normalize_model_id()` method that supports both legacy provider names and new model names, ensuring backward compatibility while providing better error handling for unknown model identifiers. **Updated**: Provider error attribution has been enhanced with model-aware error messaging that intelligently detects the actual provider that failed during fallback scenarios, improving diagnostic accuracy in multi-provider environments. **NEW**: The execution pipeline now features comprehensive signing integration with HMAC-SHA256 signatures for tamper-evident execution requests, durable execution record persistence, result observation with receipt building, and complete audit event emission throughout the mutation approval workflow. **UPDATED**: The HITL confirmation system now includes explicit `approval_kind` discrimination between flow-based and action-based approvals, browser-write detection logic for proper card rendering, improved confirmation card message persistence for consistent user experience across live streams and replay surfaces, and **enhanced** owner attribution for re-parked cards in tier_2 approval scenarios.
+This document explains the runtime kernel and agent lifecycle management within the agent platform. It covers how the execution engine initializes, manages agent states, processes runtime settings and environment variables, supports dynamic configuration updates, and handles errors, resource cleanup, and graceful shutdown. The system now includes sophisticated AgentScope 2.0.6 middleware integration with OpenTelemetry tracing, reply token budget control, enhanced toolkit management with contextvar-based token delegation, per-user toolkit closures, graceful degradation mechanisms, comprehensive state persistence capabilities, **newly added** Human-in-the-Loop (HITL) confirmation bridging that enables operator approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence functionality for tool call and result evidence during streaming operations, and **newly added** runtime model resolution logic with credential-gated catalog validation and session-level model persistence. **Updated**: The runtime kernel now integrates with AgentScope 2.0.6 middleware system, supporting OpenTelemetry tracing via TracingMiddleware, reply budget control, enhanced toolkit management with contextvar-based token delegation, HITL confirmation bridging for human approval workflows, evidence capture and persistence for streaming tool calls, runtime model switching with fail-closed validation, and session-level model affinity tracking while maintaining robust operation even when authentication tokens are unavailable or state persistence fails. **Enhanced**: The model resolution system now includes a `_normalize_model_id()` method that supports both legacy provider names and new model names, ensuring backward compatibility while providing better error handling for unknown model identifiers. **Updated**: Provider error attribution has been enhanced with model-aware error messaging that intelligently detects the actual provider that failed during fallback scenarios, improving diagnostic accuracy in multi-provider environments. **NEW**: The execution pipeline now features comprehensive signing integration with HMAC-SHA256 signatures for tamper-evident execution requests, durable execution record persistence, result observation with receipt building, and complete audit event emission throughout the mutation approval workflow. **UPDATED**: The HITL confirmation system now includes explicit `approval_kind` discrimination between flow-based and action-based approvals, browser-write detection logic for proper card rendering, improved confirmation card message persistence for consistent user experience across live streams and replay surfaces, **newly added** comprehensive secret redaction logic for action cards that prevents plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path, and **enhanced** owner attribution for re-parked cards in tier_2 approval scenarios. **NEW**: The runtime kernel now includes comprehensive authoring-trace capture capabilities that ensure mixed sessions graduate as coherent ordered traces rather than fragmented half-traces, capturing approved mutating steps from both per-action approval cards and flow-unlocked browser writes.
 
 ## Project Structure
 The runtime kernel and lifecycle are implemented primarily under the agent platform product. Key modules include:
-- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, HITL confirmation bridging, **newly added** evidence capture and persistence for streaming operations, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, and **newly added** comprehensive signing integration for mutation approvals with explicit approval kind discrimination and **enhanced** owner attribution for tier_2 approval scenarios
+- Runtime kernel: orchestrates agent lifecycle events and state transitions with enhanced token handling, state persistence, HITL confirmation bridging, **newly added** evidence capture and persistence for streaming operations, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, **newly added** comprehensive signing integration for mutation approvals with explicit approval kind discrimination and **newly added** secret redaction logic for action cards that ensures display and persistence layers never expose plaintext secrets while maintaining the integrity of the signed execution path. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards. **Updated**: Integrated secret redaction logic at critical confirmation workflow points to prevent plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path. **New**: Comprehensive authoring-trace capture at both per-action card path and flow-unlock path to ensure mixed sessions graduate as coherent ordered traces.
 - Middleware system: AgentScope 2.0.6 middleware stack with permission control, evidence emission, tracing, and budget management
 - State persistence layer: pluggable AgentStateStore protocol with memory and Postgres backends supporting TTL-based cleanup
 - Evidence persistence layer: dedicated evidence store with in-memory and Postgres backends for capturing tool call and result evidence during streaming
-- HITL confirmation system: ConfirmationRegistry for managing pending confirmations with TTL expiration and single-flight decision processing, **enhanced** with explicit approval kind discrimination, browser-write detection, and **enhanced** owner attribution for re-parked cards
+- **NEW** Authoring trace persistence layer: dedicated authoring trace store with in-memory and Postgres backends for capturing approved mutating steps for skill graduation
+- HITL confirmation system: ConfirmationRegistry for managing pending confirmations with TTL expiration and single-flight decision processing, **enhanced** with explicit approval kind discrimination, browser-write detection, **newly added** comprehensive secret redaction for action card parameters, and **enhanced** owner attribution for re-parked cards
 - **NEW** Execution signing system: HMAC-SHA256 signature generation and verification for tamper-evident execution requests and receipts
 - **NEW** Execution record persistence: Durable storage of execution lifecycle (request → receipt) with retention policies and best-effort failure handling
 - Model catalog system: credential-gated model discovery with provider-specific configuration, public API endpoints, and legacy alias support for backward compatibility
 - Session model persistence: session-level model affinity tracking through pin_session_model() for consistent model routing across turns and service restarts
 - Tool gateway integration: provides token-aware tool discovery and execution with rotation support using contextvar-based delegation
 - Audit event emission: fire-and-forget audit service integration for comprehensive execution trail correlation
-- Runtime settings: loads and validates configuration from files and environment variables, including HITL confirmation timeout settings, **newly added** evidence persistence configuration, and **newly added** execution signing key configuration
+- Runtime settings: loads and validates configuration from files and environment variables, including HITL confirmation timeout settings, **newly added** evidence persistence configuration, **newly added** execution signing key configuration, **newly added** secret redaction vocabulary configuration, and **newly added** authoring trace configuration
 - Services: runtime service for orchestration, session service for durable state, and session store for persistence
-- Metrics and observability: comprehensive monitoring for agent state operations, system health, HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, and **newly added** execution signing metrics
+- Metrics and observability: comprehensive monitoring for agent state operations, system health, HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, **newly added** execution signing metrics, **newly added** secret redaction metrics, and **newly added** authoring trace metrics
 
 ```mermaid
 graph TB
@@ -105,43 +111,54 @@ FF --> GG["Flow vs Action Approval"]
 GG --> HH["Browser-Write Detection"]
 HH --> II["Owner Attribution"]
 II --> JJ["Tier_2 Approval Support"]
-D --> KK["Evidence Persistence"]
-KK --> LL["Evidence Store"]
-LL --> MM["InMemory Evidence Store"]
-LL --> NN["Postgres Evidence Store"]
-NN --> OO["Session Evidence Table"]
-D --> PP["Model Catalog System"]
-PP --> QQ["Credential-Gated Discovery"]
-QQ --> RR["Provider Configuration"]
-RR --> SS["Public API Endpoints"]
-PP --> TT["Legacy Alias Support"]
-TT --> UU["Backward Compatibility"]
-D --> VV["Session Model Persistence"]
-VV --> WW["pin_session_model()"]
-WW --> XX["Normalized Model ID Tracking"]
-D --> YY["Execution Signing System"]
-YY --> ZZ["build_requests()"]
-ZZ --> AA["HMAC-SHA256 Signatures"]
-AA --> BB["Tamper Evidence"]
-D --> CC["Execution Record Persistence"]
-CC --> DD["Request/Receipt Lifecycle"]
-DD --> EE["Retention Policies"]
-D --> FF["Audit Event Emission"]
-FF --> GG["execution_requested"]
-FF --> HH["execution_completed"]
-FF --> II["execution_rejected"]
-D --> JJ["Metrics Tracking"]
-JJ --> KK["Error Counters"]
-JJ --> LL["Backend Gauges"]
-JJ --> MM["HITL Metrics"]
-JJ --> NN["Evidence Metrics"]
-JJ --> OO["Model Switching Metrics"]
-JJ --> PP["Execution Signing Metrics"]
-D --> QQ["V2 Chat Endpoints"]
-QQ --> RR["Structured Output"]
-QQ --> SS["Health Checks"]
-QQ --> TT["HITL Confirm Endpoint"]
-QQ --> UU["Model Catalog Endpoint"]
+JJ --> KK["Secret Redaction Logic"]
+KK --> LL["Fail-Closed Masking"]
+LL --> MM["Display Layer Protection"]
+LL --> NN["Persistence Layer Protection"]
+D --> OO["Evidence Persistence"]
+OO --> PP["Evidence Store"]
+PP --> QQ["InMemory Evidence Store"]
+PP --> RR["Postgres Evidence Store"]
+RR --> SS["Session Evidence Table"]
+D --> TT["Authoring Trace Capture"]
+TT --> UU["AuthoringTraceStore"]
+UU --> VV["InMemory Trace Store"]
+VV --> WW["Postgres Trace Store"]
+WW --> XX["Authoring Trace Table"]
+D --> YY["Model Catalog System"]
+YY --> ZZ["Credential-Gated Discovery"]
+ZZ --> AAA["Provider Configuration"]
+AAA --> BBB["Public API Endpoints"]
+YY --> CCC["Legacy Alias Support"]
+CCC --> DDD["Backward Compatibility"]
+D --> EEE["Session Model Persistence"]
+EEE --> FFF["pin_session_model()"]
+FFF --> GGG["Normalized Model ID Tracking"]
+D --> HHH["Execution Signing System"]
+HHH --> III["build_requests()"]
+III --> JJJ["HMAC-SHA256 Signatures"]
+JJJ --> KKK["Tamper Evidence"]
+D --> LLL["Execution Record Persistence"]
+LLL --> MMM["Request/Receipt Lifecycle"]
+MMM --> NNN["Retention Policies"]
+D --> OOO["Audit Event Emission"]
+OOO -> PPP["execution_requested"]
+OOO -> QQQ["execution_completed"]
+OOO -> RRR["execution_rejected"]
+D --> SSS["Metrics Tracking"]
+SSS -> TTT["Error Counters"]
+SSS -> UUU["Backend Gauges"]
+SSS -> VVV["HITL Metrics"]
+SSS -> WWW["Evidence Metrics"]
+SSS -> XXX["Model Switching Metrics"]
+SSS -> YYY["Execution Signing Metrics"]
+SSS -> ZZZ["Secret Redaction Metrics"]
+SSS -> AAAA["Authoring Trace Metrics"]
+D --> BBBB["V2 Chat Endpoints"]
+BBBB -> CCCC["Structured Output"]
+BBBB -> DDDD["Health Checks"]
+BBBB -> EEEE["HITL Confirm Endpoint"]
+BBBB -> FFFF["Model Catalog Endpoint"]
 end
 ```
 
@@ -151,6 +168,7 @@ end
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -160,6 +178,7 @@ end
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -167,45 +186,49 @@ end
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 
 ## Core Components
-- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, and **newly added** comprehensive signing integration for mutation approvals with fail-closed security posture and explicit approval kind discrimination. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards.
+- Runtime Kernel: Central coordinator for agent lifecycle events (start, execute, pause, resume, terminate), maintaining per-agent state, coordinating with services, managing delegated token handling for secure tool execution, implementing state persistence through the AgentStateStore protocol, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, and **newly added** comprehensive signing integration for mutation approvals with fail-closed security posture and explicit approval kind discrimination. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards. **Updated**: Integrated secret redaction logic at critical confirmation workflow points to prevent plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path. **New**: Comprehensive authoring-trace capture at both per-action card path and flow-unlock path to ensure mixed sessions graduate as coherent ordered traces rather than fragmented half-traces.
 - AgentScope Middleware System: Sophisticated middleware stack including GatewayPermissionMiddleware for headless stream permission control, ToolEvidenceMiddleware for evidence frame emission, optional TracingMiddleware for OpenTelemetry tracing, and ReplyBudgetControlMiddleware for token budget management.
+- **NEW** Authoring Trace Store: Durable dual-backend store for capturing approved mutating steps as replay-oriented traces, with in-memory backend for development/testing and Postgres backend for production deployments, featuring lifecycle-bound retention, per-session step caps, and idle-GC for draft traces.
 - **NEW** Execution Signing System: Complete signing infrastructure with HMAC-SHA256 signatures for tamper-evident execution requests and receipts, canonical JSON serialization, digest computation, and cryptographic verification throughout the mutation approval workflow.
 - **NEW** Execution Record Persistence: Durable storage system for execution lifecycle tracking with request/receipt patterns, retention policies, best-effort failure handling, and session-scoped query capabilities.
 - **NEW** Audit Event Emission: Fire-and-forget audit service integration for comprehensive execution trail correlation with `execution_requested`, `execution_completed`, and `execution_rejected` events.
 - **NEW** Result Observation: Automatic detection and processing of tool results to close execution lifecycles with receipt building and status mapping.
-- **ENHANCED** HITL Confirmation System: Complete Human-in-the-Loop confirmation framework with ConfirmationRegistry for managing pending confirmations, TTL-based expiration, single-flight decision processing, seamless integration with AgentScope's RequireUserConfirmEvent handling, **newly added** signing integration for approved mutations, **newly added** explicit approval kind discrimination between flow and action approvals, **newly added** browser-write detection logic for proper card rendering, **newly added** improved confirmation card message persistence for consistent user experience, and **enhanced** owner attribution for tier_2 approval scenarios where approver differs from session owner.
+- **ENHANCED** HITL Confirmation System: Complete Human-in-the-Loop confirmation framework with ConfirmationRegistry for managing pending confirmations, TTL-based expiration, single-flight decision processing, seamless integration with AgentScope's RequireUserConfirmEvent handling, **newly added** signing integration for approved mutations, **newly added** explicit approval kind discrimination between flow and action approvals, **newly added** browser-write detection logic for proper card rendering, **newly added** improved confirmation card message persistence for consistent user experience, **newly added** comprehensive secret redaction logic for action card parameters that applies fail-closed masking to prevent plaintext secret exposure, and **enhanced** owner attribution for tier_2 approval scenarios where approver differs from session owner.
 - **NEW** Fail-Closed Security: Missing execution signing keys reject entire mutation batches with proper audit trails, preventing unauthorized mutations even when HITL is enabled.
 - **ENHANCED** Model Catalog System: Credential-gated model discovery with provider-specific configuration, public API endpoints for model listing, fail-closed validation for unknown model IDs, and **enhanced** legacy alias support for backward compatibility with pre-SPEC-026 sessions.
 - **ENHANCED** Session Model Persistence: Session-level model affinity tracking through pin_session_model() for consistent model routing across turns and service restarts, with **enhanced** normalized model ID tracking.
 - AgentStateStore Protocol: Pluggable state persistence interface supporting multiple backends (in-memory and Postgres) with TTL-based cleanup and graceful degradation when backends fail.
 - ContextVar-Based Token Delegation: Enhanced toolkit management using DELEGATED_TOKEN contextvar for per-request token scoping, enabling cached toolkits to work across portal token refresh.
 - Gateway Tools Integration: Provides token-aware tool discovery and execution with support for dynamic token rotation during long-running sessions.
-- Runtime Settings: Configuration loader that merges defaults, file-based settings, and environment variables; exposes typed accessors and supports reloads, including HITL confirmation timeout settings, **newly added** evidence persistence configuration, and **newly added** execution signing key configuration.
+- Runtime Settings: Configuration loader that merges defaults, file-based settings, and environment variables; exposes typed accessors and supports reloads, including HITL confirmation timeout settings, **newly added** evidence persistence configuration, **newly added** execution signing key configuration, **newly added** secret redaction vocabulary configuration, and **newly added** authoring trace configuration.
 - Environment and Config Utilities: Provide strongly-typed access to runtime settings and environment variables, with validation and fallbacks.
 - Runtime Service: Orchestrates high-level operations such as creating sessions, invoking agents, and managing long-running tasks.
-- Session Service and Store: Manage durable session state, including persistence and retrieval, ensuring consistency across restarts and coordinating with agent state cleanup, **newly added** session-level model persistence with **enhanced** normalized model ID tracking.
+- Session Service and Store: Manage durable session state, including persistence and retrieval, ensuring consistency across restarts and coordinating with agent state cleanup, **newly added** session-level model persistence with **enhanced** normalized model ID tracking, and **newly added** authoring trace cleanup during session deletion.
 - Token Handler: Manages delegated token lifecycle and validation for secure tool execution with rotation support.
 - Per-User Toolkits: Provides isolated tool execution contexts based on user identity and permissions with token rotation awareness.
 - Graceful Degradation: Ensures system continues operating with limited functionality when authentication tokens are unavailable or state persistence fails.
-- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, and **newly added** execution signing metrics.
+- Metrics and Observability: Comprehensive monitoring for agent state operations, backend selection, error rates, system health indicators, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, **newly added** execution signing metrics, **newly added** secret redaction metrics, and **newly added** authoring trace metrics.
 
 Key responsibilities:
-- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, **newly added** initialize execution signing system, and **enhanced** build model catalog with legacy alias support.
-- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture during streaming operations, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, and **newly added** signing-integrated mutation approvals with fail-closed security, explicit approval kind discrimination, and **enhanced** owner attribution for tier_2 approval scenarios.
-- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings, HITL confirmation timeout configuration, **newly added** evidence persistence settings, **newly added** execution signing key configuration, and **enhanced** model catalog configuration with legacy alias support.
-- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, **newly added** proper handling of expired confirmations and owner mismatches, **newly added** best-effort evidence persistence failures, **enhanced** fail-closed model ID validation with legacy alias resolution, **updated** intelligent provider error attribution for accurate failure reporting, and **newly added** fail-closed execution signing rejection with proper audit trails.
-- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, **newly added** efficient evidence capture with minimal overhead, **newly added** evidence size caps and budget enforcement, **newly added** efficient signing operations with minimal cryptographic overhead, **enhanced** model switching detection with automatic agent rebuild and legacy alias optimization.
-- State Persistence: Save and restore agent conversation state across service restarts using pluggable backends with automatic TTL-based cleanup, **newly added** session-level model persistence for model affinity tracking with **enhanced** normalized model ID storage, and **newly added** durable execution record persistence with retention policies.
+- Initialization: Load settings, validate environment, create dependencies, boot services, initialize token handlers, configure state persistence backends, set up middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, **newly added** initialize execution signing system, **newly added** initialize authoring trace store, and **enhanced** build model catalog with legacy alias support.
+- Lifecycle Management: Handle agent state transitions and event-driven execution with token-aware tool execution, rotation support, persistent state management, middleware processing, **newly added** HITL confirmation bridging for human approval workflows, **newly added** evidence capture during streaming operations, **enhanced** runtime model resolution with legacy name normalization, improved error handling, **updated** intelligent provider error attribution, **newly added** signing-integrated mutation approvals with fail-closed security, explicit approval kind discrimination, **newly added** secret redaction logic for action cards, **newly added** authoring-trace capture for approved mutations, and **enhanced** owner attribution for tier_2 approval scenarios.
+- Configuration: Support dynamic updates without restarting the process where feasible, including middleware composition based on settings, HITL confirmation timeout configuration, **newly added** evidence persistence settings, **newly added** execution signing key configuration, **newly added** secret redaction vocabulary configuration, **newly added** authoring trace configuration, and **enhanced** model catalog configuration with legacy alias support.
+- Error Handling: Robust error propagation, retries, safe cleanup, graceful degradation when tokens are missing, rotated, or state persistence fails, **newly added** proper handling of expired confirmations and owner mismatches, **newly added** best-effort evidence persistence failures, **enhanced** fail-closed model ID validation with legacy alias resolution, **updated** intelligent provider error attribution for accurate failure reporting, **newly added** fail-closed execution signing rejection with proper audit trails, **newly added** best-effort authoring trace capture failures, and **newly added** fail-closed secret redaction that masks all values unless positively classified as safe.
+- Performance: Concurrency control, resource pooling, efficient memory usage, optimized token validation with rotation handling, efficient state persistence with TTL cleanup, **newly added** efficient evidence capture with minimal overhead, **newly added** evidence size caps and budget enforcement, **newly added** efficient signing operations with minimal cryptographic overhead, **newly added** efficient authoring trace capture with best-effort failure handling, **newly added** efficient secret redaction with constant-time lookups against allow-lists, **enhanced** model switching detection with automatic agent rebuild and legacy alias optimization.
+- State Persistence: Save and restore agent conversation state across service restarts using pluggable backends with automatic TTL-based cleanup, **newly added** session-level model persistence for model affinity tracking with **enhanced** normalized model ID storage, **newly added** durable execution record persistence with retention policies, **newly added** authoring trace persistence with lifecycle-bound retention, and **newly added** persisted confirmation records with secret-redacted parameters for action cards.
 - **NEW** Execution Signing Integration: Generate HMAC-SHA256 signatures for mutation approvals, persist signed execution requests, observe tool results to build closing receipts, emit audit events for execution lifecycle, and enforce fail-closed security when signing keys are unavailable.
+- **NEW** Authoring Trace Capture: Capture approved mutating steps from both per-action approval cards and flow-unlocked browser writes, ensuring mixed sessions graduate as coherent ordered traces rather than fragmented half-traces, with best-effort failure handling that degrades gracefully without affecting execution.
 - **NEW** Audit Trail Correlation: Emit comprehensive audit events correlating confirmation decisions with execution outcomes, providing complete traceability from operator approval through tool invocation to final result.
 - **ENHANCED** Runtime Model Resolution: Validate model IDs against credential-gated catalog with legacy alias support, resolve per-turn model selection with request > pinned > default priority, attribute serving model to streaming events with normalized IDs, automatically rebuild agents when model switches occur, and provide better error handling for unknown model identifiers.
 - **UPDATED** Intelligent Provider Error Attribution: Enhanced error message generation that identifies the actual provider that failed during fallback scenarios by consulting the model catalog, preventing misattribution of failures to the wrong provider in multi-provider environments.
-- **UPDATED** Explicit Approval Kind Discrimination: Added `approval_kind` field to confirmation frames and durable confirmation records to distinguish between flow-based approvals (browser flows) and action-based approvals (individual tool calls), with browser-write detection logic ensuring proper card rendering and flow headline display only for appropriate approval types. **Enhanced**: Now includes proper owner attribution for re-parked cards in tier_2 approval scenarios to prevent self-approval rule conflicts.
+- **UPDATED** Explicit Approval Kind Discrimination: Added `approval_kind` field to confirmation frames and durable confirmation records to distinguish between flow-based approvals (browser flows) and action-based approvals (individual tool calls), with browser-write detection logic ensuring proper card rendering and flow headline display only for appropriate approval types. **Enhanced**: Now includes proper owner attribution for re-parked cards in tier_2 approval scenarios to prevent self-approval rule conflicts. **Updated**: Integrated comprehensive secret redaction logic that applies fail-closed masking to action card parameters while preserving the integrity of the signed execution path.
+- **NEW** Secret Redaction Integration: Applied secret redaction logic at critical confirmation workflow points to ensure display and persistence layers are protected from plaintext secret exposure while maintaining the signed execution path unaffected. Includes fail-closed masking strategy, constant-time lookup against allow-lists, and comprehensive testing to verify the invariant that redaction never mutates signing inputs.
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -213,6 +236,7 @@ Key responsibilities:
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
@@ -220,9 +244,10 @@ Key responsibilities:
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 ## Architecture Overview
-The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, session-level model persistence, **updated** intelligent provider error attribution for accurate failure reporting in multi-provider environments, and **newly added** comprehensive signing integration for tamper-evident mutation approvals with complete audit trail correlation, explicit approval kind discrimination, and **enhanced** owner attribution for tier_2 approval scenarios.
+The runtime architecture centers around a kernel that coordinates lifecycle events through services and persists state via sessions with enhanced state persistence capabilities. Configuration is loaded at startup and can be refreshed dynamically. The enhanced architecture now includes AgentScope 2.0.6 middleware integration for OpenTelemetry tracing and reply budget control, contextvar-based token delegation for secure tool execution, comprehensive state persistence through the AgentStateStore protocol, TTL-based cleanup mechanisms, structured output support for v2 chat endpoints, **newly added** complete HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, session-level model persistence, **updated** intelligent provider error attribution for accurate failure reporting in multi-provider environments, **newly added** comprehensive signing integration for tamper-evident mutation approvals with complete audit trail correlation, explicit approval kind discrimination, **newly added** secret redaction logic for action cards that prevents plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path, **newly added** comprehensive authoring-trace capture that ensures mixed sessions graduate as coherent ordered traces, and **enhanced** owner attribution for tier_2 approval scenarios.
 
 ```mermaid
 sequenceDiagram
@@ -232,6 +257,7 @@ participant Kernel as "RuntimeKernel"
 participant Catalog as "ModelCatalog"
 participant Registry as "ConfirmationRegistry"
 participant EvidenceStore as "EvidenceStore"
+participant TraceStore as "AuthoringTraceStore"
 participant ExecStore as "ExecutionRecordStore"
 participant Audit as "AuditService"
 participant Agent as "Agent"
@@ -241,7 +267,7 @@ participant RSvc as "RuntimeService"
 participant SSvc as "SessionService"
 participant Store as "SessionStore"
 participant Gateway as "Tool Gateway"
-Note over Client,Store : Normal Flow with Enhanced Model Resolution, Legacy Alias Support, Intelligent Provider Error Attribution, Signing Integration, and Tier_2 Owner Attribution
+Note over Client,Store : Normal Flow with Enhanced Model Resolution, Legacy Alias Support, Intelligent Provider Error Attribution, Signing Integration, Tier_2 Owner Attribution, Secret Redaction, and Authoring Trace Capture
 Client->>API : "POST /api/v2/chat"
 API->>Catalog : "validate model_id with legacy aliases"
 Catalog-->>API : "known/unknown (with normalization)"
@@ -263,6 +289,7 @@ Registry-->>Kernel : "pending with confirm_id"
 Kernel->>Kernel : "determine approval_kind"
 Kernel->>Kernel : "check browser-write detection"
 Kernel->>Kernel : "extract browser element map"
+Kernel->>Kernel : "redact action card parameters"
 Kernel-->>API : "confirmation_request frame with approval_kind"
 API-->>Client : "SSE : confirmation_request"
 else No confirmation needed
@@ -281,7 +308,7 @@ Kernel->>StateStore : "save_state(session_id, state)"
 StateStore-->>Kernel : "ok"
 Kernel-->>API : "content + structured_output + normalized_model"
 API-->>Client : "response"
-Note over Client,Store : HITL Approval Flow with Signing Integration, Approval Kind Discrimination, and Tier_2 Owner Attribution
+Note over Client,Store : HITL Approval Flow with Signing Integration, Approval Kind Discrimination, Tier_2 Owner Attribution, Secret Redaction, and Authoring Trace Capture
 Client->>API : "POST /api/v2/chat/confirm"
 API->>Kernel : "resume_confirmation(approve, decider, owner_user_name)"
 Kernel->>Kernel : "_prepare_executions(pending, decider)"
@@ -289,6 +316,8 @@ alt Approval kind is flow with browser write
 Kernel->>Kernel : "_record_flow_approval(pending)"
 Kernel->>ExecStore : "save_request(signed_execution)"
 ExecStore-->>Kernel : "ok"
+Kernel->>TraceStore : "append_step(authoring_trace)"
+TraceStore-->>Kernel : "best-effort capture"
 Kernel->>Audit : "emit execution_requested"
 Audit-->>Kernel : "acknowledged"
 Kernel->>Agent : "reply_stream(confirm_event)"
@@ -301,6 +330,8 @@ Audit-->>Kernel : "acknowledged"
 else Approval kind is action or no signing key
 Kernel->>ExecStore : "save_request(signed_execution)"
 ExecStore-->>Kernel : "ok"
+Kernel->>TraceStore : "append_step(authoring_trace)"
+TraceStore-->>Kernel : "best-effort capture"
 Kernel->>Audit : "emit execution_requested"
 Audit-->>Kernel : "acknowledged"
 Kernel->>Agent : "reply_stream(confirm_event)"
@@ -316,6 +347,8 @@ Registry-->>Kernel : "resolved"
 Kernel-->>API : "confirmation_result frame"
 API-->>Client : "SSE : confirmation_result"
 Note over Kernel : Tier_2 Owner Attribution : Re-parked cards attributed to session owner (not approver) to prevent self-approval conflicts
+Note over Kernel : Secret Redaction : Action card parameters redacted in place for display/persistence while signing path uses fresh raw payload
+Note over Kernel : Authoring Trace : Mixed sessions graduate as coherent ordered traces from both per-action and flow-unlock paths
 end
 ```
 
@@ -325,6 +358,7 @@ end
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
@@ -332,15 +366,16 @@ end
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 ## Detailed Component Analysis
 
-### Runtime Kernel with State Persistence, Middleware Integration, HITL Confirmation Bridging, Evidence Capture, Enhanced Runtime Model Resolution, Intelligent Provider Error Attribution, Comprehensive Signing Integration, Explicit Approval Kind Discrimination, and Tier_2 Owner Attribution
-The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging for human approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with legacy name normalization and improved error handling, **updated** intelligent provider error attribution for accurate failure reporting, and **newly added** comprehensive signing integration for tamper-evident mutation approvals with fail-closed security posture and explicit approval kind discrimination. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards to prevent self-approval rule conflicts. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows, **newly added** captures and persists tool call and result evidence during streaming operations, **enhanced** resolves and validates model IDs with legacy alias support, improved error handling, **updated** intelligent provider error attribution, and **newly added** generates signed execution requests with cryptographic verification for mutation approvals with explicit approval kind discrimination and **enhanced** owner attribution for tier_2 approval scenarios.
+### Runtime Kernel with State Persistence, Middleware Integration, HITL Confirmation Bridging, Evidence Capture, Enhanced Runtime Model Resolution, Intelligent Provider Error Attribution, Comprehensive Signing Integration, Explicit Approval Kind Discrimination, Tier_2 Owner Attribution, Secret Redaction, and Authoring Trace Capture
+The runtime kernel manages agent lifecycle events and enforces state transitions with comprehensive state persistence capabilities, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging for human approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with legacy name normalization and improved error handling, **updated** intelligent provider error attribution for accurate failure reporting, **newly added** comprehensive signing integration for tamper-evident mutation approvals with fail-closed security posture and explicit approval kind discrimination, **newly added** secret redaction logic for action cards that prevents plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path, and **newly added** comprehensive authoring-trace capture that ensures mixed sessions graduate as coherent ordered traces rather than fragmented half-traces. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards to prevent self-approval rule conflicts. It coordinates with the runtime service to perform work, uses the session service to persist state changes, integrates with the AgentStateStore protocol for conversation durability, includes enhanced delegated token handling for secure tool execution with rotation support, applies a sophisticated middleware stack for permission control, evidence emission, tracing, and budget management, **newly added** seamlessly bridges AgentScope's RequireUserConfirmEvent into operator approval workflows, **newly added** captures and persists tool call and result evidence during streaming operations, **enhanced** resolves and validates model IDs with legacy alias support, improved error handling, **updated** intelligent provider error attribution, **newly added** generates signed execution requests with cryptographic verification for mutation approvals with explicit approval kind discrimination, **newly added** applies secret redaction logic to action card parameters, **newly added** captures authoring traces for approved mutations, and **enhanced** owner attribution for tier_2 approval scenarios.
 
 Lifecycle events and typical transitions:
-- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, **newly added** initialize execution signing system, and **enhanced** build model catalog with legacy alias support.
-- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, **newly added** capture evidence frames during streaming, **newly added** detect and bridge RequireUserConfirmEvent for human approval, **enhanced** resolve model ID with legacy alias support and improved error handling, **updated** generate accurate provider error messages during fallback scenarios, and **newly added** integrate signing for mutation approvals with fail-closed security, explicit approval kind discrimination, and **enhanced** owner attribution for tier_2 approval scenarios.
+- Start: Initialize resources, load settings, prepare context, set up token handlers, configure state persistence backends, build middleware stack, **newly added** initialize HITL confirmation registry, **newly added** configure evidence persistence, **newly added** initialize execution signing system, **newly added** initialize authoring trace store, and **enhanced** build model catalog with legacy alias support.
+- Execute: Transition to running, validate delegated tokens, restore persisted state, invoke agent logic with per-user toolkits, apply middleware chain, handle results or errors, save state after completion, **newly added** capture evidence frames during streaming, **newly added** detect and bridge RequireUserConfirmEvent for human approval, **enhanced** resolve model ID with legacy alias support and improved error handling, **updated** generate accurate provider error messages during fallback scenarios, **newly added** integrate signing for mutation approvals with fail-closed security, explicit approval kind discrimination, **newly added** apply secret redaction logic to action card parameters, **newly added** capture authoring traces for approved mutations, and **enhanced** owner attribution for tier_2 approval scenarios.
 - Pause: Suspend execution, save checkpoint, transition to paused.
 - Resume: Restore checkpoint, re-validate tokens if needed, transition back to running.
 - Terminate: Clean up resources, finalize state, revoke tokens, delete persisted state, transition to terminated.
@@ -362,15 +397,17 @@ Enhanced state persistence features:
 - Contextvar-based token delegation via DELEGATED_TOKEN for per-request token scoping
 - Settings-driven middleware composition with opt-in features
 
-**NEW** HITL Confirmation Bridging with Signing Integration, Explicit Approval Kind Discrimination, and Tier_2 Owner Attribution:
-- **_build_confirmation_frame()**: Detects RequireUserConfirmEvent from AgentScope, registers pending confirmation in ConfirmationRegistry, builds confirmation_request frame with explicit `approval_kind` discriminator, ends stream without message_end, and **newly added** extracts browser element map from web.snapshot results for enhanced context
-- **resume_confirmation()**: Resumes parked reply with operator decision, creates UserConfirmResultEvent, streams resumed events, handles nested confirmations, cleans up registry entries, and **newly added** integrates signing for approved mutations with flow authority recording for browser writes. **Enhanced**: Now accepts `owner_user_name` parameter to properly attribute re-parked cards to session owner while maintaining approver as decider, preventing tier_2 self-approval rule conflicts
+**NEW** HITL Confirmation Bridging with Signing Integration, Explicit Approval Kind Discrimination, Tier_2 Owner Attribution, Secret Redaction, and Authoring Trace Capture:
+- **_build_confirmation_frame()**: Detects RequireUserConfirmEvent from AgentScope, registers pending confirmation in ConfirmationRegistry, builds confirmation_request frame with explicit `approval_kind` discriminator, ends stream without message_end, **newly added** extracts browser element map from web.snapshot results for enhanced context, and **newly added** applies secret redaction logic to action card parameters before persistence and streaming
+- **resume_confirmation()**: Resumes parked reply with operator decision, creates UserConfirmResultEvent, streams resumed events, handles nested confirmations, cleans up registry entries, and **newly added** integrates signing for approved mutations with flow authority recording for browser writes. **Enhanced**: Now accepts `owner_user_name` parameter to properly attribute re-parked cards to session owner while maintaining approver as decider, preventing tier_2 self-approval rule conflicts. **New**: Captures authoring traces for approved mutations at the same seam as execution record persistence.
 - **expire_confirmation()**: Handles TTL-expired confirmations by sending UserInterruptEvent to parked reply and resolving registry entry
 - **ConfirmationRegistry**: Process-wide singleton managing pending confirmations with TTL expiration, single-flight decision processing, and ownership validation
 - Seamless integration with existing streaming infrastructure, preserving all middleware benefits including evidence emission and tracing
 - Configurable via AGENT_HITL_CONFIRM_TIMEOUT environment variable (default 600 seconds)
 - **NEW** Fail-closed signing: Missing execution signing keys reject entire mutation batches with proper audit trails
 - **NEW** Browser-write detection: Uses `_tool_names_have_browser_write()` predicate to determine if batch contains browser write tools, ensuring proper approval kind assignment
+- **NEW** Secret redaction integration: Applies fail-closed masking to action card parameters at critical workflow points, ensuring display and persistence layers never expose plaintext secrets while maintaining the integrity of the signed execution path
+- **NEW** Authoring trace capture: Captures approved mutating steps from both per-action approval cards and flow-unlocked browser writes, ensuring mixed sessions graduate as coherent ordered traces rather than fragmented half-traces
 - **ENHANCED** Tier_2 Owner Attribution: When a tier_2 approver (different from session owner) resumes a confirmation, any subsequent re-parked cards are attributed to the session owner rather than the approver, preventing self-approval rule conflicts in multi-step approval workflows
 
 **NEW** Explicit Approval Kind Discrimination:
@@ -391,6 +428,15 @@ Enhanced state persistence features:
 - **verify_envelope()**: Cryptographic verification of envelope signatures for integrity checking
 - **canonical_json()**: Canonical JSON serialization ensuring deterministic signing across different implementations
 - **canonical_digest()**: SHA-256 hash computation for argument binding and outcome verification
+
+**NEW** Authoring Trace Capture:
+- **_capture_authoring_step()**: Best-effort capture of approved mutating steps at the same seam as execution record persistence, ensuring trace steps exist only for mutating calls that humans authorized (per-action, SPEC-054) or admitted under flow authority (SPEC-051) and were successfully signed
+- **Parameterization**: Arguments are parameterized before capture to ensure literal credentials never reach the trace store, with only execution_id and confirm_id references stored
+- **Mixed Session Support**: Both per-action approval cards and flow-unlocked browser writes contribute to one session-scoped trace, ensuring mixed troubleshooting sessions graduate as coherent ordered flows rather than fragmented half-traces
+- **Best-Effort Failure Handling**: Trace capture failures degrade gracefully to "no graduation candidate" without affecting the main execution flow, signed requests, or audit events
+- **Lifecycle-Bound Retention**: Traces stay in draft status while steps are being captured and are closed exactly once by graduation or discard operations
+- **Per-Session Step Caps**: Configurable limits prevent unbounded growth of individual session traces
+- **Idle-GC**: Automatic cleanup of idle draft traces beyond configured time windows
 
 **NEW** Execution Record Persistence:
 - **Durable Storage**: Persists execution lifecycle (request → receipt) with retention policies and best-effort failure handling
@@ -440,9 +486,9 @@ Completed --> Terminating : "terminate"
 Failed --> Terminating : "terminate"
 Paused --> Terminating : "terminate"
 Terminating --> [*]
-note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations\nCapture evidence frames\nResolve model ID with legacy aliases\nAttribute serving model\nGenerate accurate provider error messages\nIntegrate signing for mutations\nDetermine approval_kind\nHandle tier_2 owner attribution"
-note right of Parked : "Awaiting operator decision\nTTL-based expiration\nSingle-flight decisions\nPersist pre-park evidence\nPrepare signed execution requests\nExtract browser element map\nCheck browser-write detection\nAttribute re-parked cards to session owner"
-note right of Completed : "Persist final state\nClean up resources\nPersist post-stream evidence\nClose execution lifecycles"
+note right of Running : "Save state after each turn\nRestore state on next use\nApply middleware stack\nBridge HITL confirmations\nCapture evidence frames\nResolve model ID with legacy aliases\nAttribute serving model\nGenerate accurate provider error messages\nIntegrate signing for mutations\nDetermine approval_kind\nHandle tier_2 owner attribution\nApply secret redaction logic\nCapture authoring traces for mutations"
+note right of Parked : "Awaiting operator decision\nTTL-based expiration\nSingle-flight decisions\nPersist pre-park evidence\nPrepare signed execution requests\nExtract browser element map\nCheck browser-write detection\nAttribute re-parked cards to session owner\nRedact action card parameters\nCapture authoring traces on approval"
+note right of Completed : "Persist final state\nClean up resources\nPersist post-stream evidence\nClose execution lifecycles\nCapture authoring traces for mutations"
 ```
 
 Key behaviors:
@@ -458,7 +504,9 @@ Key behaviors:
 - **NEW**: HITL confirmation bridging that seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality.
 - **NEW**: Evidence capture and persistence that tracks tool call and result frames during streaming operations with size caps, budget enforcement, and best-effort failure handling.
 - **NEW**: Execution signing integration that provides tamper-evident mutation approvals with fail-closed security, durable execution record persistence, and comprehensive audit trail correlation.
+- **NEW**: Authoring trace capture that ensures mixed sessions graduate as coherent ordered traces from both per-action approval cards and flow-unlocked browser writes, with best-effort failure handling that degrades gracefully without affecting execution.
 - **NEW**: Explicit approval kind discrimination that distinguishes between flow-based and action-based approvals with browser-write detection logic and proper card rendering guidance.
+- **NEW**: Secret redaction integration that applies fail-closed masking to action card parameters at critical workflow points, ensuring display and persistence layers never expose plaintext secrets while maintaining the integrity of the signed execution path.
 - **ENHANCED**: Runtime model resolution with credential-gated catalog validation, legacy alias support for backward compatibility, fail-closed unknown model handling, automatic agent rebuild on model switches, and improved error handling for unknown model identifiers.
 - **UPDATED**: Intelligent provider error attribution that accurately identifies the failing provider during fallback scenarios, improving diagnostic accuracy in multi-provider environments.
 - **ENHANCED**: Tier_2 owner attribution that prevents self-approval rule conflicts by attributing re-parked cards to session owner rather than tier_2 approver.
@@ -471,6 +519,7 @@ Key behaviors:
 - [runtime_kernel.py:886-1106](file://products/agent-platform/src/agent_service/runtime_kernel.py#L886-L1106)
 - [runtime_kernel.py:1086-1147](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1086-L1147)
 - [runtime_kernel.py:1187-1281](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1187-L1281)
+- [runtime_kernel.py:1280-1479](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1280-L1479)
 - [runtime_kernel.py:1337-1483](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1337-L1483)
 - [runtime_kernel.py:1584-1612](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1584-L1612)
 - [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
@@ -506,14 +555,14 @@ Implementation details:
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
 
-### HITL Confirmation System with Signing Integration, Explicit Approval Kind Discrimination, and Tier_2 Owner Attribution
-The **newly added** HITL (Human-in-the-Loop) confirmation system provides complete operator approval workflows for sensitive tool executions. When AgentScope emits a RequireUserConfirmEvent, the system parks the active reply, surfaces a confirmation_request frame to the client, and waits for operator approval before resuming execution. **Enhanced** with comprehensive signing integration for tamper-evident mutation approvals, explicit approval kind discrimination, and **enhanced** owner attribution for tier_2 approval scenarios.
+### HITL Confirmation System with Signing Integration, Explicit Approval Kind Discrimination, Tier_2 Owner Attribution, Secret Redaction, and Authoring Trace Capture
+The **newly added** HITL (Human-in-the-Loop) confirmation system provides complete operator approval workflows for sensitive tool executions. When AgentScope emits a RequireUserConfirmEvent, the system parks the active reply, surfaces a confirmation_request frame to the client, and waits for operator approval before resuming execution. **Enhanced** with comprehensive signing integration for tamper-evident mutation approvals, explicit approval kind discrimination, **newly added** secret redaction logic for action cards that prevents plaintext secret exposure, **newly added** authoring trace capture for approved mutations, and **enhanced** owner attribution for tier_2 approval scenarios.
 
 Key features:
 - **NEW** ConfirmationRegistry: Process-wide singleton managing pending confirmations with TTL expiration, single-flight decision processing, and ownership validation
-- **NEW** PendingConfirmation: Data structure holding confirmation metadata, tool calls, timestamps, and state flags, **enhanced** with browser element maps and flow summaries
-- **NEW** _build_confirmation_frame(): Detects RequireUserConfirmEvent, registers pending confirmation, builds confirmation_request frame with explicit `approval_kind` discriminator, ends stream without message_end, and **newly added** extracts browser element map from web.snapshot results
-- **NEW** resume_confirmation(): Resumes parked reply with operator decision, creates UserConfirmResultEvent, streams resumed events, handles nested confirmations, and **newly added** integrates signing for approved mutations with flow authority recording. **Enhanced**: Now accepts `owner_user_name` parameter to properly attribute re-parked cards to session owner while maintaining approver as decider, preventing tier_2 self-approval rule conflicts
+- **NEW** PendingConfirmation: Data structure holding confirmation metadata, tool calls, timestamps, and state flags, **enhanced** with browser element maps, flow summaries, and secret-redacted parameters for action cards
+- **NEW** _build_confirmation_frame(): Detects RequireUserConfirmEvent, registers pending confirmation, builds confirmation_request frame with explicit `approval_kind` discriminator, ends stream without message_end, **newly added** extracts browser element map from web.snapshot results, and **newly added** applies secret redaction logic to action card parameters
+- **NEW** resume_confirmation(): Resumes parked reply with operator decision, creates UserConfirmResultEvent, streams resumed events, handles nested confirmations, and **newly added** integrates signing for approved mutations with flow authority recording. **Enhanced**: Now accepts `owner_user_name` parameter to properly attribute re-parked cards to session owner while maintaining approver as decider, preventing tier_2 self-approval rule conflicts. **New**: Captures authoring traces for approved mutations at the same seam as execution record persistence.
 - **NEW** expire_confirmation(): Handles TTL-expired confirmations by sending UserInterruptEvent to parked reply and resolving registry entry
 - **NEW** Single-flight decision processing: Prevents duplicate confirmations and ensures atomic decision processing
 - **NEW** TTL-based expiration: Configurable timeout (AGENT_HITL_CONFIRM_TIMEOUT) with automatic cleanup
@@ -525,17 +574,19 @@ Key features:
 - **NEW** Audit event emission: Comprehensive audit trail correlation from confirmation decision through execution completion
 - **NEW** Browser-write detection: Uses shared predicate `_tool_names_have_browser_write()` to determine if batch contains browser write tools for proper approval kind assignment
 - **NEW** Flow headline gating: `flow_summary` present only when `approval_kind == flow`, preventing headline leakage
+- **NEW** Secret redaction integration: Applies fail-closed masking to action card parameters at critical workflow points, ensuring display and persistence layers never expose plaintext secrets while maintaining the integrity of the signed execution path
+- **NEW** Authoring trace capture: Captures approved mutating steps from both per-action approval cards and flow-unlocked browser writes, ensuring mixed sessions graduate as coherent ordered traces
 - **ENHANCED** Tier_2 Owner Attribution: Properly attributes re-parked cards to session owner rather than tier_2 approver to prevent self-approval rule conflicts in multi-step approval workflows
 
 Implementation details:
-- `register()`: Creates PendingConfirmation with unique confirm_id, stores tool calls, sets creation timestamp, **enhanced** with browser element maps and flow summaries
+- `register()`: Creates PendingConfirmation with unique confirm_id, stores tool calls, sets creation timestamp, **enhanced** with browser element maps, flow summaries, and secret-redacted parameters for action cards
 - `claim()`: Atomically claims confirmation for decision processing, prevents duplicate approvals
 - `get()`: Retrieves unclaimed, unresolved confirmation with TTL validation
 - `resolve()`: Marks confirmation as resolved and removes from registry
 - `take_for_expiry()`: Claims confirmation for expiry processing, prevents racing with decision processing
 - `is_parked()`: Checks if session has unresolved confirmation
 - `peek_parked()`: Returns unresolved confirmation regardless of TTL for health checks
-- `pending_calls_payload()`: Serializes tool calls for confirmation_request frames, **enhanced** with display hints for browser tools
+- `pending_calls_payload()`: Serializes tool calls for confirmation_request frames, **enhanced** with display hints for browser tools and secret-redacted parameters for action cards
 - `tool_names()`: Extracts tool names for logging and UI display
 - **NEW** `_prepare_executions()`: Builds signed execution requests for approved mutations with fail-closed security
 - **NEW** `_observe_tool_result()`: Automatically closes execution lifecycles by building and persisting signed receipts
@@ -543,6 +594,7 @@ Implementation details:
 - **NEW** `_tool_names_have_browser_write()`: Static method determining if tool names contain browser write tools using canonical gateway names
 - **NEW** `_batch_has_browser_write()`: Determines if parked batch contains browser write tools for flow-unlock authority arming
 - **NEW** `_record_flow_approval()**: Records flow authority when approved batch contains browser write, scoped to session and flow identity
+- **NEW** `redact_pending_calls()`: Applies fail-closed secret redaction to action card parameters in place, ensuring display and persistence layers never expose plaintext secrets
 - **ENHANCED** Tier_2 Owner Attribution: `owner_user_name or user_name` pattern ensures re-parked cards are attributed to session owner when provided, falling back to approver identity when no explicit owner is specified
 
 **Section sources**
@@ -550,9 +602,11 @@ Implementation details:
 - [test_hitl_confirmations.py](file://products/agent-platform/tests/test_hitl_confirmations.py)
 - [runtime_kernel.py:1086-1147](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1086-L1147)
 - [runtime_kernel.py:1187-1281](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1187-L1281)
+- [runtime_kernel.py:1280-1479](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1280-L1479)
 - [runtime_kernel.py:1584-1647](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1584-L1647)
 - [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 ### Evidence Capture and Persistence System
 The **newly added** evidence capture and persistence system provides comprehensive tracking of tool call and result frames during streaming operations. This system ensures that evidence is captured consistently across both normal streaming flows and HITL confirmation resume flows, with robust size management and best-effort persistence.
@@ -577,9 +631,40 @@ Implementation details:
 **Section sources**
 - [runtime_kernel.py:458-510](file://products/agent-platform/src/agent_service/runtime_kernel.py#L458-L510)
 - [runtime_kernel.py:814-869](file://products/agent-platform/src/agent_service/runtime_kernel.py#L814-869)
-- [runtime_kernel.py:1005-1063](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1005-L1063)
+- [runtime_kernel.py:1005-1063](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1005-1063)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
+
+### Authoring Trace Capture System
+The **newly added** authoring trace capture system provides comprehensive tracking of approved mutating steps for develop-as-you-go skill graduation. This system ensures that both per-action approval cards and flow-unlocked browser writes contribute to one coherent session-scoped trace, enabling mixed troubleshooting sessions to graduate as executable flows rather than fragmented half-traces.
+
+Key features:
+- **NEW** Dual-Backend Store: In-memory backend for development/testing and Postgres backend for production deployments, sharing the same interface and field parity
+- **NEW** Lifecycle-Bound Retention: Traces stay in draft status while steps are being captured and are closed exactly once by graduation or discard operations
+- **NEW** Per-Session Step Caps: Configurable limits prevent unbounded growth of individual session traces
+- **NEW** Idle-GC: Automatic cleanup of idle draft traces beyond configured time windows
+- **NEW** Parameterization: Arguments are parameterized before capture to ensure literal credentials never reach the trace store
+- **NEW** Best-Effort Failure Handling: Trace capture failures degrade gracefully without affecting execution flow, signed requests, or audit events
+- **NEW** Mixed Session Support: Both per-action approval cards and flow-unlocked browser writes contribute to one session-scoped trace
+- **NEW** Advisory Locking: Transaction-scoped PostgreSQL advisory locks prevent race conditions between append and close operations
+
+Implementation details:
+- `make_trace_step()`: Shapes trace steps with session_id, tool_name, parameterized args, execution_id, confirm_id, and captured_at
+- `append_step()`: Appends steps with per-session ordinal assignment, enforcing step caps and never-reopen guards
+- `load_for_session()`: Loads ordered trace steps for session replay and graduation
+- `trace_status()`: Returns current trace status (draft, graduated, discarded)
+- `close_trace()`: Closes traces with terminal status (graduated or discarded)
+- `sweep_idle()`: Reclaims idle draft traces beyond configured time windows
+- `delete_session()`: Deletes trace data when sessions are removed
+- **NEW** Parameterization: Uses `parameterize_for_trace()` to replace literal credentials with placeholders before capture
+- **NEW** Timestamp canonicalization: Ensures consistent timestamp formatting across backends
+- **NEW** Deep copying: Prevents mutation of captured arguments by deep-copying parameter objects
+
+**Section sources**
+- [authoring_trace.py:1-703](file://products/agent-platform/src/agent_service/services/authoring_trace.py#L1-703)
+- [test_authoring_trace.py:1-751](file://products/agent-platform/tests/test_authoring_trace.py#L1-751)
+- [runtime_kernel.py:1280-1479](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1280-L1479)
+- [test_runtime_kernel.py:1951-2274](file://products/agent-platform/tests/test_runtime_kernel.py#L1951-L2274)
 
 ### ContextVar-Based Token Delegation
 The enhanced toolkit management uses contextvars for per-request token scoping, enabling cached toolkits to work seamlessly across portal token refresh scenarios.
@@ -708,7 +793,7 @@ Implementation details:
 - [runtime_kernel.py:1283-1308](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1283-L1308)
 
 ### V2 Chat Endpoints with Structured Output, HITL Confirmation, Evidence Access, and Enhanced Model Selection
-The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, **newly added** HITL confirmation endpoints, **newly added** evidence access capabilities, **enhanced** per-turn model selection with credential-gated validation and legacy alias support, and **newly added** execution signing integration for mutation approvals. These endpoints integrate with the state persistence layer and provide better observability into system health.
+The v2 chat endpoints provide enhanced functionality including structured output support, comprehensive health checks, improved error handling, **newly added** HITL confirmation endpoints, **newly added** evidence access capabilities, **enhanced** per-turn model selection with credential-gated validation and legacy alias support, **newly added** execution signing integration for mutation approvals, **newly added** secret redaction integration for action cards, and **newly added** authoring trace integration for skill graduation. These endpoints integrate with the state persistence layer and provide better observability into system health.
 
 Key features:
 - **Updated**: Structured output support through response_schema parameter enabling validated structured responses
@@ -727,7 +812,9 @@ Key features:
 - **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
 - **ENHANCED**: Normalized model ID tracking throughout the request pipeline
 - **NEW**: Execution signing integration for mutation approvals with fail-closed security
-- **NEW**: Explicit approval kind discrimination in confirmation frames for proper card rendering
+- **NEW**: Explicit approval kind discrimination in confirmation frames for flow vs action discrimination
+- **NEW**: Secret redaction integration for action cards that prevents plaintext secret exposure in display and persistence layers
+- **NEW**: Authoring trace integration for skill graduation with best-effort failure handling
 - **ENHANCED**: Tier_2 owner attribution support for proper card ownership in multi-step approval workflows
 
 Implementation details:
@@ -744,6 +831,8 @@ Implementation details:
 - **NEW** Model flow: Validates model IDs against catalog with legacy alias support, pins to session, attributes to streaming events
 - **NEW** Execution signing flow: Integrates signing for approved mutations with fail-closed security and audit trail correlation
 - **NEW** Approval kind flow: Adds explicit `approval_kind` field to confirmation frames for flow vs action discrimination
+- **NEW** Secret redaction flow: Applies fail-closed masking to action card parameters at critical workflow points, ensuring display and persistence layers never expose plaintext secrets
+- **NEW** Authoring trace flow: Captures approved mutations for skill graduation with best-effort failure handling
 - **ENHANCED** Legacy support: Bare provider names are automatically resolved to corresponding default-model entries
 - **ENHANCED** Tier_2 owner attribution: Passes `owner_user_name=session.user_id` to ensure re-parked cards are attributed to session owner
 
@@ -756,7 +845,7 @@ Implementation details:
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 
 ### Runtime Settings and Configuration
-The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, **newly added** HITL confirmation bridging, **newly added** evidence persistence configuration, **newly added** execution signing key configuration, and **enhanced** model catalog configuration with legacy alias support.
+The runtime settings system has been enhanced with new configuration options for AgentScope 2.0.6 middleware integration, reply budget control, **newly added** HITL confirmation bridging, **newly added** evidence persistence configuration, **newly added** execution signing key configuration, **newly added** secret redaction vocabulary configuration, **newly added** authoring trace configuration, and **enhanced** model catalog configuration with legacy alias support.
 
 **Updated** Configuration options:
 - **AGENTSCOPE_KERNEL_TRACING**: Boolean flag to enable OpenTelemetry tracing via TracingMiddleware
@@ -768,6 +857,8 @@ The runtime settings system has been enhanced with new configuration options for
 - **NEW** **AGENT_EVIDENCE_ENTRY_MAX_CHARS**: Integer characters for per-entry evidence payload limit (default 131072)
 - **NEW** **AGENT_EVIDENCE_SESSION_MAX_BYTES**: Integer bytes for per-session evidence storage budget (default 4194304)
 - **NEW** **AGENT_EXECUTION_SIGNING_KEY**: String for HMAC-SHA256 signing key for mutation approvals (required for signed mutations)
+- **NEW** **AGENT_AUTHORING_TRACE_MAX_STEPS**: Integer for per-session authoring trace step cap (default 100)
+- **NEW** **AGENT_AUTHORING_TRACE_IDLE_DAYS**: Integer for idle trace reclaim window (default 180)
 - **NEW** Provider-specific model configuration: OPENAI_API_KEY/MODEL_NAME/BASE_URL, DEEPSEEK_API_KEY/MODEL_NAME/BASE_URL, DASHSCOPE_API_KEY/MODEL_NAME/BASE_URL
 
 Key features:
@@ -780,17 +871,21 @@ Key features:
 - **NEW**: Environment variable parsing for AGENT_HITL_CONFIRM_TIMEOUT with default 600 seconds
 - **NEW**: Evidence persistence configuration with sensible defaults and validation
 - **NEW**: Execution signing key configuration with proper validation and security considerations
+- **NEW**: Secret redaction vocabulary configuration with fail-closed masking strategy
+- **NEW**: Authoring trace configuration with per-session step caps and idle-GC settings
 - **NEW**: Model catalog configuration with provider-specific environment variables
 - **ENHANCED**: Legacy alias support configuration for backward compatibility
 
 Implementation details:
-- `__post_init__()`: Validates all settings including new middleware-related configurations, HITL timeout, evidence settings, and execution signing key
+- `__post_init__()`: Validates all settings including new middleware-related configurations, HITL timeout, evidence settings, execution signing key, secret redaction vocabulary, and authoring trace configuration
 - `from_env()`: Parses environment variables with proper type conversion and defaults
 - Provider-specific options with validation and type safety
 - Graceful fallbacks for optional features when not configured
 - **NEW**: HITL confirmation timeout validation ensuring non-negative integer values
 - **NEW**: Evidence persistence settings with appropriate defaults for development and production environments
 - **NEW**: Execution signing key validation and security considerations
+- **NEW**: Secret redaction vocabulary validation ensuring fail-closed masking strategy
+- **NEW**: Authoring trace configuration validation with per-session step caps and idle-GC settings
 - **NEW**: Model catalog environment variable parsing for multi-provider deployments
 - **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
 
@@ -799,7 +894,7 @@ Implementation details:
 - [runtime_settings.py:332-338](file://products/agent-platform/src/agent_service/runtime_settings.py#L332-L338)
 
 ### Metrics and Observability
-Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, and **newly added** execution signing metrics. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
+Comprehensive metrics tracking provides visibility into agent state operations, backend selection, error rates, system health, **newly added** HITL confirmation metrics, **newly added** evidence store performance metrics, **enhanced** model switching metrics with legacy alias tracking, **newly added** execution signing metrics, **newly added** secret redaction metrics, and **newly added** authoring trace metrics. The metrics system follows established conventions and provides both counters and gauges for different types of observations.
 
 Key features:
 - **Updated**: Agent state store metrics including backend selection, operation errors, and fallback counts
@@ -813,6 +908,8 @@ Key features:
 - **NEW**: Evidence store metrics including write success/failure rates, frame counts, and truncation reasons
 - **NEW**: Model switching metrics including resolution attempts, unknown model rejections, and session pinning operations
 - **NEW**: Execution signing metrics including request creation, receipt building, and audit event emission
+- **NEW**: Secret redaction metrics including masking operations, allow-list lookups, and redaction effectiveness
+- **NEW**: Authoring trace metrics including step capture success/failure rates, trace status changes, and idle-GC operations
 - **ENHANCED**: Legacy alias usage tracking for backward compatibility monitoring
 
 Implementation details:
@@ -826,6 +923,8 @@ Implementation details:
 - **NEW**: Evidence store metrics including `record_evidence_write()`, `record_evidence_frames_persisted()`, and `record_evidence_frame_truncated()`
 - **NEW**: Model catalog metrics for discovery and validation operations
 - **NEW**: Execution signing metrics for request creation, receipt building, and audit event emission
+- **NEW**: Secret redaction metrics for masking operations and allow-list lookups
+- **NEW**: Authoring trace metrics for step capture, trace status changes, and idle-GC operations
 - **ENHANCED**: Legacy alias usage metrics for backward compatibility monitoring
 
 **Section sources**
@@ -843,6 +942,8 @@ Key features:
 - **NEW**: Confirmation expiration handling during session operations
 - **NEW**: Integration with evidence store for session cleanup
 - **NEW**: Integration with execution record store for session cleanup
+- **NEW**: Integration with confirmation record store for session cleanup
+- **NEW**: Integration with authoring trace store for session cleanup
 - **NEW**: Session-level model persistence through pin_session_model() for model affinity tracking with **enhanced** normalized model ID support
 
 Implementation details:
@@ -853,6 +954,8 @@ Implementation details:
 - **NEW**: Confirmation registry integration for parked session management
 - **NEW**: Evidence store integration for deleting session evidence when sessions are removed
 - **NEW**: Execution record store integration for deleting session execution records when sessions are removed
+- **NEW**: Confirmation record store integration for deleting session confirmation records when sessions are removed
+- **NEW**: Authoring trace store integration for deleting session traces when sessions are removed
 - **NEW**: Model persistence integration for tracking resolved model per session with normalized IDs
 - **ENHANCED**: Legacy alias support for backward compatibility with pre-SPEC-026 sessions
 
@@ -860,7 +963,7 @@ Implementation details:
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 
 ## Dependency Analysis
-The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging, **newly added** comprehensive evidence capture and persistence, **enhanced** runtime model resolution with legacy alias support and improved error handling, **updated** intelligent provider error attribution, and **newly added** comprehensive signing integration for tamper-evident mutation approvals with explicit approval kind discrimination and **enhanced** tier_2 owner attribution:
+The runtime kernel depends on configuration, services, persistence layers, token handling components, and the new state persistence infrastructure. The following diagram shows key relationships including the enhanced state persistence architecture with TTL cleanup, metrics tracking, AgentScope 2.0.6 middleware integration, **newly added** complete HITL confirmation bridging, **newly added** comprehensive evidence capture and persistence, **enhanced** runtime model resolution with legacy alias support and improved error handling, **updated** intelligent provider error attribution, **newly added** comprehensive signing integration for tamper-evident mutation approvals with explicit approval kind discrimination, **newly added** secret redaction logic for action cards, **newly added** authoring trace capture for skill graduation, and **enhanced** tier_2 owner attribution:
 
 ```mermaid
 classDiagram
@@ -890,6 +993,7 @@ class RuntimeKernel {
 +_observe_tool_result(frame, execution_requests)
 +_execution_duration_ms(request)
 +_emit_execution_event(event_type, outcome, details, request_id, session_id, decider_user_id)
++_capture_authoring_step(envelope, parameters)
 +_tool_names_have_browser_write(tool_names, gateway_names)
 +_batch_has_browser_write(pending)
 +_record_flow_approval(pending, decider_user_id, session_id)
@@ -939,6 +1043,38 @@ class PostgresEvidenceStore {
 +initialize()
 +save_turn()
 +load_turns()
++delete_session()
++is_ready()
+}
+class AuthoringTraceStore {
+<<interface>>
++backend_name
++append_step()
++load_for_session()
++trace_status()
++close_trace()
++sweep_idle()
++delete_session()
++is_ready()
+}
+class InMemoryAuthoringTraceStore {
++backend_name = "memory"
++append_step()
++load_for_session()
++trace_status()
++close_trace()
++sweep_idle()
++delete_session()
++is_ready()
+}
+class PostgresAuthoringTraceStore {
++backend_name = "postgres"
++initialize()
++append_step()
++load_for_session()
++trace_status()
++close_trace()
++sweep_idle()
 +delete_session()
 +is_ready()
 }
@@ -995,6 +1131,19 @@ class PostgresExecutionRecordStore {
 +delete_session()
 +is_ready()
 }
+class ConfirmationRecordStore {
+<<interface>>
++backend_name
++save_parked()
++mark_resolved()
++load_for_session()
++load_record()
++load_pending_for_session()
++load_pending_inbox()
++load_inbox_history()
++delete_session()
++is_ready()
+}
 class ModelCatalog {
 +entries
 +get(model_id)
@@ -1011,6 +1160,13 @@ class ModelCatalogEntry {
 +base_url
 +default
 +to_public_dict()
+}
+class SecretParams {
++KNOWN_SAFE_FIELDS
++should_mask()
++redact_parameters()
++is_secret_param()
++is_known_safe()
 }
 class GatewayPermissionMiddleware {
 +on_check_permission()
@@ -1034,6 +1190,7 @@ class Metrics {
 +record_evidence_frames_persisted()
 +record_evidence_frame_truncated()
 +record_audit_emit()
++record_authoring_trace_*()
 }
 class GatewayTools {
 +discover_tools()
@@ -1075,6 +1232,8 @@ class RuntimeSettings {
 +evidence_entry_max_chars
 +evidence_session_max_bytes
 +execution_signing_key
++authoring_trace_max_steps
++authoring_trace_idle_days
 }
 class ExecutionSigning {
 +build_requests()
@@ -1099,8 +1258,11 @@ class FlowApprovals {
 }
 RuntimeKernel --> AgentStateStore : "persists state"
 RuntimeKernel --> EvidenceStore : "persists evidence"
+RuntimeKernel --> AuthoringTraceStore : "captures traces"
 RuntimeKernel --> ExecutionRecordStore : "persists execution records"
+RuntimeKernel --> ConfirmationRecordStore : "persists confirmation records"
 RuntimeKernel --> ModelCatalog : "validates model_id with legacy aliases"
+RuntimeKernel --> SecretParams : "applies secret redaction"
 RuntimeKernel --> Metrics : "tracks operations"
 RuntimeKernel --> GatewayTools : "uses"
 RuntimeKernel --> DelegationClient : "manages"
@@ -1121,18 +1283,27 @@ RuntimeService --> SessionService : "uses"
 SessionService --> SessionStore : "persists"
 SessionService --> AgentStateStore : "cleans up state"
 SessionService --> EvidenceStore : "cleans up evidence"
+SessionService --> AuthoringTraceStore : "cleans up traces"
 SessionService --> ExecutionRecordStore : "cleans up execution records"
+SessionService --> ConfirmationRecordStore : "cleans up confirmation records"
 AgentStateStore <|-- InMemoryAgentStateStore
 AgentStateStore <|-- PostgresAgentStateStore
 EvidenceStore <|-- InMemoryEvidenceStore
 EvidenceStore <|-- PostgresEvidenceStore
+AuthoringTraceStore <|-- InMemoryAuthoringTraceStore
+AuthoringTraceStore <|-- PostgresAuthoringTraceStore
 ExecutionRecordStore <|-- InMemoryExecutionRecordStore
 ExecutionRecordStore <|-- PostgresExecutionRecordStore
+ConfirmationRecordStore <|-- InMemoryConfirmationRecordStore
+ConfirmationRecordStore <|-- PostgresConfirmationRecordStore
 PostgresAgentStateStore --> Metrics : "records errors/fallbacks"
 PostgresEvidenceStore --> Metrics : "records truncations"
+PostgresAuthoringTraceStore --> Metrics : "records operations"
 PostgresExecutionRecordStore --> Metrics : "records operations"
+PostgresConfirmationRecordStore --> Metrics : "records operations"
 ModelCatalog --> ModelCatalogEntry : "contains"
 ModelCatalog --> RuntimeSettings : "uses for legacy aliases"
+SecretParams --> RuntimeSettings : "uses for vocabulary config"
 FlowApprovals --> RuntimeSettings : "uses for TTL config"
 ```
 
@@ -1142,14 +1313,17 @@ FlowApprovals --> RuntimeSettings : "uses for TTL config"
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 **Section sources**
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -1157,14 +1331,17 @@ FlowApprovals --> RuntimeSettings : "uses for TTL config"
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 ## Performance Considerations
 - Concurrency Control: Use bounded worker pools for agent execution to prevent resource exhaustion.
@@ -1194,11 +1371,16 @@ FlowApprovals --> RuntimeSettings : "uses for TTL config"
 - **NEW**: Browser-Write Detection Performance: Efficient tool name matching against BROWSER_WRITE_TOOLS set with minimal overhead, shared predicate usage prevents redundant calculations.
 - **NEW**: Approval Kind Discrimination Performance: Fast boolean checks for browser-write detection and flow context validation with minimal computational overhead.
 - **NEW**: Flow Authority Recording Performance: Efficient flow approval recording with TTL-based expiration and session-scoped storage with minimal memory footprint.
+- **NEW**: Secret Redaction Performance: Efficient fail-closed masking with constant-time lookups against KNOWN_SAFE_FIELDS allow-list, minimal overhead for parameter traversal, and in-place modification that doesn't affect signing inputs.
+- **NEW**: Authoring Trace Capture Performance: Best-effort trace capture with minimal overhead, efficient parameterization to avoid credential exposure, and lightweight store operations that don't block execution flow.
+- **NEW**: Mixed Session Trace Performance: Efficient merging of per-action and flow-unlock traces with consistent ordering and minimal memory overhead.
+- **NEW**: Trace Store Selection: Shared backend configuration with agent state store reduces database connections and improves resource utilization.
+- **NEW**: Trace Lifecycle Management: Efficient trace status tracking with minimal overhead, and effective idle-GC operations for draft trace cleanup.
 - **ENHANCED**: Tier_2 Owner Attribution Performance: Efficient owner attribution logic with minimal overhead, using simple parameter passing pattern `owner_user_name or user_name` that avoids expensive lookups.
 - **ENHANCED**: Legacy Alias Performance: Efficient legacy alias resolution with minimal overhead, cached alias mappings for fast provider name lookups, and optimized backward compatibility checks.
 - **UPDATED**: Provider Error Attribution Performance: Efficient model catalog lookups for provider detection with minimal overhead, cached catalog entries for fast provider resolution, and optimized error message generation for fallback scenarios.
 - Graceful Degradation: Minimize performance impact when falling back to empty Toolkit or in-memory state storage by using lazy initialization and caching.
-- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, **newly added** HITL confirmation workflow performance, **newly added** evidence store performance metrics, **enhanced** model switching performance metrics with legacy alias tracking, and **newly added** execution signing performance metrics.
+- Observability: Emit metrics and traces for lifecycle events, latency, error rates, token validation performance, state persistence operations, **newly added** HITL confirmation workflow performance, **newly added** evidence store performance metrics, **enhanced** model switching performance metrics with legacy alias tracking, **newly added** execution signing performance metrics, **newly added** secret redaction performance metrics, and **newly added** authoring trace capture performance metrics.
 
 ## Troubleshooting Guide
 Common issues and strategies:
@@ -1235,6 +1417,15 @@ Common issues and strategies:
 - **NEW**: Approval Kind Discrimination Issues: Check that flow context is properly bound and browser-write detection predicates are functioning as expected.
 - **NEW**: Flow Headline Leakage: Verify that flow_summary is only included when approval_kind is 'flow' and browser-write detection is working correctly.
 - **NEW**: Flow Authority Issues: Monitor flow approval recording and verify TTL-based expiration is working for browser flow unlocks.
+- **NEW**: Secret Redaction Issues: Monitor secret redaction effectiveness and verify that action card parameters are properly masked in display and persistence layers.
+- **NEW**: Allow-List Misconfiguration: Verify KNOWN_SAFE_FIELDS configuration is correct and that legitimate fields are not being incorrectly masked.
+- **NEW**: Signed Path Integrity: Verify that secret redaction does not affect the signed execution path and that args_digest remains byte-identical to raw parameters.
+- **NEW**: Authoring Trace Capture Issues: Monitor trace capture success rates and verify that approved mutations are being captured correctly.
+- **NEW**: Trace Store Connectivity: Verify authoring trace store backend configuration and database connectivity for Postgres deployments.
+- **NEW**: Mixed Session Trace Issues: Check that both per-action and flow-unlock paths contribute to the same session-scoped trace.
+- **NEW**: Trace Step Cap Issues: Verify AGENT_AUTHORING_TRACE_MAX_STEPS is set appropriately for complex troubleshooting sessions.
+- **NEW**: Idle Trace Cleanup: Monitor idle-GC operations and verify draft traces are being reclaimed according to configured time windows.
+- **NEW**: Parameterization Issues: Verify that literal credentials are properly replaced with placeholders before trace capture.
 - **ENHANCED**: Tier_2 Owner Attribution Issues: Verify that re-parked cards are properly attributed to session owner rather than tier_2 approver to prevent self-approval rule conflicts.
 - **ENHANCED**: Legacy Alias Issues: Monitor legacy alias usage and verify backward compatibility is working correctly for pre-SPEC-026 sessions.
 - **ENHANCED**: Model ID Normalization: Verify that model IDs are properly normalized throughout the request pipeline and check for any inconsistencies.
@@ -1267,6 +1458,13 @@ Operational checks:
 - **NEW**: Browser-write detection monitoring: Verify tool name mapping and browser-write predicate functionality.
 - **NEW**: Approval kind monitoring: Track flow vs action approval distribution and verify proper card rendering.
 - **NEW**: Flow authority monitoring: Monitor flow approval recording, TTL expiration, and session-scoped authority management.
+- **NEW**: Secret redaction monitoring: Track masking operations, allow-list effectiveness, and verify no plaintext secrets appear in display or persistence layers.
+- **NEW**: Signed path verification: Monitor args_digest integrity and verify redaction never affects signing inputs.
+- **NEW**: Authoring trace monitoring: Track trace capture success rates, trace status changes, and idle-GC operations.
+- **NEW**: Mixed session trace verification: Verify that both per-action and flow-unlock paths contribute to coherent ordered traces.
+- **NEW**: Trace capacity monitoring: Monitor trace step counts and adjust AGENT_AUTHORING_TRACE_MAX_STEPS for complex sessions.
+- **NEW**: Trace retention monitoring: Verify idle-GC operations are reclaiming old draft traces according to configured time windows.
+- **NEW**: Parameterization verification: Monitor trace capture to ensure literal credentials are properly replaced with placeholders.
 - **ENHANCED**: Tier_2 owner attribution monitoring: Verify re-parked cards are attributed to session owner and tier_2 approvers can make decisions without self-approval conflicts.
 - **ENHANCED**: Legacy alias monitoring: Track legacy alias usage and verify backward compatibility is functioning correctly.
 - **ENHANCED**: Model ID normalization verification: Monitor model ID normalization throughout the request pipeline and check for any inconsistencies.
@@ -1279,6 +1477,7 @@ Operational checks:
 - [agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
@@ -1286,8 +1485,10 @@ Operational checks:
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
 - [execution_records.py](file://products/agent-platform/src/agent_service/services/execution_records.py)
+- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [audit_emitter.py](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 
 ## Conclusion
-The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, session-level model persistence, **updated** intelligent provider error attribution, and **newly added** comprehensive signing integration for tamper-evident mutation approvals with fail-closed security posture and explicit approval kind discrimination. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards to prevent self-approval rule conflicts. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** evidence capture and persistence that ensures tool call and result evidence is reliably stored for replay and audit purposes, **enhanced** runtime model resolution that provides flexible model selection with fail-closed validation, legacy alias support for backward compatibility, and **updated** intelligent provider error attribution that accurately identifies failing providers in multi-provider environments, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality. **NEW**: The comprehensive evidence capture and persistence system ensures that tool call and result evidence is reliably captured during streaming operations, with robust size management, budget enforcement, and best-effort failure handling that never affects the main streaming flow. The evidence store provides replay capability for session evidence, enabling operators to review the exact tool interactions that occurred during agent execution. **NEW**: The comprehensive signing integration system provides tamper-evident mutation approvals with HMAC-SHA256 signatures, durable execution record persistence, result observation with receipt building, and complete audit trail correlation from operator approval through execution completion. The fail-closed security posture ensures that missing signing keys reject entire mutation batches with proper audit trails, preventing unauthorized mutations even when HITL is enabled. **NEW**: The explicit approval kind discrimination system provides clear distinction between flow-based approvals (browser flows) and action-based approvals (individual tool calls), with browser-write detection logic ensuring proper card rendering and flow headline display only for appropriate approval types. This eliminates the headline-leak defect class by making approval kind structural rather than inferred from ambient session state. **ENHANCED**: The runtime model resolution system provides flexible model selection with credential-gated catalog validation, legacy alias support for backward compatibility with pre-SPEC-026 sessions, session-level model persistence for consistent routing, fail-closed behavior for unknown model IDs, and improved error handling throughout the request pipeline. The `_normalize_model_id()` method ensures consistent model ID handling across the system, while the enhanced session management tracks normalized model IDs for better audit trails and operational visibility. **UPDATED**: The intelligent provider error attribution system enhances diagnostic accuracy by identifying the actual provider that failed during fallback scenarios through model catalog lookups, preventing misattribution of failures in multi-provider environments and providing clearer error messages for operators. **ENHANCED**: The tier_2 owner attribution system prevents self-approval rule conflicts by properly attributing re-parked cards to session owner rather than tier_2 approver, enabling multi-step approval workflows where different operators can participate in the approval process. Together, these enhancements provide a complete solution for reliable, auditable, and operator-controlled agent execution with flexible model management, accurate error attribution, tamper-evident mutation approvals, explicit approval kind discrimination, tier_2 approval support, and backward compatibility in production environments.
+The runtime kernel and agent lifecycle management provide a robust foundation for executing agents with durable state, configurable behavior, resilient operations, enhanced security through delegated token handling with rotation support, comprehensive state persistence capabilities, sophisticated AgentScope 2.0.6 middleware integration, **newly added** complete Human-in-the-Loop (HITL) confirmation bridging for operator approval workflows, **newly added** comprehensive evidence capture and persistence for streaming tool calls, **enhanced** runtime model resolution with credential-gated catalog validation, legacy alias support, session-level model persistence, **updated** intelligent provider error attribution, **newly added** comprehensive signing integration for tamper-evident mutation approvals with fail-closed security posture and explicit approval kind discrimination, **newly added** secret redaction logic for action cards that prevents plaintext secret exposure in display and persistence layers while maintaining the integrity of the signed execution path, and **newly added** comprehensive authoring-trace capture that ensures mixed sessions graduate as coherent ordered traces rather than fragmented half-traces. **Enhanced**: Now supports tier_2 approval scenarios with proper owner attribution for re-parked cards to prevent self-approval rule conflicts. By combining clear state transitions, strong configuration management, careful resource handling, sophisticated token management with graceful degradation, advanced state persistence through the AgentStateStore protocol, comprehensive middleware stack with OpenTelemetry tracing and reply budget control, **newly added** seamless HITL confirmation bridging that enables human approval workflows for sensitive tool executions, **newly added** evidence capture and persistence that ensures tool call and result evidence is reliably stored for replay and audit purposes, **enhanced** runtime model resolution that provides flexible model selection with fail-closed validation, legacy alias support for backward compatibility, **updated** intelligent provider error attribution that accurately identifies failing providers in multi-provider environments, **newly added** comprehensive signing integration for tamper-evident mutation approvals with complete audit trail correlation, explicit approval kind discrimination, **newly added** secret redaction logic that applies fail-closed masking to action card parameters at critical workflow points, **newly added** comprehensive authoring-trace capture that ensures mixed sessions graduate as coherent ordered traces, and **enhanced** owner attribution for tier_2 approval scenarios, the system supports scalable and maintainable agent execution in production environments. **Updated**: The enhanced state persistence system ensures conversation continuity across service restarts through pluggable backends with TTL-based cleanup, while structured output support in v2 chat endpoints enables validated structured responses. The AgentScope 2.0.6 middleware integration provides OpenTelemetry tracing for comprehensive observability, reply budget control to prevent runaway turns, and sophisticated permission management for headless environments. The contextvar-based token delegation system enables seamless token rotation across cached toolkits, while the comprehensive metrics and observability framework provides deep insights into system health and performance. **NEW**: The complete HITL confirmation bridging system seamlessly integrates with existing streaming infrastructure, providing operator approval workflows for sensitive tool executions while maintaining all existing functionality. **NEW**: The comprehensive evidence capture and persistence system ensures that tool call and result evidence is reliably captured during streaming operations, with robust size management, budget enforcement, and best-effort failure handling that never affects the main streaming flow. The evidence store provides replay capability for session evidence, enabling operators to review the exact tool interactions that occurred during agent execution. **NEW**: The comprehensive signing integration system provides tamper-evident mutation approvals with HMAC-SHA256 signatures, durable execution record persistence, result observation with receipt building, and complete audit trail correlation from operator approval through execution completion. The fail-closed security posture ensures that missing signing keys reject entire mutation batches with proper audit trails, preventing unauthorized mutations even when HITL is enabled. **NEW**: The explicit approval kind discrimination system provides clear distinction between flow-based approvals (browser flows) and action-based approvals (individual tool calls), with browser-write detection logic ensuring proper card rendering and flow headline display only for appropriate approval types. This eliminates the headline-leak defect class by making approval kind structural rather than inferred from ambient session state. **NEW**: The secret redaction integration system applies fail-closed masking to action card parameters at critical confirmation workflow points, ensuring display and persistence layers never expose plaintext secrets while maintaining the integrity of the signed execution path. The redaction logic operates as a pure projection that never mutates signing inputs, preserving the byte-identical nature of args_digest verification. **NEW**: The comprehensive authoring-trace capture system ensures that mixed sessions graduate as coherent ordered traces rather than fragmented half-traces, capturing approved mutating steps from both per-action approval cards and flow-unlocked browser writes. The dual-backend store provides in-memory support for development/testing and Postgres support for production deployments, with lifecycle-bound retention, per-session step caps, and idle-GC for draft traces. The best-effort failure handling ensures trace capture failures degrade gracefully without affecting the main execution flow, signed requests, or audit events. **ENHANCED**: The runtime model resolution system provides flexible model selection with credential-gated catalog validation, legacy alias support for backward compatibility with pre-SPEC-026 sessions, session-level model persistence for consistent routing, fail-closed behavior for unknown model IDs, and improved error handling throughout the request pipeline. The `_normalize_model_id()` method ensures consistent model ID handling across the system, while the enhanced session management tracks normalized model IDs for better audit trails and operational visibility. **UPDATED**: The intelligent provider error attribution system enhances diagnostic accuracy by identifying the actual provider that failed during fallback scenarios through model catalog lookups, preventing misattribution of failures in multi-provider environments and providing clearer error messages for operators. **ENHANCED**: The tier_2 owner attribution system prevents self-approval rule conflicts by properly attributing re-parked cards to session owner rather than tier_2 approver, enabling multi-step approval workflows where different operators can participate in the approval process. Together, these enhancements provide a complete solution for reliable, auditable, and operator-controlled agent execution with flexible model management, accurate error attribution, tamper-evident mutation approvals, explicit approval kind discrimination, secret redaction for action cards, comprehensive authoring-trace capture for skill graduation, tier_2 approval support, backward compatibility, and comprehensive security in production environments.

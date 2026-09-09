@@ -1,1 +1,0 @@
-Multi-product Python platform that delivers an agent runtime, policy-enforced gateways, identity federation, skills catalog, audit trail, incident triage, and operator portal as independently deployable services sharing JSON contracts.

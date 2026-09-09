@@ -12,11 +12,7 @@
 - [confirmation-race-and-restart-sweep-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-confirmation-race-and-restart-sweep-patch.md)
 - [post-live-check-confirmation-card-flow-headline.md](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md)
 - [action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
-- [SPEC-053 spec.md](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md)
-- [SPEC-053 plan.md](file://docs/specs/SPEC-053-skill-declared-step-intent/plan.md)
-- [SPEC-054 spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
-- [SPEC-054 plan.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/plan.md)
-- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
@@ -44,14 +40,13 @@
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect SPEC-054's action-level approval as first-class alongside flow-level approval, changing the HITL confirmation bridging model
-- Enhanced documentation to cover both flow-based and action-based approvals with different security models and UI representations
-- Added comprehensive coverage of change request cards with secret masking for ad-hoc browser writes
-- Updated stream contract schemas to v11 with optional `approval_kind`, `change_request`, and `message` fields
-- Modified durable confirmation records to persist `approval_kind`, `change_request`, and card message for parity across surfaces
-- Enhanced tool gateway to park ad-hoc browser writes as per-action signed gates instead of hard-denying them
-- Updated operator portal components to render change request layout for action approvals with secret masking
-- Improved headline leak prevention through explicit approval kind discrimination rather than ambient context probing
+- Added comprehensive secret parameter masking capabilities with fail-closed security posture
+- Implemented pre-redaction integration points in runtime kernel for pending calls before streaming and persistence
+- Enhanced action-type confirmations with structured change request projections and secret masking
+- Updated durable confirmation records to store redacted parameters alongside change request projections
+- Integrated secret vocabulary validation between agent platform and tool gateway components
+- Enhanced operator portal rendering to display masked values and change request layouts
+- Improved security posture by ensuring secrets never leak through any confirmation surface
 
 ## Table of Contents
 1. Introduction
@@ -65,7 +60,7 @@
 9. Conclusion
 
 ## Introduction
-This document explains the Human-in-the-Loop (HITL) confirmation bridging implemented under SPEC-020, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, and **SPEC-054's action-level approval with change request cards**. The bridge transforms kernel ASK parking into a portal-visible approval flow with tiered governance, durable state management, authored workflow intent, and **first-class action-level approvals**: tier_1 allows operator self-confirmation for routine destructive actions, while tier_2 requires designated approvers distinct from the requester for critical destructive actions.
+This document explains the Human-in-the-Loop (HITL) confirmation bridging implemented under SPEC-020, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, **SPEC-054's action-level approval with change request cards**, and **SPEC-055's secret parameter masking hardening**. The bridge transforms kernel ASK parking into a portal-visible approval flow with tiered governance, durable state management, authored workflow intent, first-class action-level approvals, and **comprehensive secret protection through fail-closed masking**.
 
 Key outcomes:
 - Kernel ASK events become SSE confirmation_request frames with risk_level metadata and tier requirements.
@@ -88,6 +83,7 @@ Key outcomes:
 - **Change request cards**: Action approvals surface decision-relevant parameters as readable change requests with secret masking, promoting them from collapsed technical details to the approval intention.
 - **Durable card-message parity**: Card confirmation messages persist on durable records so approver inbox and owner transcripts render the same message as live operator cards.
 - **Improved headline leak prevention**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines.
+- **Secret parameter masking**: Fail-closed security posture ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
@@ -99,16 +95,17 @@ Key outcomes:
 - [action-approval-and-change-request-card.md:1-147](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md#L1-L147)
 - [SPEC-053 spec.md:19-51](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L19-L51)
 - [SPEC-054 spec.md:32-105](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L32-L105)
+- [SPEC-055 plan.md:331-347](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L331-L347)
 - [spec.md:17-31](file://docs/specs/SPEC-030-require-approval-policy-semantics/spec.md#L17-L31)
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
-- Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, and durable confirmation records store.
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, **SPEC-055 secret masking hardening**, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
+- Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, durable confirmation records store, and **secret parameter masking with fail-closed security posture**.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement, and browser flow binding with intent propagation.
 - Skills hub: skill envelope validation, ingestion pipeline, and storage backend with flow_intent support.
-- Operator portal: confirmation card rendering with tier badges, confirm handler, approvals view, and authored intent display.
+- Operator portal: confirmation card rendering with tier badges, confirm handler, approvals view, authored intent display, and **change request layout with secret masking**.
 - Shared contracts: stream event schema growth with risk_level, confirm request schema, policy rule with approval tiers, session schema with flow_summary support, and skill schema with flow_intent field.
 
 ```mermaid
@@ -127,6 +124,7 @@ subgraph "Agent Platform"
 RK["runtime_kernel.py"]
 HC["services/hitl_confirmations.py"]
 CR["services/confirmation_records.py"]
+SP["services/secret_params.py"]
 FA["services/flow_approvals.py"]
 R2["api/v2/routes.py"]
 S2["schemas/v2.py"]
@@ -152,6 +150,7 @@ BC --> FA
 FA --> RK
 RK --> HC
 RK --> CR
+RK --> SP
 CR --> PG
 GC -.-> POL
 R2 -.-> SC
@@ -172,6 +171,7 @@ AI -.-> AI
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [hitl_confirmations.py:85-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L85-L208)
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
 - [v2.py:120-150](file://products/agent-platform/src/agent_service/schemas/v2.py#L120-L150)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
@@ -191,7 +191,7 @@ AI -.-> AI
 ## Core Components
 - **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk tracking and canonical name mapping; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata and gateway name mapping.
 - **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling. Now includes flow_summary JSONB column for browser-flow headline preservation and **approval_kind/change_request/message fields for action-level approvals**.
-- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records.
+- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records. **Updated**: Integrates pre-redaction of pending calls before streaming and persistence to prevent secret leakage.
 - **Flow Context Management**: Tracks browser flow state including skill_id, origin, title, description, risk_class, and now flow_intent for authored intent display. Provides summary() method that emits complete flow context including the new flow_intent field for card rendering.
 - **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience. **New**: Includes flow_summary coercion for schema compliance.
 - **Pending confirmation endpoint**: GET /api/v2/chat/pending-confirmation provides authoritative parked batch metadata including owner_user_id, derived policy action, and pending_calls with risk levels for gateway tier enforcement.
@@ -206,6 +206,7 @@ AI -.-> AI
 - **Action-level approval discriminator**: Explicit `approval_kind` field distinguishes between flow approvals (bound browser flows) and action approvals (ad-hoc mutations), enabling per-action signed gates for unbound browser writes on allowlisted origins.
 - **Change request projection**: Secret-masked display projection of decision-relevant parameters for action approvals, promoting them from collapsed technical details to readable change requests.
 - **Card message persistence**: Confirmation card messages persist on durable records ensuring parity between live operator cards and replayed surfaces.
+- **Secret parameter masking**: **Fail-closed security posture** ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe. Uses curated formatters for specific tools and generic fallback masking for unknown parameters. **Updated**: Pre-redaction occurs in runtime kernel before streaming and persistence to prevent any secret leakage.
 - **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking.
 
 **Section sources**
@@ -227,9 +228,10 @@ AI -.-> AI
 - [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
 - [skill.py:15-43](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L43)
 - [ingestion.py:199-213](file://products/skills-hub/src/skills_hub/services/ingestion.py#L199-L213)
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, and **action-level approval discrimination**:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, **action-level approval discrimination**, and **fail-closed secret masking**:
 
 ```mermaid
 sequenceDiagram
@@ -249,9 +251,12 @@ Hub->>DB : Persist skill with flow_intent
 Note over RK : Stream turn begins
 RK-->>AP : RequireUserConfirmEvent + risk_levels + flow_summary
 AP->>Reg : register(session, user, reply, tool_calls, timeout, risk_levels, gateway_names)
+AP->>AP : Build pending_calls_payload() once
+AP->>AP : _confirmation_message(pending_calls) - compute message BEFORE redaction
+AP->>AP : redact_pending_calls(pending, pending_calls) - fail-closed masking
 AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)
-Store->>DB : INSERT confirmation_records (with flow_summary JSONB including flow_intent)
-AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name], flow_summary{title, description, flow_intent}, approval_kind, change_request, message}
+Store->>DB : INSERT confirmation_records (with redacted pending_calls JSONB)
+AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name, change_request], flow_summary{title, description, flow_intent}, approval_kind, message}
 Portal->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>GW : enforce_policy("chat : confirm")
 alt Decision involves write/admin tool
@@ -368,6 +373,7 @@ Responsibilities:
 - Support cross-session queries for approvals inbox with metadata-only exposure.
 - **New**: Include flow_summary JSONB column for browser-flow headline preservation across all surfaces.
 - **New**: Add approval_kind, change_request, and message columns for action-level approval support and card message parity.
+- **Updated**: Stores redacted pending_calls with fail-closed secret masking applied before persistence.
 
 Storage design:
 - Uses same Postgres posture as SPEC-016 session store with shared database connection management.
@@ -376,6 +382,7 @@ Storage design:
 - **Enhanced**: Startup sweep now uses configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for precise stale record identification.
 - **New**: flow_summary column migration handled automatically at startup for backward compatibility.
 - **New**: approval_kind, change_request, and message columns added for action-level approval support.
+- **Updated**: Redacted parameters stored in pending_calls JSONB to prevent secret leakage in persisted records.
 
 ```mermaid
 flowchart TD
@@ -390,6 +397,8 @@ Resolve["mark_resolved(session, confirm_id, status, decider, decision)"] --> Upd
 Update --> Complete
 Startup["initialize(stale_after_seconds)"] --> CloseStale["Close pending records past TTL"]
 CloseStale --> Complete
+Redact["redact_pending_calls(pending, payload)"] --> MaskParams["Apply fail-closed masking to parameters"]
+MaskParams --> StoreRedacted["Store redacted parameters in pending_calls"]
 ```
 
 **Diagram sources**
@@ -397,6 +406,7 @@ CloseStale --> Complete
 - [confirmation_records.py:233-317](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L233-L317)
 - [confirmation_records.py:279-285](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L279-L285)
 - [confirmation_records.py:415-431](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L415-L431)
+- [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
 
 **Section sources**
 - [confirmation_records.py:114-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L114-L565)
@@ -434,7 +444,7 @@ EmitFrame --> CardRender["Portal renders authored intent"]
 - [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
 - [flow_approvals.py:112-131](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L112-L131)
 
-### Runtime Kernel Bridge (Park and Resume with Risk Mapping, Canonical Name Resolution, and Flow Summary Propagation)
+### Runtime Kernel Bridge (Park and Resume with Risk Mapping, Canonical Name Resolution, Flow Summary Propagation, and Pre-Redaction)
 Behavior:
 - On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, yields frame, and ends stream without message_end.
 - **Enhanced**: Persists confirmation lifecycle to durable store before streaming confirmation_request frame to client.
@@ -442,6 +452,8 @@ Behavior:
 - **New**: Adds approval_kind discriminator to distinguish between flow and action approvals.
 - **New**: Assembles change_request projection from parameters with secret masking for action approvals.
 - **New**: Persists card message for durable parity across surfaces.
+- **Updated**: **Pre-redaction integration point**: Applies fail-closed secret masking to pending_calls payload BEFORE streaming to client and BEFORE persisting to durable store, ensuring no plaintext secrets appear anywhere in the confirmation pipeline.
+- **Critical Security Enhancement**: Message computation happens BEFORE redaction to ensure the curated effect sentence can read raw parameters, while the streamed and persisted payload carries redacted values.
 - resume_confirmation sets delegated token, emits confirmation_result first, then streams resumed reply through normalization/evidence pipeline.
 - **Enhanced**: Records resolution outcome to durable store after confirmation_result flows through.
 - Handles chained parks: resumed turns can trigger another ASK, emitting a fresh confirmation_request.
@@ -462,7 +474,10 @@ SetFlow --> AssembleChangeRequest["Assemble change_request for action approvals"
 SetAction --> AssembleChangeRequest
 AssembleChangeRequest --> MapNames["_toolkit_gateway_name_map(toolkit)"]
 MapNames --> Register["Register pending confirmation with risk_levels, gateway_names, flow_summary"]
-Register --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)"]
+Register --> BuildPayload["Build pending_calls_payload() ONCE"]
+BuildPayload --> ComputeMessage["_confirmation_message(payload) - BEFORE redaction"]
+ComputeMessage --> RedactPayload["redact_pending_calls(pending, payload) - FAIL-CLOSED MASKING"]
+RedactPayload --> Persist["save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)"]
 Persist --> EndStream["End stream (no message_end)"]
 EndStream --> WaitDecision["Await confirm decision"]
 WaitDecision --> Resume["resume_confirmation(UserConfirmResultEvent)"]
@@ -479,11 +494,50 @@ ChainedASK -- No --> Complete["Complete turn"]
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+- [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
 
 **Section sources**
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+
+### Secret Parameter Masking (Fail-Closed Security Posture)
+Responsibilities:
+- **Fail-closed masking**: All secret-bearing parameters are masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface.
+- **Curated formatters**: Specific tools get tailored change request projections with appropriate masking (e.g., web.fill_credential shows reference-only, never values).
+- **Generic fallback**: Unknown tools get label→value projection with fail-closed masking applied to all parameters.
+- **Vocabulary synchronization**: Twin masking vocabularies maintained between agent platform and tool gateway, validated by build system to prevent drift.
+- **Display-only projection**: Masking never affects signed parameters or args_digest calculations, maintaining security integrity.
+
+Security posture:
+- **Fail-closed by default**: Parameters mask unless positively listed in KNOWN_SAFE_FIELDS allow-list.
+- **Name-based masking**: Parameter names containing secret indicators (password, token, secret, etc.) are always masked.
+- **Opaque value fields**: Certain tool parameters (like web.type.text) are always masked regardless of parameter name.
+- **Safe field allow-list**: Only explicitly whitelisted fields (like k8s.delete_pod.name, k8s.delete_pod.namespace) render verbatim.
+- **Twin vocabulary validation**: Build system validates that agent platform and tool gateway masking vocabularies remain synchronized.
+
+```mermaid
+flowchart TD
+Parameter["Tool Parameter"] --> CheckKnownSafe{"Is in KNOWN_SAFE_FIELDS?"}
+CheckKnownSafe -- Yes --> RenderVerbatim["Render verbatim value"]
+CheckKnownSafe -- No --> CheckSecretName{"Contains secret indicator?"}
+CheckSecretName -- Yes --> MaskValue["Mask to ***"]
+CheckSecretName -- No --> CheckOpaque{"Is opaque value field?"}
+CheckOpaque -- Yes --> MaskValue
+CheckOpaque -- No --> DefaultMask["Default mask (fail-closed)"]
+MaskValue --> ApplyMask["Apply *** mask"]
+DefaultMask --> ApplyMask
+ApplyMask --> Display["Display masked value"]
+RenderVerbatim --> Display
+```
+
+**Diagram sources**
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
+- [hitl_confirmations.py:229-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L229-L349)
+
+**Section sources**
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
+- [hitl_confirmations.py:229-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L229-L349)
 
 ### Stream Event Normalization (Flow Summary Coercion)
 Responsibilities:
@@ -796,6 +850,7 @@ Normal --> Done
   - Portal depends on SSE parser and styles for card rendering with tier badges.
   - **New**: Portal includes ApprovalsView component for designated approvers and flow summary decoding.
   - **New**: Skills hub depends on validation framework for flow_intent frontmatter processing.
+  - **New**: Secret parameter masking depends on twin vocabulary synchronization between agent platform and tool gateway.
 
 ```mermaid
 graph LR
@@ -811,6 +866,7 @@ GWSVC --> APPROVALSROUTE["api/routes/approvals.py"]
 ROUTES --> KERNEL["runtime_kernel.py"]
 KERNEL --> REGISTRY["hitl_confirmations.py"]
 KERNEL --> RECORDS["confirmation_records.py"]
+KERNEL --> SECRET["secret_params.py"]
 RECORDS --> POSTGRES["PostgreSQL"]
 CHATROUTE --> GWSVC
 CHATROUTE --> SCHEMA
@@ -821,6 +877,7 @@ PORTAL -.-> SESSION_SCHEMA
 SKILLSHUB --> BROWSERCONN["browser_connector.py"]
 BROWSERCONN --> FLOWCTX["flow_approvals.py"]
 FLOWCTX --> KERNEL
+SECRET -.-> VALIDATE["validate_secret_vocabulary.py"]
 ```
 
 **Diagram sources**
@@ -837,6 +894,7 @@ FLOWCTX --> KERNEL
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [hitl_confirmations.py:85-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L85-L208)
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
@@ -871,6 +929,9 @@ FLOWCTX --> KERNEL
 - **SPEC-054 Enhancement**: Approval kind determination uses efficient predicate checks rather than expensive ambient context probes.
 - **SPEC-054 Enhancement**: Change request projection is built separately from signed parameters, avoiding signature recalculation overhead.
 - **SPEC-054 Enhancement**: Secret masking uses existing vocabulary reuse, avoiding new redaction logic overhead.
+- **SPEC-055 Enhancement**: Fail-closed masking is optimized with allow-list checking and substring matching, minimizing computational overhead while providing strong security guarantees.
+- **SPEC-055 Enhancement**: Pre-redaction occurs once per confirmation park, avoiding redundant masking operations during streaming and persistence.
+- **SPEC-055 Enhancement**: Vocabulary validation runs at build time, not runtime, preventing performance impact during confirmation processing.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -908,6 +969,12 @@ Common issues and resolutions:
   - **Card message missing on replay**: Verify message field is persisted on durable records and that legacy records degrade gracefully.
   - **Headline leak on action cards**: Ensure approval_kind is explicitly set to 'action' for non-browser flows, preventing flow headline inheritance.
   - **Ad-hoc browser writes still denied**: Check that origin is on allowlist and that bridging is enabled (AGENT_HITL_CONFIRM_TIMEOUT > 0).
+- **SPEC-055 Issues**:
+  - **Secrets appearing in plaintext**: Verify fail-closed masking is working correctly; check that parameters are not in KNOWN_SAFE_FIELDS allow-list.
+  - **Change request showing unmasked values**: Ensure curated formatters are applying appropriate masking for sensitive fields like web.type.text.
+  - **Vocabulary validation failures**: Check that agent platform and tool gateway masking vocabularies are synchronized; run make verify to validate.
+  - **Pre-redaction not occurring**: Verify runtime kernel is calling redact_pending_calls before streaming and persistence.
+  - **Durable records containing secrets**: Check that post-redaction storage is capturing redacted parameters, not original values.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -930,6 +997,8 @@ Operational checks:
 - **v0.33.1 Verification**: Verify that flow_summary is properly included in confirmation_request frames and that the portal decoder correctly parses browser-flow headlines for consistent workflow framing.
 - **SPEC-053 Verification**: Verify that skills with flow_intent declarations validate successfully and that browser flow cards display the authored intent line prominently above technical details.
 - **SPEC-054 Verification**: Verify that ad-hoc browser writes on allowlisted origins park for per-action approval instead of being hard-denied, and that change request cards display secret-masked parameters appropriately.
+- **SPEC-055 Verification**: Verify that all secret-bearing parameters are masked in confirmation cards, durable records, and stream frames; check that fail-closed masking prevents plaintext secrets from appearing anywhere in the confirmation pipeline.
+- **Vocabulary Synchronization**: Run `make verify` to ensure agent platform and tool gateway masking vocabularies remain synchronized; address any validation failures immediately.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
@@ -952,11 +1021,13 @@ Operational checks:
 - [SPEC-053 spec.md:83-108](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L83-L108)
 - [SPEC-053 plan.md:34-58](file://docs/specs/SPEC-053-skill-declared-step-intent/plan.md#L34-L58)
 - [SPEC-054 spec.md:117-143](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L117-L143)
+- [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
+- [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
 
 ## Conclusion
-SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, and **SPEC-054's action-level approval with change request cards**. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
+SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, **SPEC-054's action-level approval with change request cards**, and **SPEC-055's secret parameter masking hardening**. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
 
-The integration provides a six-layer security model: deny-by-default policy bundle actions, tool risk tiers with tools:mutate admission gate, agent auto-allow list exclusion for mutating tools, mandatory HITL confirmation with tier enforcement, approval tier validation ensuring appropriate approver identities, and skill-declared intent providing clear operator understanding of what each approval actually achieves. This ensures that no mutating action can execute without explicit human approval at the correct governance level, maintaining the platform's operational safety guarantees while enabling powerful automated remediation capabilities with clear, authored intent communication.
+The integration provides a seven-layer security model: deny-by-default policy bundle actions, tool risk tiers with tools:mutate admission gate, agent auto-allow list exclusion for mutating tools, mandatory HITL confirmation with tier enforcement, approval tier validation ensuring appropriate approver identities, skill-declared intent providing clear operator understanding of what each approval actually achieves, and **fail-closed secret masking ensuring no plaintext secrets appear in any confirmation surface**. This ensures that no mutating action can execute without explicit human approval at the correct governance level, maintaining the platform's operational safety guarantees while enabling powerful automated remediation capabilities with clear, authored intent communication.
 
 **Critical Enhancement**: The recent SPEC-030 implementation introduces tiered approval governance where tier_1 permits operator self-confirmation for routine destructive actions (like service restarts), while tier_2 requires designated approvers distinct from the requester for critical destructive actions. This addresses the governance gap where any chat:confirm holder could previously confirm any parked mutating call, including their own. The tier system enforces separation of duties through policy configuration rather than code special cases, making approval governance flexible, auditable, and enforceable.
 
@@ -982,6 +1053,12 @@ The integration provides a six-layer security model: deny-by-default policy bund
 
 **SPEC-054 Critical Enhancement**: Durable card-message parity ensures that confirmation card messages persist on durable records, so the approver inbox and owner transcripts render the same message as live operator cards. This fixes the issue where card messages would disappear on replayed surfaces, maintaining consistent user experience across all approval surfaces.
 
+**SPEC-055 Critical Enhancement**: **Fail-closed secret parameter masking** represents a fundamental security improvement to the HITL confirmation system. All secret-bearing parameters are now masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface including live streams, durable records, and operator portals. The fail-closed approach ensures that unknown or off-vocabulary secrets are always masked, eliminating the possibility of secret leakage through newly discovered parameter names or custom tool implementations.
+
+**SPEC-055 Critical Enhancement**: **Pre-redaction integration points** in the runtime kernel ensure that secret masking occurs before any data leaves the kernel boundary. The pending_calls payload is built once, the card message is computed from raw parameters (before redaction), and then fail-closed masking is applied to the payload before streaming to clients and persisting to durable storage. This architectural decision ensures that no plaintext secrets can escape the kernel, regardless of downstream processing or storage failures.
+
+**SPEC-055 Critical Enhancement**: **Twin vocabulary synchronization** between agent platform and tool gateway ensures consistent masking behavior across all confirmation surfaces. The build system validates that both components maintain identical masking vocabularies, preventing drift that could lead to inconsistent secret handling. This validation catches configuration errors early in the development cycle rather than allowing them to reach production.
+
 **New Capability**: The addition of the pending-confirmation endpoint, RISK_LEVEL_ACTIONS mapping, and approvals inbox enables sophisticated approval workflows where the platform gateway can make informed tier enforcement decisions based on authoritative parked batch metadata, including the original session owner and derived policy actions from tool risk levels.
 
 **New Capability**: The approvals inbox provides cross-session discovery for designated approvers with metadata-only exposure, enabling operators to manage parked confirmations across multiple sessions without exposing owner transcript content.
@@ -997,5 +1074,7 @@ The integration provides a six-layer security model: deny-by-default policy bund
 **New Capability**: Change request projection promotes decision-relevant parameters from collapsed technical details to readable change requests with secret masking, improving operator understanding of what they're approving without compromising security.
 
 **New Capability**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines, structurally eliminating the headline leak class of defects rather than merely gating them.
+
+**New Capability**: Fail-closed secret masking provides comprehensive protection against secret leakage across all confirmation surfaces, ensuring that plaintext secrets never appear in live streams, durable records, operator portals, or audit trails.
 
 [No sources needed since this section summarizes without analyzing specific files]
