@@ -44,6 +44,9 @@ SKILL_DRAFT_PATCH = (
 SKILL_TARGET_PATCH = (
     "platform_gateway.services.gateway_service.agent_client.declare_skill_target"
 )
+SKILL_GRADUATE_PATCH = (
+    "platform_gateway.services.gateway_service.agent_client.graduate_session_skill"
+)
 INCIDENT_SKILL_DRAFT_PATCH = (
     "platform_gateway.services.gateway_service."
     "agent_client.create_incident_skill_draft"
@@ -1029,6 +1032,192 @@ class SkillDraftProxyTests(DocumentsProxyBase):
             patch(SKILL_DRAFT_PATCH, upstream),
         ):
             response = self.client.post("/api/v1/sessions/ses-1/skill-draft")
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "agent service unavailable")
+
+
+class SkillGraduateProxyTests(DocumentsProxyBase):
+    """SPEC-055 R-4: skill graduation behind ``session:skill_graduate``.
+
+    The mapping is the *draft's*, not the declaration's, and the divergence is
+    deliberate: a declaration reaches no downstream validation leg, so a 503
+    there is just an unhealthy upstream and collapses to the house 502. A
+    graduation validates the draft on skills-hub's own ingestion path, so 503
+    ("not configured") and 502 ("unreachable") are domain outcomes meaning no
+    validated artifact exists, and both ride through unchanged.
+
+    The refusal an operator is most likely to hit is a **409** — the agent's
+    deterministic blast-radius refusal. Its detail names every guard the trace
+    failed and the steps responsible, which is the whole answer to "why can't
+    the session I spent an hour on become a skill", so it is asserted verbatim
+    rather than merely asserted present.
+    """
+
+    GRADUATION_PAYLOAD = {
+        "markdown": (
+            "---\ntitle: \"Restart checkout\"\nkind: executable_flow\n"
+            "risk_class: write\n---\n\nBody\n"
+        ),
+        "mode": "graduated",
+        "validation": "passed",
+        "suggested_filename": "restart-checkout.md",
+        "step_count": 3,
+        "web_target": "https://admin.internal/login",
+        "declaration": "preceded",
+    }
+
+    def _post(self, session_id: str = "ses-1"):
+        return self.client.post(f"/api/v1/sessions/{session_id}/skill-graduate")
+
+    def test_operator_graduates_and_the_draft_rides_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=self.GRADUATION_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.GRADUATION_PAYLOAD)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[2], "ses-1")
+        self.assertEqual(args[3], "operator.user")
+
+    def test_approver_and_platform_admin_may_graduate(self) -> None:
+        for role in ("platform-admin", "approver"):
+            with self.subTest(role=role):
+                reset_policy_state()
+                upstream = AsyncMock(return_value=self.GRADUATION_PAYLOAD)
+                with (
+                    self._patch_identity(role, route_module="sessions"),
+                    patch(SKILL_GRADUATE_PATCH, upstream),
+                ):
+                    response = self._post()
+                self.assertEqual(response.status_code, 200)
+                upstream.assert_called_once()
+
+    def test_observer_denied_before_upstream(self) -> None:
+        # Graduating produces an executable *mutating* artifact — a higher
+        # trust level than drafting prose, which is why the action exists
+        # separately from session:skill_draft at all (OQ-3). read-only-observer
+        # holds no grant, so the denial is settled here and no draft is built.
+        upstream = AsyncMock(return_value=self.GRADUATION_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"]["action"], "session:skill_graduate"
+        )
+        upstream.assert_not_called()
+
+    def test_developer_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=self.GRADUATION_PAYLOAD)
+        with (
+            self._patch_identity("developer", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        upstream.assert_not_called()
+
+    def test_the_blast_radius_refusal_rides_through_verbatim(self) -> None:
+        refusal = (
+            "this session cannot be graduated: 24 captured steps exceed the "
+            "20-step budget a bound flow replays under, so the graduated flow "
+            "would be refused part-way through mutating; step(s) 7 have no "
+            "observed origin, so nothing proves the mutation landed on the "
+            "declared target"
+        )
+        upstream = AsyncMock(
+            side_effect=_status_error_json(409, {"detail": refusal})
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 409)
+        # Not flattened, not summarized, not replaced with the house fallback:
+        # this text is the operator's only explanation of which guard failed
+        # and which step failed it.
+        self.assertEqual(response.json()["detail"], refusal)
+
+    def test_upstream_404_passes_through_with_detail(self) -> None:
+        # Foreign/unknown sessions answer the anti-enumeration 404.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(404, {"detail": "session not found"})
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post(session_id="ses-foreign")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "session not found")
+
+    def test_upstream_503_not_configured_passes_through(self) -> None:
+        # A deliberate divergence from the declaration proxy above, which
+        # collapses a 503 to 502. Graduation has a validation leg, so 503 means
+        # "no validated artifact exists" and the dependency posture rides
+        # verbatim — an unvalidated executable draft is never returned.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                503,
+                {
+                    "detail": "skills service not configured for "
+                    "skill-graduation validation"
+                },
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "skills service not configured for skill-graduation validation",
+        )
+
+    def test_upstream_502_validation_failure_passes_through(self) -> None:
+        # The renderer and ingestion disagree — a platform fault, surfaced with
+        # the upstream's own reason rather than folded into a generic one.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                502,
+                {"detail": "graduated draft failed format validation: bad steps"},
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            "graduated draft failed format validation: bad steps",
+        )
+
+    def test_upstream_500_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(500))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_GRADUATE_PATCH, upstream),
+        ):
+            response = self._post()
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["detail"], "agent service unavailable")
 

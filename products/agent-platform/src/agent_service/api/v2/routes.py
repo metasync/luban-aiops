@@ -36,6 +36,7 @@ from agent_service.schemas.v2 import (
     DocumentCreateRequest,
     EvidenceTurn,
     SessionTitleUpdateRequest,
+    SkillGraduationResponse,
     SkillTargetDeclaration,
     SkillTargetDeclareRequest,
 )
@@ -46,6 +47,8 @@ from agent_service.services.audit_emitter import (
 )
 from agent_service.services.authoring_trace import (
     AUTHORING_TRACE_STORE,
+    TRACE_DISCARDED,
+    TRACE_GRADUATED,
     origin_of_url,
     skill_target_scope,
 )
@@ -118,6 +121,11 @@ from agent_service.services.skill_draft import (
     build_skill_draft_bundle,
     build_skeleton,
     generate_skill_draft,
+)
+from agent_service.services.skill_graduation import (
+    MODE_GRADUATED,
+    build_executable_flow_draft,
+    revalidate_blast_radius,
 )
 from agent_service.services.skills_client import (
     SkillsClientRejected,
@@ -1232,6 +1240,153 @@ async def declare_skill_target(
         session_id=session.session_id,
         target=existing,
         already_declared=already_declared,
+    )
+
+
+@router.post("/sessions/{session_id}/skill-graduate")
+async def graduate_session_skill(
+    session_id: str,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+) -> SkillGraduationResponse:
+    """Graduate a session's authoring trace into an executable-flow draft (R-4).
+
+    Contrast ``create_skill_draft`` beside this: that endpoint asks a model to
+    synthesize knowledge prose and falls back to a facts-only skeleton, so it
+    always returns something. This one renders what the session actually did
+    and refuses when the trace cannot support a replay — no model call, no
+    skeleton, and no step that was not approved by a human and signed before it
+    ran.
+
+    Authorization (``session:skill_graduate``, distinct from
+    ``session:skill_draft`` because the artifact is an executable *mutating*
+    one — OQ-3) is enforced by the platform-gateway; ownership is re-checked
+    server-side, so a foreign or unknown id answers the structural 404 per the
+    anti-enumeration convention.
+
+    ``revalidate_blast_radius`` runs **before** the draft exists, re-applying
+    at graduation the guards the tool-gateway applies at replay: the step
+    budget, every observed origin inside the declared target's origin, a
+    write-class declaration with no read-tier step in it, no unresolved
+    credential hole, and no argument shaped like a secret literal. A trace that
+    fails is not graduable, and the 409 names every guard it failed with the
+    steps responsible — one reason at a time would send the operator back for a
+    second round-trip to discover the next.
+
+    The draft is then validated on skills-hub's own ingestion path, so a
+    document that reaches the operator is one their skills repo will accept. A
+    failure here is a 502 rather than a refusal: re-validation already passed,
+    so the renderer and ingestion disagree, which is a platform fault worth
+    surfacing verbatim rather than a judgement about the operator's session.
+
+    Only then does the trace lifecycle flip to ``graduated``, which is terminal
+    — no later approval appends to it and the idle-GC never reclaims it, so the
+    graduated artifact and the trace it came from cannot drift apart. Flipping
+    before validation would strand a session's trace as graduated with no draft
+    to show for it whenever the validation leg is down, and the flip is
+    deliberately not best-effort: a draft returned while the lifecycle write
+    failed would leave the operator believing the session is graduated while the
+    platform still considers it open. A re-graduation of an already-graduated
+    trace is an idempotent re-export — the same document on the same UTC date,
+    the provenance block's ``date:`` being the rendering's only wall-clock
+    input — which is what an operator who lost the download needs, and it is
+    audited again because it is another act producing an executable artifact.
+
+    A ``discarded`` trace is refused: it is a deliberately dropped candidate and
+    graduation must not resurrect it. Nothing else is persisted — the draft is
+    the response, ephemeral by construction, for a human to review and merge
+    into the team's Git skills repo. The platform never auto-publishes it.
+    """
+    user_id = _user_id(x_user_id)
+    session = get_session(session_id, user_id)
+    settings = get_settings()
+    if not skills_validation_configured(settings):
+        raise HTTPException(
+            status_code=503,
+            detail="skills service not configured for skill-graduation validation",
+        )
+    if AUTHORING_TRACE_STORE.trace_status(session.session_id) == TRACE_DISCARDED:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "this session's authoring trace was discarded and cannot be "
+                "graduated"
+            ),
+        )
+
+    steps = AUTHORING_TRACE_STORE.load_for_session(session.session_id)
+    declaration = AUTHORING_TRACE_STORE.target_declaration(session.session_id)
+    target = declaration["target"] if declaration else None
+    report = revalidate_blast_radius(
+        steps,
+        target=target,
+        declared_at=declaration["declared_at"] if declaration else None,
+        # The operator's replay budget rather than the module default, so the
+        # twin of ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` moves with it.
+        max_steps=settings.skill_graduation_max_steps,
+    )
+    if not report.graduable:
+        raise HTTPException(
+            status_code=409,
+            detail="this session cannot be graduated: " + "; ".join(report.refusals),
+        )
+
+    markdown, slug = build_executable_flow_draft(
+        steps,
+        report=report,
+        session_id=session.session_id,
+        # The operator's own session title, so the skill is named for what they
+        # called the work rather than for a string this endpoint invented;
+        # ``postprocess`` clamps it to the contract's cap and a session with no
+        # title falls back to the declared scope.
+        title=session.title,
+        declared_target=target,
+    )
+    valid, reason = await _validate_skill_markdown(settings, x_request_id, markdown)
+    if not valid:
+        raise HTTPException(
+            status_code=502,
+            detail=f"graduated draft failed format validation: {reason}",
+        )
+
+    graduated_now = AUTHORING_TRACE_STORE.close_trace(
+        session.session_id, TRACE_GRADUATED
+    )
+    details: dict = {
+        "session_id": session.session_id,
+        "mode": MODE_GRADUATED,
+        "validation": "passed",
+        "step_count": report.step_count,
+        # The scoped declaration rather than the whole target row: it is what a
+        # reviewer reads to know which origin the graduated flow is bound to.
+        "web_target": report.web_target,
+        "declaration": report.declaration,
+    }
+    _emit_document_audit("skill_graduated", user_id, x_request_id, details)
+    LOGGER.info(
+        "session skill graduated",
+        extra={
+            "request_id": x_request_id,
+            "session_id": session.session_id,
+            "user_id": user_id,
+            "mode": MODE_GRADUATED,
+            "step_count": report.step_count,
+            "target_origin": origin_of_url(report.web_target or target),
+            "declaration": report.declaration,
+            # False on a re-export of an already-graduated trace, which is
+            # idempotent and still audited.
+            "graduated_now": graduated_now,
+            "unguarded_steps": len(report.unguarded_positions),
+        },
+    )
+    return SkillGraduationResponse(
+        markdown=markdown,
+        mode=MODE_GRADUATED,
+        validation="passed",
+        suggested_filename=f"{slug}.md",
+        step_count=report.step_count,
+        web_target=report.web_target,
+        declaration=report.declaration,
     )
 
 

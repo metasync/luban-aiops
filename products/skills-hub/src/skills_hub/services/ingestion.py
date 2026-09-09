@@ -39,17 +39,17 @@ MAX_SOURCE_URL_CHARS = 2048
 MAX_WEB_TARGET_CHARS = 2048
 MAX_FLOW_INTENT_CHARS = 200
 # SPEC-055 R-3: executable-flow step-list bounds. ``MAX_STEPS`` is a resource
-# ceiling, not the policy bound. It sits above the two step counts that exist
-# today — the R-1 authoring-trace cap (``AGENT_AUTHORING_TRACE_MAX_STEPS``,
+# ceiling, not the policy bound. It sits above the step counts that decide
+# anything — the R-1 authoring-trace cap (``AGENT_AUTHORING_TRACE_MAX_STEPS``,
 # default 100) and the gateway's per-flow budget
-# (``DEFAULT_BROWSER_FLOW_MAX_STEPS``, default 20) — so a draft graduated from
-# a default-configured trace is never rejected by it. Both of those are
-# operator-tunable and this one is not, so the ordering is a coupling to
-# preserve rather than an invariant: raising the trace cap past 200 would make
-# a long trace un-graduable here (it fails safe — the draft is rejected, not
-# truncated). R-4's blast-radius bound (stage 6, **not yet implemented**) is
-# planned to sit below this ceiling too: graduality is a policy decision, this
-# is only the resource limit.
+# (``DEFAULT_BROWSER_FLOW_MAX_STEPS``, default 20), which R-4's blast-radius
+# bound copies as a deliberate twin (``AGENT_SKILL_GRADUATION_MAX_STEPS``,
+# also 20) — so a draft graduated from a default-configured trace is never
+# rejected by it. Those are all operator-tunable and this one is not, so the
+# ordering is a coupling to preserve rather than an invariant: raising the
+# trace cap past 200 would make a long trace un-graduable here (it fails safe
+# — the draft is rejected, not truncated). Graduality is a policy decision;
+# this is only the resource limit.
 # ``MAX_STEPS_BYTES`` matches the body cap — ``steps`` is the first frontmatter
 # key whose size the per-key char caps do not already bound, and it lands in
 # one JSONB column and rides list responses.

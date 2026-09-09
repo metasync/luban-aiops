@@ -1303,9 +1303,10 @@ class AgentKernel:
             # curated auto-allow list — an unvetted read tool parks and is
             # signed like any other ASK-gated call — and it is not a replay
             # step: a graduated flow declares ``risk_class: write``, so a
-            # read in its step list would either fail R-4's planned
-            # re-validation (stage 6) or mislabel the read as a write. The
-            # platform's single risk→action mapping decides, so this seam
+            # read in its step list is refused by R-4's blast-radius
+            # re-validation, which derives read-tier from the same
+            # ``BROWSER_WRITE_TOOLS`` set rather than keeping a second list.
+            # The platform's single risk→action mapping decides, so this seam
             # and the policy bridge cannot disagree about what a mutation
             # is; a call with no known tier is not captured either, which
             # degrades to "no graduation candidate" — the outcome R-2

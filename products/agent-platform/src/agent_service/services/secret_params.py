@@ -63,12 +63,12 @@ MASK = "***"
 # "a secret is here and withheld", while a trace placeholder tells a
 # graduation "this argument has to be supplied from a credential-set
 # reference at replay time". It is a hole the operator must fill. R-4's
-# blast-radius re-validation (stage 6, **not yet implemented**) is planned to
-# require every credential resolved to a credential-set reference, which
-# makes a trace still carrying one a deterministic refusal; until it lands
-# the vocabulary below is the only control. The placeholder is loud either
-# way, where a ``***`` in stored replay arguments would be indistinguishable
-# from a value the flow is supposed to type literally.
+# blast-radius re-validation (``skill_graduation.revalidate_blast_radius``)
+# requires every credential resolved to a credential-set reference, which
+# makes a trace still carrying one a deterministic refusal naming the step
+# and the argument path. The placeholder is loud either way, where a ``***``
+# in stored replay arguments would be indistinguishable from a value the flow
+# is supposed to type literally.
 #
 # Two costs are accepted here and are recorded as R-4/R-5 inputs in tasks.md:
 # the per-tool opaque fields (``web.type.text``, ``web.evaluate.expression``)
@@ -78,6 +78,15 @@ MASK = "***"
 # reference ever reaches a trace under the default configuration (see
 # ``is_secret_value``). The reference is supplied by the human completing the
 # draft at merge time.
+#
+# R-4 makes that second cost consequential rather than cosmetic: it refuses a
+# trace still holding a hole, and nothing resolves one already stored, so a
+# session that typed a credential literally through an opaque field cannot
+# graduate at all. That is the intended failure — the refusal says so and
+# names the steps — and its remedy is to re-author them filling the credential
+# through ``web.fill_credential`` instead, which leaves no hole because that
+# tool is read-tier and is never captured, and then to add the reference step
+# by hand when merging the draft, because the trace does not carry it either.
 #
 # The literal is a cross-product twin: skills-hub re-declares it as
 # ``ingestion.CREDENTIAL_HOLE`` to refuse an executable-flow document still
@@ -217,17 +226,17 @@ def is_secret_value(tool_name: str, param_name: str) -> bool:
     the per-tool opaque fields, minus the positively-known-safe allow-list.
 
     The gap that leaves is **bounded, not closed**, and it matters to be
-    precise about which half R-4 covers. ``revalidate_blast_radius`` (stage 6
-    / R-4, **not yet implemented**) is planned to refuse a trace still
-    carrying ``TRACE_CREDENTIAL_PLACEHOLDER``, so a credential this
-    vocabulary *recognizes* could never graduate unresolved. A literal under
-    a name the vocabulary does not know produces no placeholder and is
-    therefore **not** detectable by that check either. Until stage 6 lands
-    the vocabulary below is the only control on what a trace stores. What
-    carries the residual risk is that vocabulary's breadth — the name
-    substrings plus the per-tool opaque fields, both of which grow as new
-    secret shapes are found (see ``web.evaluate.expression``) — and the fact
-    that graduation produces a draft a human reviews and merges, never an
+    precise about which half R-4 covers. ``revalidate_blast_radius``
+    (``skill_graduation``, R-4) refuses a trace still carrying
+    ``TRACE_CREDENTIAL_PLACEHOLDER``, so a credential this vocabulary
+    *recognizes* can never graduate unresolved — the refusal names the step
+    and the argument path. A literal under a name the vocabulary does not know
+    produces no placeholder and is therefore **not** detectable by that check
+    either, which leaves the vocabulary below as the only control on what a
+    trace stores. What carries the residual risk is that vocabulary's breadth
+    — the name substrings plus the per-tool opaque fields, both of which grow
+    as new secret shapes are found (see ``web.evaluate.expression``) — and the
+    fact that graduation produces a draft a human reviews and merges, never an
     auto-published skill.
     """
     if is_known_safe(tool_name, param_name):

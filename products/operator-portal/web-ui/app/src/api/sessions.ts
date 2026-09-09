@@ -180,12 +180,26 @@ export async function getSession(
 
 // Omitting sessionId keeps the server-generated id; named sessions are
 // reserved for dedicated workflows (incident triage, SPEC-015 R-3).
+//
+// skillTarget (SPEC-055 R-4) opens the session as a develop-as-you-go one:
+// the target is declared *at birth*, which is what makes it an authorization
+// scope rather than a claim fitted to the trace afterwards — the session does
+// not exist to mutate until this call returns, so no captured step can
+// predate it. It rides session:create and is deliberately not gated by
+// session:skill_graduate, so any authenticated role may scope their own
+// session; graduating it stays gated. Throws ApiError 422 when the target is
+// not a normalizable http(s) URL, and nothing is created in that case (the
+// agent validates before the session exists).
 export async function createSession(
   sessionId?: string,
+  skillTarget?: string,
 ): Promise<SessionDetail> {
+  const body: Record<string, string> = {};
+  if (sessionId) body.session_id = sessionId;
+  if (skillTarget) body.skill_target = skillTarget;
   return requestJson<SessionDetail>("/api/v1/sessions", {
     method: "POST",
-    body: sessionId ? { session_id: sessionId } : {},
+    body,
   });
 }
 
@@ -228,5 +242,63 @@ export async function createSkillDraft(
   return requestJson<SkillDraftResponse>(
     `/api/v1/sessions/${encodeURIComponent(sessionId)}/skill-draft`,
     { method: "POST" },
+  );
+}
+
+// Skill graduation (SPEC-055 R-4): the agent re-validates the session's
+// captured authoring trace against its declared blast radius and renders it
+// — deterministically, with no model involved — into an executable-flow draft
+// validated against Skill v2 before it is returned. Nothing is published and
+// nothing is persisted beyond the trace's lifecycle flip to `graduated`.
+//
+// Throws ApiError 404 (unknown/foreign — anti-enumeration), 409 (the
+// deterministic blast-radius refusal; `detail` names every guard the trace
+// failed and the steps responsible), 409 (the trace was already discarded),
+// 503 (validation not configured) or 502 (validation unreachable, or the
+// renderer and ingestion disagree — the draft is withheld rather than handed
+// over unvalidated).
+export interface SkillGraduationResponse extends SkillDraftResponse {
+  mode: "graduated" | (string & {});
+  // Replay steps in the draft, i.e. the approved mutations captured.
+  step_count: number;
+  // The declared scope a replay binds to; null for a flow with no browser
+  // step, which needs none and gets none rather than a target it never uses.
+  web_target: string | null;
+  // Where the declaration sits relative to the first captured step. A report,
+  // never a gate — `postdated` means the scope was fitted to a trace that had
+  // already begun, and the operator is told so rather than silently trusted.
+  declaration: "preceded" | "postdated" | "indeterminate" | (string & {});
+}
+
+export async function graduateSessionSkill(
+  sessionId: string,
+): Promise<SkillGraduationResponse> {
+  return requestJson<SkillGraduationResponse>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/skill-graduate`,
+    { method: "POST" },
+  );
+}
+
+// Mid-session target declaration (SPEC-055 R-4): for a session that *becomes*
+// a development session after it was opened, so its declaration can postdate
+// the first captured step. First declaration wins and cannot be widened —
+// `target` is therefore the scope actually in force, never an echo of the
+// request, and `already_declared` means a *different* target is in force.
+// Throws ApiError 403 (role holds no session:skill_graduate grant), 404
+// (unknown/foreign) or 422 (not a normalizable http(s) URL, so it could
+// never be corroborated).
+export interface SkillTargetDeclaration {
+  session_id: string;
+  target: string;
+  already_declared: boolean;
+}
+
+export async function declareSkillTarget(
+  sessionId: string,
+  target: string,
+): Promise<SkillTargetDeclaration> {
+  return requestJson<SkillTargetDeclaration>(
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}/skill-target`,
+    { method: "POST", body: { target } },
   );
 }

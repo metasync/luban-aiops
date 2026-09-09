@@ -70,7 +70,13 @@ DEFAULT_IDLE_DAYS = 180
 # draft (or of a deliberately dropped candidate), so a later approval
 # never appends to it and the idle-GC never reclaims it.
 TRACE_DRAFT = "draft"
-TRACE_TERMINAL_STATUSES = frozenset({"graduated", "discarded"})
+# The two terminal statuses, named because a caller must never reach for a
+# bare string: ``graduated`` is what R-4's endpoint flips a trace to once its
+# draft has validated, ``discarded`` is a deliberately dropped candidate, and
+# graduation refuses the latter rather than resurrecting it.
+TRACE_GRADUATED = "graduated"
+TRACE_DISCARDED = "discarded"
+TRACE_TERMINAL_STATUSES = frozenset({TRACE_GRADUATED, TRACE_DISCARDED})
 TRACE_STATUSES = frozenset({TRACE_DRAFT}) | TRACE_TERMINAL_STATUSES
 
 # Idle-GC bound per run, counted in *sessions* rather than rows so a run
@@ -212,6 +218,8 @@ class AuthoringTraceStore(Protocol):
 
     def trace_target(self, session_id: str) -> str | None: ...
 
+    def target_declaration(self, session_id: str) -> dict[str, Any] | None: ...
+
     def load_for_session(self, session_id: str) -> list[dict[str, Any]]: ...
 
     def trace_status(self, session_id: str) -> str | None: ...
@@ -316,8 +324,22 @@ class InMemoryAuthoringTraceStore:
         return target
 
     def trace_target(self, session_id: str) -> str | None:
+        declaration = self.target_declaration(session_id)
+        return declaration["target"] if declaration is not None else None
+
+    def target_declaration(self, session_id: str) -> dict[str, Any] | None:
+        """The declaration row: ``{"target", "declared_at"}``, or ``None``.
+
+        ``declared_at`` is stored canonical (second precision) on the way in,
+        so this returns the same basis the Postgres backend renders its
+        ``TIMESTAMPTZ`` to — the single comparison basis graduation's ordering
+        report needs, since the two must not disagree inside a sub-second
+        window.
+        """
         entry = self._targets.get(session_id)
-        return entry[0] if entry is not None else None
+        if entry is None:
+            return None
+        return {"target": entry[0], "declared_at": entry[1]}
 
     def load_for_session(self, session_id: str) -> list[dict[str, Any]]:
         # Deep-copy on the way out too: Postgres re-decodes JSONB per load, so
@@ -554,8 +576,15 @@ VALUES (%(session_id)s, %(target)s, now())
 ON CONFLICT (session_id) DO NOTHING
 """
 
-_TRACE_TARGET = """
-SELECT target
+# The declaration row, and the only projection of this table: ``declare_target``
+# reads it back to report the target actually in force, and graduation reads it
+# for that target plus the stamp it reports the ordering of. One statement
+# rather than a target-only one beside it, so the column set the SQL names
+# cannot drift from the DDL in two places. ``declared_at`` is rendered to
+# second precision on the way out to match the in-memory backend and
+# ``captured_at``, so the ordering comparison is made on one basis.
+_TARGET_DECLARATION = """
+SELECT target, declared_at
   FROM authoring_trace_target
  WHERE session_id = %(session_id)s
 """
@@ -814,8 +843,10 @@ class PostgresAuthoringTraceStore:
                 )
                 # Read back in the same transaction: the caller must learn
                 # which target is actually in force, not assume its own
-                # declaration landed.
-                cur.execute(_TRACE_TARGET, {"session_id": session_id})
+                # declaration landed. The ``declared_at`` column rides along
+                # and is dropped here — one projection of the table, so the
+                # read-back and graduation cannot disagree about the row.
+                cur.execute(_TARGET_DECLARATION, {"session_id": session_id})
                 row = cur.fetchone()
             conn.commit()
         if row is None:
@@ -826,12 +857,22 @@ class PostgresAuthoringTraceStore:
         return str(row[0])
 
     def trace_target(self, session_id: str) -> str | None:
+        declaration = self.target_declaration(session_id)
+        return declaration["target"] if declaration is not None else None
+
+    def target_declaration(self, session_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(_TRACE_TARGET, {"session_id": session_id})
+                cur.execute(_TARGET_DECLARATION, {"session_id": session_id})
                 row = cur.fetchone()
             conn.commit()
-        return str(row[0]) if row is not None else None
+        if row is None:
+            return None
+        # Canonicalized on the way out: the column holds microseconds, the
+        # in-memory backend holds seconds, and ``captured_at`` reaches a
+        # caller in seconds too, so rendering here is what puts the ordering
+        # comparison on one basis across both backends.
+        return {"target": str(row[0]), "declared_at": _canonical_timestamp(row[1])}
 
     def load_for_session(self, session_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:

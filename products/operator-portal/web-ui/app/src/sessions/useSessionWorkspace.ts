@@ -27,6 +27,16 @@ export interface RenameOutcome {
   message?: string;
 }
 
+// SPEC-055 R-4: create outcome. The develop-as-you-go opener needs a
+// per-call message because a refused target is the operator's to fix inline
+// (the panel error banner is shared with list failures and would not say
+// which field was wrong); the one-click path keeps using `sessionId`.
+export interface CreateOutcome {
+  ok: boolean;
+  sessionId: string | null;
+  message?: string;
+}
+
 export interface SessionWorkspace {
   sessions: SessionSummary[];
   loading: boolean;
@@ -35,6 +45,9 @@ export interface SessionWorkspace {
   setActiveSessionId: (sessionId: string | null) => void;
   refresh: () => Promise<void>;
   createAndOpen: () => Promise<string | null>;
+  // SPEC-055 R-4: the develop-as-you-go opener — `createAndOpen` with a
+  // target declared at birth, and an outcome the dialog can report inline.
+  createDevelopmentSession: (skillTarget?: string) => Promise<CreateOutcome>;
   remove: (sessionId: string) => Promise<DeleteOutcome>;
   rename: (sessionId: string, title: string) => Promise<RenameOutcome>;
   // SPEC-023 R-3 deep links: incident sessions appear as extra panel
@@ -106,17 +119,41 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     saveActiveSessionId(sessionId);
   }, []);
 
+  // One implementation, two contracts: the one-click panel path wants the id
+  // (or null), the develop-as-you-go dialog wants a message it can show
+  // against the target field. A refused target leaves nothing behind — the
+  // agent validates it before the session exists, so there is no half-created
+  // session to clean up and no refresh to run.
+  const createDevelopmentSession = useCallback(
+    async (skillTarget?: string): Promise<CreateOutcome> => {
+      try {
+        const detail = await createSession(undefined, skillTarget);
+        setActiveSessionId(detail.session_id);
+        await refresh();
+        return { ok: true, sessionId: detail.session_id };
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        setError(text);
+        if (err instanceof ApiError && err.status === 422) {
+          return {
+            ok: false,
+            sessionId: null,
+            message:
+              "Enter an absolute http(s) URL. A target with no origin can " +
+              "never be corroborated against the session's captured steps, " +
+              "and no session was created.",
+          };
+        }
+        return { ok: false, sessionId: null, message: text };
+      }
+    },
+    [refresh, setActiveSessionId],
+  );
+
   const createAndOpen = useCallback(async (): Promise<string | null> => {
-    try {
-      const detail = await createSession();
-      setActiveSessionId(detail.session_id);
-      await refresh();
-      return detail.session_id;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      return null;
-    }
-  }, [refresh, setActiveSessionId]);
+    const outcome = await createDevelopmentSession();
+    return outcome.sessionId;
+  }, [createDevelopmentSession]);
 
   const remove = useCallback(
     async (sessionId: string): Promise<DeleteOutcome> => {
@@ -209,6 +246,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     setActiveSessionId,
     refresh,
     createAndOpen,
+    createDevelopmentSession,
     remove,
     rename,
     pinned,

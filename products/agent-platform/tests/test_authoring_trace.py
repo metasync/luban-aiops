@@ -36,6 +36,7 @@ selection (an unreachable Postgres falls back to memory) and
 
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -337,6 +338,13 @@ _PG_ROW = (
     datetime(2026, 9, 8, 10, 0, 0, tzinfo=timezone.utc),
     "https://admin.internal",
 )
+
+# Column order of _TARGET_DECLARATION, the table's only projection:
+# ``(target, declared_at)``. The stamp carries microseconds because the
+# ``TIMESTAMPTZ`` column does, so a read that renders it to second precision is
+# visibly doing something rather than passing a value through unchanged.
+_PG_DECLARED_AT = datetime(2026, 9, 8, 9, 0, 0, 123456, tzinfo=timezone.utc)
+_PG_TARGET_ROW = ("https://admin.internal", _PG_DECLARED_AT)
 
 
 class TestPostgresStore:
@@ -687,10 +695,14 @@ class TestDeclaredTarget:
         store = InMemoryAuthoringTraceStore()
         store.declare_target("ses-1", "https://admin.internal")
         assert store.trace_target("ses-2") is None
+        # No declaration row at all, rather than one with an empty target:
+        # graduation reads the pair and must see "nothing declared", which is
+        # a different fact from "declared as nothing".
+        assert store.target_declaration("ses-2") is None
 
     def test_postgres_declares_with_a_conflict_noop(self) -> None:
         calls: list[dict] = []
-        store = _pg_store(calls, rows=[("https://admin.internal",)])
+        store = _pg_store(calls, rows=[_PG_TARGET_ROW])
         assert store.declare_target("ses-1", "https://admin.internal") == (
             "https://admin.internal"
         )
@@ -709,12 +721,14 @@ class TestDeclaredTarget:
 
     def test_postgres_reads_the_target_back_in_the_same_transaction(self) -> None:
         calls: list[dict] = []
-        store = _pg_store(calls, rows=[("https://admin.internal",)])
+        store = _pg_store(calls, rows=[_PG_TARGET_ROW])
         store.declare_target("ses-1", "https://elsewhere.example")
         sqls = [call["sql"] for call in calls if "sql" in call]
         # The read-back is what makes the return value the *effective*
-        # target; committing only after it keeps the two consistent.
-        assert any("SELECT target" in sql for sql in sqls)
+        # target; committing only after it keeps the two consistent. It is the
+        # declaration projection — the table's only one — so the read-back and
+        # graduation cannot disagree about which row they saw.
+        assert any("SELECT target, declared_at" in sql for sql in sqls)
         assert any(call.get("commit") for call in calls)
         # The caller is told the truth, not its own request.
         assert store.trace_target("ses-1") == "https://admin.internal"
@@ -729,6 +743,53 @@ class TestDeclaredTarget:
             "https://admin.internal"
         )
         assert store.trace_target("ses-1") is None
+        assert store.target_declaration("ses-1") is None
+
+    def test_postgres_declaration_renders_the_stamp_to_second_precision(
+        self,
+    ) -> None:
+        # The half of the "one comparison basis" invariant that lives in the
+        # store: the column holds microseconds, ``captured_at`` reaches a
+        # caller in seconds, and graduation orders the two. Rendering here is
+        # what makes that comparison meaningful on this backend at all — a
+        # mixed-precision ordering would disagree with the in-memory backend
+        # inside a sub-second window.
+        calls: list[dict] = []
+        store = _pg_store(calls, rows=[_PG_TARGET_ROW])
+
+        declaration = store.target_declaration("ses-1")
+
+        assert declaration == {
+            "target": "https://admin.internal",
+            "declared_at": "2026-09-08T09:00:00Z",
+        }
+
+    def test_both_backends_report_a_declaration_on_one_basis(self) -> None:
+        """Parity, asserted rather than assumed.
+
+        Graduation's ordering report reads ``declared_at`` and compares it
+        against ``captured_at``; if the two backends rendered either stamp at a
+        different precision the same trace would report ``preceded`` on one and
+        ``indeterminate`` on the other, and a reviewer would be told something
+        untrue about which backend they happened to be running against.
+        """
+        memory = InMemoryAuthoringTraceStore()
+        memory.declare_target("ses-1", "https://admin.internal")
+        postgres = _pg_store([], rows=[_PG_TARGET_ROW])
+
+        for store in (memory, postgres):
+            declaration = store.target_declaration("ses-1")
+            assert declaration is not None, store.backend_name
+            assert declaration["target"] == "https://admin.internal"
+            # Second precision, UTC, ``Z``-suffixed: ``_iso``'s shape, and the
+            # shape ``captured_at`` arrives in.
+            assert re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+                declaration["declared_at"],
+            ), (store.backend_name, declaration["declared_at"])
+            # And ``trace_target`` is the same row's target on both, so a
+            # caller cannot see one backend's declaration and another's scope.
+            assert store.trace_target("ses-1") == declaration["target"]
 
     def test_memory_sweep_keeps_a_declaration_for_a_session_with_steps(self) -> None:
         store = InMemoryAuthoringTraceStore(idle_days=1)
@@ -1108,7 +1169,10 @@ class TestBackendFieldParity:
         )
 
         calls: list[dict] = []
-        postgres = _pg_store(calls, rows=[("https://first.internal",)])
+        postgres = _pg_store(
+            calls,
+            rows=[("https://first.internal", _PG_TARGET_ROW[1])],
+        )
         assert postgres.declare_target("ses-1", "https://second.internal") == (
             "https://first.internal"
         )

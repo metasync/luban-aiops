@@ -1,19 +1,29 @@
 """Self-tests for the cross-product secret-literal lockstep leg.
 
 ``shared/shared-contracts/scripts/validate_secret_vocabulary.py`` textually
-compares two pairs of deliberate second copies, each pair spanning products
+compares three pairs of deliberate second copies, each pair spanning products
 that never import each other, so the comparison is by source extraction:
 
 1. the agent-platform ``SECRET_PARAM_SUBSTRINGS`` tuple against its
    tool-gateway twin ``_SECRET_QUERY_PARAMS`` (SPEC-054 R-3 / SPEC-049 R-5);
 2. the agent-platform ``TRACE_CREDENTIAL_PLACEHOLDER`` marker against its
-   skills-hub twin ``CREDENTIAL_HOLE`` (SPEC-055 R-2 writes it, R-3 refuses it).
+   skills-hub twin ``CREDENTIAL_HOLE`` (SPEC-055 R-2 writes it, R-3 refuses it);
+3. the agent-platform ``REDACTION_VALUE_PATTERNS`` shape tuple against its
+   tool-gateway twin ``_VALUE_PATTERNS`` (the gateway redacts tool output with
+   it, ``skill_draft.postprocess`` a draft body, and SPEC-055 R-4 graduation
+   *refuses* a step argument matching one).
 
 Any drift fails the ``make verify`` build.
 
+The third coupling is compared as an **ordered** list while the first is a set:
+both shape copies document their order as meaningful ("most specific first" so
+overlapping shapes are not double-counted), so a re-ordering is a divergence a
+set comparison would pass silently. ``test_reordered_shapes_fail`` pins that
+difference rather than leaving it to the docstring.
+
 These tests run the script as a subprocess against (a) the real repo, which
 must agree, and (b) synthetic trees that agree and diverge, proving the leg
-passes on lockstep and fails — in both directions, for both couplings — on
+passes on lockstep and fails — in both directions, for all three couplings — on
 divergence.
 """
 
@@ -35,10 +45,22 @@ SCRIPT = (
 AGENT_REL = Path("products/agent-platform/src/agent_service/services/secret_params.py")
 GATEWAY_REL = Path("products/tool-gateway/src/tool_gateway/tools/browser_connector.py")
 SKILLS_HUB_REL = Path("products/skills-hub/src/skills_hub/services/ingestion.py")
+SKILL_DRAFT_REL = Path("products/agent-platform/src/agent_service/services/skill_draft.py")
+REDACTION_REL = Path("products/tool-gateway/src/tool_gateway/tools/redaction.py")
 
 # The shipped marker, used as the synthetic default so the vocabulary tests
 # exercise one coupling at a time.
 HOLE = "<credential-reference>"
+
+# Synthetic shape vocabulary, as regex *source text* — the extractor compares
+# the raw-string literals verbatim, backslashes included, so these are what the
+# generated modules must contain between the quotes. Two is enough to make an
+# ordering divergence distinguishable from a membership one.
+SHAPES: tuple[str, ...] = (
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+)
+EXTRA_SHAPE = r"\bghp_[A-Za-z0-9]{36}\b"
 
 
 def _run(root: Path) -> subprocess.CompletedProcess:
@@ -50,6 +72,19 @@ def _run(root: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _shapes_module(var: str, shapes: tuple[str, ...]) -> str:
+    """A synthetic shape-vocabulary module.
+
+    The closing paren sits at column zero on its own line, which is what the
+    extractor keys on: unlike the substring tuples, these bodies contain parens
+    of their own (regex groups), so the block cannot be captured to the first
+    ``)``. An empty ``shapes`` renders a tuple with no literals, exercising the
+    "found the block, extracted nothing" path distinctly from "block absent".
+    """
+    body = "".join(f'    re.compile(r"{shape}"),\n' for shape in shapes)
+    return f"{var}: tuple[re.Pattern[str], ...] = (\n{body})\n"
+
+
 def _write_tree(
     root: Path,
     agent_entries: tuple[str, ...],
@@ -57,12 +92,15 @@ def _write_tree(
     *,
     agent_hole: str | None = HOLE,
     hub_hole: str | None = HOLE,
+    agent_shapes: tuple[str, ...] | None = SHAPES,
+    gateway_shapes: tuple[str, ...] | None = SHAPES,
 ) -> None:
-    """Materialize a minimal repo tree carrying both twin pairs.
+    """Materialize a minimal repo tree carrying all three twin pairs.
 
-    A hole marker passed as ``None`` writes the file *without* the literal, so
-    the "literal not found" path is exercised distinctly from the "missing
-    file" path (``test_missing_source_file_fails`` covers that one).
+    A hole marker or a shape tuple passed as ``None`` writes the file *without*
+    the literal, so the "literal not found" path is exercised distinctly from
+    the "missing file" path (``test_missing_source_file_fails`` covers that
+    one).
     """
 
     def _module(var: str, entries: tuple[str, ...]) -> str:
@@ -72,9 +110,10 @@ def _write_tree(
     agent_path = root / AGENT_REL
     gateway_path = root / GATEWAY_REL
     hub_path = root / SKILLS_HUB_REL
-    agent_path.parent.mkdir(parents=True, exist_ok=True)
-    gateway_path.parent.mkdir(parents=True, exist_ok=True)
-    hub_path.parent.mkdir(parents=True, exist_ok=True)
+    draft_path = root / SKILL_DRAFT_REL
+    redaction_path = root / REDACTION_REL
+    for path in (agent_path, gateway_path, hub_path, draft_path, redaction_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     agent_src = _module("SECRET_PARAM_SUBSTRINGS", agent_entries)
     if agent_hole is not None:
@@ -93,14 +132,32 @@ def _write_tree(
         hub_path.write_text(
             "# CREDENTIAL_HOLE deliberately absent\n", encoding="utf-8"
         )
+    if agent_shapes is not None:
+        draft_path.write_text(
+            _shapes_module("REDACTION_VALUE_PATTERNS", agent_shapes),
+            encoding="utf-8",
+        )
+    else:
+        draft_path.write_text(
+            "# REDACTION_VALUE_PATTERNS deliberately absent\n", encoding="utf-8"
+        )
+    if gateway_shapes is not None:
+        redaction_path.write_text(
+            _shapes_module("_VALUE_PATTERNS", gateway_shapes), encoding="utf-8"
+        )
+    else:
+        redaction_path.write_text(
+            "# _VALUE_PATTERNS deliberately absent\n", encoding="utf-8"
+        )
 
 
 def test_real_repo_vocabularies_agree() -> None:
-    """Both shipped twin pairs are in lockstep, so the leg passes on the repo."""
+    """All three shipped twin pairs are in lockstep, so the leg passes."""
     result = _run(REPO_ROOT)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.startswith("OK:")
     assert "credential-hole markers agree" in result.stdout
+    assert "secret-shape vocabularies agree" in result.stdout
 
 
 def test_synthetic_tree_agrees(tmp_path: Path) -> None:
@@ -110,6 +167,7 @@ def test_synthetic_tree_agrees(tmp_path: Path) -> None:
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "agree (3 substrings)" in result.stdout
+    assert f"agree ({len(SHAPES)} patterns, in order)" in result.stdout
 
 
 def test_divergent_tree_fails_both_directions(tmp_path: Path) -> None:
@@ -137,8 +195,8 @@ def test_missing_source_file_fails(tmp_path: Path) -> None:
         f'TRACE_CREDENTIAL_PLACEHOLDER = "{HOLE}"\n',
         encoding="utf-8",
     )
-    # Both the tool-gateway vocabulary twin and the skills-hub marker twin are
-    # deliberately absent.
+    # The four other source files — the tool-gateway substring twin, the
+    # skills-hub marker twin, and both shape modules — are deliberately absent.
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "missing file" in result.stdout
@@ -240,3 +298,98 @@ def test_a_prose_mention_is_not_read_as_the_assignment(tmp_path: Path) -> None:
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "CREDENTIAL_HOLE literal not found" in result.stdout
+
+
+def test_shape_drift_fails_both_directions(tmp_path: Path) -> None:
+    """A shape one side knows and the other does not fails and names the side.
+
+    The consequential direction is the gateway growing a shape
+    agent-platform does not mirror: the new shape would still be redacted out
+    of tool output and out of a draft's readable body, while the value itself
+    rode unrefused into the frontmatter a human merges — the one copy that is
+    never scrubbed. Neither direction may pass silently.
+    """
+    entries = ("password",)
+    for label, kwargs, expected_side in (
+        (
+            "gateway-only",
+            {"gateway_shapes": SHAPES + (EXTRA_SHAPE,)},
+            "tool-gateway only",
+        ),
+        (
+            "agent-only",
+            {"agent_shapes": SHAPES + (EXTRA_SHAPE,)},
+            "agent-platform only",
+        ),
+    ):
+        tree = tmp_path / label
+        tree.mkdir()
+        _write_tree(tree, entries, entries, **kwargs)
+        result = _run(tree)
+        assert result.returncode == 1, label
+        assert result.stdout.startswith("FAIL:"), label
+        assert "secret-shape vocabulary differs" in result.stdout, label
+        # Names the side that grew the shape, and the shape itself: a build
+        # failure that does not say which copy to fix is a build failure that
+        # gets worked around. Printed as a ``repr``, like the substring
+        # vocabulary's failures, so the backslashes in a regex source text are
+        # visible rather than interpreted.
+        assert expected_side in result.stdout, label
+        assert repr(EXTRA_SHAPE) in result.stdout, label
+
+
+def test_reordered_shapes_fail(tmp_path: Path) -> None:
+    """The same shapes in a different order fail — the ordered/set distinction.
+
+    Both copies document their order as meaningful ("most specific first" so
+    overlapping shapes are not double-counted), and this coupling is compared
+    as a list while the substring vocabulary above is compared as a set. A set
+    comparison would pass a re-ordering silently, so the distinction is pinned
+    here rather than left to the docstring.
+    """
+    entries = ("password",)
+    reordered = tuple(reversed(SHAPES))
+    assert set(reordered) == set(SHAPES), "the premise: membership is unchanged"
+    _write_tree(tmp_path, entries, entries, agent_shapes=reordered)
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "secret-shape vocabulary differs" in result.stdout
+    assert "different order" in result.stdout
+    # Neither side holds a shape the other lacks, so the membership wording
+    # must not appear — the message has to say what actually diverged.
+    assert "only:" not in result.stdout
+
+
+def test_a_missing_shape_tuple_fails(tmp_path: Path) -> None:
+    """A shape constant renamed away on either side fails closed.
+
+    The likelier drift is not a changed pattern but a refactor that makes the
+    tuple private again or renames it — the extraction then finds nothing, and
+    a check that skipped on "not found" would pass with one side unpinned.
+    """
+    entries = ("password",)
+    for label, kwargs in (
+        ("agent", {"agent_shapes": None}),
+        ("gateway", {"gateway_shapes": None}),
+    ):
+        tree = tmp_path / label
+        tree.mkdir()
+        _write_tree(tree, entries, entries, **kwargs)
+        result = _run(tree)
+        assert result.returncode == 1, label
+        assert "tuple not found" in result.stdout, result.stdout
+
+
+def test_an_empty_shape_tuple_is_not_read_as_agreement(tmp_path: Path) -> None:
+    """Two empty vocabularies must not compare equal and pass vacuously.
+
+    The same trap as ``test_a_triple_quoted_marker_is_not_read_as_empty``: if
+    an extraction that found the block but no literals returned ``()``, a
+    quoting-style refactor on both sides would leave the coupling green while
+    pinning nothing — and graduation would refuse no shape at all.
+    """
+    entries = ("password",)
+    _write_tree(tmp_path, entries, entries, agent_shapes=(), gateway_shapes=())
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "no raw-string patterns" in result.stdout

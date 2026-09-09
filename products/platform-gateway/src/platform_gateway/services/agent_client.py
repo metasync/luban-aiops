@@ -454,6 +454,34 @@ async def declare_skill_target(
     return response.json()
 
 
+async def graduate_session_skill(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Graduate a session's authoring trace into an executable-flow draft.
+
+    SPEC-055 R-4. The timeout is the draft's generous one rather than the
+    declaration's house one, because graduation makes a skills-hub
+    validation round-trip — unlike a declaration, it *does* have a
+    validation leg. Upstream 404 answers foreign/unknown sessions;
+    upstream 409 is the agent's deterministic blast-radius refusal (an
+    over-budget trace, an origin that drifted from the declared target, an
+    unverified step, an unresolved credential hole, a discarded trace or no
+    trace at all); 502/503 mean the validation leg failed and no draft is
+    returned.
+    """
+    timeout = httpx.Timeout(60.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}/skill-graduate",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def create_skill_draft(
     settings: PlatformGatewaySettings,
     request_id: str,

@@ -213,6 +213,17 @@ class RuntimeSettings:
     # trace is never swept. 0 idle days disables the idle-GC entirely.
     authoring_trace_max_steps: int = 100
     authoring_trace_idle_days: int = 180
+    # Graduation blast-radius bound (SPEC-055 R-4): the step count above which
+    # a trace is refused as not-graduable. A deliberate twin of the
+    # tool-gateway's replay budget (``GATEWAY_BROWSER_FLOW_MAX_STEPS``, default
+    # 20), which is the budget ``bind_flow`` arms a bound flow with — see
+    # ``skill_graduation.DEFAULT_MAX_GRADUATION_STEPS``. Tunable because its
+    # twin is: an operator who raises the gateway budget past 20 would
+    # otherwise watch a flow that *would* replay be refused at graduation, and
+    # nothing in that refusal would say the two bounds had drifted apart.
+    # Deliberately *not* skills-hub's ingestion ceiling (``MAX_STEPS``, 200),
+    # which is a resource limit rather than a policy bound.
+    skill_graduation_max_steps: int = 20
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -297,6 +308,9 @@ class RuntimeSettings:
             raise ValueError("AGENT_AUTHORING_TRACE_MAX_STEPS must be >= 1.")
         if self.authoring_trace_idle_days < 0:
             raise ValueError("AGENT_AUTHORING_TRACE_IDLE_DAYS must be >= 0.")
+        # Graduation blast-radius bound validation (SPEC-055 R-4).
+        if self.skill_graduation_max_steps < 1:
+            raise ValueError("AGENT_SKILL_GRADUATION_MAX_STEPS must be >= 1.")
         try:
             from zoneinfo import ZoneInfo
 
@@ -477,6 +491,9 @@ class RuntimeSettings:
             ),
             authoring_trace_idle_days=int(
                 os.getenv("AGENT_AUTHORING_TRACE_IDLE_DAYS", "180")
+            ),
+            skill_graduation_max_steps=int(
+                os.getenv("AGENT_SKILL_GRADUATION_MAX_STEPS", "20")
             ),
         )
 

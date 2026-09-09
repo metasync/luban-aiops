@@ -18,6 +18,7 @@ from platform_gateway.services.gateway_service import (
     delete_session,
     enforce_policy,
     get_session,
+    graduate_session_skill,
     list_sessions,
     resolve_request_identity,
     update_session_title,
@@ -180,9 +181,12 @@ async def declare_skill_target_route(
     Deliberately unaudited *here*: the declaration is not an operational
     act against an external system, it is a scope that only becomes
     consequential at graduation — and the ``skill_graduated`` event carries
-    ``web_target``, the target that was in force, which is where a reviewer
-    needs it (pinned in the audit-event contract's ``details`` ledger; the
-    emitter itself lands with graduation). The agent layer still logs the
+    ``web_target`` and ``declaration``, the binding the graduated flow was
+    given and where that declaration sat relative to the first captured
+    step, which is what a reviewer needs to tell an authorization scope
+    from a post-hoc claim (both pinned in the audit-event contract's
+    ``details`` ledger, and both emitted by the agent layer's graduation
+    route rather than by this proxy). The agent layer still logs the
     declaration (including a rejected attempt to widen a first-wins scope)
     on the structured log path.
 
@@ -205,6 +209,53 @@ async def declare_skill_target_route(
         session_id=session_id,
         user_id=user_id,
         already_declared=response.get("already_declared"),
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    return response
+
+
+@router.post("/api/v1/sessions/{session_id}/skill-graduate")
+async def graduate_session_skill_route(
+    request: Request,
+    session_id: str,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Graduate a session's authoring trace into an executable-flow draft.
+
+    SPEC-055 R-4. Authorized by the same ``session:skill_graduate`` action as
+    the declaration route above it — declaring a target is the first half of
+    graduating, not a second capability (OQ-3's one action, on the
+    ``documents:create`` precedent) — and this is the consequential half: it
+    produces an executable *mutating* artifact, which is why the action exists
+    separately from ``session:skill_draft`` at all.
+
+    Ownership is re-checked by the agent layer, so a foreign session answers
+    the same structural 404 as an unknown one. The draft is passed through
+    verbatim and the gateway holds no graduation state; the agent layer emits
+    the ``skill_graduated`` audit event, whose ``details`` name the target that
+    was in force and whether it was declared before the first captured step.
+
+    A 409 from upstream is the agent's deterministic blast-radius refusal and
+    is passed through with its detail intact: it names every guard the trace
+    failed and the steps responsible, which is the answer an operator needs
+    rather than a bare "not graduable".
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_SESSION_SKILL_GRADUATE, request_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    response = await graduate_session_skill(settings, request_id, session_id, user_id)
+    log_event(
+        LOGGER,
+        "skill_graduated",
+        request_id=request_id,
+        session_id=session_id,
+        user_id=user_id,
+        mode=response.get("mode"),
+        step_count=response.get("step_count"),
+        declaration=response.get("declaration"),
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )

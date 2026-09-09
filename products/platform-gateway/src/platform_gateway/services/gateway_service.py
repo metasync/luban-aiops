@@ -595,6 +595,47 @@ async def declare_skill_target(
         ) from exc
 
 
+async def graduate_session_skill(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy a session's skill graduation (SPEC-055 R-4).
+
+    The draft proxy's mapping, not the declaration's: upstream 4xx passes
+    through with the agent's structured detail — and here the 4xx an
+    operator is most likely to hit is a **409**, the agent's deterministic
+    blast-radius refusal, whose detail names every guard the trace failed
+    and the steps responsible, which is the whole point of surfacing it
+    verbatim. Upstream 502/503 pass through too, because unlike a
+    declaration a graduation *does* have a validation leg that can be
+    unconfigured or unreachable, and an unvalidated draft is never returned;
+    any other 5xx and transport failures map to 502.
+    """
+    try:
+        return await agent_client.graduate_session_skill(
+            settings, request_id, session_id, user_id
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_detail(
+                    exc, "agent service refused the skill graduation"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=status if status in (502, 503) else 502,
+            detail=_upstream_detail(exc, "agent service skill graduation failed"),
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 async def create_skill_draft(
     settings: PlatformGatewaySettings,
     request_id: str,

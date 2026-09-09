@@ -9,6 +9,13 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    // The server's own explanation, when it sent one. SPEC-055 R-4 makes this
+    // load-bearing: a graduation refusal names every blast-radius guard the
+    // trace failed and the steps responsible, which *is* the operator's remedy
+    // — reducing it to a status code would answer "not graduable" and send
+    // them hunting. Absent when the body carried no string detail (a proxy's
+    // HTML 502, or the policy engine's structured 403 object).
+    public readonly detail?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -86,9 +93,22 @@ export async function requestJson<T = unknown>(
     throw new ApiError(
       response.status,
       `Request failed: ${response.status} ${response.statusText}`,
+      await errorDetail(response),
     );
   }
   return (await response.json()) as T;
+}
+
+// Best-effort read of an error body's `detail` string. Never throws: an
+// unreadable or non-JSON body must not replace the status a caller was about
+// to receive with a parse failure, so the detail is simply absent.
+async function errorDetail(response: Response): Promise<string | undefined> {
+  try {
+    const payload = (await response.json()) as { detail?: unknown } | null;
+    return typeof payload?.detail === "string" ? payload.detail : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function currentAuthenticatedUser(): string | null {

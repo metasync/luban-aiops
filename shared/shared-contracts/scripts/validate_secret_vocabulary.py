@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate the cross-product secret literals are in lockstep.
 
-Two couplings are pinned here, both of them a deliberate **second copy** of a
+Three couplings are pinned here, each a deliberate **second copy** of a
 constant in a product that never imports the other.
 
 1. The secret-parameter redaction vocabulary. SPEC-054 R-3 masks
@@ -23,17 +23,29 @@ constant in a product that never imports the other.
    the ingestion check — a renamed marker would no longer be recognized, so an
    unresolved hole would ingest instead of being rejected.
 
-Both pairs live in different products, so this script compares them
-**textually**: it extracts each literal from source and diffs them (the tuple
-pair as sets, the marker by equality). It fails the build on any divergence so
-the copies cannot drift silently (the ``validate-secret-vocabulary`` leg of
-``make verify``).
+3. The secret-*shape* vocabulary. The tool-gateway redacts tool output by
+   shape (``tools/redaction._VALUE_PATTERNS``), agent-platform's model-written
+   skill-draft body redacts by the same shapes
+   (``services/skill_draft.REDACTION_VALUE_PATTERNS``), and SPEC-055 R-4
+   graduation **refuses** a captured step whose argument matches one. Divergence
+   fails *open* in the graduation guard: a shape the gateway added and
+   agent-platform did not mirror would still be redacted out of tool output and
+   out of the draft's readable body, while the value itself rode unrefused into
+   the frontmatter a human merges — the one copy that is never scrubbed,
+   because a redacted argument would replay the wrong value.
+
+All three pairs live in different products, so this script compares them
+**textually**: it extracts each literal from source and diffs them (the
+substring vocabulary as sets, the marker by equality, the shape patterns as
+ordered lists because both copies document their order as meaningful). It fails
+the build on any divergence so the copies cannot drift silently (the
+``validate-secret-vocabulary`` leg of ``make verify``).
 
 Usage:
     python validate_secret_vocabulary.py [repo-root]
 
-Defaults to the repository containing this script. Exits 0 when both couplings
-agree, 1 on any divergence or extraction failure.
+Defaults to the repository containing this script. Exits 0 when all three
+couplings agree, 1 on any divergence or extraction failure.
 """
 
 from __future__ import annotations
@@ -53,6 +65,14 @@ TOOL_GATEWAY_VAR = "_SECRET_QUERY_PARAMS"
 SKILLS_HUB_REL = "products/skills-hub/src/skills_hub/services/ingestion.py"
 SKILLS_HUB_VAR = "CREDENTIAL_HOLE"
 AGENT_PLATFORM_HOLE_VAR = "TRACE_CREDENTIAL_PLACEHOLDER"
+
+# The secret-shape vocabulary (the gateway redacts tool output with it,
+# agent-platform redacts a draft body with it, SPEC-055 R-4 graduation refuses a
+# step argument matching it).
+AGENT_DRAFT_REL = "products/agent-platform/src/agent_service/services/skill_draft.py"
+AGENT_DRAFT_PATTERNS_VAR = "REDACTION_VALUE_PATTERNS"
+REDACTION_REL = "products/tool-gateway/src/tool_gateway/tools/redaction.py"
+REDACTION_PATTERNS_VAR = "_VALUE_PATTERNS"
 
 
 def repo_root() -> Path:
@@ -122,6 +142,54 @@ def extract_string_literal(
     return match.group(1)
 
 
+def _patterns_block_pattern(var_name: str) -> re.Pattern[str]:
+    """Match a module-level ``VAR[: annotation] = ( ... )`` tuple of compiled
+    patterns, closing at the first ``)`` **at column zero**.
+
+    ``_tuple_pattern`` cannot be reused: it stops at the first ``)``, and these
+    bodies are regex source texts full of their own groups. Both copies close
+    the tuple with a paren on its own line, which is the only unambiguous
+    boundary available without importing the modules (and importing is exactly
+    what a cross-product check must not do).
+    """
+    return re.compile(
+        rf"^{re.escape(var_name)}\s*(?::[^=]+)?=\s*\((.*?)^\)",
+        re.MULTILINE | re.DOTALL,
+    )
+
+
+def extract_patterns(
+    errors: list[str], root: Path, rel: str, var_name: str, label: str
+) -> list[str] | None:
+    """Extract one product's shape vocabulary as an **ordered** list.
+
+    Ordered, not a set like the substring vocabulary: both copies document the
+    order as meaningful ("most specific first" so overlapping shapes are not
+    double-counted), so a re-ordering is a divergence worth failing on and a set
+    comparison would pass it silently.
+
+    Raw-string literals only, with backslash escapes kept exactly as written —
+    ``\\b`` and ``\\s`` are load-bearing characters in a regex source text, and
+    comparing post-unescape would equate patterns that differ.
+    """
+    path = root / rel
+    if not path.is_file():
+        errors.append(f"{label}: missing file: {path}")
+        return None
+    match = _patterns_block_pattern(var_name).search(path.read_text(encoding="utf-8"))
+    if not match:
+        errors.append(f"{label}: {var_name} tuple not found in {path}")
+        return None
+    literals = re.findall(r'r"((?:[^"\\]|\\.)*)"', match.group(1))
+    # An empty extraction is absent rather than empty, for the same reason as in
+    # ``extract_string_literal``: two empty lists would compare equal and the
+    # coupling would pass vacuously after a refactor changed the quoting style.
+    if not literals:
+        errors.append(f"{label}: no raw-string patterns in {var_name} at {path}")
+        return None
+    return literals
+
+
 def main() -> int:
     root = repo_root()
     errors: list[str] = []
@@ -141,6 +209,12 @@ def main() -> int:
     )
     hub_hole = extract_string_literal(
         errors, root, SKILLS_HUB_REL, SKILLS_HUB_VAR, "skills-hub"
+    )
+    agent_patterns = extract_patterns(
+        errors, root, AGENT_DRAFT_REL, AGENT_DRAFT_PATTERNS_VAR, "agent-platform"
+    )
+    gateway_patterns = extract_patterns(
+        errors, root, REDACTION_REL, REDACTION_PATTERNS_VAR, "tool-gateway"
     )
 
     if agent is not None and gateway is not None and agent != gateway:
@@ -168,6 +242,32 @@ def main() -> int:
             f"{SKILLS_HUB_VAR}={hub_hole!r}"
         )
 
+    if (
+        agent_patterns is not None
+        and gateway_patterns is not None
+        and agent_patterns != gateway_patterns
+    ):
+        only_agent = [p for p in agent_patterns if p not in gateway_patterns]
+        only_gateway = [p for p in gateway_patterns if p not in agent_patterns]
+        parts = []
+        if only_agent:
+            parts.append(
+                f"agent-platform only: " + ", ".join(repr(p) for p in only_agent)
+            )
+        if only_gateway:
+            parts.append(
+                f"tool-gateway only: " + ", ".join(repr(p) for p in only_gateway)
+            )
+        if not parts:
+            # Same set, different order — still a divergence, because both
+            # copies apply them in sequence and document the order as
+            # meaningful.
+            parts.append("the same patterns in a different order")
+        errors.append(
+            f"secret-shape vocabulary differs ({AGENT_DRAFT_PATTERNS_VAR} vs "
+            f"{REDACTION_PATTERNS_VAR}): " + "; ".join(parts)
+        )
+
     if errors:
         print(
             "FAIL: secret-literal drift across products "
@@ -185,6 +285,11 @@ def main() -> int:
     print(
         "OK: agent-platform and skills-hub credential-hole markers agree "
         f"({agent_hole!r})"
+    )
+    shape_count = len(agent_patterns) if agent_patterns is not None else 0
+    print(
+        "OK: agent-platform and tool-gateway secret-shape vocabularies agree "
+        f"({shape_count} patterns, in order)"
     )
     return 0
 

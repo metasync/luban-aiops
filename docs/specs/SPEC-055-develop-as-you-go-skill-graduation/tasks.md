@@ -75,9 +75,10 @@ against them.
 >   `web.navigate.url`, `k8s.restart_service.namespace`), making every trace un-graduable —
 >   R-2 would ship non-functional. The trace predicate targets *credential values* (vocabulary
 >   + opaque fields, allow-list exempt); the residual fail-open-on-capture gap is **bounded** at the
->   other end by R-4's planned blast-radius re-validation (stage 6, not yet implemented), which is to
->   refuse a trace still carrying a `TRACE_CREDENTIAL_PLACEHOLDER` — see the "bounded, not closed"
->   bullet below for what that does and does not detect.
+>   other end by R-4's blast-radius re-validation (**landed in stage 6** as
+>   `skill_graduation.revalidate_blast_radius`), which refuses a trace still carrying a
+>   `TRACE_CREDENTIAL_PLACEHOLDER` — see the "bounded, not closed" bullet below for what that does
+>   and does not detect.
 > - `services/session_service.py`: `delete_session` now cascades `AUTHORING_TRACE_STORE.delete_session`
 >   (absent from plan §R-2's affected-file list, but every sibling per-session store is wired there
 >   and omitting it would leak durable argument copies for a deleted session). A terminal trace
@@ -109,6 +110,9 @@ against them.
 >   and merge, never an auto-published skill). Consequence: a trace carries **no** reference to resolve
 >   a placeholder *against*, so R-4 cannot "resolve" one — it must surface each placeholder as a hole
 >   in the draft for the human to fill, and R-5 must refuse to replay a flow with one still unresolved.
+>   **Resolved in stage 6b: R-4 refuses rather than renders the hole into the draft** — see the
+>   stage-6b refinement note for why, and for the second half of this finding (the remedy has to be a
+>   re-author, because `web.fill_credential` is never captured in the first place).
 > - **R-4/R-5 input:** `TRACE_CREDENTIAL_PLACEHOLDER` is a bare string. It records that a hole exists
 >   but not *which* credential set fills it, nor which tool/field it came from once the step is read
 >   back. Two related costs land on stage 6/7: (a) the per-tool opaque fields (`web.type.text`,
@@ -120,11 +124,19 @@ against them.
 >   human fills in the draft, not a pre-draft refusal) or make it self-describing, e.g.
 >   `{"__credential_ref__": {"tool": …, "field": …}}` — which stage 5's step schema and stage 7's
 >   replay substitution would both have to absorb, so it is cheaper to decide before stage 5 lands.
->   **Resolved in stage 5: kept bare** — see the stage-5 refinement note.
+>   **Resolved in stage 5: kept bare** — see the stage-5 refinement note. The parenthetical guess did
+>   *not* survive stage 6b: a placeholder is a pre-draft refusal, not a hole rendered into the draft.
+>   Bare is still the right call, now for a better reason — a self-describing marker would have bought
+>   nothing, because no stage can name the credential set that was never recorded. See the stage-6b
+>   note.
 > - `is_secret_value`'s residual fail-open gap is **bounded, not closed**: R-4's planned re-validation
 >   detects *placeholders*, so a literal under a name the vocabulary does not know produces no
 >   placeholder and is not detectable by that check. Until stage 6 lands the vocabulary is the only
 >   control. The vocabulary + the per-tool opaque fields are the boundary.
+>   **Landed in stage 6**, which makes the two controls separable rather than one: the vocabulary +
+>   the per-tool opaque fields bound what a trace *stores*, R-4 bounds what may *graduate* out of it,
+>   and an off-vocabulary literal is invisible to both. The boundary is unchanged, it is just now a
+>   boundary with a second gate behind it.
 > - new `tests/test_secret_params.py`: the R-2 projection is a pure function with no confirmation
 >   frame to ride, and most of what it pins is the *deliberate divergence* from R-7's fail-closed
 >   posture (R-7's own predicates stay asserted through the frame in `test_hitl_confirmations.py`).
@@ -214,6 +226,11 @@ against them.
 >   below it too. Both existing counts are operator-tunable and `MAX_STEPS` is not, so the ordering is
 >   a coupling to preserve rather than an invariant: raising `AGENT_AUTHORING_TRACE_MAX_STEPS` past
 >   200 would make a long trace un-graduable here (failing safe — rejected, never truncated).
+>   **Landed in stage 6b** as `AGENT_SKILL_GRADUATION_MAX_STEPS` (default 20, `>= 1`), a deliberate
+>   twin of the gateway's flow budget and tunable *because* that one is — so all three counts move
+>   together and the coupling above is the whole of it. Both this knob and the two R-1 knobs are now
+>   documented in `docs/guides/configuration-reference.md`, which plan.md asked for at stage 1 and
+>   which stage 6b found had not happened.
 > - **A new size ceiling needs a metrics bucket.** `sync._rejection_category` mapped only
 >   `"body exceeds"` to `size`, so `"steps exceed 64 KiB"` and `"more than 200 steps"` fell through to
 >   `frontmatter` and the rejection counter under-counted size rejections. Broadened, gated on
@@ -339,20 +356,170 @@ against them.
 
 ### Stage 6b: graduation itself
 
-- [ ] `services/skill_graduation.py` (new): `build_executable_flow_draft(trace)` renders the ordered trace into an executable-flow skill Markdown (frontmatter `kind: executable_flow`, `risk_class: write`, `web_target` for a browser flow, `steps`; body = a human-readable replay runbook) with **no LLM call** (contrast SPEC-044's `generate_skill_draft`) (R-4)
-- [ ] `services/skill_graduation.py`: `revalidate_blast_radius(trace)` runs **before** the draft is produced — bounded step count, every step's observed `flow_origin` inside the declared target's origin, a **NULL `flow_origin` refuses** (unverified is never fabricated), consistent `risk_class: write`, all credentials resolved to credential-set references (the SPEC-051 guards); a failing trace is a deterministic refusal surfaced to the operator (R-4)
-- [ ] `services/skill_graduation.py`: report whether the declaration preceded the first captured step, on one comparison basis across both backends (see the stage-6a refinement note) — a late declaration is a scope fitted to the trace, and the operator is told so rather than silently trusted (R-4)
-- [ ] `api/v2/routes.py`: `POST /api/v2/sessions/{session_id}/skill-graduate` mirroring `create_skill_draft` — gateway-enforced `session:skill_graduate`, server-side ownership re-check (foreign/unknown → the structural 404), validate through skills-hub's ingestion path (`_validate_skill_markdown`), ephemeral (nothing persisted but the lifecycle flip) (R-4)
-- [ ] `api/v2/routes.py`: emit the `skill_graduated` audit event — `details` carrying `session_id, mode, validation, step_count, web_target`, the payload the contract's description ledger already pins (stage 6a) — and flip the trace lifecycle to `graduated` (R-4)
-- [ ] the graduated draft is validated against Skill v2 on skills-hub's own ingestion path before it reaches the operator (never auto-published) (R-4)
-- [ ] portal: a "Graduate as skill" entry point on the session (role-gated — visible to operator/approver, not observer), and the develop-as-you-go session opener that collects the target at birth (R-4)
-- [ ] portal: the executable-flow draft preview (rendered + raw toggle, mode badge, Download .md / Discard) reusing the SPEC-045 pattern (R-4)
-- [ ] `platform-gateway`: proxy `POST /api/v1/sessions/{session_id}/skill-graduate` behind `ACTION_SESSION_SKILL_GRADUATE` (the action constant and its grant landed in stage 6a), with the draft proxy's 502/503 passthrough — a graduation *does* have a validation leg, unlike the declaration (R-4)
-- [ ] tests: `build_executable_flow_draft` is deterministic over a fixed trace (no LLM synthesis of steps) (R-4)
-- [ ] tests: blast-radius re-validation refuses an over-budget / off-allowlist / inconsistent-`risk_class` / unresolved-credential trace and passes a clean one (R-4)
-- [ ] tests: the endpoint emits `skill_graduated`, flips the lifecycle to `graduated`, and produces a draft that is **not** published (R-4)
-- [ ] tests: observer is denied `session:skill_graduate`; operator/approver are allowed (R-4)
-- [ ] portal tests: the entry point appears for an authorized role and not for an observer; the preview renders (rendered + raw) and downloads (R-4)
+- [x] `services/skill_graduation.py` (new): `build_executable_flow_draft(trace)` renders the ordered trace into an executable-flow skill Markdown (frontmatter `kind: executable_flow`, `risk_class: write`, `web_target` for a browser flow, `steps`; body = a human-readable replay runbook) with **no LLM call** (contrast SPEC-044's `generate_skill_draft`) (R-4)
+- [x] `services/skill_graduation.py`: `revalidate_blast_radius(trace)` runs **before** the draft is produced — bounded step count, every step's observed `flow_origin` inside the declared target's origin, a **NULL `flow_origin` refuses** (unverified is never fabricated), consistent `risk_class: write`, all credentials resolved to credential-set references (the SPEC-051 guards); a failing trace is a deterministic refusal surfaced to the operator (R-4)
+- [x] `services/skill_graduation.py`: report whether the declaration preceded the first captured step, on one comparison basis across both backends (see the stage-6a refinement note) — a late declaration is a scope fitted to the trace, and the operator is told so rather than silently trusted (R-4)
+- [x] `api/v2/routes.py`: `POST /api/v2/sessions/{session_id}/skill-graduate` mirroring `create_skill_draft` — gateway-enforced `session:skill_graduate`, server-side ownership re-check (foreign/unknown → the structural 404), validate through skills-hub's ingestion path (`_validate_skill_markdown`), ephemeral (nothing persisted but the lifecycle flip) (R-4)
+- [x] `api/v2/routes.py`: emit the `skill_graduated` audit event — `details` carrying `session_id, mode, validation, step_count, web_target`, the payload the contract's description ledger already pins (stage 6a) — and flip the trace lifecycle to `graduated` (R-4)
+- [x] the graduated draft is validated against Skill v2 on skills-hub's own ingestion path before it reaches the operator (never auto-published) (R-4)
+- [x] portal: a "Graduate as skill" entry point on the session (role-gated — visible to operator/approver, not observer), and the develop-as-you-go session opener that collects the target at birth (R-4)
+- [x] portal: the executable-flow draft preview (rendered + raw toggle, mode badge, Download .md / Discard) reusing the SPEC-045 pattern (R-4)
+- [x] `platform-gateway`: proxy `POST /api/v1/sessions/{session_id}/skill-graduate` behind `ACTION_SESSION_SKILL_GRADUATE` (the action constant and its grant landed in stage 6a), with the draft proxy's 502/503 passthrough — a graduation *does* have a validation leg, unlike the declaration (R-4)
+- [x] tests: `build_executable_flow_draft` is deterministic over a fixed trace (no LLM synthesis of steps) (R-4)
+- [x] tests: blast-radius re-validation refuses an over-budget / off-allowlist / inconsistent-`risk_class` / unresolved-credential trace and passes a clean one (R-4)
+- [x] tests: the endpoint emits `skill_graduated`, flips the lifecycle to `graduated`, and produces a draft that is **not** published (R-4)
+- [x] tests: observer is denied `session:skill_graduate`; operator/approver are allowed (R-4)
+- [x] portal tests: the entry point appears for an authorized role and not for an observer; the preview renders (rendered + raw) and downloads (R-4)
+- [x] `runtime_settings.py`: register `AGENT_SKILL_GRADUATION_MAX_STEPS` (default 20, `>= 1`) and have the route pass it — *not in plan.md*; found by stage 6b when a comment claimed the knob existed (see the refinement note) (R-4)
+- [x] tests: the route's step bound comes from settings, not the module default — both directions pinned, so the wiring cannot regress silently (R-4)
+- [x] real-PostgreSQL sqlcheck re-run for 6b (`.sqlcheck-spec055-s6a.sql`): the collapsed `_TARGET_DECLARATION` projection resolves, and `to_char`/`date_part` over the live columns prove the second-precision canonicalization is doing work rather than passing a value through (R-4)
+- [x] review fix: a **fifth** blast-radius guard — no step argument shaped like a secret literal. The frontmatter is the authoritative replay copy and is never scrubbed, while `postprocess` redacts only the body, so a literal under a name R-2's vocabulary does not know showed as `[REDACTED]` to the reviewer and rode verbatim into the artifact they merge. Refuses rather than scrubs; `skill_draft._VALUE_PATTERNS` became public `REDACTION_VALUE_PATTERNS` so detection and redaction read one vocabulary (R-4)
+- [x] review fix: the step-list size guard measured per-step UTF-8 bytes with `ensure_ascii=False` while skills-hub's ingestion ceiling is `len(json.dumps(steps))` on the whole list with `ensure_ascii=True` — a ~2× divergence window that passed graduation and then surfaced as a 502 blamed on the renderer. Now measured on ingestion's exact basis (R-4)
+- [x] review fix: the runbook names the `web.navigate` binding step a trace can never contain — `bind_flow` is reachable only from that read-tier call, so without it a merged flow never binds and every write parks its own card (R-4, and an R-5 input)
+- [x] review fix: a third cross-product coupling in `validate_secret_vocabulary.py` — the secret-*shape* vocabulary compared as **ordered** lists, proven to fire on a gateway-only shape, a re-ordering and a rename (R-4)
+- [x] review fix: the shape guard's refusal no longer asserts the value *is* a credential; it names the over-catch (`web.select` option `Basic Authentication`) and why that error direction is the safe one, with a test pinning the wording (R-4)
+
+> **Refinement (stage 6b) — the draft takes the report, so the ordering is structural.** plan.md wrote
+> `revalidate_blast_radius(trace)` and `build_executable_flow_draft(trace)` as two calls over one
+> input. Shipped as a *sequence*: `revalidate_blast_radius(steps, *, target, declared_at, max_steps)
+> -> BlastRadius`, then `build_executable_flow_draft(steps, *, report, session_id, title,
+> declared_target) -> (markdown, slug)`. Two reasons. The draft **requires** the report, so a document
+> cannot be rendered from a trace that was never re-validated — the ordering the plan asked for is a
+> signature fact rather than a caller discipline. And the draft needs the session's own id and title
+> (the provenance block and the runbook's `Session:` line, and a title the operator chose rather than
+> one the endpoint invented), which no trace row carries.
+>
+> - **A credential hole is a refusal, not a hole rendered into the draft.** Stage 4 predicted the
+>   opposite ("R-4 … must surface each placeholder as a hole in the draft for the human to fill",
+>   above). Stage 6b refuses pre-draft (409) for three reasons that turned out to agree. spec.md R-4
+>   lists "all credentials resolved to credential-set references" as a *graduality* condition and the
+>   checklist above ticks it as a re-validation guard, so refusing is what was asked for. Rendering
+>   `<credential-reference>` into `steps` would fail skills-hub's own `CREDENTIAL_HOLE` rule (R-3), so
+>   the platform would hand the operator a document its own validator rejects — breaking the invariant
+>   that a graduation draft always validates. And inventing a set name to fill it would fabricate a
+>   reference to a credential set that may not exist, in the one artifact a human merges into a repo.
+>   The refusal therefore names each step and argument path and says what to do instead.
+> - **The remedy has to be a re-author, because `web.fill_credential` is never captured.** Writing the
+>   test that a named credential-set reference is *not* a hole failed: `web.fill_credential` was
+>   refused as read-tier. The guard was right and the premise was wrong — `web.fill_credential` is on
+>   `kernel_middleware.DEFAULT_AUTO_ALLOWED_TOOLS` and absent from `BROWSER_WRITE_TOOLS`, so R-2's
+>   `tools:mutate` gate never captures it (recorded at stage 4 and in `skill-format.md`). What *was*
+>   wrong is the refusal's stated remedy: it told the operator to add the reference step, but nothing
+>   resolves a hole already stored and no reference ever reaches a trace, so the instruction was
+>   unactionable. It now says **re-author these steps filling the credential through
+>   `web.fill_credential`** rather than typing it, and the draft's runbook says the reference step must
+>   be added by hand at merge time. **R-5 input:** a graduated browser flow therefore always needs a
+>   human-added credential step, so replay verification must not treat a missing `web.fill_credential`
+>   as an anomaly.
+> - **read-tier is derived, not listed.** The guard is `tool_name.startswith("web.") and tool_name not
+>   in BROWSER_WRITE_TOOLS` — `web.*` is the whole browser surface and that set is its complete write
+>   subset, so a `web.*` tool outside it is read-tier by construction. One vocabulary, no second list
+>   to drift, and `runtime_kernel.py`'s capture gate now says so at the seam.
+> - **`web_target` is emitted iff the flow has a browser step.** It is what `bind_flow` binds an origin
+>   guard and a step budget from, so declaring one on a pure-infra flow would advertise a binding that
+>   does not exist. A NULL `flow_origin` refuses for a step `BROWSER_WRITE_TOOLS` covers (stage 6a's
+>   "unverified is never drifted"); for a non-browser step it is *not applicable*, and those positions
+>   are reported as `unguarded_positions` in the draft rather than counted as drift.
+> - **One comparison basis, and it is load-bearing.** `captured_at` (`_iso`) and `declared_at`
+>   (`_canonical_timestamp`) are both rendered to second precision on **both** backends, so the
+>   declaration-ordering comparison is made on one basis and equal stamps answer `indeterminate`
+>   rather than picking a winner. The re-run real-PostgreSQL check proves the canonicalization does
+>   work rather than passing a value through: the column holds `2026-09-09 02:57:09.178661+00`
+>   (`date_part('microsecond', …) % 1000000 = 178661`) while both canonical renders read
+>   `2026-09-09T02:57:09Z`. Cross-backend parity is asserted in `test_authoring_trace.py`, not assumed.
+> - **One projection of `authoring_trace_target`.** Stage 6a shipped `_TRACE_TARGET` (target only)
+>   beside `_TARGET_DECLARATION` (target + `declared_at`); 6b needs the stamp, so they were collapsed
+>   into `_TARGET_DECLARATION` and `declare_target`'s same-transaction read-back now runs it and drops
+>   the column it does not use. Two statements over one table is two places for the column set to drift
+>   from the DDL — and this drift was found the hard way: a 6a Postgres test's single-column fake row
+>   raised `IndexError` once `target_declaration` began reading `row[1]`. Only the **full-suite** run
+>   caught it; every targeted file passed. Lesson carried to R-5: a change to a shared store's
+>   read shape needs the whole suite, not the files that mention it.
+> - **`AGENT_SKILL_GRADUATION_MAX_STEPS` exists because a comment claimed it did.**
+>   `skill_graduation.py` documented the bound as operator-tunable under that name while no such
+>   setting existed and the route used the module default — an overclaim that would have shipped.
+>   Rather than delete the claim, 6b made it true: the knob joins `RuntimeSettings` beside the two R-1
+>   ones (default 20, `>= 1`, read in `from_env`, passed by the route) with a route-level test pinning
+>   **both** directions, because the service already honoured `max_steps` and only the wiring could
+>   regress silently. Finding it also exposed that the two R-1 knobs had never been added to
+>   `docs/guides/configuration-reference.md` as plan.md required; all three rows are there now.
+> - **The lifecycle flip is ordered validate → `close_trace(TRACE_GRADUATED)` → audit, and is not
+>   best-effort.** A trace that fails validation is never marked graduated, and the audit event never
+>   describes a flip that did not happen. Re-graduating an already-graduated trace is an idempotent
+>   re-export: `close_trace` returns `False`, `graduated_now` is logged as such, and the event is
+>   emitted again — a second export is a second consequential act and gets its own audit line.
+> - **The gateway's status mapping is the *draft's*, not the declaration's, deliberately.** Stage 6a's
+>   declaration proxy collapses 503→502 because a declaration reaches no downstream validation leg, so
+>   a 503 there is only an unhealthy upstream. A graduation validates on skills-hub's own ingestion
+>   path, so 503 ("not configured") and 502 ("unreachable") are domain outcomes meaning no validated
+>   artifact exists; both ride through unchanged, as does the multi-guard 409 refusal verbatim.
+> - **Hand-rolled YAML with JSON-quoted scalars.** agent-platform has no PyYAML, and JSON is a subset
+>   of YAML, so frontmatter is rendered by hand with every scalar JSON-quoted and `sort_keys=True` for
+>   byte-determinism — which is what keeps a selector like `#submit-1` or a target URL from being
+>   re-interpreted on the way back in. No model call, no skeleton and no bounded regeneration, unlike
+>   SPEC-044's `generate_skill_draft`: every step in the document was human-approved and signed before
+>   it ran, so there is nothing to synthesize and nothing a session did not run can appear in it.
+> - **Review finding (Critical): a secret literal reached the frontmatter while the runbook showed
+>   `[REDACTED]`.** R-2's capture-time parameterization is *name*-based and deliberately fails open on
+>   an unknown name — failing closed would placeholder `web.click.selector` and make every trace
+>   un-graduable — and `KNOWN_SAFE_FIELDS` positively exempts some names from placeholdering at all
+>   (`web.select.value`). So a literal under a name the vocabulary does not know is stored verbatim.
+>   The draft's `postprocess` redacts the *body* only, because the frontmatter is the authoritative
+>   replay copy and a redacted argument would replay the wrong value. The asymmetry therefore hid the
+>   leak from the reviewer while the value itself rode into the artifact they merge. Fixed by refusing
+>   (a fifth guard, naming each position, beside the credential hole) rather than scrubbing — the
+>   posture the credential hole already takes. `skill_draft._VALUE_PATTERNS` became public
+>   `REDACTION_VALUE_PATTERNS` so the refusal and the redaction read one vocabulary, not two that can
+>   drift; the four shapes are parametrized in tests against `parameterize_for_trace` to prove R-2
+>   really does store them verbatim. `skill-format.md` now states the residual as the intersection
+>   (neither the name vocabulary nor a recognized shape) instead of overclaiming a detection neither
+>   side performs, and the draft no longer says it "carries no literal secret".
+> - **Review finding (High): the size guard measured on a different basis than the validator it guards
+>   against.** skills-hub's ingestion ceiling is `len(json.dumps(steps))` — the whole list, default
+>   `ensure_ascii=True`, where one BMP character costs 6 `\uXXXX` characters. Graduation summed
+>   per-step UTF-8 bytes with `ensure_ascii=False`, where the same character costs 3. A step list above
+>   roughly half the ceiling could pass graduation and then be rejected by ingestion, surfacing as a
+>   502 blamed on the renderer when the real cause was the bound disagreeing with itself. Now measured
+>   on ingestion's exact basis, with the UTF-8 premise **asserted** in the test rather than assumed so
+>   the test is a real discriminator. Same class of bug as the `captured_at` basis above: two places
+>   measuring one thing on different scales.
+> - **Review finding (Warning): the `web.navigate` binding hole was unnamed — an R-5 input.**
+>   `bind_flow` is reachable *only* from the `web.navigate` handler, and `web.navigate` is read-tier, so
+>   a graduated step list can never contain the call that binds the flow. Without it the flow never
+>   binds, the origin guard and the step budget never arm, and every write parks its own confirmation
+>   card instead of the single one the `risk_class` bullet promises. The runbook now says to add it as
+>   step 1, naming the `skill_id` the binding is keyed on — which does not exist until the merge
+>   assigns it, so the guidance has to say that too. Emitting the step instead was rejected: it would
+>   synthesize a step the session never ran, which is the one thing the deterministic-rendering
+>   invariant exists to prevent. **R-5 input:** a graduated browser flow therefore always needs *two*
+>   human-added steps at merge time — the binding `web.navigate` and the credential
+>   `web.fill_credential` — so replay verification must not treat either absence as an anomaly, and a
+>   replay of an unmerged draft is expected to park per-action rather than one-gate.
+> - **Re-review of the fixes: the shape guard over-catches, and that is the accepted direction.**
+>   A second review of the delta above found that `web.select` with `value: "Basic Authentication"` —
+>   a plausible dropdown option on an admin portal's auth-settings page, stored verbatim because
+>   `web.select.value` is in `KNOWN_SAFE_FIELDS` — matches the Bearer/Basic shape and is refused with no
+>   in-platform remedy. Verified reachable. Kept, because the over-catch is **pre-existing and already
+>   shipped twice**: the same pattern redacts that string out of tool-gateway evidence and out of a
+>   SPEC-044 draft body, so R-4 changes the *consequence* (cosmetic redaction → refusal), not the
+>   trade. Narrowing the pattern to buy back this false positive opens a false *negative*, and only one
+>   of the two publishes a credential into a repository. What changed is the honesty: the refusal no
+>   longer asserts the value *is* a credential, names the over-catch and its direction, and offers the
+>   `web.fill_credential` remedy conditionally; the function docstring went from "four guards" to five
+>   and says plainly that this is the only guard whose inference is a guess. A test pins the wording so
+>   the narrowing cannot happen quietly.
+> - **A third cross-product coupling is now pinned in `make verify`.** Making
+>   `skill_draft._VALUE_PATTERNS` public turned an unpinned second copy of the gateway's
+>   `tools/redaction._VALUE_PATTERNS` into a **consequential** one: before, divergence only changed
+>   cosmetic body redaction; now it decides whether a secret-shaped literal is refused or rides into the
+>   merged frontmatter — failing *open* in the graduation guard, exactly like the credential-hole marker
+>   already did. `validate_secret_vocabulary.py` therefore grew a third check, comparing the two tuples
+>   textually as **ordered** lists (both copies document "most specific first" as meaningful, so a
+>   re-ordering is a divergence a set comparison would pass silently). The existing `_tuple_pattern`
+>   could not be reused: it captures to the first `)` and these bodies are regex source texts full of
+>   their own groups. Proven to fire rather than assumed — a throwaway tree was perturbed three ways
+>   (a gateway-only fifth shape, a re-ordering, a rename) and each failed the build with a message naming
+>   the coupling. Same class as the two basis bugs above: one thing measured in two places.
 
 ## Stage 7: agent-platform + tool-gateway + portal — R-5 replay
 

@@ -62,7 +62,15 @@ REDACTION_MARKER = "[REDACTED]"
 # The gateway's redaction vocabulary (tool_gateway/tools/redaction.py): the
 # same shape-based, key-agnostic patterns tool output receives, applied to
 # the model-written body before validation.
-_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+#
+# Public because a second caller needs the *same* vocabulary rather than its
+# own: ``skill_graduation.revalidate_blast_radius`` refuses a trace whose step
+# arguments carry a shape this recognizes (SPEC-055 R-4). That is a detection,
+# not a redaction — the frontmatter ``steps`` list is the authoritative replay
+# copy, so scrubbing a value in place would silently change what the flow
+# replays — but it must key off these patterns or the two draft producers would
+# grow divergent notions of what a secret looks like.
+REDACTION_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"
     ),
@@ -312,7 +320,7 @@ def parse_model_output(text: str) -> tuple[dict[str, Any], str] | None:
 
 
 def _redact_text(text: str) -> str:
-    for pattern in _VALUE_PATTERNS:
+    for pattern in REDACTION_VALUE_PATTERNS:
         text = pattern.sub(REDACTION_MARKER, text)
     return text
 

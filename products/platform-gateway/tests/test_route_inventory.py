@@ -33,6 +33,10 @@ EXPECTED_ROUTES = {
     # develop-as-you-go session before it mutates anything; rides the
     # session:skill_graduate grant rather than its own action.
     ("POST", "/api/v1/sessions/{session_id}/skill-target"),
+    # Skill graduation (SPEC-055 R-4): the consequential half of the same
+    # capability — a deterministic executable-flow draft, blast-radius
+    # re-validated, never auto-published.
+    ("POST", "/api/v1/sessions/{session_id}/skill-graduate"),
     # Skill-draft export (SPEC-044 R-1): validated Markdown handover,
     # ephemeral by construction.
     ("POST", "/api/v1/sessions/{session_id}/skill-draft"),

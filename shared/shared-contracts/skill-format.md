@@ -56,10 +56,10 @@ tool surface resolves them from platform-managed credential sets.
 
 A `knowledge` skill grounds an answer and never executes. An
 `executable_flow` skill additionally carries a machine-readable replay list —
-what SPEC-055 graduation will produce from a session's approved authoring
-trace (R-4, stage 6, *not yet implemented*), and what replay will drive (R-5,
-stage 7, *planned*). Ingestion and storage of the class are shipped; the two
-ends that feed and consume it are not.
+what SPEC-055 graduation produces from a session's approved authoring trace
+(R-4), and what replay will drive (R-5, stage 7, *planned*). Ingestion,
+storage and the graduation that feeds them are shipped; the replay that
+consumes them is not.
 
 ```markdown
 ---
@@ -117,9 +117,21 @@ Ingestion rules for the class (all rejections are reportable):
 
   This check is structural, not lexical: skills-hub cannot see the gateway's
   credential store, so it verifies that a credential-filling step *names* a set
-  and that no argument carries R-2's marker. It cannot detect a literal secret
-  under an argument name the capture-time vocabulary never matched — that
-  residual is recorded in the SPEC-055 stage-4 notes.
+  and that no argument carries R-2's marker. It detects no literal secret at
+  all — not by name and not by shape.
+
+  The lexical check lives upstream, at graduation: SPEC-055 R-4 re-validates
+  every captured step and **refuses** (409, naming each position) a step
+  argument shaped like a secret literal — a PEM private key block, a JWT, an
+  `Authorization` header value or an AWS access key id. It refuses rather than
+  redacts because the frontmatter `steps` list is the authoritative replay copy
+  and a scrubbed argument would replay the wrong value. The match over-catches
+  by design — a `web.select` option reading `Basic Authentication` is refused
+  too — and that direction of error is the deliberate one: a false refusal
+  costs an operator a re-author, a false accept publishes a credential. What
+  survives both checks is therefore a literal matching neither R-2's
+  capture-time *name* vocabulary nor R-4's recognized *shapes* — narrower than
+  either alone, and recorded in the SPEC-055 stage-4 and stage-6b notes.
 
   Because `web.fill_credential` is read-tier, auto-allowed and absent from the
   browser write set, a graduated flow's trace never contains one under default
@@ -135,14 +147,17 @@ Ingestion rules for the class (all rejections are reportable):
 - ≤ 200 `steps`, and ≤ 64 KiB serialized for the whole list
 
 The step caps are resource ceilings (one JSONB column, and `steps` rides list
-responses), not the policy bound. The counts that decide whether a flow is
-graduable and how far it may replay are the gateway's flow step budget
-(`GATEWAY_BROWSER_FLOW_MAX_STEPS`, default 20) and — once it lands —
-graduation's blast-radius re-validation (SPEC-055 R-4, stage 6, *not yet
-implemented*). `200` sits above both so a default-configured graduation is
-never rejected by the ceiling; the authoring-trace cap
-(`AGENT_AUTHORING_TRACE_MAX_STEPS`, default 100) is operator-tunable, so that
-ordering is a coupling to preserve rather than an invariant.
+responses), not the policy bound. The count that decides how far a flow may
+replay is the gateway's flow step budget (`GATEWAY_BROWSER_FLOW_MAX_STEPS`,
+default 20), and graduation's blast-radius re-validation (SPEC-055 R-4)
+re-checks that same bound before an operator ever holds the artifact — as a
+deliberate twin (`AGENT_SKILL_GRADUATION_MAX_STEPS`, also 20) with no drift
+guard, because the gateway stays the authority at replay and fails closed
+either way, so a drift only moves where the refusal surfaces. `200` sits above
+both so a default-configured graduation is never rejected by the ceiling; the
+authoring-trace cap (`AGENT_AUTHORING_TRACE_MAX_STEPS`, default 100) is
+operator-tunable, so that ordering is a coupling to preserve rather than an
+invariant.
 
 ## Identity rules
 

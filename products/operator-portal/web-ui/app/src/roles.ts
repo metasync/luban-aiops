@@ -67,6 +67,19 @@ export const INCIDENT_SKILL_DRAFT_ROLES = new Set([
   "operator",
 ]);
 
+// SPEC-055 R-4/OQ-3: session:skill_graduate is a *higher* trust level
+// than the two draft grants — its artifact declares risk_class: write and
+// a machine-readable replay step list rather than knowledge prose — so it
+// is separately authorized. Same operational-role posture, and it gates
+// the mid-session target declaration too (one capability, one action).
+// Client-side mirror of allow-operators-skill-graduate; the gateway
+// re-enforces the action on every request.
+export const SKILL_GRADUATE_ROLES = new Set([
+  "platform-admin",
+  "approver",
+  "operator",
+]);
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

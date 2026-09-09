@@ -255,6 +255,27 @@ def test_authoring_trace_settings_validation():
     assert RuntimeSettings(authoring_trace_idle_days=0).authoring_trace_idle_days == 0
 
 
+def test_skill_graduation_max_steps_default(monkeypatch):
+    """SPEC-055 R-4: the graduation blast-radius bound defaults to 20, the
+    tool-gateway's replay budget. The two are a deliberate twin, so the
+    default is the load-bearing part — an operator who raises
+    ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` raises this beside it or graduation
+    refuses a flow that would have replayed."""
+    monkeypatch.delenv("AGENT_SKILL_GRADUATION_MAX_STEPS", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.skill_graduation_max_steps == 20
+
+
+def test_skill_graduation_max_steps_reads_env(monkeypatch):
+    monkeypatch.setenv("AGENT_SKILL_GRADUATION_MAX_STEPS", "40")
+    assert RuntimeSettings.from_env().skill_graduation_max_steps == 40
+
+
+def test_skill_graduation_max_steps_validation():
+    with pytest.raises(ValueError, match="GRADUATION_MAX_STEPS must be >= 1"):
+        RuntimeSettings(skill_graduation_max_steps=0)
+
+
 def test_model_discovery_settings_validation():
     with pytest.raises(ValueError, match="REFRESH_SECONDS must be >= 1"):
         RuntimeSettings(model_discovery_refresh_seconds=0)

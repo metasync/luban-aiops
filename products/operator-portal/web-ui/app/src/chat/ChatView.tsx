@@ -16,15 +16,18 @@ import {
   message,
 } from "antd";
 import {
+  AimOutlined,
   AudioOutlined,
   CheckOutlined,
   CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { Bubble, Sender } from "@ant-design/x";
 import dayjs from "dayjs";
@@ -33,15 +36,19 @@ import { ApiError } from "../api/client";
 import { getModelCatalog, type ModelCatalogResponse } from "../api/models";
 import {
   createSkillDraft,
+  declareSkillTarget,
   getSession,
+  graduateSessionSkill,
   type SessionSummary,
   type SkillDraftResponse,
+  type SkillGraduationResponse,
 } from "../api/sessions";
 import { useAuth } from "../auth/AuthContext";
 import {
   CHAT_CONFIRM_ROLES,
   APPROVAL_DECIDER_ROLES,
   SKILL_DRAFT_ROLES,
+  SKILL_GRADUATE_ROLES,
   hasAnyRole,
 } from "../roles";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
@@ -831,6 +838,189 @@ export function DraftAsSkillButton({ sessionId }: { sessionId: string }) {
   );
 }
 
+// SPEC-055 R-4: "Graduate as skill" — the develop-as-you-go counterpart of
+// the draft action above it. Visibility mirrors the gateway's
+// session:skill_graduate grant (client-side convenience only), but the
+// artifact is a different class: the agent re-validates the session's
+// captured trace against its declared blast radius and renders it
+// deterministically, so the response either arrives validated or the
+// operator gets a refusal naming every guard the trace failed. That refusal
+// is a modal rather than a toast because it lists step positions and is the
+// operator's only remedy — a toast that dismisses itself would take the
+// answer with it.
+export function GraduateAsSkillButton({ sessionId }: { sessionId: string }) {
+  const { roles } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<SkillGraduationResponse | null>(null);
+  if (!hasAnyRole(roles, SKILL_GRADUATE_ROLES)) {
+    return null;
+  }
+  const graduate = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      setDraft(await graduateSessionSkill(sessionId));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        Modal.warning({
+          title: "This session cannot be graduated",
+          width: 640,
+          content:
+            err.detail ?? "Its authoring trace failed blast-radius re-validation.",
+        });
+      } else if (err instanceof ApiError && err.status === 403) {
+        message.error("Your role cannot graduate sessions into skills.");
+      } else if (err instanceof ApiError && err.status === 404) {
+        // Same race as the draft action: sessions expire on an idle TTL and a
+        // foreign id answers the identical opaque 404 (anti-enumeration).
+        message.error(
+          "This session is no longer available to you (expired or owned by " +
+            "another operator).",
+        );
+      } else if (err instanceof ApiError && err.status === 503) {
+        message.error("Skill validation is not configured right now.");
+      } else if (err instanceof ApiError && err.status === 502) {
+        // Covers both an unreachable validation leg and a draft ingestion
+        // rejected — in neither case is anything handed over.
+        message.error(
+          err.detail ?? "Graduation failed validation — no draft was returned.",
+        );
+      } else {
+        message.error(
+          err instanceof Error ? err.message : "Skill graduation failed.",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Tooltip title="Render this session's approved mutations into a validated executable-flow skill draft">
+        <Button
+          type="text"
+          size="small"
+          icon={<ThunderboltOutlined />}
+          aria-label="Graduate as skill"
+          loading={busy}
+          onClick={() => void graduate()}
+        >
+          Graduate as skill
+        </Button>
+      </Tooltip>
+      <SkillDraftPreviewModal draft={draft} onClose={() => setDraft(null)} />
+    </>
+  );
+}
+
+// SPEC-055 R-4: declare the target a session's captured mutations are
+// corroborated against. The birth path (the develop-as-you-go opener) is the
+// primary one; this exists for a session that *became* a development session
+// after it was opened, without which its browser steps could never graduate —
+// the re-validation would have nothing to corroborate them against.
+//
+// The dialog reports the target actually in force rather than echoing the
+// field, because the first declaration wins and cannot be widened: an
+// operator who believed they had moved a scope they cannot move would trust a
+// graduation that was scoped by whatever was declared first.
+export function DeclareSkillTargetButton({ sessionId }: { sessionId: string }) {
+  const { roles } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (!hasAnyRole(roles, SKILL_GRADUATE_ROLES)) {
+    return null;
+  }
+  const submit = async () => {
+    const value = target.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    try {
+      const declaration = await declareSkillTarget(sessionId, value);
+      setOpen(false);
+      setTarget("");
+      setError(null);
+      if (declaration.already_declared) {
+        message.warning(
+          "A different target is already in force for this session: " +
+            declaration.target,
+        );
+      } else {
+        message.success(`Target in force: ${declaration.target}`);
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422) {
+        setError(
+          err.detail ??
+            "Enter an absolute http(s) URL — a target with no origin can " +
+              "never be corroborated.",
+        );
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError("Your role cannot declare a skill-development target.");
+      } else if (err instanceof ApiError && err.status === 404) {
+        setError("This session is no longer available to you.");
+      } else {
+        setError(err instanceof Error ? err.message : "Declaration failed.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Tooltip title="Declare the web target this session's mutations are corroborated against (needed to graduate a browser flow)">
+        <Button
+          type="text"
+          size="small"
+          icon={<AimOutlined />}
+          aria-label="Declare skill target"
+          onClick={() => {
+            setError(null);
+            setOpen(true);
+          }}
+        >
+          Declare target
+        </Button>
+      </Tooltip>
+      <Modal
+        title="Declare skill-development target"
+        open={open}
+        okText="Declare"
+        okButtonProps={{ disabled: target.trim().length === 0 }}
+        confirmLoading={busy}
+        onOk={() => void submit()}
+        onCancel={() => setOpen(false)}
+        destroyOnHidden
+      >
+        {error ? (
+          <Alert
+            type="error"
+            showIcon
+            title={error}
+            style={{ marginBottom: 12 }}
+          />
+        ) : null}
+        <Input
+          value={target}
+          maxLength={2048}
+          autoFocus
+          placeholder="https://console.example.com/admin/users"
+          aria-label="Skill target"
+          onChange={(event) => setTarget(event.target.value)}
+          onPressEnter={() => void submit()}
+        />
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          The first declaration wins and cannot be widened. Only the origin and
+          path are kept — any query, fragment or embedded credential is dropped
+          — and every mutation this session captures must land inside it, or
+          graduation refuses the flow.
+        </Typography.Text>
+      </Modal>
+    </>
+  );
+}
+
 function SessionPanel({
   sessions,
   activeSessionId,
@@ -840,6 +1030,7 @@ function SessionPanel({
   localDecisionApplied,
   onSelect,
   onCreate,
+  onCreateDevelopment,
   onDelete,
   onRename,
 }: {
@@ -853,6 +1044,9 @@ function SessionPanel({
   localDecisionApplied: boolean;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
+  // SPEC-055 R-4: opens the develop-as-you-go dialog, which collects the
+  // target before the session exists to mutate anything.
+  onCreateDevelopment: () => void;
   onDelete: (session: SessionSummary) => void;
   onRename: (session: SessionSummary) => void;
 }) {
@@ -863,17 +1057,45 @@ function SessionPanel({
         {/* Pre-login the workspace API cannot be called (401), so the
             affordance is disabled like the composer; the server-side 401
             path stays as the defence for mid-session token expiry. */}
-        <Tooltip title={authenticated ? "" : "Sign in to create a session"}>
-          <Button
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={onCreate}
-            disabled={!authenticated}
-            aria-label="New session"
+        {/* Both create affordances share one flex child: the header is
+            space-between, so a third direct child would centre itself. */}
+        <div style={{ display: "flex", gap: 4 }}>
+          <Tooltip title={authenticated ? "" : "Sign in to create a session"}>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={onCreate}
+              disabled={!authenticated}
+              aria-label="New session"
+            >
+              New
+            </Button>
+          </Tooltip>
+          {/* SPEC-055 R-4: the develop-as-you-go opener. Deliberately a second
+              button rather than a step added to "New" — the one-click path is
+              the common case and its muscle memory holds. Not role-gated: the
+              target rides session:create, which every authenticated role
+              holds, because declaring a scope is inert (it grants nothing and
+              only narrows what a later graduation may emit). Graduating stays
+              gated on session:skill_graduate. */}
+          <Tooltip
+            title={
+              authenticated
+                ? "Open a skill-development session against a declared web target"
+                : "Sign in to create a session"
+            }
           >
-            New
-          </Button>
-        </Tooltip>
+            <Button
+              size="small"
+              icon={<ExperimentOutlined />}
+              onClick={onCreateDevelopment}
+              disabled={!authenticated}
+              aria-label="New skill development session"
+            >
+              Skill
+            </Button>
+          </Tooltip>
+        </div>
       </div>
       {error ? (
         <Alert
@@ -1297,6 +1519,39 @@ export default function ChatView({
     setRenaming(null);
   };
 
+  // SPEC-055 R-4: the develop-as-you-go opener. The target is collected
+  // *before* the session exists, which is what makes it an authorization
+  // scope rather than a claim fitted to the trace afterwards — no mutation
+  // can have been captured yet, so graduation can report the declaration
+  // `preceded` every step. Required, not optional: a session opened without a
+  // target can still capture browser mutations, but graduating them needs a
+  // target, and one declared after the fact is reported as fitted to the trace
+  // rather than as the scope the session acted under. The plain "New" button
+  // keeps the targetless path for ordinary chat.
+  const [devOpen, setDevOpen] = useState(false);
+  const [devTarget, setDevTarget] = useState("");
+  const [devError, setDevError] = useState<string | null>(null);
+  const [devBusy, setDevBusy] = useState(false);
+
+  const openDevelopmentDialog = () => {
+    setDevTarget("");
+    setDevError(null);
+    setDevOpen(true);
+  };
+
+  const submitDevelopmentSession = async () => {
+    const target = devTarget.trim();
+    if (!target || devBusy) return;
+    setDevBusy(true);
+    const outcome = await workspace.createDevelopmentSession(target);
+    setDevBusy(false);
+    if (!outcome.ok) {
+      setDevError(outcome.message ?? "Could not open the session.");
+      return;
+    }
+    setDevOpen(false);
+  };
+
   // SPEC-039 R-8: the open session header carries the id for handoff.
   const activeSummary =
     mergedSessions.find((s) => s.session_id === workspace.activeSessionId) ??
@@ -1327,6 +1582,7 @@ export default function ChatView({
         localDecisionApplied={localDecisionApplied}
         onSelect={setActiveSessionId}
         onCreate={() => void workspace.createAndOpen()}
+        onCreateDevelopment={openDevelopmentDialog}
         onDelete={confirmDelete}
         onRename={startRename}
       />
@@ -1345,6 +1601,10 @@ export default function ChatView({
             </code>
             <CopyIdButton id={activeSummary.session_id} />
             <DraftAsSkillButton sessionId={activeSummary.session_id} />
+            {/* Order reads as the workflow: prose draft first, then the two
+                develop-as-you-go controls — scope the session, graduate it. */}
+            <DeclareSkillTargetButton sessionId={activeSummary.session_id} />
+            <GraduateAsSkillButton sessionId={activeSummary.session_id} />
           </div>
         ) : null}
         <div className="chat-messages" ref={scrollRef}>
@@ -1501,6 +1761,45 @@ export default function ChatView({
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           Renames apply to your own sessions only and are not audited.
         </Typography.Text>
+      </Modal>
+      <Modal
+        title="New skill-development session"
+        open={devOpen}
+        okText="Open session"
+        okButtonProps={{ disabled: devTarget.trim().length === 0 }}
+        confirmLoading={devBusy}
+        onOk={() => void submitDevelopmentSession()}
+        onCancel={() => setDevOpen(false)}
+        destroyOnHidden
+      >
+        {devError ? (
+          <Alert
+            type="error"
+            showIcon
+            title={devError}
+            style={{ marginBottom: 12 }}
+          />
+        ) : null}
+        <Input
+          value={devTarget}
+          maxLength={2048}
+          autoFocus
+          placeholder="https://console.example.com/admin/users"
+          aria-label="Skill development target"
+          onChange={(event) => setDevTarget(event.target.value)}
+          onPressEnter={() => void submitDevelopmentSession()}
+        />
+        <Typography.Paragraph
+          type="secondary"
+          style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}
+        >
+          Name the web target this session will work against. Declaring it
+          before the first mutation is what makes it the scope the session acts
+          under: every approved change it captures is then corroborated against
+          this origin at graduation, and a step that lands elsewhere refuses
+          the flow. Only the origin and path are kept — any query, fragment or
+          embedded credential is dropped. The first declaration wins.
+        </Typography.Paragraph>
       </Modal>
     </div>
   );

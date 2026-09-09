@@ -375,6 +375,42 @@ class SkillTargetDeclaration(BaseModel):
     already_declared: bool
 
 
+class SkillGraduationResponse(BaseModel):
+    """One session's graduated executable-flow draft (SPEC-055 R-4).
+
+    Field-compatible with the SPEC-044 draft response (``markdown``, ``mode``,
+    ``validation``, ``suggested_filename``) so the portal's shared preview
+    modal serves both, with three additions that only a graduation can report:
+
+    ``mode`` is ``graduated`` rather than ``generated`` or ``skeleton`` — no
+    model was involved, which is the property a reviewer of an *executable*
+    artifact most needs to see, and there is no skeleton to fall back to
+    because a trace either re-validates or it does not.
+
+    ``step_count`` is the number of replay steps in the draft, i.e. the number
+    of approved mutations the session captured. ``web_target`` is the declared
+    scope the draft binds a replay to, and is ``None`` for a flow with no
+    browser step, which needs none and gets none rather than a target it would
+    never use.
+
+    ``declaration`` reports where the declaration sits relative to the first
+    captured step — ``preceded`` (an authorization scope the session acted
+    under), ``postdated`` (a scope fitted to a trace that had already begun)
+    or ``indeterminate`` (both stamps are second-precision, so a same-second
+    declaration cannot be ordered). It is a report, never a gate: corroboration
+    of every observed origin against the declared one is the control, and a
+    hard ordering gate would add friction without adding safety.
+    """
+
+    markdown: str
+    mode: str
+    validation: str
+    suggested_filename: str
+    step_count: int
+    web_target: str | None
+    declaration: str
+
+
 # --- Model discovery (SPEC-024 R-2) ---
 
 
