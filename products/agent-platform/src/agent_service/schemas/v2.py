@@ -320,9 +320,59 @@ class AgentSessionCreateRequest(BaseModel):
     Omitting ``session_id`` keeps the historical server-generated id;
     supplying one creates a named dedicated session (SPEC-015 R-3 triage
     sessions). Identity stays in headers, never in bodies.
+
+    ``skill_target`` (SPEC-055 R-4) opens the session as a
+    develop-as-you-go session: naming the web target it will work against
+    *at birth* is what makes that target an authorization scope rather
+    than a claim fitted to the trace afterwards, because no mutation can
+    have been captured yet. Shaped exactly like the standalone
+    declaration's — origin and path kept, any query or embedded
+    credentials dropped — since both paths go through one validator.
+    Bounded by the skill contract's own ``web_target`` maxLength, so
+    anything accepted here can always be emitted into a graduated draft.
     """
 
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    skill_target: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+# --- Skill graduation (SPEC-055 R-4) ---
+
+
+class SkillTargetDeclareRequest(BaseModel):
+    """Body for ``POST /api/v2/sessions/{session_id}/skill-target``.
+
+    The web target an operator names when opening a skill-development
+    session — declared *before* the first mutation, so it is the
+    authorization scope the session's captured steps are corroborated
+    against, not a post-hoc claim about the past. Stored as origin and
+    path (the operator's path narrowing is part of the scope and must
+    survive into the draft's ``web_target``) with any query, fragment and
+    ``user:password@`` dropped, and capped at the skill contract's own
+    ``web_target`` bound, so a declared target can always be emitted.
+    """
+
+    target: str = Field(min_length=1, max_length=2048)
+
+
+class SkillTargetDeclaration(BaseModel):
+    """The target actually in force for one session's graduation.
+
+    ``target`` is the *effective* value, not an echo of the request: the
+    first declaration wins, so a second call reports the scope already set.
+    A UI that showed the request back would let an operator believe they had
+    moved a scope they cannot move.
+
+    ``already_declared`` means precisely that a target *other than the one
+    requested* is in force — not that a declaration pre-existed, which the
+    field cannot tell the caller and does not try to. Re-declaring the same
+    scope is a no-op that reads as success, so an operator confirming a
+    target they already set is not told they were too late.
+    """
+
+    session_id: str
+    target: str
+    already_declared: bool
 
 
 # --- Model discovery (SPEC-024 R-2) ---

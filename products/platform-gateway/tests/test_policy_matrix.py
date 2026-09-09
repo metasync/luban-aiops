@@ -197,6 +197,17 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertFalse(matrix["developer"]["incident:skill_draft"])
         self.assertFalse(matrix["read-only-observer"]["incident:skill_draft"])
         self.assertFalse(matrix["auditor"]["incident:skill_draft"])
+        # SPEC-055 R-4/OQ-3: session:skill_graduate is a higher trust level
+        # than the draft grants — its artifact declares risk_class: write and
+        # a replay step list — so it is separately authorized rather than
+        # folded into session:skill_draft. Same operational-role posture, and
+        # it gates the target declaration too (one capability, one action).
+        self.assertIn("session:skill_graduate", payload["actions"])
+        for role in ("platform-admin", "approver", "operator"):
+            self.assertTrue(matrix[role]["session:skill_graduate"], role)
+        self.assertFalse(matrix["developer"]["session:skill_graduate"])
+        self.assertFalse(matrix["read-only-observer"]["session:skill_graduate"])
+        self.assertFalse(matrix["auditor"]["session:skill_graduate"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

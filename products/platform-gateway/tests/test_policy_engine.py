@@ -329,6 +329,9 @@ class ContractAlignmentTests(unittest.TestCase):
         # session:update guards the owner rename (SPEC-039 R-2/R-7).
         # session:skill_draft and incident:skill_draft guard the two
         # skill-draft entry points (SPEC-044 R-3 / SPEC-045 R-3).
+        # session:skill_graduate guards skill graduation and the target
+        # declaration that scopes it — one capability, one action
+        # (SPEC-055 R-4/OQ-3).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
@@ -336,6 +339,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "session:list", "session:delete", "session:update",
                 "session:skill_draft",
                 "incident:skill_draft",
+                "session:skill_graduate",
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
                 "policy:read", "tools:list", "tools:mutate", "skills:read",

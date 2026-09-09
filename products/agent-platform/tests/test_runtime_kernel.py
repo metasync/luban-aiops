@@ -1810,17 +1810,25 @@ class TestAuthoringTraceCapture:
         ``save_request``, since a request persists exactly once.
         """
         traces = getattr(AUTHORING_TRACE_STORE, "_by_session", None)
+        targets = getattr(AUTHORING_TRACE_STORE, "_targets", None)
         records = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
         CONFIRMATION_REGISTRY._by_session.clear()
         FLOW_APPROVALS.clear_all()
         FLOW_CONTEXTS.clear_all()
         if traces is not None:
             traces.clear()
+        if targets is not None:
+            # R-4's declaration map is a separate key space from the step
+            # rows: a leaked target would make another test's first-wins
+            # assertion read a scope this test never declared.
+            targets.clear()
         if records is not None:
             records.clear()
         yield
         if traces is not None:
             traces.clear()
+        if targets is not None:
+            targets.clear()
         if records is not None:
             records.clear()
 
@@ -1924,7 +1932,10 @@ class TestAuthoringTraceCapture:
         # References only: the exact step shape, so no signature, receipt,
         # outcome or digest is duplicated out of ``execution_records``
         # (ADR-0009 — the trace never becomes a second copy of tamper
-        # evidence).
+        # evidence). ``flow_origin`` is present but NULL at capture: this
+        # seam runs before the call, and the receipt seam amends it with
+        # the origin the gateway reports the interaction landed on
+        # (SPEC-055 R-4).
         assert set(rows[0]) == {
             "session_id",
             "position",
@@ -1934,6 +1945,7 @@ class TestAuthoringTraceCapture:
             "confirm_id",
             "status",
             "captured_at",
+            "flow_origin",
         }
         assert [row["execution_id"] for row in rows] == [
             requests["call-1"]["execution_id"],
@@ -1943,6 +1955,9 @@ class TestAuthoringTraceCapture:
         # Dated from the signature, not from the append.
         assert rows[0]["captured_at"] == requests["call-1"]["requested_at"]
         assert rows[0]["status"] == "draft"
+        # No origin yet: capture precedes execution, so there is nothing the
+        # gateway could have reported. R-4 amends it from the receipt seam.
+        assert all(row["flow_origin"] is None for row in rows)
         # The seam it sits beside is untouched: the durable record and the
         # audit event both still landed.
         assert len(EXECUTION_RECORD_STORE.load_for_session(session_id)) == 2
@@ -2272,4 +2287,301 @@ class TestAuthoringTraceCapture:
         assert len(
             [a for a in audits if a["event_type"] == "execution_requested"]
         ) == 2
+
+
+# --- SPEC-055 R-4: the observed step origin at the receipt seam --------------
+
+
+class TestObserveStepOrigin:
+    """SPEC-055 R-4: a captured browser step is amended with the origin the
+    gateway reported the interaction actually landed on.
+
+    R-2 appends at the *signing* seam, before the call runs, so the step
+    cannot carry an origin; this is the only place the kernel can read one,
+    because ``build_receipt`` digests the outcome and never stores it. Scoped
+    to ``BROWSER_WRITE_TOOLS`` — the same set that gates the flow-unlock
+    capture site — so the two ends cannot disagree about which steps carry
+    origins, and to a ``succeeded`` result, so the trace cannot disagree with
+    the receipt beside it either. Best-effort: a store failure degrades
+    graduation candidacy and never the receipt already written or the audit
+    about to be emitted.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_trace_store(self):
+        """Isolate the process-wide singletons (see ``TestAuthoringTraceCapture``)."""
+        traces = getattr(AUTHORING_TRACE_STORE, "_by_session", None)
+        targets = getattr(AUTHORING_TRACE_STORE, "_targets", None)
+        records = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
+        CONFIRMATION_REGISTRY._by_session.clear()
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        for space in (traces, targets, records):
+            if space is not None:
+                space.clear()
+        yield
+        for space in (traces, targets, records):
+            if space is not None:
+                space.clear()
+
+    def _kernel(self, **overrides):
+        kwargs = dict(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+        )
+        kwargs.update(overrides)
+        return AgentKernel(settings=RuntimeSettings(**kwargs))
+
+    def _signed_browser_write(self, kernel, session_id, call_id="call-w1"):
+        """One flow-unlocked ``web.click``: signed, captured, and returned as
+        the request map ``_observe_tool_result`` looks the frame up in."""
+        _record_authority(session_id, confirm_id="conf-approving")
+        _record_context(session_id)
+        requests: dict = {}
+        envelope = _run_signer(
+            kernel,
+            ToolCallBlock(id=call_id, name="web_click", input='{"ref": 1}'),
+            "web.click",
+            session_id,
+            requests,
+        )
+        assert envelope is not None
+        requests[call_id] = envelope
+        return requests
+
+    def _result(self, call_id="call-w1", url="https://admin.internal/users/42"):
+        return {
+            "type": "tool_result",
+            "tool_name": "web.click",
+            "call_id": call_id,
+            "status": "success",
+            "request_id": "req-9",
+            "data": {"url": url},
+        }
+
+    def test_a_captured_browser_step_gains_the_observed_origin(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-1"
+        requests = self._signed_browser_write(kernel, session_id)
+        # Captured with no origin: the signing seam precedes execution.
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+
+        kernel._observe_tool_result(self._result(), requests)
+
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert len(rows) == 1
+        # Normalized to an origin, not stored as the reported URL: the path
+        # and query of a live page are not the operator's declared scope, and
+        # a query string could carry a credential into a store that outlives
+        # every receipt.
+        assert rows[0]["flow_origin"] == "https://admin.internal"
+
+    @pytest.mark.parametrize(
+        ("error", "receipt_status"),
+        [({}, "failed"), ({"code": "TIMEOUT"}, "timeout")],
+    )
+    def test_a_write_that_did_not_succeed_records_no_origin(
+        self, error, receipt_status
+    ):
+        """Only a ``succeeded`` result is corroborated as having landed.
+
+        A failed or timed-out browser write can still report the URL it was
+        *attempting*, and recording that would let a mutation which never
+        happened count toward graduation — the trace would claim a landing the
+        receipt beside it denies. The gate reads the ``status`` the receipt was
+        just built with rather than re-reading the frame, so the two cannot
+        drift apart. A timeout is the sharper case: whether it landed is
+        genuinely unknown, and unknown must stay NULL (unverified, so R-4
+        refuses the draft) rather than harden into an assertion.
+        """
+        kernel = self._kernel()
+        session_id = "ses-origin-failed"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        kernel._observe_tool_result(
+            {
+                "type": "tool_result",
+                "tool_name": "web.click",
+                "call_id": "call-w1",
+                "status": "error",
+                "request_id": "req-9",
+                "error": error,
+                "data": {"url": "https://admin.internal/users/42"},
+            },
+            requests,
+        )
+
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+        # The receipt still closed, and with the status that decided the gate:
+        # the amendment is derived from the receipt, never the other way round.
+        records = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert len(records) == 1
+        assert records[0]["status"] == receipt_status
+
+    def test_a_non_browser_step_is_left_unobserved(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-k8s"
+        pending = CONFIRMATION_REGISTRY.register(
+            session_id,
+            "alice",
+            "reply-1",
+            [ToolCallBlock(id="call-1", name="k8s.restart_service",
+                           input='{"namespace": "ops"}')],
+            600,
+            risk_levels=_risk_snapshot(
+                ToolCallBlock(id="call-1", name="k8s.restart_service",
+                              input='{"namespace": "ops"}')
+            ),
+        )
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", True, "req-9", session_id
+        )
+        assert rejection is None
+
+        # A frame that happens to carry an http URL on an infra tool must not
+        # attach an origin: ``flow_origin`` is evidence about the web target a
+        # mutation landed on, and a spurious value would read as a drift at
+        # graduation.
+        kernel._observe_tool_result(
+            {
+                "type": "tool_result",
+                "tool_name": "k8s.restart_service",
+                "call_id": "call-1",
+                "status": "success",
+                "request_id": "req-9",
+                "data": {"url": "https://admin.internal/console"},
+            },
+            requests,
+        )
+
+        rows = AUTHORING_TRACE_STORE.load_for_session(session_id)
+        assert len(rows) == 1
+        assert rows[0]["flow_origin"] is None
+
+    def test_a_frame_with_no_legible_url_leaves_the_step_unverified(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-nourl"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        # The evidence frame's size guard omits ``data`` entirely rather than
+        # truncating it, so an over-budget payload reports no URL at all.
+        for frame in (
+            {"type": "tool_result", "tool_name": "web.click",
+             "call_id": "call-w1", "status": "success", "request_id": "req-9"},
+            {"type": "tool_result", "tool_name": "web.click",
+             "call_id": "call-w1", "status": "success", "request_id": "req-9",
+             "data": {"url": "about:blank"}},
+            {"type": "tool_result", "tool_name": "web.click",
+             "call_id": "call-w1", "status": "success", "request_id": "req-9",
+             "data": "not-a-mapping"},
+        ):
+            kernel._observe_tool_result(frame, requests)
+
+        # NULL, i.e. *unverified* — which R-4 refuses to graduate, rather than
+        # a fabricated origin that would corroborate nothing.
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+
+    def test_a_rejected_call_records_no_origin(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-rejected"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        # An invocation-boundary rejection never reached the gateway, so there
+        # is no page to have landed on; the seam returns before the receipt leg.
+        kernel._observe_tool_result(
+            {
+                "type": "tool_result",
+                "tool_name": "web.click",
+                "call_id": "call-w1",
+                "status": "error",
+                "request_id": "req-9",
+                "error": {"code": "EXECUTION_REJECTED", "reason": "digest_mismatch"},
+                "data": {"url": "https://admin.internal/users/42"},
+            },
+            requests,
+        )
+
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+
+    def test_a_frame_for_an_unknown_call_is_ignored(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-unknown"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        # No request for this call id ⇒ nothing was signed ⇒ nothing was
+        # captured ⇒ nothing to amend.
+        kernel._observe_tool_result(self._result(call_id="call-other"), requests)
+
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+
+    def test_a_trace_store_failure_never_blocks_the_receipt(self, monkeypatch):
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-origin-broken"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        class BrokenOriginStore:
+            backend_name = "broken"
+
+            def record_step_origin(self, session_id, execution_id, origin):
+                raise RuntimeError("trace store down")
+
+        monkeypatch.setattr(
+            "agent_service.runtime_kernel.AUTHORING_TRACE_STORE",
+            BrokenOriginStore(),
+        )
+
+        kernel._observe_tool_result(self._result(), requests)
+
+        # The receipt closed and the completion audit went out: the derived
+        # amendment failing degrades graduation candidacy only.
+        rows = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert [row["status"] for row in rows] == ["succeeded"]
+        assert len(
+            [a for a in audits if a["event_type"] == "execution_completed"]
+        ) == 1
+
+    def test_wired_into_the_trace_drain(self):
+        """Pins the call site, not just the method: both the live and the
+        resumed stream drain through ``_drain_trace_queue``, so that is where
+        the observation has to reach the store before the turn ends."""
+        kernel = self._kernel()
+        session_id = "ses-origin-drain"
+        requests = self._signed_browser_write(kernel, session_id)
+        queue = asyncio.Queue()
+        queue.put_nowait(self._result())
+
+        frames = kernel._drain_trace_queue(queue, "req-9", session_id, [], requests)
+
+        assert len(frames) == 1
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] == "https://admin.internal"
+
+    def test_a_later_observation_never_rewrites_the_first(self):
+        kernel = self._kernel()
+        session_id = "ses-origin-twice"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        kernel._observe_tool_result(self._result(), requests)
+        # A second frame for the same execution — a retry surfacing twice on
+        # the queue — must not move what the step was first seen to do.
+        kernel._observe_tool_result(
+            self._result(url="https://elsewhere.internal/x"), requests
+        )
+
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] == "https://admin.internal"
 

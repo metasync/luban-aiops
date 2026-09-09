@@ -332,8 +332,38 @@ async def create_session(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    skill_target: str | None = None,
 ) -> dict:
-    return await agent_client.create_session(settings, request_id, user_id)
+    """Proxy a session create, optionally declaring its skill target (R-4).
+
+    Carries the house mapping like every other proxy here. It previously had
+    none, which was harmless while the agent layer could only answer this
+    route 201 — but a declared skill target adds a refusal the gateway's own
+    body contract cannot catch (a well-formed, in-bounds target with no
+    normalizable origin), and letting that surface as an unhandled upstream
+    error would answer the operator 500 for what is a 422 they can act on.
+    """
+    try:
+        return await agent_client.create_session(
+            settings, request_id, user_id, skill_target
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_detail(
+                    exc, "agent service rejected the session create"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=_upstream_detail(exc, "agent service session create failed"),
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
 
 
 async def get_session(
@@ -516,6 +546,48 @@ async def update_session_title(
             ) from exc
         raise HTTPException(
             status_code=502, detail="agent service session rename failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
+async def declare_skill_target(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+    target: str,
+) -> dict:
+    """Proxy a skill-development target declaration (SPEC-055 R-4).
+
+    Upstream 4xx passes through with the agent's structured detail,
+    because the two refusals an operator can actually hit are both
+    agent-layer judgements worth reading verbatim: 404 (foreign or
+    unknown session, the anti-enumeration posture) and 422 (a target
+    with no normalizable origin, which could never be corroborated
+    against the session's captured steps). Every 5xx maps to 502 —
+    unlike the draft proxy there is no 502/503 passthrough here, since
+    a declaration reaches no downstream validation leg that could be
+    unconfigured or unreachable.
+    """
+    try:
+        return await agent_client.declare_skill_target(
+            settings, request_id, session_id, user_id, target
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_detail(
+                    exc, "agent service rejected the skill target"
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=_upstream_detail(exc, "agent service skill target failed"),
         ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(

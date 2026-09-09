@@ -50,11 +50,21 @@ class ChatResponse(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """Session creation body accepted by the gateway and forwarded to agent-service."""
+    """Session creation body accepted by the gateway and forwarded to agent-service.
+
+    ``skill_target`` (SPEC-055 R-4) opens the session as a develop-as-you-go
+    one, naming the web target it will work against before anything can have
+    been captured. Relayed verbatim and bounded by the skill contract's own
+    ``web_target`` maxLength; shape and scope are the agent layer's to judge,
+    since it owns ``origin_of_url`` and the store the target is corroborated
+    against — it refuses a target with no normalizable origin, and keeps
+    origin and path while dropping any query or embedded credentials.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str | None = None
+    skill_target: str | None = Field(default=None, min_length=1, max_length=2048)
 
 
 class SessionTitleUpdateRequest(BaseModel):
@@ -63,6 +73,26 @@ class SessionTitleUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=80)
+
+
+class SkillTargetDeclareRequest(BaseModel):
+    """Skill-development target declaration body (SPEC-055 R-4).
+
+    Relayed verbatim — the gateway neither normalizes nor truncates, because
+    shape and scope are the agent layer's to judge: it owns ``origin_of_url``
+    and the store the target is corroborated against, refuses a target with no
+    normalizable origin, and keeps the operator's path narrowing (part of the
+    declared scope, and it must survive into the graduated draft's
+    ``web_target``) while dropping any query, fragment or ``user:password@``
+    (all inert at replay, and where a pasted address bar carries a
+    credential). The bound matches the agent layer's, which in turn matches
+    the skill contract's own ``web_target`` maxLength, so anything accepted
+    here can always be emitted into a draft.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(min_length=1, max_length=2048)
 
 
 class DocumentCreateRequest(BaseModel):

@@ -29,6 +29,10 @@ EXPECTED_ROUTES = {
     ("DELETE", "/api/v1/sessions/{session_id}"),
     # Owner session rename (SPEC-039 R-7): cosmetic metadata, unaudited.
     ("PATCH", "/api/v1/sessions/{session_id}/title"),
+    # Skill-development target declaration (SPEC-055 R-4): scopes a
+    # develop-as-you-go session before it mutates anything; rides the
+    # session:skill_graduate grant rather than its own action.
+    ("POST", "/api/v1/sessions/{session_id}/skill-target"),
     # Skill-draft export (SPEC-044 R-1): validated Markdown handover,
     # ephemeral by construction.
     ("POST", "/api/v1/sessions/{session_id}/skill-draft"),

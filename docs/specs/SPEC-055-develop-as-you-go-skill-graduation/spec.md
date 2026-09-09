@@ -185,6 +185,15 @@ Acceptance criteria:
   — the same guards SPEC-051 applies to a hand-authored flow. A trace that fails
   re-validation is not graduable (deterministic refusal, surfaced to the
   operator).
+  - "target/origin" is two distinct things, and both are recorded rather than
+    inferred (stage-6a refinement in `tasks.md`): the **declared target** is the
+    web target the operator names when opening a develop-as-you-go session —
+    declared *before* mutating, so it is an authorization scope rather than a
+    claim fitted to the trace afterwards — and the **observed origin** is what the
+    gateway reported each captured mutation actually landed on. Re-validation
+    checks every observed origin against the declared target, so this criterion is
+    substantiated by evidence. A step with no observed origin is *unverified*, not
+    drifted, and refuses.
 - Graduation produces a **draft for human review and merge** — previewed
   (rendered + raw) and downloaded/exported like the SPEC-045 draft preview, for
   contribution to the team's Git skills repo. The platform never auto-publishes
@@ -196,6 +205,12 @@ Acceptance criteria:
   audit event type** (e.g. `skill_graduated`), role-gated to operator/approver
   (not observer), following the SPEC-044/045 precedent. The graduated trace's
   lifecycle flips to `graduated`.
+  - Declaring the target is the first half of that one capability, not a second
+    one, so it rides the same `session:skill_graduate` action (the
+    `documents:create` precedent). The exception is declaring at *birth* on
+    session create, which rides `session:create` alone: it is inert — it grants
+    nothing and only narrows what a later graduation may emit — and dual-gating
+    it would refuse session creation itself over an inert field.
 
 ### R-5: Replay under one gate, secret-safe and gateway-guarded
 

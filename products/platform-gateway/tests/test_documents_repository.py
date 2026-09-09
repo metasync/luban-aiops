@@ -41,6 +41,9 @@ TITLE_PATCH = (
 SKILL_DRAFT_PATCH = (
     "platform_gateway.services.gateway_service.agent_client.create_skill_draft"
 )
+SKILL_TARGET_PATCH = (
+    "platform_gateway.services.gateway_service.agent_client.declare_skill_target"
+)
 INCIDENT_SKILL_DRAFT_PATCH = (
     "platform_gateway.services.gateway_service."
     "agent_client.create_incident_skill_draft"
@@ -534,6 +537,384 @@ class SessionRenameProxyTests(DocumentsProxyBase):
                 "/api/v1/sessions/ses-1/title", json={"title": "boom"}
             )
         self.assertEqual(response.status_code, 502)
+
+
+class SkillTargetProxyTests(DocumentsProxyBase):
+    """SPEC-055 R-4: skill-development target declaration pass-through behind
+    ``session:skill_graduate``.
+
+    The declaration scopes a develop-as-you-go session *before* it mutates
+    anything, which is what makes it an authorization scope rather than a
+    post-hoc claim. Two properties matter at the gateway and nowhere else:
+    the target is relayed verbatim (the operator's path narrowing is part of
+    the scope), and the response reports the target actually in force rather
+    than echoing the request — a UI that showed the request back would let an
+    operator believe they had widened a scope they cannot widen.
+    """
+
+    TARGET = "https://admin.internal/login"
+    DECLARATION_PAYLOAD = {
+        "session_id": "ses-1",
+        "target": TARGET,
+        "already_declared": False,
+    }
+
+    def _post(self, target: str = TARGET, session_id: str = "ses-1"):
+        return self.client.post(
+            f"/api/v1/sessions/{session_id}/skill-target",
+            json={"target": target},
+        )
+
+    def test_operator_declares_target_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), self.DECLARATION_PAYLOAD)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[2], "ses-1")
+        self.assertEqual(args[3], "operator.user")
+        # Verbatim: no normalization, no truncation. The gateway holds no
+        # origin_of_url, so the agent layer is the only place that judges
+        # shape — a gateway that lowercased or stripped the path here would
+        # silently widen the graduated skill's scope.
+        self.assertEqual(args[4], self.TARGET)
+
+    def test_a_path_narrowed_target_survives_the_hop(self) -> None:
+        """The verbatim property under a target whose path *is* the scope."""
+        narrowed = "https://admin.internal/console/settings"
+        upstream = AsyncMock(
+            return_value={
+                "session_id": "ses-1",
+                "target": narrowed,
+                "already_declared": False,
+            }
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(target=narrowed)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["target"], narrowed)
+        self.assertEqual(upstream.mock_calls[0][1][4], narrowed)
+
+    def test_the_effective_target_is_relayed_not_echoed(self) -> None:
+        """First declaration wins, and the caller sees the winner.
+
+        The request names ``elsewhere.internal``; the response must name the
+        target in force. Relaying the upstream body verbatim is what makes
+        that true without the gateway holding any declaration state.
+        """
+        upstream = AsyncMock(
+            return_value={
+                "session_id": "ses-1",
+                "target": self.TARGET,
+                "already_declared": True,
+            }
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(target="https://elsewhere.internal/admin")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["target"], self.TARGET)
+        self.assertTrue(response.json()["already_declared"])
+
+    def test_observer_denied_before_upstream(self) -> None:
+        # Graduating a trace into an executable-flow skill is an operational
+        # act of a higher trust level than drafting prose: read-only-observer
+        # holds no session:skill_graduate grant, and declaring its target is
+        # the first half of the same capability.
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"]["action"], "session:skill_graduate"
+        )
+        upstream.assert_not_called()
+
+    def test_developer_denied_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("developer", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 403)
+        upstream.assert_not_called()
+
+    def test_approver_and_platform_admin_may_declare(self) -> None:
+        """The bundle grants graduation to all three operational roles."""
+        for role in ("platform-admin", "approver"):
+            with self.subTest(role=role):
+                reset_policy_state()
+                upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+                with (
+                    self._patch_identity(role, route_module="sessions"),
+                    patch(SKILL_TARGET_PATCH, upstream),
+                ):
+                    response = self._post()
+                self.assertEqual(response.status_code, 200)
+                upstream.assert_called_once()
+
+    def test_upstream_422_no_origin_passes_through_with_detail(self) -> None:
+        """A target with no normalizable origin could never be corroborated
+        against the session's captured steps, so the agent layer's reasoning
+        rides to the operator verbatim rather than being flattened."""
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                422,
+                {"detail": "skill target must be an absolute http(s) URL"},
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(target="admin.internal/login")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"], "skill target must be an absolute http(s) URL"
+        )
+
+    def test_upstream_404_passes_through_with_detail(self) -> None:
+        # Foreign/unknown sessions answer the anti-enumeration 404.
+        upstream = AsyncMock(
+            side_effect=_status_error_json(404, {"detail": "session not found"})
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(session_id="ses-foreign")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "session not found")
+
+    def test_upstream_503_maps_to_502(self) -> None:
+        """A deliberate divergence from the skill-draft proxy, in the status
+        only.
+
+        There a 503 is a *domain* outcome — skills-hub is not configured, so
+        an unvalidated draft is never returned — and rides through verbatim.
+        A declaration reaches no downstream validation leg, so a 503 here is
+        just an unhealthy upstream and collapses to the house 502 rather than
+        implying a validation posture this route does not have. The upstream's
+        own reason still rides through ``_upstream_detail``: flattening the
+        status must not cost the operator the explanation.
+        """
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                503, {"detail": "skills service not configured"}
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"], "skills service not configured"
+        )
+
+    def test_an_unlegible_upstream_5xx_falls_back(self) -> None:
+        """With no legible body there is nothing to relay, so the house
+        fallback names the operation rather than a generic gateway error."""
+        upstream = AsyncMock(side_effect=_status_error(503))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"], "agent service skill target failed"
+        )
+
+    def test_upstream_500_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(500))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "agent service unavailable")
+
+    def test_a_blank_target_is_refused_at_the_gateway(self) -> None:
+        # The gateway's own body contract, so the upstream is never reached.
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(target="")
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
+
+    def test_an_overlong_target_is_refused_at_the_gateway(self) -> None:
+        """Capped at the skill contract's own ``web_target`` bound, so a
+        target this route accepts can always be emitted into a draft."""
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self._post(target="https://admin.internal/" + "a" * 2048)
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
+
+    def test_an_unknown_body_field_is_refused(self) -> None:
+        """``extra="forbid"``: a misspelled field must not be silently
+        dropped, or an operator would believe they had scoped a session with
+        a declaration that never carried the field they meant."""
+        upstream = AsyncMock(return_value=self.DECLARATION_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(SKILL_TARGET_PATCH, upstream),
+        ):
+            response = self.client.post(
+                "/api/v1/sessions/ses-1/skill-target",
+                json={"target": self.TARGET, "web_target": self.TARGET},
+            )
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
+
+
+class SessionBirthTargetProxyTests(DocumentsProxyBase):
+    """SPEC-055 R-4: ``skill_target`` on session create — the primary
+    declaration path, because at birth nothing can have been captured yet.
+
+    These pin the two things the gateway is responsible for on this path:
+    relaying the target verbatim, and mapping the agent's refusal properly.
+    The second is not a formality — ``create_session`` carried no error mapping
+    before R-4, which was harmless while the upstream could only answer 201,
+    but a target with no normalizable origin is refused *by the agent layer*
+    and would otherwise have surfaced as an unhandled upstream error, answering
+    the operator 500 for a 422 they could have acted on.
+    """
+
+    CREATE_PAYLOAD = {"session_id": "ses-1", "user_id": "operator.user"}
+    CREATE_PATCH = (
+        "platform_gateway.services.gateway_service.agent_client.create_session"
+    )
+
+    def test_a_birth_target_is_forwarded_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=self.CREATE_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(
+                "/api/v1/sessions",
+                json={"skill_target": "https://admin.internal/login"},
+            )
+        self.assertEqual(response.status_code, 200)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[2], "operator.user")
+        self.assertEqual(args[3], "https://admin.internal/login")
+
+    def test_an_unscoped_create_forwards_no_target(self) -> None:
+        """The historical call shape: an ordinary chat session declares
+        nothing, and the gateway must not invent a scope for it."""
+        upstream = AsyncMock(return_value=self.CREATE_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions", json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(upstream.mock_calls[0][1][3])
+
+    def test_an_upstream_422_on_create_passes_through(self) -> None:
+        """A well-formed, in-bounds target with no normalizable origin is the
+        agent layer's judgement, and its reasoning rides to the operator."""
+        upstream = AsyncMock(
+            side_effect=_status_error_json(
+                422,
+                {"detail": "skill target must be an absolute http(s) URL"},
+            )
+        )
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(
+                "/api/v1/sessions", json={"skill_target": "admin.internal/login"}
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"], "skill target must be an absolute http(s) URL"
+        )
+
+    def test_an_upstream_500_on_create_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(500))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions", json={})
+        self.assertEqual(response.status_code, 502)
+
+    def test_a_transport_failure_on_create_maps_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post("/api/v1/sessions", json={})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"], "agent service unavailable")
+
+    def test_an_overlong_birth_target_is_refused_at_the_gateway(self) -> None:
+        upstream = AsyncMock(return_value=self.CREATE_PAYLOAD)
+        with (
+            self._patch_identity("operator", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(
+                "/api/v1/sessions",
+                json={"skill_target": "https://admin.internal/" + "a" * 2048},
+            )
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
+
+    def test_an_observer_may_scope_their_own_session(self) -> None:
+        """Deliberate, and the reason this route is not dual-gated.
+
+        Declaring a scope is inert — it grants nothing and only narrows what a
+        later graduation may emit — while dual-gating with
+        ``session:skill_graduate`` would refuse *session creation itself* over
+        an inert field. Graduation stays gated; this does not.
+        """
+        upstream = AsyncMock(return_value=self.CREATE_PAYLOAD)
+        with (
+            self._patch_identity("read-only-observer", route_module="sessions"),
+            patch(self.CREATE_PATCH, upstream),
+        ):
+            response = self.client.post(
+                "/api/v1/sessions", json={"skill_target": "https://admin.internal/x"}
+            )
+        self.assertEqual(response.status_code, 200)
+        upstream.assert_called_once()
 
 
 class SkillDraftProxyTests(DocumentsProxyBase):

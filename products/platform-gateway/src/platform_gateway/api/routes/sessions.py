@@ -5,11 +5,16 @@ from fastapi import APIRouter, Depends, Header, Request
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
 from platform_gateway.core.request_context import resolve_request_id
-from platform_gateway.schemas.api import CreateSessionRequest, SessionTitleUpdateRequest
+from platform_gateway.schemas.api import (
+    CreateSessionRequest,
+    SessionTitleUpdateRequest,
+    SkillTargetDeclareRequest,
+)
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.gateway_service import (
     create_session,
     create_skill_draft,
+    declare_skill_target,
     delete_session,
     enforce_policy,
     get_session,
@@ -23,6 +28,7 @@ from platform_gateway.services.policy_engine import (
     ACTION_SESSION_LIST,
     ACTION_SESSION_READ,
     ACTION_SESSION_SKILL_DRAFT,
+    ACTION_SESSION_SKILL_GRADUATE,
     ACTION_SESSION_UPDATE,
 )
 
@@ -45,6 +51,7 @@ async def create_session_route(
         settings,
         request_id,
         user_id,
+        body.skill_target,
     )
     log_event(
         LOGGER,
@@ -52,6 +59,10 @@ async def create_session_route(
         request_id=request_id,
         session_id=response.get("session_id"),
         user_id=user_id,
+        # Whether this opened a develop-as-you-go session (SPEC-055 R-4). The
+        # flag, never the target: a declared URL may carry a query string and
+        # the gateway holds no normalization to strip it with.
+        skill_target_declared=body.skill_target is not None,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -146,6 +157,54 @@ async def update_session_title_route(
         request_id=request_id,
         session_id=session_id,
         user_id=user_id,
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    return response
+
+
+@router.post("/api/v1/sessions/{session_id}/skill-target")
+async def declare_skill_target_route(
+    request: Request,
+    session_id: str,
+    body: SkillTargetDeclareRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Declare a session's skill-development target (SPEC-055 R-4).
+
+    Authorization (``session:skill_graduate``) is enforced here;
+    ownership is re-checked by the agent layer, so a foreign session
+    answers the same structural 404 as an unknown one.
+
+    Deliberately unaudited *here*: the declaration is not an operational
+    act against an external system, it is a scope that only becomes
+    consequential at graduation — and the ``skill_graduated`` event carries
+    ``web_target``, the target that was in force, which is where a reviewer
+    needs it (pinned in the audit-event contract's ``details`` ledger; the
+    emitter itself lands with graduation). The agent layer still logs the
+    declaration (including a rejected attempt to widen a first-wins scope)
+    on the structured log path.
+
+    The target itself is never logged: a declared URL may carry a query
+    string or embedded credentials, and the gateway holds no normalization
+    to strip either with — the agent layer drops both before storing the
+    target and logs the derived origin.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_SESSION_SKILL_GRADUATE, request_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    response = await declare_skill_target(
+        settings, request_id, session_id, user_id, body.target
+    )
+    log_event(
+        LOGGER,
+        "skill_target_declared",
+        request_id=request_id,
+        session_id=session_id,
+        user_id=user_id,
+        already_declared=response.get("already_declared"),
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )

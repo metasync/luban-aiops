@@ -79,6 +79,16 @@ ACTION_SESSION_SKILL_DRAFT = "session:skill_draft"
 # sibling: drafting skills is an operational act, so developer and
 # read-only-observer are denied by default.
 ACTION_INCIDENT_SKILL_DRAFT = "incident:skill_draft"
+# Skill graduation (SPEC-055 R-4/OQ-3): a higher trust level than the draft
+# grants — the artifact declares ``risk_class: write`` and a machine-readable
+# replay step list rather than knowledge prose — so it is separately
+# authorized rather than folded into session:skill_draft. One action gates
+# both halves of the capability: declaring the target a development session
+# works against, and graduating the trace it captured. Declaring is not a
+# distinct capability, it is the first step of graduating, and splitting it
+# would let a bundle grant one half without the other (the documents:create
+# precedent, which gates create/publish/delete of one capability).
+ACTION_SESSION_SKILL_GRADUATE = "session:skill_graduate"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -102,6 +112,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_SESSION_UPDATE,
         ACTION_SESSION_SKILL_DRAFT,
         ACTION_INCIDENT_SKILL_DRAFT,
+        ACTION_SESSION_SKILL_GRADUATE,
     }
 )
 

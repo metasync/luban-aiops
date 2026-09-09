@@ -144,7 +144,7 @@ class PolicyEnforcementRouteTests(unittest.TestCase):
         ):
             return {"session_id": "ses-1", "content": "ok", "status": "ok"}
 
-        async def fake_create(settings, request_id, user_id):
+        async def fake_create(settings, request_id, user_id, skill_target=None):
             return {"session_id": "ses-1"}
 
         # require_auth=False + no token -> synthetic developer identity.

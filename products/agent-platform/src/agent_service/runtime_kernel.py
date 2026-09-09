@@ -20,6 +20,7 @@ from agent_service.services.audit_emitter import (
 from agent_service.services.authoring_trace import (
     AUTHORING_TRACE_STORE,
     make_trace_step,
+    origin_of_url,
 )
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
@@ -1713,6 +1714,10 @@ class AgentKernel:
                 request["execution_id"],
                 exc,
             )
+        # After the receipt, so the tamper evidence is durable before the
+        # derived trace amendment is attempted (same ordering R-2 uses
+        # between _persist_execution_request and _capture_authoring_step).
+        self._observe_step_origin(request, frame, status)
         self._emit_execution_event(
             "execution_completed",
             "success" if status == "succeeded" else "error",
@@ -1729,6 +1734,74 @@ class AgentKernel:
             str(frame.get("session_id") or ""),
             request["decider_user_id"],
         )
+
+    @staticmethod
+    def _observe_step_origin(
+        request: dict, frame: dict[str, object], status: str
+    ) -> None:
+        """Amend the captured step with the origin it landed on (SPEC-055 R-4).
+
+        R-2 appends a trace step at the *signing* seam, before the call runs,
+        so the step cannot carry the origin the interaction landed on. This is
+        the only place the kernel can read it: the tool-gateway reports
+        ``data["url"]`` on every browser result, and by the time the frame
+        reaches the receipt the value is already gone elsewhere —
+        ``build_receipt`` digests the outcome into ``outcome_digest`` and never
+        stores it, and the execution records are swept at 30 days while a trace
+        must outlive them (ADR-0009). The URL is legible for exactly one
+        moment; recording it here is what makes it durable.
+
+        Only a ``succeeded`` result is recorded, and ``status`` is the value
+        just written into the receipt rather than a second reading of the
+        frame, so the trace and the receipt cannot disagree about which
+        mutations landed. A failed or timed-out write may still report the URL
+        it was attempting — corroborating that as "landed on target" would let
+        a mutation that never happened count toward graduation.
+
+        Scoped to ``BROWSER_WRITE_TOOLS`` rather than to "any frame with a
+        url". ``flow_origin`` is evidence about the web target a *mutation*
+        landed on, and a read-tier result carrying an unrelated link would
+        otherwise attach an origin to a step graduation has no reason to
+        compare — or, worse, to a step that is not in the trace at all. The
+        same set already gates the flow-unlock capture site, so the two ends
+        of the amendment cannot disagree about which steps carry origins.
+
+        A step whose origin is never observed stays ``NULL``, which R-4 reads
+        as *unverified* rather than as a drift. Three shapes produce that, and
+        all fail toward refusing the draft: a result that did not succeed, a
+        payload over the evidence frame's size guard (``_make_full_data`` omits
+        ``data`` entirely rather than truncating it), and a gateway that
+        reported no URL.
+
+        Best-effort on the same terms as the capture beside it: a store
+        failure degrades graduation candidacy and never touches the receipt
+        already written, the audit event about to be emitted, or the resumed
+        stream.
+        """
+        if status != "succeeded":
+            return
+        if request.get("tool_name") not in BROWSER_WRITE_TOOLS:
+            return
+        session_id = str(request.get("session_id") or "")
+        execution_id = str(request.get("execution_id") or "")
+        if not session_id or not execution_id:
+            return
+        data = frame.get("data")
+        if not isinstance(data, dict):
+            return
+        origin = origin_of_url(data.get("url"))
+        if origin is None:
+            return
+        try:
+            AUTHORING_TRACE_STORE.record_step_origin(
+                session_id, execution_id, origin
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "authoring trace origin write failed for %s: %s",
+                execution_id,
+                exc,
+            )
 
     @staticmethod
     def _execution_duration_ms(request: dict) -> int:

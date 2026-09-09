@@ -36,11 +36,18 @@ from agent_service.schemas.v2 import (
     DocumentCreateRequest,
     EvidenceTurn,
     SessionTitleUpdateRequest,
+    SkillTargetDeclaration,
+    SkillTargetDeclareRequest,
 )
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.audit_emitter import (
     build_audit_event,
     emit_audit_event,
+)
+from agent_service.services.authoring_trace import (
+    AUTHORING_TRACE_STORE,
+    origin_of_url,
+    skill_target_scope,
 )
 from agent_service.services.confirmation_records import (
     CONFIRMATION_RECORD_STORE,
@@ -139,6 +146,48 @@ def _bearer_token(authorization: str | None) -> str | None:
     if scheme.lower() != "bearer" or not token:
         return None
     return token
+
+
+def _validated_skill_target(raw: str) -> str:
+    """Trim, shape-check and scope a declared skill target (SPEC-055 R-4).
+
+    Shared by the two declaration paths — the standalone endpoint and
+    ``skill_target`` on session create — so both refuse the same targets with
+    the same reasoning and both persist the same shape, and a future third
+    path cannot drift.
+
+    A target with no normalizable origin could never be corroborated against
+    the session's captured steps, so refusing it at the point of input beats
+    an opaque refusal at graduation. What survives is origin *and* path, and
+    never a query, a fragment or ``user:password@`` userinfo
+    (``skill_target_scope``): the path is the operator's narrowing and must
+    reach the graduated draft's ``web_target``, while the rest is inert at
+    replay and is where an address-bar paste carries a credential — storing
+    one verbatim would put a secret in a table that outlives every receipt.
+
+    Scoping runs *before* the shape check so the check judges the value that
+    will actually be stored. Checking the paste instead would admit a target
+    whose credentials were its whole netloc (``https://u:p@/path``): it has an
+    origin as typed and none at all once scoped, and storing that would be a
+    scope nothing can ever corroborate.
+    """
+    target = raw.strip()
+    try:
+        scoped = skill_target_scope(target)
+    except ValueError:
+        # ``urlparse`` itself rejected the string. Let the shape check below
+        # refuse it with the operator-facing 422 rather than a 500.
+        scoped = target
+    if origin_of_url(scoped) is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "skill target must be an absolute http(s) URL — a target with "
+                "no origin can never be corroborated against the session's "
+                "captured steps"
+            ),
+        )
+    return scoped
 
 
 async def _reject_if_parked(session_id: str) -> None:
@@ -718,13 +767,43 @@ async def create_session(
     body: AgentSessionCreateRequest | None = None,
     x_user_id: str | None = Header(None),
 ) -> AgentSession:
+    """Open a session, optionally as a develop-as-you-go one (SPEC-055 R-4).
+
+    ``skill_target`` names the web target the session will work against. It is
+    the *birth* declaration, and being at birth is the whole point: nothing can
+    have been captured yet, so the target is structurally an authorization
+    scope the operator set before acting rather than a claim fitted to a trace
+    afterwards. ``POST /sessions/{id}/skill-target`` remains for a session that
+    becomes a development session later.
+
+    Deliberately **not** dual-gated with ``session:skill_graduate`` the way
+    SPEC-045 dual-gates its skill-draft route. Declaring a scope is inert — it
+    grants nothing and only narrows what a later graduation may emit — while
+    dual-gating here would refuse *session creation itself* over an inert
+    field, which is a worse outcome than an observer being able to scope their
+    own session. Graduation, the consequential act, stays behind
+    ``session:skill_graduate``.
+
+    First declaration wins, so an idempotent re-create of a named session
+    carrying a different target cannot move a scope already in force.
+    """
     user_id = _user_id(x_user_id)
     requested_id = body.session_id.strip() if body and body.session_id else ""
+    # Shape-checked before the session exists: a refused target must not leave
+    # a half-created session behind, and the 422 should read as being about the
+    # target rather than about a create that already happened.
+    skill_target = (
+        _validated_skill_target(body.skill_target)
+        if body and body.skill_target
+        else None
+    )
     if requested_id:
         # Dedicated named session (SPEC-015 R-3): idempotent for the owner.
         session = create_named_session(requested_id, user_id)
     else:
         session = ensure_session(None, user_id)
+    if skill_target:
+        AUTHORING_TRACE_STORE.declare_target(session.session_id, skill_target)
     return AgentSession(
         session_id=session.session_id,
         user_id=session.user_id or user_id,
@@ -1076,6 +1155,84 @@ async def create_incident_skill_draft(
         "validation": "passed",
         "suggested_filename": f"{slug}.md",
     }
+
+
+# --- Skill graduation (SPEC-055 R-4) ---
+
+
+@router.post("/sessions/{session_id}/skill-target")
+async def declare_skill_target(
+    session_id: str,
+    body: SkillTargetDeclareRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+) -> SkillTargetDeclaration:
+    """Declare the web target a skill-development session works against (R-4).
+
+    The develop-as-you-go model has an operator name the target *before*
+    mutating anything, which is what makes the declaration an authorization
+    scope rather than a claim about the past: the session's captured steps
+    are then corroborated against a target that already existed when they ran.
+    Graduation reads it as the draft's ``web_target`` — the security parameter
+    a replayed flow binds its origin guard and step budget to — and R-2's
+    per-step observations prove every mutation landed there.
+
+    The primary path declares at birth (``skill_target`` on session create),
+    where nothing can have been captured yet. This endpoint is the path for a
+    session that *becomes* a development session after it was opened, so a
+    declaration made here can postdate the first captured step — which is why
+    graduation checks the ordering rather than assuming it, and why this
+    endpoint cannot be used to widen a scope that is already in force.
+
+    Authorized by the same ``session:skill_graduate`` action as graduation
+    itself (enforced by the platform-gateway): declaring a target is part of
+    graduating, not a separate capability, and both need the same operational
+    roles. Ownership is re-checked server-side — a foreign or unknown id
+    answers the structural 404, per the anti-enumeration convention.
+
+    The **first** declaration wins and the response reports the target
+    actually in force, never an echo of the request: a scope an operator
+    could move after the fact would corroborate nothing.
+    ``_validated_skill_target`` shape-checks and scopes it — refusing a target
+    with no normalizable origin, which could never be corroborated, and
+    keeping origin and path while dropping everything a replay is not bound
+    by (query, fragment, any ``user:password@``), which is also where a pasted
+    address bar carries a credential. Nothing else is persisted and no draft
+    is produced.
+    """
+    user_id = _user_id(x_user_id)
+    session = get_session(session_id, user_id)
+    target = _validated_skill_target(body.target)
+    # No read before the write: ``declare_target`` is first-wins on both
+    # backends — ``INSERT … ON CONFLICT DO NOTHING`` plus a same-transaction
+    # read-back, or the dict check in memory — and returns the target actually
+    # in force, so pre-reading spends a second connection to learn what this
+    # call already reports. ``already_declared`` is therefore decided by the
+    # store rather than by which branch ran, which is exactly what a
+    # declaration concurrent with this one requires: first-wins is the store's
+    # invariant, and the response must not claim an effect this call did not
+    # have. An identical concurrent declaration is indistinguishable from this
+    # one and immaterial — the scope is the same either way.
+    existing = AUTHORING_TRACE_STORE.declare_target(session.session_id, target)
+    already_declared = existing != target
+    LOGGER.info(
+        "skill development target declared",
+        extra={
+            "request_id": x_request_id,
+            "session_id": session.session_id,
+            "user_id": user_id,
+            # The origin rather than the declared target: it is what
+            # graduation corroborates the captured steps against, so it is the
+            # value an operator troubleshooting a refusal needs to find.
+            "target_origin": origin_of_url(existing),
+            "already_declared": already_declared,
+        },
+    )
+    return SkillTargetDeclaration(
+        session_id=session.session_id,
+        target=existing,
+        already_declared=already_declared,
+    )
 
 
 # --- Operations document repository (SPEC-039) ---

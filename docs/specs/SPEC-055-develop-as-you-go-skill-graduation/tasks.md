@@ -234,15 +234,120 @@ against them.
 >   `POST /skills/validate` → `validate_document` → the same `_validate_frontmatter` these rules live
 >   in, so a graduation draft is refused by the rules it will be ingested under.
 
-## Stage 6: agent-platform + portal — R-4 graduation
+## Stage 6: agent-platform + platform-gateway + portal — R-4 graduation
+
+> **Refinement (stage 6a) — R-4 needs *two* forms of target, not one.** The plan as written asks
+> `revalidate_blast_radius` to check that "every origin/target is allowlisted", but before stage 6a
+> nothing in the trace recorded an origin at all, and nothing recorded a target. Both are now
+> captured, and they are different things:
+>
+> - **declared target** (`authoring_trace_target`, one row per session) — the web target the operator
+>   names when opening a develop-as-you-go session. Declared *before* mutating, it is an
+>   **authorization scope**: the session acted under it. Graduation emits it as the draft's
+>   `web_target`, the security parameter a replayed flow binds its origin guard and step budget to.
+> - **observed origin** (`authoring_trace.flow_origin`, one column per step) — the origin the gateway
+>   reported that captured mutation actually landed on. Graduation uses these to *prove* every step
+>   landed inside the declared scope, so "every origin/target allowlisted" is substantiated by
+>   evidence rather than asserted about a trace that never carried any.
+>
+> This is the operator's model, and it is strictly stronger than scraping a target out of the trace
+> after the fact: a target supplied *at graduation* is an untrusted post-hoc claim, while one
+> declared before the first mutation is a scope the session can be held to — and it is still
+> corroborable, because the gateway reports `data["url"]` on every successful browser write result.
+>
+> - **the receipt seam is the only place the origin can be captured.** `build_receipt` stores
+>   `outcome_digest` alone — the outcome is digested, never stored — and `execution_records` are swept
+>   at 30 days while a trace must outlive them (ADR-0009). `data["url"]` is legible for exactly one
+>   moment, so `_observe_step_origin` runs in `_observe_tool_result` right after `save_receipt` (the
+>   receipt first, so the tamper evidence is durable before a derived trace amendment is attempted —
+>   the same ordering R-2 uses). Scoped to `BROWSER_WRITE_TOOLS`, the set that gates the flow-unlock
+>   capture site.
+> - **only a `succeeded` result is observed.** `_observe_step_origin` takes the `status` already written
+>   into the receipt rather than re-reading the frame, so the trace and the receipt cannot disagree about
+>   which mutations landed. A failed or timed-out write can still report the URL it was *attempting*, and
+>   corroborating that as "landed on target" would let a mutation that never happened count toward
+>   graduation.
+> - **`web.navigate` cannot supply it:** R-2's tier gate captures write-tier only, and navigate is
+>   read-tier, so it never enters a trace.
+> - **the declaration is stored as origin and path — never as a bare origin, and never with anything a
+>   replay is not bound by.** `bind_flow` requires origin equality *and* `_path_under(url_path,
+>   target_path)`, so a path narrowing is part of the scope and must survive into the draft; collapsing
+>   it to a bare origin would silently widen the graduated skill to every path on the host. Query,
+>   fragment and `user:password@` userinfo go the other way (`skill_target_scope`): `bind_flow` reads
+>   none of them, so storing one would advertise a narrowing that does not exist — and a target pasted
+>   from an address bar is exactly where a session token rides, into a table that outlives every receipt
+>   (ADR-0009), into the structured log's `target_origin`, and into the `skill_graduated` audit payload.
+>   A declaration reaches the store from the operator's own input, not through the gateway's result
+>   redaction, so nothing upstream has masked it. Userinfo is worse than a leak: `origin_of_url` keeps
+>   the netloc verbatim, so `https://u:p@host` normalizes to an origin no browser will ever report, and
+>   graduation would refuse a trace that ran perfectly. It is stripped at declaration rather than inside
+>   `origin_of_url`, which must stay byte-identical to the gateway's `origin_of` twin. Scoping therefore
+>   runs *before* the shape check, so the check judges the value that will be stored rather than the
+>   paste — `https://u:p@/path` has an origin as typed and none at all once scoped, and is refused
+>   (a `urlparse` `ValueError` on the way answers the same 422, never a 500). Corroboration is
+>   at origin granularity only — a bounded residual, because the gateway's live deviation guard already
+>   enforces origin *and* path at write time.
+> - **NULL `flow_origin` means *unverified*, never *drifted*.** It is produced by a result that did not
+>   succeed, by `_make_full_data`'s size guard omitting `data` entirely over 128KB, by a gateway that
+>   reported no URL, and by every row written before R-4. Stage 6b must refuse such a trace rather than
+>   fabricate an origin.
+>
+> **Plan gap: R-4 needs a `platform-gateway` leg that neither plan.md nor this file mentioned.** The
+> portal reaches the agent layer only through the gateway, so a route the gateway does not proxy is a
+> route the operator cannot call. Stage 6a delivers it: the `session:skill_graduate` action constant
+> and its `PROTECTED_ACTIONS` entry, the request schema, the client + proxy pair, the route,
+> `EXPECTED_ROUTES`, and the policy-engine/matrix literals.
+>
+> **Two declaration paths, deliberately different authorization postures.**
+>
+> - `skill_target` on `POST /sessions` is the **birth** declaration and the primary path: the session
+>   does not exist to mutate until the create returns, so no captured step can predate it. It rides
+>   `session:create` and is *not* dual-gated with `session:skill_graduate` — declaring a scope is
+>   inert (it grants nothing and only narrows what a later graduation may emit), and dual-gating would
+>   refuse *session creation itself* over an inert field, which is worse than an observer scoping their
+>   own session. Graduation, the consequential act, stays gated.
+> - `POST /sessions/{id}/skill-target` is for a session that *becomes* a development session later, so
+>   a declaration made through it can postdate the first captured step. It rides
+>   `session:skill_graduate` on the `documents:create` precedent — one action gating the several
+>   operations that constitute one capability — which avoids a second action's bundle, scenario, matrix
+>   and content-hash churn.
+>
+> **Stage 6b input: the ordering datum is expressible and discriminating.** The real-PostgreSQL check
+> (`.sqlcheck-spec055-s6a.sql`) proves `declared_at <= min(captured_at)` over the stored columns
+> returns true for a birth-declared session and **false** for one declared an hour after its first
+> step, so 6b can tell an authorization scope from a claim fitted to the trace. Two hazards for 6b:
+> `now()` is the *transaction* timestamp in PostgreSQL, so declaration and capture only differ across
+> separate requests (they always are); and `_canonical_timestamp` renders second precision while the
+> columns hold microseconds, so the comparison must be made on **one** basis across both backends or
+> they will disagree inside a sub-second window.
+
+### Stage 6a: the durable substrate and the two write paths that populate it
+
+- [x] `services/authoring_trace.py`: `flow_origin TEXT` on `authoring_trace` and a new `authoring_trace_target (session_id PK, target, declared_at)` table, on **both** backends — DDL, the idempotent `ALTER … ADD COLUMN IF NOT EXISTS` that migrates a 0.35.0 cluster in place, the INSERT/LOAD column lists, and `_row_to_step` (R-4)
+- [x] `services/authoring_trace.py`: `record_step_origin` (first observation wins — `AND flow_origin IS NULL` in SQL, an `is not None` guard in memory), `declare_target` (first declaration wins — `ON CONFLICT DO NOTHING` plus a same-transaction read-back so the caller learns which target is in force), `trace_target`; `sweep_idle` also reclaims declarations that never produced a step and still returns a **step** count so both backends report one unit; `delete_session` reclaims both key spaces (R-4)
+- [x] `services/authoring_trace.py`: `origin_of_url`, the deliberate twin of the tool-gateway's `origin_of` — agreement is what stops a coherent trace looking like a drift (R-4)
+- [x] `runtime_kernel.py`: `_observe_step_origin` amends the captured step from the receipt seam, after `save_receipt`, best-effort, scoped to `BROWSER_WRITE_TOOLS` and to a `succeeded` result (R-4)
+- [x] `api/v2/routes.py`: `POST /api/v2/sessions/{session_id}/skill-target` — ownership re-checked server-side (structural 404), shape-checked and scoped by `_validated_skill_target`, first-wins, responding with the target **in force** rather than an echo of the request (R-4)
+- [x] `api/v2/routes.py` + `schemas/v2.py`: `skill_target` on session create — validated *before* the session exists, so a refused target leaves no half-created session behind (R-4)
+- [x] `platform-gateway`: `ACTION_SESSION_SKILL_GRADUATE` + its `PROTECTED_ACTIONS` entry, `SkillTargetDeclareRequest`, `agent_client`/`gateway_service` `declare_skill_target`, `POST /api/v1/sessions/{session_id}/skill-target`, and `skill_target` forwarded through create-session (R-4)
+- [x] `platform-gateway`: `create_session` gains the house 4xx/5xx mapping it previously lacked — without it the agent's 422 on an unnormalizable target would have reached the operator as a 500 (R-4)
+- [x] `services/authoring_trace.py`: `skill_target_scope`, the shared normalization both declaration paths go through — origin and path kept; query, fragment and `user:password@` userinfo dropped (R-4)
+- [x] `shared/shared-contracts/schemas/audit-event.schema.json`: `web_target` added to the `skill_graduated` `details` ledger — the declaration is deliberately unaudited at the gateway, so this event is where a reviewer learns which scope was in force (`details` is `additionalProperties: true`, so no emitter or model moves in lockstep) (R-4)
+- [x] tests: both backends' first-wins guards, the 9-column round-trip, origin normalization, a `k8s.*` frame carrying a URL left unobserved, a store failure degrading the trace and never the execution or its audit, a second observation never rewriting the first, and both declaration paths' posture (R-4)
+- [x] tests: a target declared with a query, a fragment or embedded credentials persists as origin and path only on **both** declaration paths, and a **failed** browser write carrying `data["url"]` leaves `flow_origin` NULL rather than corroborating a mutation that did not land (R-4)
+- [x] real-PostgreSQL sqlcheck (`.sqlcheck-spec055-s6a.sql`, Postgres 16): pre-R-4 migration leaves the existing row NULL and the 9-column list resolvable; DDL and ALTER idempotent on a second run; `UPDATE 0` on a repeat observation and on a second declaration; the ordering predicate discriminating; the target sweep keeping a declaration whose session has steps; zero footprint after ROLLBACK (R-4)
+
+### Stage 6b: graduation itself
 
 - [ ] `services/skill_graduation.py` (new): `build_executable_flow_draft(trace)` renders the ordered trace into an executable-flow skill Markdown (frontmatter `kind: executable_flow`, `risk_class: write`, `web_target` for a browser flow, `steps`; body = a human-readable replay runbook) with **no LLM call** (contrast SPEC-044's `generate_skill_draft`) (R-4)
-- [ ] `services/skill_graduation.py`: `revalidate_blast_radius(trace)` runs **before** the draft is produced — bounded step count, every origin/target allowlisted, consistent `risk_class: write`, all credentials resolved to credential-set references (the SPEC-051 guards); a failing trace is a deterministic refusal surfaced to the operator (R-4)
+- [ ] `services/skill_graduation.py`: `revalidate_blast_radius(trace)` runs **before** the draft is produced — bounded step count, every step's observed `flow_origin` inside the declared target's origin, a **NULL `flow_origin` refuses** (unverified is never fabricated), consistent `risk_class: write`, all credentials resolved to credential-set references (the SPEC-051 guards); a failing trace is a deterministic refusal surfaced to the operator (R-4)
+- [ ] `services/skill_graduation.py`: report whether the declaration preceded the first captured step, on one comparison basis across both backends (see the stage-6a refinement note) — a late declaration is a scope fitted to the trace, and the operator is told so rather than silently trusted (R-4)
 - [ ] `api/v2/routes.py`: `POST /api/v2/sessions/{session_id}/skill-graduate` mirroring `create_skill_draft` — gateway-enforced `session:skill_graduate`, server-side ownership re-check (foreign/unknown → the structural 404), validate through skills-hub's ingestion path (`_validate_skill_markdown`), ephemeral (nothing persisted but the lifecycle flip) (R-4)
-- [ ] `api/v2/routes.py`: emit the `skill_graduated` audit event and flip the trace lifecycle to `graduated` (R-4)
+- [ ] `api/v2/routes.py`: emit the `skill_graduated` audit event — `details` carrying `session_id, mode, validation, step_count, web_target`, the payload the contract's description ledger already pins (stage 6a) — and flip the trace lifecycle to `graduated` (R-4)
 - [ ] the graduated draft is validated against Skill v2 on skills-hub's own ingestion path before it reaches the operator (never auto-published) (R-4)
-- [ ] portal: a "Graduate as skill" entry point on the session (role-gated — visible to operator/approver, not observer) (R-4)
+- [ ] portal: a "Graduate as skill" entry point on the session (role-gated — visible to operator/approver, not observer), and the develop-as-you-go session opener that collects the target at birth (R-4)
 - [ ] portal: the executable-flow draft preview (rendered + raw toggle, mode badge, Download .md / Discard) reusing the SPEC-045 pattern (R-4)
+- [ ] `platform-gateway`: proxy `POST /api/v1/sessions/{session_id}/skill-graduate` behind `ACTION_SESSION_SKILL_GRADUATE` (the action constant and its grant landed in stage 6a), with the draft proxy's 502/503 passthrough — a graduation *does* have a validation leg, unlike the declaration (R-4)
 - [ ] tests: `build_executable_flow_draft` is deterministic over a fixed trace (no LLM synthesis of steps) (R-4)
 - [ ] tests: blast-radius re-validation refuses an over-budget / off-allowlist / inconsistent-`risk_class` / unresolved-credential trace and passes a clean one (R-4)
 - [ ] tests: the endpoint emits `skill_graduated`, flips the lifecycle to `graduated`, and produces a draft that is **not** published (R-4)
@@ -273,7 +378,7 @@ against them.
   - R-1 → stage 3 dual-backend round-trip (incl. `postgres`), step cap, lifecycle, idle-GC, best-effort failure
   - R-2 → stage 4 capture-only-on-signed-mutation (both sites), ordered mixed trace, secret parameterization, fail-safe
   - R-3 → stage 5 `risk_class`-without-`web_target`, executable-flow schema validation (both backends), malformed rejection, knowledge-skill no-regression
-  - R-4 → stage 6 deterministic draft, blast-radius refusal + happy path, `skill_graduated` + lifecycle flip + draft-not-published, observer-denied
+  - R-4 → stage 6a declared-target + observed-origin substrate (both backends, both declaration paths, real-PG migration) and stage 6b deterministic draft, blast-radius refusal + happy path, `skill_graduated` + lifecycle flip + draft-not-published, observer-denied
   - R-5 → stage 7 one-gate browser replay with per-write signing, infra per-action fallback asserted, deviation-guard fail-closed
   - R-6 → this mapping + the exercised `samples/` graduation demo
   - R-7 → stage 2 fail-closed projection (off-vocabulary masked), no-plaintext-secret on stream/render/at-rest for an action card, `args_digest` invariant preserved

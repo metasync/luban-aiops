@@ -33,11 +33,19 @@ async def create_session(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    skill_target: str | None = None,
 ) -> dict:
+    """Create a session, optionally declaring its skill target (SPEC-055 R-4).
+
+    No body at all unless there is something to declare: the agent route's
+    body is optional, and posting an empty object would only make the
+    historical call shape a special case for no benefit.
+    """
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/sessions",
             headers=_headers(request_id, user_id),
+            json={"skill_target": skill_target} if skill_target else None,
         )
     response.raise_for_status()
     return response.json()
@@ -415,6 +423,32 @@ async def update_session_title(
             f"{settings.agent_service_url}/api/v2/sessions/{session_id}/title",
             headers=_headers(request_id, user_id),
             json={"title": title},
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+async def declare_skill_target(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    session_id: str,
+    user_id: str,
+    target: str,
+) -> dict:
+    """Declare a session's skill-development target (SPEC-055 R-4).
+
+    One store write, no model call and no validation round-trip, so the
+    house timeout applies rather than the draft's generous one. Upstream
+    404 answers foreign/unknown sessions; upstream 422 means the target
+    has no normalizable origin and could never be corroborated. The
+    response reports the target *in force*, not an echo of the request —
+    the first declaration wins.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}/skill-target",
+            headers=_headers(request_id, user_id),
+            json={"target": target},
         )
     response.raise_for_status()
     return response.json()
