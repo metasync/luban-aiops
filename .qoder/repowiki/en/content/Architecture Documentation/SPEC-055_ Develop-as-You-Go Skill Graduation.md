@@ -39,6 +39,7 @@
 - Updated implementation status to show completed delivery with comprehensive testing coverage across all eight stages
 - Added detailed verification results showing 2424 Python tests passing across eight products with version lockstep enforcement
 - Enhanced troubleshooting guidance with new configuration options and service-specific issues
+- Incorporated post-delivery fixes for dev-k8s browser live check including login flow SSO auto-login handling, service availability retry logic, and portal access documentation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -74,6 +75,8 @@ The goal is to enable operators to "develop as you go" by running actions in cha
 **Delivered** Stage 7 (R-5) Verification is now complete with graduated flow replay functionality proven to work through existing SPEC-051 browser-flow path without new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows.
 
 **Delivered** Stage 8 (R-6) Sample Implementation provides interactive graduation demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow: author ad hoc against a declared target, graduate the trace into an executable-flow draft, merge the draft into the skills repository, and replay under one gate. Includes comprehensive automated testing with deterministic legs and optional chat legs, following ADR-0008 exercised-sample rule.
+
+**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three defects around the R-6 sample: login flow SSO auto-login handling, service availability retry logic, and portal access documentation. The first two changed the sample's own walkthrough prompts and demo script; the third corrected documentation on both sample and platform surfaces (the two sibling web-check walkthroughs, `docs/guides`, and the dev-k8s overlay README). No product code changed, so the deployed platform images are unaffected.
 
 **Section sources**
 - [spec.md:5-37](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L5-L37)
@@ -133,6 +136,7 @@ SAMPLES["Interactive Demo Script ✓"]
 WALKTHROUGH["Live Walkthrough Guide ✓"]
 DEMO["End-to-End Verification ✓"]
 TESTS["Automated Testing ✓"]
+POST_DELIVERY["Post-Delivery Fixes ✓"]
 end
 SC_skill --> SH_skill
 SC_audit --> AUDIT_audit
@@ -161,6 +165,7 @@ TG_guard --> BR_tools
 SAMPLES --> WALKTHROUGH
 SAMPLES --> DEMO
 SAMPLES --> TESTS
+SAMPLES --> POST_DELIVERY
 ```
 
 **Diagram sources**
@@ -182,6 +187,8 @@ SAMPLES --> TESTS
 - **Interactive Sample Implementation (R-6)**: **DELIVERED** - Comprehensive end-to-end demonstration of the complete skill graduation lifecycle through interactive demo script and walkthrough guide. Provides six deterministic legs plus four optional chat legs covering authoring, graduation, merging, and replay phases. Includes comprehensive automated testing with assertions for each phase of the graduation workflow.
 
 **Version 0.36.0 Delivery**: All seven requirements successfully delivered with comprehensive testing coverage across eight products. The implementation includes 2424 Python tests passing, portal npm test 342 across 29 files, and clean build verification. Version lockstep enforced across VERSION + 8 pyproject.toml + 8 metadata.py + 2 __init__.py + 8 uv.lock re-locks.
+
+**Post-Delivery Sample Fixes**: Three defects identified during dev-k8s browser live check were resolved: login flow SSO auto-login handling (preventing detached element clicks) and service availability retry logic (handling 502/503 errors gracefully), both in the sample, plus portal access documentation (canonical OIDC origin rather than a localhost port-forward), which spanned the sample walkthroughs and the platform guides.
 
 **Section sources**
 - [spec.md:101-305](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L101-L305)
@@ -546,6 +553,11 @@ Durable --> Audit["Audit trail"]
 - **Comprehensive Assertions**: Each leg includes detailed assertions for expected behavior, error handling, and state validation. Tests cover edge cases like observer denial, empty trace refusal, target normalization, and credential scoping.
 - **Cleanup and Safety**: Automatic cleanup of temporary resources including graduated skills from ConfigMap, throwaway sessions, and scratch files. Supports KEEP_GRADUATED_SKILL=true for keeping artifacts for inspection.
 
+**Post-Delivery Fixes Applied**: Three defects identified during dev-k8s browser live check were resolved:
+1. **Login Flow SSO Auto-Login Handling**: Fixed prompt asking model to click "Sign in" which conflicts with legacy-SSO auto-login that hides form within 100ms. Updated prompts to let page redirect itself naturally.
+2. **Service Availability Retry Logic**: Added bounded retry logic for 502/503 errors when skills-hub service endpoints are still propagating after restart, mirroring inventory retry behavior.
+3. **Portal Access Documentation**: Corrected OIDC redirect URI documentation to specify canonical origin `https://aiops.luban.metasync.cc` instead of localhost port-forward, explaining why sign-in round-trips only work on the configured origin.
+
 ```mermaid
 flowchart TD
 Start(["Sample Demo Start"]) --> Leg1["Leg 1: Prerequisites<br/>Browser connector, HITL, SPEC-055 knobs"]
@@ -646,6 +658,8 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Added comprehensive assertions** for each phase of the graduation workflow including prerequisite validation, tool discovery, target declaration, and graduation posture
 - **Provided configuration guidance** for adapting the sample to different targets and environments
 
+**Post-Delivery Sample Enhancements**: Applied fixes for dev-k8s browser live check defects including login flow SSO auto-login handling, service availability retry logic, and portal access documentation improvements.
+
 **Section sources**
 - [plan.md:349-373](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L349-373)
 - [tasks.md:10-102](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L10-102)
@@ -690,6 +704,7 @@ subgraph "Samples (Stage 8) ✓ COMPLETE"
 SAMPLES["Interactive Demo ✓"]
 WALKTHROUGH["Walkthrough Guide ✓"]
 VERIFICATION["Automated Testing ✓"]
+POST_DELIVERY["Post-Delivery Fixes ✓"]
 end
 SC_skill --> SH_skill
 SC_audit --> AUDIT_audit
@@ -711,6 +726,7 @@ TG_guard --> BR_tools
 AP_grad --> SAMPLES
 SAMPLES --> WALKTHROUGH
 SAMPLES --> VERIFICATION
+SAMPLES --> POST_DELIVERY
 ```
 
 **Diagram sources**
@@ -762,6 +778,11 @@ SAMPLES --> VERIFICATION
 - **R-5 Replay Issues**: **New** - If graduated flows don't replay correctly, verify they bind through existing SPEC-051 path and collapse to one confirmation card. Check that gateway deviation guards enforce origin allowlist, risk_class, and step budget. Ensure credentials resolve from named credential sets and that execution-runtime forwards approval_kind unchanged. For infra executable flows, verify per-action parking behavior and absence of flow authority.
 - **Sample Demo Issues**: **New** - If the interactive demo fails, check that prerequisites are met (browser connector enabled, HITL bridging active, SPEC-055 knobs configured). Verify that the admin portal pages are served, credential sets are loaded, and all web.* tools are registered with correct risk tiers. For chat legs, ensure model interaction is available and approval workflows are functioning. Check that cleanup procedures are removing temporary resources properly.
 
+**Post-Delivery Sample Troubleshooting**: 
+- **Login Flow Issues**: If the model attempts to click "Sign in" button, update prompts to let the page redirect itself naturally due to legacy-SSO auto-login that fires within 100ms of credential fields holding values.
+- **Service Availability Errors**: If encountering 502/503 errors when accessing skills-hub after restart, implement bounded retry logic similar to inventory retry behavior, retrying only on transient service unavailability.
+- **Portal Access Problems**: If portal stays signed out after OIDC round-trip, ensure accessing via canonical origin `https://aiops.luban.metasync.cc` rather than localhost port-forward, as identity-broker starts every login at OIDC_REDIRECT_URI.
+
 **Section sources**
 - [plan.md:375-427](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L375-L427)
 - [tasks.md:104-124](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L104-L124)
@@ -786,6 +807,8 @@ SPEC-055 enables a secure, operator-friendly path from live troubleshooting to r
 **Delivered** Stage 7 (R-5) Replay verification is now complete, proving that graduated flow replay functionality works through existing SPEC-051 browser-flow path without requiring new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows. Enhanced runtime kernel security guards ensure flow execution signing scope boundaries are properly enforced.
 
 **Delivered** Stage 8 (R-6) Sample Implementation is now complete with comprehensive interactive demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow (author, graduate, merge, replay) through six deterministic legs and four optional chat legs, following ADR-0008 exercised-sample rule. Includes detailed walkthrough guide, comprehensive automated testing, cleanup procedures, and configuration guidance for adapting to different environments.
+
+**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three critical defects around the sample, ensuring reliable end-to-end verification. These fixes included login flow SSO auto-login handling and service availability retry logic in the sample itself, plus portal access documentation across the sample walkthroughs and the platform guides; none touched product code, so the deployed platform images are unaffected.
 
 The implementation strategy emphasizes incremental delivery with clear dependencies, comprehensive testing requirements, and robust rollback procedures. With all eight stages complete, the foundation is solid for proceeding with future enhancements. The eight-stage approach ensures that each component is thoroughly tested and validated before proceeding to the next, minimizing risk while maximizing the value delivered at each milestone. The interactive sample implementation provides confidence that the complete graduation workflow functions as designed across all components and services.
 
