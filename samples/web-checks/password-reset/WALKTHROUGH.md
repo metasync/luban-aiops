@@ -84,6 +84,19 @@ the skill itself (`skills.search` → `skills.get`), but if it stops to ask whet
 it may proceed rather than navigating, re-send the message above. The skill's
 title (`ResetUserPassword`) works in place of its id.
 
+**The session title in the sidebar masks the password.** It reads
+
+```
+Reset the password for user alice@example.com to *** in the admin portal. Use sk
+```
+
+The title is minted from your own message, which is the one credential carrier no
+tool-side redactor ever sees — you typed the password into the chat, so it is in
+the prompt text, not in a tool argument — and it is the label an approver's inbox
+lists this session by, so it reaches a second identity. Masking runs *before* the
+80-character cap, which is why nothing of the secret survives: truncating first
+would leave its leading characters readable (SPEC-049 R-5).
+
 The agent should:
 1. Search for the `ResetUserPassword` skill via `skills.search`
 2. Navigate to the admin login page via `web.navigate` (binding the flow)
@@ -146,7 +159,14 @@ After approval, the agent:
 ## Step 6: Verify the Result
 
 The agent's final message should confirm the password was reset. You'll see:
-- The tool evidence chain (all `web.*` calls with their results)
+- The tool evidence chain (all `web.*` calls with their results). Expand the
+  `web.navigate` that went to the reset page and its arguments read
+  `?user=alice@example.com&newpw=***` — the secret query value masked, every
+  other byte of the URL intact. A `tool_call` frame is the record of what was
+  actually invoked, so it keeps its shape and loses only the secret; that is a
+  deliberately narrower projection than the fail-closed one R-7 applies to an
+  action card's arguments, which would render `{ "url": "***" }` and destroy the
+  evidence the panel exists to show
 - The HITL approval record (signed receipt)
 - The final snapshot showing the success page
 

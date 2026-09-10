@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import HTTPException
 
@@ -12,13 +13,121 @@ from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STOR
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.flow_approvals import FLOW_APPROVALS, FLOW_CONTEXTS
+from agent_service.services.secret_params import (
+    MASK,
+    SECRET_PARAM_SUBSTRINGS,
+    redact_secret_query,
+)
 from agent_service.services.session_store import SESSION_STORE
+# Imported for the *vocabulary*, not the service: the secret-shape patterns are
+# pinned as exactly two copies (``validate_secret_vocabulary.py`` fails the build
+# on divergence), so a third caller must reuse one rather than declare its own.
+from agent_service.services.skill_draft import REDACTION_VALUE_PATTERNS
 
 LOGGER = logging.getLogger(__name__)
 
 # SPEC-022 R-1: workspace list cap and title minting bounds.
 SESSION_LIST_CAP = 50
 SESSION_TITLE_MAX_LENGTH = 80
+
+# --- Title secret masking (SPEC-049 R-5 posture applied to a UI label) ---
+#
+# A minted title comes from the *user's own first message*, which is the one
+# credential carrier no tool-side redactor ever sees: the operator typed the
+# password into the chat, so it is in the prompt text, not in a tool argument.
+# The title is then rendered in the workspace sidebar and the session header
+# and — because an approver's inbox lists a pending card by its session title —
+# in front of a *second identity*. Neither the gateway's result redaction nor
+# R-7's confirmation-frame masking can reach it, since both run downstream of
+# the model's tool calls.
+#
+# Three of the four layers reuse a pinned vocabulary: the secret-*shape*
+# patterns (PEM/JWT/Bearer-Basic/AKIA, shared with the gateway and the skill
+# draft), the secret-*name* substrings applied to a ``key=value`` pair, and the
+# same substrings applied to a URL query via ``redact_secret_query``. None of
+# those matches a bare password literal in prose — "reset the password for
+# alice to TempPass123!" has no shape, no key and no query — so the fourth
+# layer masks a credential-*looking* token, fired only when the message already
+# names a secret.
+#
+# That fourth layer is a heuristic, and it is scoped to titles *alone* on
+# purpose. Here a false positive costs an 80-character label some of its
+# informativeness — the cost curve ``secret_params.is_secret_value`` documents
+# for a display projection — while a false negative publishes a credential into
+# another identity's inbox. In tool output the curve inverts: masking a pod
+# name or a session id breaks the evidence, which is why ``redaction.py``
+# records rejecting a generic substring matcher there (its Q-3 note). This
+# predicate must never be promoted to a tool-output or trace redactor.
+#
+# Known accepted false positives, all checked against the sample prompts: a
+# mixed-alnum identifier in a message that also names a secret (``k8s.list_pods``
+# beside the word "password") masks. Known accepted false negative: an
+# all-alphabetic password with no punctuation (``CorrectHorse``) has one
+# character class and does not mask.
+_TITLE_SECRET_NAME = "|".join(
+    sorted(
+        {re.escape(name) for name in SECRET_PARAM_SUBSTRINGS},
+        key=lambda item: (-len(item), item),
+    )
+)
+# ``password: TempPass123!`` / ``newpw=TempPass123!`` in prose. The value stops
+# at ``&``/``;``/quotes so an already-masked URL query keeps its non-secret
+# params visible instead of swallowing the rest of the string.
+_TITLE_KEY_VALUE = re.compile(
+    rf"\b([\w.-]*(?:{_TITLE_SECRET_NAME})[\w.-]*)(\s*[=:]\s*)([^\s&;,\"']+)",
+    re.IGNORECASE,
+)
+_TITLE_SECRET_HINT = re.compile(_TITLE_SECRET_NAME, re.IGNORECASE)
+_TITLE_TOKEN = re.compile(r"\S+")
+_TITLE_CREDENTIAL_MIN_CHARS = 8
+
+
+def _is_credential_literal(token: str) -> bool:
+    """True when a whitespace-delimited token looks like a typed credential."""
+    candidate = token.strip(".,;:!?()[]{}<>\"'`")
+    if len(candidate) < _TITLE_CREDENTIAL_MIN_CHARS:
+        return False
+    # An address or anything carrying a path separator is an identifier or a
+    # URL, not a password — and a URL's secret is the query layer's job, which
+    # has already run by the time this is consulted.
+    if "@" in candidate or "/" in candidate or "\\" in candidate:
+        return False
+    has_alpha = any(char.isalpha() for char in candidate)
+    has_digit = any(char.isdigit() for char in candidate)
+    classes = sum((
+        any(char.islower() for char in candidate),
+        any(char.isupper() for char in candidate),
+        has_digit,
+        any(not char.isalnum() for char in candidate),
+    ))
+    # Mixed alnum (``TempPass123``) or three-plus character classes
+    # (``Crrct!Horse``). Requiring one of the two is what keeps the hyphenated
+    # and dotted identifiers this product is full of — ``browser-check-target``,
+    # ``dev-luban-aiops``, ``web-ui`` — out of the match: they carry two
+    # classes at most (lowercase plus punctuation) and no digit.
+    return (has_alpha and has_digit) or classes >= 3
+
+
+def _mask_title_secrets(message: str) -> str:
+    """The message with credential material masked, before it becomes a title.
+
+    Layers run most-deterministic first, and each is idempotent on the
+    previous one's output (``MASK`` is too short to re-match).
+    """
+    text = message
+    for pattern in REDACTION_VALUE_PATTERNS:
+        text = pattern.sub(MASK, text)
+    text = redact_secret_query(text)
+    text = _TITLE_KEY_VALUE.sub(rf"\1\2{MASK}", text)
+    if _TITLE_SECRET_HINT.search(text):
+        text = _TITLE_TOKEN.sub(
+            lambda match: (
+                MASK if _is_credential_literal(match.group(0))
+                else match.group(0)
+            ),
+            text,
+        )
+    return text
 
 
 def _assert_session_owner(session: SessionRecord, user_id: str | None) -> None:
@@ -111,8 +220,12 @@ def mark_session_turn(session_id: str, message: str) -> None:
     Mints the title from the first user turn (80-char cap, never rewritten)
     and refreshes ``last_active_at``. Both are fail-open: bookkeeping never
     fails a turn.
+
+    Masking runs **before** the cap, not after: truncating first leaves the
+    leading characters of a secret straddling the boundary readable, which is
+    how a sidebar came to show ``... to Temp``.
     """
-    title = " ".join(message.split())[:SESSION_TITLE_MAX_LENGTH]
+    title = " ".join(_mask_title_secrets(message).split())[:SESSION_TITLE_MAX_LENGTH]
     try:
         if title:
             SESSION_STORE.set_session_title(session_id, title)

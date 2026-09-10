@@ -33,6 +33,7 @@ from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import ToolResponse
 
 from agent_service.services.flow_approvals import BROWSER_WRITE_TOOLS
+from agent_service.services.secret_params import redact_evidence_parameters
 
 LOGGER = logging.getLogger(__name__)
 
@@ -337,7 +338,17 @@ class ToolEvidenceMiddleware(MiddlewareBase):
                 "type": "tool_call",
                 "tool_name": gateway_tool_name,
                 "call_id": call_id,
-                "parameters": self._parse_parameters(tool_call),
+                # A display + at-rest projection, never a signing input: the
+                # frame is streamed to the portal's evidence panel and
+                # persisted, so a secret the model put in an argument (the
+                # password-reset demo navigates with ``?newpw=...``) would
+                # otherwise be readable in both even though every gateway-side
+                # representation of the same call masks it (SPEC-049 R-5).
+                # The resume path digests a fresh raw payload, so masking here
+                # cannot shift an ``args_digest``.
+                "parameters": redact_evidence_parameters(
+                    gateway_tool_name, self._parse_parameters(tool_call),
+                ),
             })
 
             gateway_result = None

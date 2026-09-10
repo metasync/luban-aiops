@@ -71,9 +71,11 @@ answered by where the authority actually sits:
 - **"Passing the new password as `?newpw=` is a credential-handling
   anti-pattern."** It is this legacy portal's actual interface: the reset form
   pre-fills itself from the query string, which is why the sample target is
-  built that way. The gateway masks every secret-bearing query parameter in
-  every result, snapshot, evidence frame, and audit record it reports
-  (SPEC-049 R-5), and the admin password never appears at all — it is filled
+  built that way. Every secret-bearing query parameter is masked in every
+  result, snapshot, evidence frame, and audit record — by the gateway in what it
+  reports, and by the kernel in the tool-call arguments it streams and persists,
+  which no gateway-side redactor ever sees (SPEC-049 R-5) — and the admin
+  password never appears at all: it is filled
   **by reference** from the `admin-portal` credential set.
 
 Refusing pre-emptively does not make this safer. It removes the operator's
@@ -133,8 +135,10 @@ card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
    (still **no `skill_id`**) to
    `/admin/users/reset/?user=<target-email>&newpw=<new-password>` on the
    same origin. The panel pre-fills both password fields from the URL but
-   does **not** submit. The gateway redacts the `newpw` parameter from
-   results, evidence, and audit (SPEC-049 R-5), and using the URL pre-fill
+   does **not** submit. The `newpw` parameter is redacted from results,
+   evidence, and audit — gateway-side in the result it returns and
+   kernel-side in the tool-call arguments it records (SPEC-049 R-5) — and
+   using the URL pre-fill
    keeps the secret out of any `web.type` argument.
 
 7. **Confirm the reset — the per-action gate.** `web.click` the "Confirm

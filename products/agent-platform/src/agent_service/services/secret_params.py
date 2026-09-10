@@ -37,6 +37,7 @@ docstring for why the two postures diverge.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 # Parameter-name substrings whose values are secret-bearing and must never
 # enter a change-request projection in plaintext. Matched case-insensitively
@@ -203,6 +204,116 @@ def redact_parameters(tool_name: str, parameters: dict) -> dict:
         str(key): MASK if should_mask(tool_name, str(key)) else value
         for key, value in parameters.items()
     }
+
+
+# ---------------------------------------------------------------------------
+# Evidence-frame parameter projection (SPEC-049 R-5, third posture)
+# ---------------------------------------------------------------------------
+
+
+def redact_secret_query(url: str) -> str:
+    """Mask secret-bearing query-param values in a URL, key and shape kept.
+
+    Kernel twin of ``browser_connector._redact_secret_query``, which masks the
+    same vocabulary in every gateway-side representation (results, snapshot
+    header, ``_evidence_url``). The kernel needs it because the ``tool_call``
+    evidence frame carries the *arguments the model chose* — including a
+    ``web.navigate`` URL with ``?newpw=...`` in it — and that frame is both
+    streamed to the portal's evidence panel and persisted into the evidence
+    store, so the gateway's own masking never sees it.
+
+    Only the value is masked (to ``MASK``); the key stays so the URL shape is
+    still visible, and the raw query is rewritten segment-by-segment so every
+    non-secret byte is preserved exactly (no re-encoding). A string with no
+    secret-bearing query param is returned unchanged, which makes this safe to
+    apply to arbitrary string arguments.
+    """
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return url
+    if not parsed.query:
+        return url
+    changed = False
+    segments: list[str] = []
+    for segment in parsed.query.split("&"):
+        key, sep, _value = segment.partition("=")
+        # A bare key with no '=' carries no value to leak; leave it as-is.
+        if sep and is_secret_param(unquote(key)):
+            segments.append(f"{key}{sep}{MASK}")
+            changed = True
+        else:
+            segments.append(segment)
+    if not changed:
+        return url
+    return urlunsplit((
+        parsed.scheme, parsed.netloc, parsed.path,
+        "&".join(segments), parsed.fragment,
+    ))
+
+
+def _redact_evidence_value(tool_name: str, key: str | None, value: Any) -> Any:
+    """Redact one argument value, descending into nested containers."""
+    if key is not None and not is_known_safe(tool_name, key):
+        if is_opaque_value(tool_name, key) or is_secret_param(key):
+            # Mask the whole subtree, not just a string leaf: a secret-named
+            # key holding a list (``{"passwords": [...]}``) leaks exactly as
+            # hard as one holding a string.
+            return MASK
+    if isinstance(value, dict):
+        return {
+            str(item_key): _redact_evidence_value(tool_name, str(item_key), item)
+            for item_key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_evidence_value(tool_name, None, item) for item in value]
+    if isinstance(value, str):
+        return redact_secret_query(value)
+    return value
+
+
+def redact_evidence_parameters(tool_name: str, parameters: Any) -> Any:
+    """A display/persistence copy of a ``tool_call`` frame's ``parameters``.
+
+    A **third** masking posture, and the divergence from the other two is
+    forced by what this frame is for. ``redact_parameters`` (R-7) is
+    fail-closed: every off-allow-list value becomes ``MASK``, because a
+    change-request card's job is to convey an *intention* and its raw
+    parameters are a redundant sibling. A ``tool_call`` evidence frame has the
+    opposite job — it is the record of what was actually invoked — so applying
+    R-7's posture here would render ``{"url": "***"}`` and destroy the very
+    evidence the panel exists to show. ``parameterize_for_trace`` (R-2) is
+    likewise unusable: a trace's holes are refusals at graduation time.
+
+    So this keeps the evidence shape and removes only the secret:
+
+    - a field positively on ``KNOWN_SAFE_FIELDS`` survives verbatim (the
+      credential-set *reference* must stay readable, exactly as in
+      ``is_secret_value``);
+    - a per-tool opaque field (``web.type.text``, ``web.evaluate.expression``)
+      or a secret-named key masks wholesale — the value *is* the secret there,
+      so no shape is worth preserving;
+    - any other string goes through ``redact_secret_query``, which is a no-op
+      unless it carries a secret-bearing query param.
+
+    The residual gap is a secret literal in an off-vocabulary,
+    generically-named, non-URL argument. That is R-7's fail-closed case and it
+    is deliberately *not* closed here, for the reason above; the structural
+    control is the same one ``OPAQUE_VALUE_FIELDS`` documents — credentials
+    enter through ``web.fill_credential`` as a reference, never as a literal.
+
+    **Never** applied to a signing input, for the reason ``redact_parameters``
+    documents: ``build_requests`` re-reads a fresh raw
+    ``pending_calls_payload()`` at resume time, so the ``args_digest`` a
+    gateway verifies stays byte-identical. This is a pure display + at-rest
+    projection, and it returns a fresh structure rather than mutating.
+    """
+    if isinstance(parameters, dict):
+        return {
+            str(key): _redact_evidence_value(tool_name, str(key), value)
+            for key, value in parameters.items()
+        }
+    return _redact_evidence_value(tool_name, None, parameters)
 
 
 # ---------------------------------------------------------------------------

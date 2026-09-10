@@ -87,6 +87,19 @@ objections a model may raise, and the kernel's default system prompt states the
 same. An unbound write is the **more** heavily gated of the two paths: one card
 per action rather than one gate for the whole flow.
 
+**The session title in the sidebar masks the password.** It reads
+
+```
+Ad-hoc, without binding a flow, reset the password for alice@example.com to ***
+```
+
+The title is minted from your own message, which is the one credential carrier no
+tool-side redactor ever sees — you typed the password into the chat, so it is in
+the prompt text, not in a tool argument — and it is the label an approver's inbox
+lists this session by, so it reaches a second identity. Masking runs *before* the
+80-character cap: this prompt puts the secret right at the boundary, so
+truncating first left a sidebar reading `… to Temp` (SPEC-049 R-5).
+
 The agent should:
 1. Read the `ResetPasswordAdHoc` runbook via `skills.get`/`skills.search`
 2. Navigate to the admin login page via `web.navigate` **without `skill_id`**
@@ -96,7 +109,9 @@ The agent should:
    reference** — admitted unbound by SPEC-054 R-2; the secret never enters the
    arguments). The login form auto-submits (legacy SSO) and redirects
 5. Navigate to the reset page with the new password as the `newpw` URL
-   parameter (read tier; the gateway redacts it)
+   parameter (read tier; the value is masked in the result the gateway returns
+   *and* in the tool-call arguments the kernel streams and persists, so it
+   reads `newpw=***` in the evidence panel with the rest of the URL intact)
 6. **Click "Confirm reset"** ← an unbound write-tier interaction, so it parks a
    **per-action** confirmation card
 
@@ -182,6 +197,14 @@ snapshot enumerates interactive elements only (`a, button, input, select,
 textarea` and a few ARIA roles) and the status line is a plain `<p
 role="status">`, so it is legitimately absent from every snapshot in the
 transcript.
+
+The evidence chain masks the secret on both sides of the gateway boundary: the
+`web.navigate` **result** reports `newpw=***` (the gateway masks every
+representation of a call it executed), and its **`tool_call` arguments** in the
+panel read the same way — the kernel masks the arguments the model chose, since
+no gateway-side redactor ever sees them. What survives is the URL's shape, which
+is the point: a `tool_call` frame is the record of what was invoked, so it keeps
+its evidence and loses only the secret.
 
 In the session detail (or the approvals inbox), the durable confirmation record
 carries the **same** `approval_kind: "action"`, the persisted top-line `message`

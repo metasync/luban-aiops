@@ -446,6 +446,118 @@ def test_blank_message_never_mints_title(workspace):
     assert session_store.get_session(record.session_id).title is None
 
 
+# --- Title secret masking (SPEC-049 R-5 applied to a UI label) ---
+#
+# The title is minted from the *user's own* message, which is the one
+# credential carrier no tool-side redactor ever sees, and it is rendered in
+# front of a second identity: an approver's inbox lists a pending card by its
+# session title. Everything below is asserted through ``mark_session_turn``
+# rather than against the private projection, so the layer that actually
+# stores the label is the one under test.
+
+
+def _mint(workspace, message: str) -> str | None:
+    session_store, _ = workspace
+    record = session_store.create_session("alice")
+    session_service.mark_session_turn(record.session_id, message)
+    return session_store.get_session(record.session_id).title
+
+
+def test_title_masks_a_bare_password_the_operator_typed(workspace):
+    """The flow sample's own prompt. No pinned shape, no ``key=value``, no URL
+    query — a bare literal in prose, caught only by the credential-literal
+    layer that fires because the message names a secret."""
+    title = _mint(
+        workspace,
+        "Reset the password for user alice@example.com to TempPass123! in the "
+        "admin portal. Use skill samples/password-reset-resetuserpassword.",
+    )
+
+    assert "TempPass123" not in title
+    assert "***" in title
+    # Surgical, not wholesale: the address and the opening of the request
+    # survive, so the label still says what the session is about.
+    assert "alice@example.com" in title
+    assert title.startswith("Reset the password for user")
+
+
+def test_title_masks_before_the_cap_so_no_fragment_survives(workspace):
+    """The ad-hoc sample's prompt put the secret across the 80-char boundary,
+    so truncating first left a sidebar reading ``... to Temp``. Masking runs
+    before the cap."""
+    title = _mint(
+        workspace,
+        "Ad-hoc, without binding a flow, reset the password for "
+        "alice@example.com to TempPass-2026! in the admin portal.",
+    )
+
+    assert "TempPass" not in title
+    assert "Temp" not in title
+    assert "to ***" in title
+    # The cap still bites, and it bites the masked text: the words after the
+    # secret are what got truncated away, not the secret's first characters.
+    assert len(title) == 80
+    assert "admin portal" not in title
+
+
+def test_title_masks_a_key_anchored_secret(workspace):
+    """``password=<value>`` in prose: the name vocabulary catches it with no
+    help from the heuristic, and the key stays visible so the label still says
+    a password was involved."""
+    title = _mint(
+        workspace,
+        "rotate the db password=hunter2secret for the payment service",
+    )
+
+    assert "hunter2secret" not in title
+    assert "password=***" in title
+
+
+def test_title_masks_a_secret_url_query_and_keeps_the_other_params(workspace):
+    """The URL layer, exercised on free text: the secret param masks and the
+    non-secret one beside it stays readable. Prose *after* the query is
+    consumed by the mask — an accepted over-mask, since the alternative is
+    deciding where a URL ends inside a sentence."""
+    title = _mint(
+        workspace,
+        "open https://target/reset?user=alice&newpw=TempPass123%21 and confirm",
+    )
+
+    assert "TempPass123" not in title
+    assert "newpw=***" in title
+    assert "user=alice" in title
+
+
+def test_title_masks_a_pinned_secret_shape(workspace):
+    """The shape vocabulary is reused, not re-declared: it is pinned as exactly
+    two copies across products, so a third caller must import one."""
+    title = _mint(
+        workspace,
+        "call the api with Bearer abcdefgh12345678 for the payments service",
+    )
+
+    assert "abcdefgh12345678" not in title
+    assert "***" in title
+
+
+def test_title_masking_leaves_an_ordinary_message_alone(workspace):
+    """The heuristic is gated on the message naming a secret, so a normal
+    operations request is not touched — and the hyphenated identifiers this
+    product is full of survive even when the gate does open."""
+    assert _mint(workspace, "check the web-ui pod in dev-luban-aiops") == (
+        "check the web-ui pod in dev-luban-aiops"
+    )
+
+    gated = _mint(
+        workspace,
+        "reset the password using runbook browser-check-target on "
+        "dev-luban-aiops",
+    )
+    assert "browser-check-target" in gated
+    assert "dev-luban-aiops" in gated
+    assert "runbook" in gated
+
+
 # --- Voice-readiness contract (R-2) ---
 
 

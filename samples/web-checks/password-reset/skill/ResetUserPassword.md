@@ -173,8 +173,10 @@ for this specific reset. It is not a persistent service credential.
 Credential sets are for long-lived service accounts; one-time
 passwords belong in the chat message. The URL parameter approach is
 realistic for legacy admin panels that support batch operations via
-pre-filled URLs, and the gateway redacts the `newpw` query parameter
-from every result, evidence frame, and audit record (SPEC-049 R-5).
+pre-filled URLs, and the `newpw` query parameter is redacted from every
+result, evidence frame, and audit record — by the gateway in the results it
+returns, and by the kernel in the tool-call arguments it streams and persists,
+which no gateway-side redactor ever sees (SPEC-049 R-5).
 
 **Why does the reset form pre-fill but not auto-submit?**
 The form pre-fills both password fields from the URL so the operator

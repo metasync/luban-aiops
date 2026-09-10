@@ -590,6 +590,44 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         self.assertEqual(events[1]["evidence"]["duration_ms"], 42)
         self.assertEqual(events[1]["data_summary"], {"pods": []})
 
+    def test_tool_call_frame_masks_a_secret_in_the_arguments(self) -> None:
+        """SPEC-049 R-5: the frame is streamed to the portal's evidence panel
+        *and* persisted into the evidence store, so a secret the model put in
+        an argument (the password-reset demo navigates with ``?newpw=...``)
+        must not ride along in plaintext — while the URL shape that makes the
+        frame evidence does.
+        """
+        from agentscope.message import TextBlock
+        from agentscope.tool import ToolChunk, ToolResponse
+
+        secret_url = (
+            "https://browser-check-target/reset?user=alice&newpw=TempPass123%21"
+        )
+        result = self._gateway_result()
+        tool = _StubTool("web_navigate", gateway_tool_name="web.navigate")
+        agent = _StubAgent([tool])
+        tool_call = _tool_call_block("web_navigate", {"url": secret_url})
+        items = [
+            ToolChunk(
+                content=[TextBlock(text=json.dumps(result, default=str))],
+                metadata={"gateway_result": result},
+            ),
+            ToolResponse(metadata={"gateway_result": result}),
+        ]
+        events = self._emit(ToolEvidenceMiddleware(), agent, tool_call, items)
+
+        frame = events[0]
+        self.assertEqual(frame["type"], "tool_call")
+        self.assertEqual(
+            frame["parameters"],
+            {"url": "https://browser-check-target/reset?user=alice&newpw=***"},
+        )
+        self.assertNotIn("TempPass123", json.dumps(events, default=str))
+        # The projection is a copy: the raw ``tool_call`` the resume path
+        # digests into ``args_digest`` still carries the real value, so a
+        # gateway's signature check is unaffected by what the panel shows.
+        self.assertIn("newpw=TempPass123%21", tool_call.input)
+
     def test_tool_result_frame_includes_error_on_failure(self) -> None:
         from agentscope.tool import ToolResponse
 

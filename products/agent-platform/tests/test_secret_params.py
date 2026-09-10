@@ -24,7 +24,9 @@ from agent_service.services.secret_params import (
     is_secret_param,
     is_secret_value,
     parameterize_for_trace,
+    redact_evidence_parameters,
     redact_parameters,
+    redact_secret_query,
     should_mask,
 )
 
@@ -275,3 +277,117 @@ def test_the_two_projections_stay_independent() -> None:
         "selector": "#submit",
         "password": TRACE_CREDENTIAL_PLACEHOLDER,
     }
+
+
+# --- The evidence-frame projection: shape kept, secret removed --------------
+
+RESET_URL = "https://browser-check-target/reset?user=alice&newpw=TempPass123%21"
+
+
+def test_the_query_redactor_masks_the_value_and_preserves_bytes() -> None:
+    """The gateway twin's contract, asserted on the kernel copy: the key stays
+    so the URL shape is still visible, non-secret params survive untouched, and
+    the percent-encoding is not re-encoded on the way through."""
+    assert redact_secret_query(RESET_URL) == (
+        "https://browser-check-target/reset?user=alice&newpw=" + MASK
+    )
+
+
+def test_the_query_redactor_is_a_no_op_without_a_secret_param() -> None:
+    """It is applied to *every* string argument, so a string that carries no
+    secret-bearing query must come back byte-identical — including strings
+    that are not URLs at all."""
+    for value in (
+        "https://browser-check-target/reset?user=alice",
+        "https://portal/reset",
+        "samples/password-reset-resetuserpassword",
+        "#reset-status",
+        "",
+        "?user=alice",
+        "a bare key with no equals? newpw",
+    ):
+        assert redact_secret_query(value) == value
+
+
+def test_the_evidence_projection_diverges_from_fail_closed_masking() -> None:
+    """The whole reason a third posture exists. R-7's ``redact_parameters``
+    masks a URL wholesale because a change-request card conveys an intention;
+    an evidence frame is the record of what was invoked, so masking it to
+    ``***`` would destroy the evidence the panel exists to show. If someone
+    "simplifies" one into the other, this fails."""
+    parameters = {"url": RESET_URL}
+
+    assert redact_parameters("web.navigate", parameters) == {"url": MASK}
+    assert redact_evidence_parameters("web.navigate", parameters) == {
+        "url": "https://browser-check-target/reset?user=alice&newpw=" + MASK,
+    }
+
+
+def test_the_evidence_projection_masks_opaque_and_secret_named_fields() -> None:
+    """A field whose value *is* the secret keeps no shape worth preserving, so
+    it masks wholesale — the per-tool opaque fields (a literal typed into
+    ``web.type``, a credential assigned from JS in ``web.evaluate``) and the
+    name vocabulary, including a secret-named key holding a container."""
+    assert redact_evidence_parameters(
+        "web.type", {"selector": "#username", "text": "TempPass123!"},
+    ) == {"selector": "#username", "text": MASK}
+    assert redact_evidence_parameters(
+        "web.evaluate",
+        {"expression": "document.querySelector('#pw').value='TempPass123!'"},
+    ) == {"expression": MASK}
+    assert redact_evidence_parameters(
+        "k8s.rotate_secret", {"name": "db", "passwords": ["a1b2c3d4"]},
+    ) == {"name": "db", "passwords": MASK}
+
+
+def test_the_evidence_projection_keeps_a_credential_reference_readable() -> None:
+    """``KNOWN_SAFE_FIELDS`` wins over the name vocabulary, exactly as in
+    ``is_secret_value``: ``credential_set`` contains "credential", but the
+    *reference* is the structural fix that keeps a credential out of the
+    arguments at all, so masking it would hide the one thing worth showing."""
+    assert redact_evidence_parameters(
+        "web.fill_credential",
+        {"credential_set": "admin-portal", "field": "#username"},
+    ) == {"credential_set": "admin-portal", "field": "#username"}
+
+
+def test_the_evidence_projection_descends_into_containers() -> None:
+    """A secret nested one level down rides into the same persisted frame."""
+    assert redact_evidence_parameters(
+        "web.navigate",
+        {"options": {"referer": RESET_URL}, "urls": [RESET_URL, "plain"]},
+    ) == {
+        "options": {
+            "referer": (
+                "https://browser-check-target/reset?user=alice&newpw=" + MASK
+            ),
+        },
+        "urls": [
+            "https://browser-check-target/reset?user=alice&newpw=" + MASK,
+            "plain",
+        ],
+    }
+
+
+def test_the_evidence_projection_never_mutates_its_input() -> None:
+    """The caller's ``tool_call`` input is the object the resume path digests
+    into ``args_digest``; mutating it would perturb the signature a gateway
+    verifies against. Asserted structurally, not just by comment."""
+    parameters = {"url": RESET_URL, "nested": {"token": "t0ken-SECRET"}}
+    before = copy.deepcopy(parameters)
+
+    redact_evidence_parameters("web.navigate", parameters)
+
+    assert parameters == before
+
+
+def test_the_evidence_projection_tolerates_a_non_dict_argument() -> None:
+    """Same tolerance the other two projections have: a malformed frame yields
+    something inert rather than raising inside the evidence seam."""
+    assert redact_evidence_parameters("web.navigate", None) is None
+    assert redact_evidence_parameters("web.navigate", "") == ""
+    assert redact_evidence_parameters("web.navigate", 7) == 7
+    assert redact_evidence_parameters("web.navigate", []) == []
+    assert redact_evidence_parameters("web.navigate", RESET_URL) == (
+        "https://browser-check-target/reset?user=alice&newpw=" + MASK
+    )
