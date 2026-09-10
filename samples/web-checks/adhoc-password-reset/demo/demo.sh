@@ -327,9 +327,14 @@ print('  %d per-action card(s), all action-kind with a change request; %d signed
   echo "session detail carries only action-kind cards, each with a change request and signed executions (SPEC-054 R-1/R-2/R-3/R-4)"
 
   echo ""
-  echo "==> [CHAT] verification URLs (open in your browser to see the reset result):"
-  echo "    Admin portal user list: http://localhost:9090/admin/users/?reset=${TARGET_USER}"
-  echo "    Confirmation page:      http://localhost:9090/admin/users/reset/done/?user=${TARGET_USER}"
+  echo "==> [CHAT] evidence for this run — NOT the admin portal URLs:"
+  echo "    The portal is a static mock with no server-side state: its pages echo"
+  echo "    their own query parameters and report success for any user, including"
+  echo "    one absent from the roster, so opening"
+  echo "      http://localhost:9090/admin/users/reset/done/?user=${TARGET_USER}"
+  echo "    proves nothing about this run. The evidence is the transcript's"
+  echo "    post-click #reset-status snapshot and screenshot, plus the action-kind"
+  echo "    cards and the signed execution receipts asserted above."
 else
   echo "==> [CHAT] chat leg skipped (RUN_CHAT_LEG unset; opt-in)"
 fi

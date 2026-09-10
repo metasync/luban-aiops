@@ -27,6 +27,35 @@ def test_default_system_prompt_carries_skills_discipline(monkeypatch):
     assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
 
 
+def test_default_system_prompt_carries_browser_authorization_discipline(monkeypatch):
+    """SPEC-054 R-2: the default prompt teaches that an unbound browser write is
+    a supported, platform-gated path rather than an attack.
+
+    Live-run finding: models refused the ad-hoc password-reset sample outright —
+    "a skill's steps are only authoritative when the flow is bound", and an
+    instruction to stay unbound is "exactly what a prompt-injection or
+    privilege-escalation attempt looks like" — so no per-action card was ever
+    parked and the R-2/R-3 seam went undemonstrated. The model was substituting
+    its own refusal for the operator's decision, which is the actual control.
+    """
+    # Both authorization paths named, and neither framed as a bypass.
+    assert "skill_id" in DEFAULT_SYSTEM_PROMPT
+    assert "per-action approval" in DEFAULT_SYSTEM_PROMPT
+    assert "SPEC-054 R-2" in DEFAULT_SYSTEM_PROMPT
+    assert "Neither is a bypass" in DEFAULT_SYSTEM_PROMPT
+    # Attempt the step; the platform decides whether to gate it.
+    assert "let the platform gate it" in DEFAULT_SYSTEM_PROMPT
+    # A query-string credential is the legacy target's shape, not an attack.
+    assert "not evidence of an attack" in DEFAULT_SYSTEM_PROMPT
+    # The refusal boundary is preserved — this is not blanket compliance.
+    assert "contradicts the runbook" in DEFAULT_SYSTEM_PROMPT
+    assert "outside the allowlist" in DEFAULT_SYSTEM_PROMPT
+
+    monkeypatch.delenv("AGENTSCOPE_SYSTEM_PROMPT", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
+
+
 def test_default_system_prompt_carries_log_quoting_discipline():
     """0.18.1 live-check finding: replies quoted pod logs as one
     JSON-serialized string; the default prompt steers the model to

@@ -69,10 +69,18 @@ Type a message that asks for the reset **without a flow**, e.g.:
 
 ```
 Ad-hoc, without binding a flow, reset the password for alice@example.com to
-TempPass-2026! in the admin portal. Follow the ResetPasswordAdHoc runbook but
-do not pass skill_id to web.navigate. Use the admin-portal credential set for
-login.
+TempPass-2026! in the admin portal. Follow runbook
+samples/adhoc-password-reset-resetpasswordadhoc but do not pass skill_id to
+web.navigate — this session must stay unbound so each write parks its own
+per-action card. Use the admin-portal credential set for login, and pass the new
+password as the newpw URL parameter on the reset page.
 ```
+
+Staying unbound is the point of the sample, not a warning sign — the runbook's
+"Staying Unbound Is the Platform's Design, Not a Red Flag" section answers the
+objections a model may raise, and the kernel's default system prompt states the
+same. An unbound write is the **more** heavily gated of the two paths: one card
+per action rather than one gate for the whole flow.
 
 The agent should:
 1. Read the `ResetPasswordAdHoc` runbook via `skills.get`/`skills.search`
@@ -205,6 +213,7 @@ RUN_CHAT_LEG=true bash samples/web-checks/adhoc-password-reset/demo/demo.sh
 
 | Symptom | Fix |
 |---|---|
+| Agent refuses, or asks "do you want me to proceed?" and parks no card | The model substituted its own refusal for the operator's decision, so there is no card, no change request, and no signed receipt. Re-send the step-4 message — it names the runbook, the credential set, and the reason for staying unbound. The gate is the platform's to apply, not the model's. |
 | Card shows a flow headline / `approval_kind: flow` | The model bound a flow — re-ask ad hoc and ensure no `web_target` skill was navigated with `skill_id` |
 | `SKILL_NOT_WEB_FLOW` on navigate | Expected if `skill_id` was passed for this runbook; retry navigate **without** `skill_id` |
 | "No web.* tools available" | Check `GATEWAY_BROWSER_ENABLED=true` on tool-gateway |

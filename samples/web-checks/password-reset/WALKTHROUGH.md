@@ -63,14 +63,23 @@ In the operator portal:
 
 ## Step 4: Ask the Agent to Reset a Password
 
-Type a natural language message in the chat composer, like:
+Type a message in the chat composer, like:
 
 ```
 Reset the password for user alice@example.com to TempPass123! in the admin portal.
+Use skill samples/password-reset-resetuserpassword. Admin credentials are in the
+admin-portal credential set.
 ```
 
-Notice you don't need to specify the skill name — the agent will find
-the right skill based on your request. The agent should:
+Naming the skill and the credential set is what `demo.sh` sends, and it is the
+reliable form: it closes the two ambiguities that make models stall before they
+reach the gate — which runbook to follow, and where the admin password comes
+from. You can try the bare one-line request instead and watch the agent discover
+the skill itself (`skills.search` → `skills.get`), but if it stops to ask whether
+it may proceed rather than navigating, re-send the message above. The skill's
+title (`ResetUserPassword`) works in place of its id.
+
+The agent should:
 1. Search for the `ResetUserPassword` skill via `skills.search`
 2. Navigate to the admin login page via `web.navigate` (binding the flow)
 3. Take a snapshot via `web.snapshot` to see the login form
@@ -198,6 +207,7 @@ This verifies:
 
 | Symptom | Fix |
 |---|---|
+| Agent asks "do you want me to proceed?" and never navigates | It stalled before reaching the gate. Re-send the step-4 message naming the skill and the credential set — that is the form `demo.sh` sends and the one that reaches the card. The platform gates the write itself; the flow card *is* the gate, so the agent does not need your permission first. |
 | "No web.* tools available" | Check `GATEWAY_BROWSER_ENABLED=true` on tool-gateway |
 | "Credential set not found" | Run `sync-browser-credentials.sh` to refresh the secret |
 | "Skill not found" | Run `make deploy-samples` to pack the skill into the `skills-samples` ConfigMap |
