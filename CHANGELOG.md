@@ -226,6 +226,28 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   problem — the invariant rested on a call site staying disciplined. The
   `BROWSER_WRITE_TOOLS` guard is now inside the signer, so the scope is
   enforced by the function that declares it.
+- **The skill-graduation sample now matches the platform it exercises
+  (SPEC-055 R-6)** — the `dev-k8s` browser live check that closes this release
+  found three defects in the sample and none in the platform, so the shipped
+  images are unaffected. Its act-1 prompt asked the model to click "Sign in" on
+  a page whose legacy-SSO auto-login hides the form and navigates away within
+  100 ms of both credential fields being filled, so that click could only ever
+  fail on a detached element; the model recovered and finished both resets, but
+  the failed write left a trace step with no observed origin, and graduation
+  refuses an unverified step — R-4 behaving as specified against a prompt that
+  guaranteed it would fire. Act 3 read the merged skill back with a single
+  un-retried `GET` against the service it had just restarted, and `rollout
+  status` returning does not mean the Service endpoints have finished
+  propagating: the gateway answered `502` "skills hub unavailable", its honest
+  mapping of a transport error, reproducibly on the first request and never on
+  the second. That call is now bounded-retried on `502`/`503` alone, so a `404`
+  — a real answer about the skill — still fails at once. And the walkthrough's
+  step 1 sent readers to sign in on a localhost port-forward, where sign-in
+  cannot round-trip: the identity-broker starts every login at
+  `OIDC_REDIRECT_URI`, which makes the canonical portal origin the only one
+  that works. The two sibling web-check walkthroughs carry that same stale
+  instruction and predate this spec, so they are flagged rather than changed
+  here.
 
 ## 0.35.0 — 2026-09-07
 

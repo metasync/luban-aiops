@@ -342,3 +342,30 @@ future longer transition is a one-line raise here rather than a mystery
 failure blamed on an unrelated file. No product behavior is involved, and
 `make verify` does not run the portal suite, which is why this is recorded
 here rather than in `CHANGELOG.md`.
+
+Browser live check on aiops.luban.metasync.cc at `0.36.0-dev-k8s-6c45e21`,
+ten scenarios green: the six deterministic legs (connector + HITL + knob
+sanity, admin-portal pages served, credential set loaded, all fifteen
+`web.*` tools at their tiers, target declaration first-wins/scoped/stored
+as origin + path, graduation denied to an observer and refused on an empty
+trace) and the four chat acts — **author** two resets behind two per-action
+cards leaving two succeeded, signed write-tier executions; **graduate** them
+into a draft carrying exactly those two steps with the declaration preceding
+and no model call; **merge** it into `skills-samples` and see it ingest as
+`kind=executable_flow risk_class=write steps=2`; **replay** it under one
+flow-kind card, eight write-tier executions all succeeded and signed, no
+second gate. That last pair is the contrast the release exists to show: two
+cards authored ad hoc, one card replayed as a graduated flow, same work.
+R-7 needed a separate probe rather than the demo, because the demo's prompts
+route the password through a read-tier URL parameter and the credentials
+through read-tier `web.fill_credential`, so no card it parks ever holds a
+secret. The probe drove a `web.type` of a literal through all three legs —
+the stream frame, the durable record, and the portal expander — and each
+shows `{'ref': '***', 'text': '***'}` (`ref` masks too, since
+`should_mask` fails closed against a curated safe-field list), with the
+literal surviving only in the operator's own transcript message. That
+exclusion is asserted, not assumed: a whole-record check first failed on the
+probe's own input, which is a lesson about writing the check rather than
+about the platform. The live pass found three defects in the sample and none
+in the platform, so the shipped images are unaffected and needed no rebuild —
+all three are recorded in `CHANGELOG.md` under 0.36.0 → Fixed.

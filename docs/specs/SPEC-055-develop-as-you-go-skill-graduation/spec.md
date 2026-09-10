@@ -605,3 +605,42 @@ recorded in the changelog (the `approved`-spec rule).
   the new OQ-2 backlog row, `docs/adr/README.md` ADR-0009 stays `accepted`,
   this Status block, and a `## 0.36.0` section in `CHANGELOG.md` plus the dated
   release note. **Status → `delivered`.**
+- 2026-09-09: **post-delivery fix, folded into v0.36.0** (no requirement text
+  changed) — the `dev-k8s` browser live check that closes this spec's delivery
+  gate found three defects in the R-6 sample
+  (`samples/web-checks/skill-graduation/`). All three are in the sample and none
+  in the platform, so the deployed `0.36.0-dev-k8s-6c45e21` images are
+  unaffected and no rebuild followed — neither `demo.sh` nor the walkthrough
+  ships inside an image. **(1)** The act-1 prompt asked the model to click
+  "Sign in", which the target's legacy-SSO auto-login makes impossible: it hides
+  the form and navigates to the user list within 100 ms of both credential
+  fields holding a value, so the click failed on a detached element. The model
+  recovered and completed both resets, but the failed write stayed in the trace
+  with no observed origin, and R-4 refuses to graduate an unverified step — the
+  guard behaving exactly as specified, against a prompt that guaranteed it would
+  fire. Both chat prompts and their two `WALKTHROUGH.md` mirrors now let the
+  page redirect itself. The two sibling web-check demos were already reconciled
+  to gate on "Confirm reset" with the login left read-tier, so this aligns the
+  new sample with a posture the repo held rather than inventing one. **(2)** Act
+  3 made its skill-detail `GET` exactly once, against the service the act had
+  just restarted, and `rollout status` returning does not mean the Service
+  endpoints have finished propagating: the call answered `502` "skills hub
+  unavailable" — the gateway's honest mapping of an httpx transport error, so
+  nothing reached skills-hub — reproducibly, 3 runs out of 3 in a controlled
+  probe, recovering on the second attempt even when the inventory call
+  immediately before it had answered `200` on its first try. It is now
+  bounded-retried on `502`/`503` only, mirroring the inventory retry beside it,
+  so a `404`/`401`/`403` — a real answer about that skill — still fails at once.
+  **(3)** `WALKTHROUGH.md` step 1 sent the reader to a `svc/web-ui` localhost
+  port-forward to sign in, but the identity-broker starts every login at
+  `OIDC_REDIRECT_URI`, which `shared/platform-ops/gitops/dev-k8s/README.md`
+  documents as making the canonical origin the only one where sign-in
+  round-trips; step 1 now names that origin and says why a localhost tab stays
+  signed out. The same stale instruction stands in the two sibling web-check
+  walkthroughs, which predate this spec and are flagged rather than fixed here.
+  R-1..R-7 stand as written. The live check then passed end to end — six
+  deterministic legs and four acts, ending on the contrast the sample exists to
+  show (2 per-action cards authored ad hoc, 1 flow card replayed for the same
+  work) — and R-7's masking was confirmed on all three legs by a separate probe,
+  because this sample deliberately parks no secret-bearing card for the demo to
+  observe. Recorded in the root `CHANGELOG.md` under 0.36.0 → Fixed.
