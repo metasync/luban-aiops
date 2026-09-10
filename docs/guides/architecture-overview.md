@@ -92,9 +92,11 @@ Browser → web-ui → platform-gateway → agent-service → tool-gateway → c
 ### Step-by-Step
 
 1. **Browser** sends a chat request to `web-ui` (via the Envoy Gateway canonical
-   hostname `aiops.luban.metasync.cc` — the `aiops.luban.k8s.orb.local` wildcard
-   hostname serves the same portal as a reachability fallback — or port-forwarded to
-   `localhost:18080`).
+   hostname `aiops.luban.metasync.cc`. The `aiops.luban.k8s.orb.local` wildcard
+   hostname and a `localhost:18080` port-forward serve the same portal assets and
+   proxy the same `/api/` path, but neither can complete sign-in — the broker
+   always builds the login callback from `OIDC_REDIRECT_URI` — so in practice only
+   the canonical origin holds the portal JWT this request carries).
 2. **web-ui** (nginx) serves static assets and proxies `/api/` to **platform-gateway**.
 3. **platform-gateway** verifies the portal JWT, evaluates action policy (`chat`), exchanges the
    user's token for a short-lived delegated token (audience = `tool-gateway`), and forwards the

@@ -186,7 +186,12 @@ pinned to `https://aiops.luban.metasync.cc/callback`, and the portal's PKCE pend
 request lives in per-origin browser storage, so a sign-in started on the orb.local
 hostname cannot round-trip back to it. Because `web-ui` proxies `/api/` to
 `platform-gateway`, no other service needs its own route. Port-forwarding
-`service/web-ui` remains a valid fallback when neither wildcard DNS is reachable.
+`service/web-ui` reaches the same shell and the same proxied `/api/` path, but it
+is **not** a fallback for a browser flow: the callback is still pinned to the
+canonical hostname, so if neither wildcard DNS resolves from your browser the
+authorization code has nowhere to land either, and no origin can complete sign-in
+until DNS or ingress reachability is fixed. Use a port-forward to inspect assets
+and the proxied gateway path, not to sign in.
 
 The `redis` deployment uses `emptyDir` storage in this development baseline. That keeps setup simple for Kubernetes development testing, but it is not a durable production persistence model.
 
@@ -727,15 +732,15 @@ kubectl -n dev-luban-aiops get pods,svc
 kubectl -n dev-luban-aiops logs deployment/redis
 ```
 
-To reach the portal in this development cluster through a single browser entrypoint:
+To reach the portal's shell and its proxied `/api/` path without the canonical hostname:
 
 ```bash
 kubectl -n dev-luban-aiops port-forward service/web-ui 18080:8080
 ```
 
-Then open `http://localhost:18080`. The committed `OIDC` redirect URIs in this overlay assume that same local browser entrypoint, and `nginx` forwards `/api/` calls to `platform-gateway`.
+Then open `http://localhost:18080`; `nginx` forwards `/api/` calls to `platform-gateway`. That makes this origin useful for inspecting built assets and the proxied gateway path, but it is **not** a sign-in entrypoint, and the committed `OIDC` redirect URIs do not make it one. As `Runtime Wiring` above records, `/api/v1/auth/login` takes no redirect override and always builds the authorization URL from `OIDC_REDIRECT_URI`, so a login started from this tab delivers its code to `https://aiops.luban.metasync.cc/callback` and the localhost tab stays signed out. The `http://localhost:18080/callback` entry in `OIDC_EXTRA_REDIRECT_URIS` is registered for reachability — post-logout selects the portal's own origin — and sign-in never selects it. Run the browser checks below on the canonical origin.
 
-Once the pods are running, verify that `agent-service` starts successfully and that the portal can:
+Once the pods are running, verify that `agent-service` starts successfully and that the portal, on `https://aiops.luban.metasync.cc`, can:
 
 - start `SSO` login
 - complete the callback back into the portal shell

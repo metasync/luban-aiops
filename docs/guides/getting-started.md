@@ -133,13 +133,21 @@ hostname, so a sign-in always round-trips back here. The OrbStack wildcard hostn
 `https://aiops.luban.k8s.orb.local` serves the same portal and stays reachable as a
 fallback, but a sign-in started there cannot round-trip back to it.
 
-Otherwise port-forward the web-ui service:
+A `web-ui` port-forward serves the same portal shell and proxies `/api/` to the
+Gateway, which is handy for inspecting built assets or the proxied API path:
 
 ```bash
 kubectl -n dev-luban-aiops port-forward service/web-ui 18080:8080
 ```
 
-and open `http://localhost:18080` in your browser.
+Open `http://localhost:18080` for that, but do not treat it as an alternative
+sign-in entrypoint. `/api/v1/auth/login` takes no redirect override and always
+builds the authorization URL from `OIDC_REDIRECT_URI`, so a login started from a
+port-forwarded tab still delivers its code to `https://aiops.luban.metasync.cc/callback`
+and that tab stays signed out. It follows that if the canonical hostname is not
+reachable from your browser, no origin is: fix DNS/ingress reachability rather
+than falling back to a port-forward, because the callback has to land somewhere
+your browser can load.
 
 > Login uses the self-contained `luban-aiops` Keycloak realm. `make deploy` reconciles the
 > realm, role groups, and one test user per role (`luban-admin`, `luban-approver`,

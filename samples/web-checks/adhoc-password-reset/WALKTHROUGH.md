@@ -32,12 +32,20 @@ Everything is already running in your cluster:
 
 ## Step 1: Open the Operator Portal
 
-```sh
-kubectl port-forward -n dev-luban-aiops svc/web-ui 8080:8080 &
-```
+Open **https://aiops.luban.metasync.cc** — the canonical dev-k8s portal
+entrypoint — in your browser and sign in with the dev user (silent OIDC — click
+"Sign in" if prompted).
 
-Then open **http://localhost:8080** in your browser and sign in with the dev
-user (silent OIDC — click "Sign in" if prompted).
+Do not reach the portal through a `svc/web-ui` port-forward instead. The broker
+starts every login at `OIDC_REDIRECT_URI`, which is the canonical origin above,
+so a localhost tab never receives the authorization code and stays signed out
+however correctly the port-forward serves the shell. See the `Runtime Wiring`
+section of `shared/platform-ops/gitops/dev-k8s/README.md` for the mechanism and
+for what the extra registered origins are actually for.
+
+The port-forwards this walkthrough and its demo do need — `browser-check-target`
+in step 2, plus identity-service and platform-gateway for `demo.sh`, whose header
+lists them — are set up where they are used.
 
 ## Step 2: Verify the Admin Target Pages
 

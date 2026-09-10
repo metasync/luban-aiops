@@ -44,12 +44,14 @@ users share the development-only password `reconcile-luban-realm.sh` sets (see
 
 Do not try to reach the portal through a `svc/web-ui` port-forward instead. The
 identity-broker starts every login at `OIDC_REDIRECT_URI`, which makes the
-origin above *the only one where sign-in round-trips*; `OIDC_EXTRA_REDIRECT_URIS`
-registers further origins with Keycloak for post-logout reachability and sign-in
-never selects one, so a localhost tab stays signed out while its callback lands
-on the public origin. The port-forwards this walkthrough does need —
-identity-service and platform-gateway, for the API reads in step 7 and for the
-demo script — are set up where they are used.
+origin above *the only one where sign-in round-trips*: `OIDC_EXTRA_REDIRECT_URIS`
+registers further callback URIs with Keycloak for reachability, but sign-in never
+selects one, so a localhost tab stays signed out while its callback lands on the
+public origin. Logout is the opposite — the portal passes its own origin, which
+is what the separate `OIDC_EXTRA_POST_LOGOUT_REDIRECT_URIS` list is for. The
+port-forwards this walkthrough does need — identity-service and platform-gateway,
+for the API reads in step 7 and for the demo script — are set up where they are
+used.
 
 `operator` holds both `session:skill_graduate` (graduate) and `chat:confirm`
 (answer a parked card), but it is **not** a tier-2 decider role — so you will
