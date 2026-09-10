@@ -27,8 +27,13 @@ Everything is already running in your cluster:
 ## Step 1: Open the Operator Portal
 
 Open **https://aiops.luban.metasync.cc** — the canonical dev-k8s portal
-entrypoint — in your browser. Sign in with the dev user (the portal uses silent
-OIDC login — just click "Sign in" if prompted).
+entrypoint — in your browser and sign in as **`luban-operator`** (Keycloak, with
+the shared development password the dev-k8s README documents).
+
+You will need a **second identity** at step 5, so open a private window or a
+second browser profile and sign in there as **`luban-approver`** now. Mutating
+execution carries a tier-2 approval requirement and `operator` is not a
+designated decider — step 5 explains what happens if you skip this.
 
 Do not reach the portal through a `svc/web-ui` port-forward instead. The broker
 starts every login at `OIDC_REDIRECT_URI`, which is the canonical origin above,
@@ -102,11 +107,26 @@ card** appears in the chat. It shows:
 - The tool being called: `web.click` on the "Confirm reset" button
 - The risk level: **write**
 
-Click **Approve** on the confirmation card.
+**Someone else approves it.** Mutating execution carries a tier-2 approval
+requirement decided by `approver` or `platform-admin`, and the requester cannot
+decide their own call — so clicking **Approve** in the operator's own chat
+answers `403` and the card stays parked. For an `operator` the reason is
+`not_a_designated_approver`: the decider-role check runs before the
+self-approval one, and `operator` holds no decider role at all. `self_approval`
+is the answer a *designated decider* gets on a session they own — tier 2 blocks
+self-approval even for an approver. Either way that is SPEC-030 R-4 working, not
+a bug in the sample.
+
+Switch to the window signed in as **`luban-approver`** and open **Approvals** in
+the sidebar — the decider-only inbox, badged with the pending count. The parked
+card renders there identically to the one in the operator's transcript (same
+component), under a provenance header naming the session and its owner. Approve
+it; the operator's stream resumes and the agent performs the click.
 
 After approval, the agent:
 - Clicks "Confirm reset" (the admin panel performs the password reset)
-- Takes a final snapshot to verify "Password reset successfully"
+- Takes a final snapshot to verify the target's own status line,
+  `Password for alice@example.com has been reset successfully.`
 - Captures a screenshot as visual evidence
 
 ## Step 6: Verify the Result

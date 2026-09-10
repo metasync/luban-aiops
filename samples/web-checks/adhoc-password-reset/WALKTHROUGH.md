@@ -33,8 +33,13 @@ Everything is already running in your cluster:
 ## Step 1: Open the Operator Portal
 
 Open **https://aiops.luban.metasync.cc** — the canonical dev-k8s portal
-entrypoint — in your browser and sign in with the dev user (silent OIDC — click
-"Sign in" if prompted).
+entrypoint — in your browser and sign in as **`luban-operator`** (Keycloak, with
+the shared development password the dev-k8s README documents).
+
+You will need a **second identity** at step 5, so open a private window or a
+second browser profile and sign in there as **`luban-approver`** now. Mutating
+execution carries a tier-2 approval requirement and `operator` is not a
+designated decider — step 5 explains what happens if you skip this.
 
 Do not reach the portal through a `svc/web-ui` port-forward instead. The broker
 starts every login at `OIDC_REDIRECT_URI`, which is the canonical origin above,
@@ -110,9 +115,25 @@ Under the hood the card carries `approval_kind: "action"` and **no**
 `flow_summary` — the discriminator SPEC-054 R-1 adds so the card states its own
 kind rather than inferring it from ambient session state.
 
-Click **Approve**. Because there is no flow-unlock for unbound writes, **had the
-agent performed more than one write, each would park its own card** — approving
-one never unlocks the next.
+**Someone else approves it.** Mutating execution carries a tier-2 approval
+requirement decided by `approver` or `platform-admin`, and the requester cannot
+decide their own call — so clicking **Approve** in the operator's own chat
+answers `403` and the card stays parked. For an `operator` the reason is
+`not_a_designated_approver`: the decider-role check runs before the
+self-approval one, and `operator` holds no decider role at all. `self_approval`
+is the answer a *designated decider* gets on a session they own — tier 2 blocks
+self-approval even for an approver. Either way that is SPEC-030 R-4 working, not
+a bug in the sample.
+
+Switch to the window signed in as **`luban-approver`** and open **Approvals** in
+the sidebar — the decider-only inbox, badged with the pending count. The parked
+card renders there identically to the one in the operator's transcript (same
+component), under a provenance header naming the session and its owner. Approve
+it; the operator's stream resumes and the agent performs the click.
+
+Because there is no flow-unlock for unbound writes, **had the agent performed
+more than one write, each would park its own card** — approving one never
+unlocks the next.
 
 After approval the agent clicks "Confirm reset", snapshots the success message,
 and captures a screenshot.
