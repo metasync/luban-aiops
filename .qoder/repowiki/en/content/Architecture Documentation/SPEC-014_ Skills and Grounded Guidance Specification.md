@@ -14,22 +14,31 @@
 - [ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
 - [skill_store.py](file://products/skills-hub/src/skills_hub/services/skill_store.py)
 - [scoring.py](file://products/skills-hub/src/skills_hub/services/scoring.py)
+- [skill.py](file://products/skills-hub/src/skills_hub/schemas/skill.py)
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [skills_client.py](file://products/agent-platform/src/agent_service/services/skills_client.py)
+- [skill_graduation.py](file://products/agent-platform/src/agent_service/services/skill_graduation.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [SPEC-044 spec.md](file://docs/specs/SPEC-044-skill-authoring-export/spec.md)
 - [SPEC-044 plan.md](file://docs/specs/SPEC-044-skill-authoring-export/plan.md)
 - [SPEC-044 tasks.md](file://docs/specs/SPEC-044-skill-authoring-export/tasks.md)
+- [SPEC-055 plan.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md)
+- [ADR-0009](file://docs/adr/0009-graduate-sessions-into-replayable-executable-skills.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added new section documenting the skill authoring export capability (SPEC-044) that complements existing grounded guidance features
-- Updated Introduction to reflect the enhanced skills ecosystem with export functionality
-- Added new Architecture Overview diagram showing the complete skills lifecycle including export flow
-- Added detailed component analysis for the validation client and export workflow
-- Updated Dependency Analysis to include the new skills validation client
-- Enhanced Troubleshooting Guide with export-related issues and diagnostics
+- Added comprehensive documentation for executable-flow support through skill graduation (SPEC-055)
+- Updated risk_class decoupling from web_target to support non-browser mutating skills
+- Enhanced graduate-to-replay workflow with blast radius validation and deterministic draft generation
+- Added new sections covering executable-flow skill class, graduation pipeline, and replay mechanics
+- Updated architecture diagrams to show the complete flow from authoring trace to graduated executable skill
+- Enhanced troubleshooting guide with graduation-specific issues and diagnostics
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,16 +47,17 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Skill Authoring Export Capability](#skill-authoring-export-capability)
-7. [Dependency Analysis](#dependency-analysis)
-8. [Performance Considerations](#performance-considerations)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
-11. [Appendices](#appendices)
+7. [Executable Flow Graduation System](#executable-flow-graduation-system)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
+12. [Appendices](#appendices)
 
 ## Introduction
 SPEC-014 delivers Release 2 of the platform's skills and grounded guidance capability, establishing a comprehensive skills ecosystem that now includes both consumption and creation workflows. The specification introduces a new skills-hub service that ingests team-owned Markdown runbooks from federated sources, validates them against a shared contract, indexes them, and exposes deterministic search and retrieval APIs. The agent-platform extends its system prompt to consult skills when answering procedure or remediation questions, and tool-gateway registers read-only skills tools so all skill access flows through policy, audit, redaction, and evidence panels without expanding the trust surface.
 
-The enhanced ecosystem now supports the complete knowledge lifecycle: operators can generate skill drafts from completed troubleshooting sessions, validate them against Skill Format v1 before they reach human review, and export them as downloadable Markdown files ready for contribution to team Git repositories. This creates a closed loop where operational experience becomes reusable team knowledge through a secure, auditable process.
+The enhanced ecosystem now supports the complete knowledge lifecycle: operators can generate skill drafts from completed troubleshooting sessions, validate them against Skill Format v1 before they reach human review, export them as downloadable Markdown files ready for contribution to team Git repositories, and graduate approved mutation sequences into replayable executable-flow skills. This creates a closed loop where operational experience becomes reusable team knowledge through a secure, auditable process.
 
 Key outcomes:
 - A stable skill document contract with JSON schema validation and frontmatter rules.
@@ -55,19 +65,22 @@ Key outcomes:
 - Deterministic keyword-based search with explainable ranking and provenance.
 - Read-only skills tools exposed via tool-gateway, inheriting existing security and observability controls.
 - **New**: Skill authoring export capability that generates validated Markdown drafts from session facts.
+- **New**: Executable-flow graduation system that transforms approved mutation sequences into replayable skills.
+- **New**: Risk class decoupling from web target to support non-browser mutating skills.
 - Operator-facing citations visible in the portal evidence panel and chat transcripts.
 
 **Section sources**
 - [spec.md:13-41](file://docs/specs/SPEC-014-skills-and-grounded-guidance/spec.md#L13-L41)
 - [plan.md:3-22](file://docs/specs/SPEC-014-skills-and-grounded-guidance/plan.md#L3-L22)
 - [SPEC-044 spec.md:18-29](file://docs/specs/SPEC-044-skill-authoring-export/spec.md#L18-L29)
+- [SPEC-055 plan.md:1-37](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L1-L37)
 
 ## Project Structure
-The implementation spans three products plus shared contracts, now extended to support the complete skills lifecycle:
-- skills-hub: FastAPI service for ingestion, storage, retrieval, and validation endpoints.
-- tool-gateway: Registers skills tools and proxies calls to skills-hub.
-- agent-platform: Extends system prompt, auto-allowed tools, and now includes skill-draft generation and validation client.
-- operator-portal: Session actions for draft generation and download.
+The implementation spans three products plus shared contracts, now extended to support the complete skills lifecycle including executable-flow graduation:
+- skills-hub: FastAPI service for ingestion, storage, retrieval, and validation endpoints with executable-flow support.
+- tool-gateway: Registers skills tools and proxies calls to skills-hub, with browser flow binding and replay enforcement.
+- agent-platform: Extends system prompt, auto-allowed tools, skill-draft generation, validation client, and graduation pipeline.
+- operator-portal: Session actions for draft generation, download, and skill graduation.
 - shared contracts: Skill schema and format convention consumed by skills-hub and tests.
 
 ```mermaid
@@ -76,9 +89,13 @@ subgraph "Agent Platform"
 AP["Agent Runtime Settings"]
 SDG["Skill Draft Generator"]
 SC["Skills Validation Client"]
+SG["Skill Graduation Engine"]
+AT["Authoring Trace Store"]
 end
 subgraph "Tool Gateway"
 TG["Skills Connector"]
+BC["Browser Connector"]
+FC["Flow Context & Approvals"]
 end
 subgraph "Skills Hub"
 SH_API["Retrieval API"]
@@ -104,9 +121,13 @@ SH_API --> SH_CFG
 SH_VAL --> SH_STORE
 SDG --> SC
 SC --> SH_VAL
+SG --> AT
+SG --> SH_VAL
 OP --> SDG
+OP --> SG
 SH_ING --> SCHEMA
 SH_ING --> FORMAT
+BC --> FC
 ```
 
 **Diagram sources**
@@ -119,15 +140,15 @@ SH_ING --> FORMAT
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L88)
 - [runtime_settings.py:8-22](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L22)
 - [skills_client.py:69-114](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L114)
-- [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
-- [skill-format.md:1-85](file://shared/shared-contracts/skill-format.md#L1-L85)
+- [skill_graduation.py:1-763](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L1-L763)
+- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 
 **Section sources**
 - [spec.md:43-213](file://docs/specs/SPEC-014-skills-and-grounded-guidance/spec.md#L43-L213)
 - [plan.md:24-235](file://docs/specs/SPEC-014-skills-and-grounded-guidance/plan.md#L24-L235)
 
 ## Core Components
-- Skill contract: Envelope and frontmatter rules define how skills are authored and validated.
+- Skill contract: Envelope and frontmatter rules define how skills are authored and validated, now supporting executable-flow kind and steps.
 - Ingestion pipeline: Walks source directories, parses YAML frontmatter, enforces size caps and allowed keys, derives slugs, and rejects invalid documents with structured reasons.
 - Storage backends: In-memory store for dev/tests; PostgreSQL store for production with per-source atomic replace and GIN full-text index pre-filtering.
 - Search and scoring: Deterministic keyword scorer with fixed weights (title > tags > body), capped body occurrences, and stable tie-breaking by skill id.
@@ -136,11 +157,14 @@ SH_ING --> FORMAT
 - Tool connector: Registers read-only skills tools in tool-gateway, authenticates to skills-hub with gateway-held credentials, maps upstream errors, and emits standard evidence envelopes.
 - **New**: Skill draft generator: Generates Markdown skill drafts from session facts with fenced frontmatter contract and deterministic post-processing.
 - **New**: Skills validation client: Bounded HTTP client that validates drafts against skills-hub before returning to operators.
+- **New**: Executable-flow graduation engine: Transforms approved mutation sequences into replayable skills with blast radius validation.
+- **New**: Browser flow binding: Manages flow context, approvals, and replay authorization for graduated executable flows.
 - Agent integration: System prompt instructs the agent to consult skills for procedure/interpretation/remediation and cite used skills; tools are auto-allowed.
 
 **Section sources**
 - [skill.schema.json:1-76](file://shared/shared-contracts/schemas/skill.schema.json#L1-L76)
 - [skill-format.md:9-68](file://shared/shared-contracts/skill-format.md#L9-L68)
+- [skill.py:15-66](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L66)
 - [ingestion.py:85-149](file://products/skills-hub/src/skills_hub/services/ingestion.py#L85-L149)
 - [skill_store.py:72-154](file://products/skills-hub/src/skills_hub/services/skill_store.py#L72-L154)
 - [skill_store.py:247-432](file://products/skills-hub/src/skills_hub/services/skill_store.py#L247-L432)
@@ -149,9 +173,11 @@ SH_ING --> FORMAT
 - [skills_connector.py:143-401](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L143-L401)
 - [runtime_settings.py:8-22](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L22)
 - [skills_client.py:69-114](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L114)
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
+- [flow_approvals.py:78-122](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L78-L122)
 
 ## Architecture Overview
-End-to-end flow from agent request to cited skill result, now including the complete skills lifecycle from generation to publication:
+End-to-end flow from agent request to cited skill result, now including the complete skills lifecycle from generation to publication and graduation:
 
 ```mermaid
 sequenceDiagram
@@ -163,6 +189,8 @@ participant Skills as "Skills Hub"
 participant Store as "Skill Store"
 participant Score as "Scorer"
 participant Validator as "Validation API"
+participant Graduation as "Graduation Engine"
+participant Trace as "Authoring Trace"
 Note over Client : Skill Consumption Flow
 Client->>Gateway : Chat request
 Gateway->>Agent : Forward to runtime kernel
@@ -185,6 +213,18 @@ Skills-->>Validator : {valid : bool, reason? : string}
 Validator-->>Agent : Validation result
 Agent-->>Gateway : Draft + validation outcome
 Gateway-->>Client : Downloadable .md file
+Note over Client : Executable Flow Graduation
+Client->>Gateway : POST /sessions/{id}/skill-graduate
+Gateway->>Agent : Graduate executable flow
+Agent->>Trace : Load authoring trace
+Agent->>Graduation : Revalidate blast radius
+Graduation->>Graduation : Build executable flow draft
+Graduation->>Validator : Validate draft
+Validator->>Skills : POST /api/v1/skills/validate
+Skills-->>Validator : {valid : bool, reason? : string}
+Validator-->>Graduation : Validation result
+Graduation-->>Gateway : Graduated skill markdown
+Gateway-->>Client : Downloadable .md file
 ```
 
 **Diagram sources**
@@ -194,6 +234,8 @@ Gateway-->>Client : Downloadable .md file
 - [scoring.py:85-97](file://products/skills-hub/src/skills_hub/services/scoring.py#L85-L97)
 - [runtime_settings.py:8-22](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L22)
 - [skills_client.py:69-114](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L114)
+- [routes.py:1250-1390](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1250-L1390)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
 
 ## Detailed Component Analysis
 
@@ -202,6 +244,7 @@ Gateway-->>Client : Downloadable .md file
 - Frontmatter must be a YAML mapping with required keys and strict size caps; unknown keys are rejected.
 - Slug derivation is path-based and sanitized, ensuring moves within a repo change skill_id intentionally.
 - Ingestion walks directories, skips README/NOTICE files, handles Kubernetes projected volumes, and reports per-document rejections.
+- **Updated**: Risk class no longer requires web target, allowing non-browser mutating skills to declare `risk_class: write` independently.
 
 ```mermaid
 flowchart TD
@@ -211,7 +254,11 @@ Parse --> ValidFM{"Valid mapping?"}
 ValidFM --> |No| RejectFM["Reject: invalid frontmatter"]
 ValidFM --> |Yes| CheckKeys["Check allowed keys"]
 CheckKeys --> SizeCaps["Enforce size caps"]
-SizeCaps --> Slug["Derive slug from path"]
+SizeCaps --> WebTarget{"Has web_target?"}
+WebTarget --> |Yes| ValidateURL["Validate URL format"]
+WebTarget --> |No| RiskClass["Validate risk_class"]
+ValidateURL --> RiskClass
+RiskClass --> Slug["Derive slug from path"]
 Slug --> Duplicate{"Duplicate slug in source?"}
 Duplicate --> |Yes| RejectDup["Reject: duplicate slug"]
 Duplicate --> |No| BuildRecord["Build Skill record"]
@@ -231,6 +278,7 @@ Next --> End(["Snapshot complete"])
 - [skill-format.md:9-68](file://shared/shared-contracts/skill-format.md#L9-L68)
 - [ingestion.py:85-149](file://products/skills-hub/src/skills_hub/services/ingestion.py#L85-L149)
 - [ingestion.py:151-229](file://products/skills-hub/src/skills_hub/services/ingestion.py#L151-L229)
+- [ingestion.py:229-243](file://products/skills-hub/src/skills_hub/services/ingestion.py#L229-L243)
 
 ### Federated Ingestion and Sync
 - Sources are configured via SKILLS_SOURCES entries supporting local directories and Git repositories.
@@ -275,6 +323,7 @@ SourceSpec --> SkillsSettings : "parsed into"
 ### Storage Backends
 - InMemorySkillStore: Per-source snapshot map with atomic reference swap; suitable for dev/tests.
 - PostgresSkillStore: Durable table with GIN index on title/body tsvector; per-source delete+insert transaction; tag filtering uses safe constructs; search pre-filters via full-text then re-ranks with shared scorer for byte-identical ordering.
+- **Updated**: Now supports executable-flow skills with `kind` discriminator and `steps` array persistence.
 
 ```mermaid
 classDiagram
@@ -514,12 +563,138 @@ Portal-->>Op : Download .md file
 - [SPEC-044 plan.md:35-59](file://docs/specs/SPEC-044-skill-authoring-export/plan.md#L35-L59)
 - [skills_client.py:69-114](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-114)
 
+## Executable Flow Graduation System
+
+The graduation system transforms approved mutation sequences captured during operator sessions into replayable executable-flow skills. This represents a significant enhancement to the skills ecosystem, enabling teams to convert operational experience into automated, repeatable procedures while maintaining strict security and audit controls.
+
+### Authoring Trace Capture
+The system captures a durable, replay-oriented authoring trace as a by-product of each already-approved, already-signed mutation. The trace stores the ordered step sequence with secret-safe parameterization — credentials as placeholders or credential-set references rather than literal values — and references existing execution records without duplicating tamper evidence.
+
+```mermaid
+sequenceDiagram
+participant Kernel as "Runtime Kernel"
+participant Trace as "Authoring Trace Store"
+participant Execution as "Execution Records"
+participant Approval as "Approval System"
+Note over Kernel : Mutation Request
+Kernel->>Approval : Check approval status
+Approval-->>Kernel : Approved
+Kernel->>Execution : Persist signed execution
+Kernel->>Trace : Append step to authoring trace
+Trace-->>Kernel : Step recorded
+Note over Kernel : Trace capture is best-effort
+Note over Kernel : Failure degrades to "no graduation candidate"
+```
+
+**Diagram sources**
+- [runtime_kernel.py:1354-1413](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1354-L1413)
+
+### Blast Radius Re-validation
+Before producing any draft, the graduation engine re-validates the trace's blast radius by applying the same guards that the tool-gateway enforces at replay:
+
+- **Bounded step count**: Against the replay budget (default 20 steps)
+- **Origin allowlisting**: Every observed origin compared against declared target's origin
+- **Consistent risk class**: Write-class declaration with no read-tier steps
+- **Credential resolution**: All credentials resolved to credential-set references
+- **Secret detection**: No arguments shaped like secret literals
+
+```mermaid
+flowchart TD
+Steps["Load Authoring Trace Steps"] --> Order["Order by position"]
+Order --> Budget{"Step count ≤ max_steps?"}
+Budget --> |No| RefuseBudget["Refuse: exceeds replay budget"]
+Budget --> |Yes| Origins["Check origins"]
+Origins --> OriginOK{"All origins allowlisted?"}
+OriginOK --> |No| RefuseOrigin["Refuse: origin deviation"]
+OriginOK --> |Yes| RiskClass["Validate risk class"]
+RiskClass --> RiskOK{"Write-class with no read-tier?"}
+RiskOK --> |No| RefuseRisk["Refuse: read-tier in write flow"]
+RiskOK --> |Yes| Credentials["Check credential resolution"]
+Credentials --> CredOK{"All credentials resolved?"}
+CredOK --> |No| RefuseCred["Refuse: unresolved credential holes"]
+CredOK --> |Yes| Secrets["Scan for secret patterns"]
+Secrets --> SecretOK{"No secret patterns?"}
+SecretOK --> |No| RefuseSecret["Refuse: potential secret leak"]
+SecretOK --> |Yes| Render["Render executable flow draft"]
+```
+
+**Diagram sources**
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
+
+### Executable Flow Draft Generation
+The graduation engine renders a deterministic executable-flow skill draft from the validated trace. Unlike skill drafts which use LLM synthesis, graduation is purely deterministic — the same trace produces the same document on the same UTC date. The draft includes:
+
+- **Frontmatter**: Title, description, tags, web_target (for browser flows), risk_class: write, kind: executable_flow, and steps array
+- **Runbook**: Human-readable replay instructions with step details and safety notes
+- **Provenance**: Session ID, covered incident ID, generation date, platform version, and generation mode
+
+```mermaid
+sequenceDiagram
+participant Graduation as "Graduation Engine"
+participant Trace as "Authoring Trace"
+participant Validator as "Validation API"
+participant Store as "Skill Store"
+Graduation->>Trace : Load steps for session
+Trace-->>Graduation : Ordered steps
+Graduation->>Graduation : Revalidate blast radius
+alt Validation passed
+Graduation->>Graduation : Build executable flow draft
+Graduation->>Validator : Validate draft
+Validator-->>Graduation : {valid : true}
+Graduation->>Store : Close trace as graduated
+Graduation-->>Caller : Markdown draft + metadata
+else Validation failed
+Graduation-->>Caller : 409 with refusal reasons
+end
+```
+
+**Diagram sources**
+- [routes.py:1250-1390](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1250-L1390)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
+
+### Replay Authorization and Flow Binding
+Graduated executable flows replay under one gate through the existing SPEC-051 machinery. For browser flows, the system binds a flow authority scoped to skill_id and origin, allowing subsequent writes to be auto-signed while maintaining individual signing, auditing, and receipting for each step.
+
+```mermaid
+sequenceDiagram
+participant Operator as "Operator"
+participant Gateway as "Platform Gateway"
+participant Browser as "Browser Connector"
+participant Kernel as "Runtime Kernel"
+Note over Operator : Replay Graduated Skill
+Operator->>Gateway : Execute web.navigate with skill_id
+Gateway->>Browser : Bind flow with skill metadata
+Browser-->>Gateway : Flow bound (skill_id, origin, risk_class)
+Gateway->>Kernel : Record flow context
+Note over Kernel : Subsequent writes in same flow
+Kernel->>Kernel : Auto-sign under flow authority
+Kernel->>Kernel : Individual signing + audit + receipt
+Kernel-->>Operator : Step executed successfully
+```
+
+**Diagram sources**
+- [flow_approvals.py:78-122](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L78-L122)
+- [browser_connector.py:490-515](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L490-L515)
+- [runtime_kernel.py:1970-1997](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1970-L1997)
+
+### Risk Class Decoupling from Web Target
+A key architectural improvement allows `risk_class` to stand independently from `web_target`. This enables non-browser mutating skills (like `k8s.*` operations) to declare their mutating nature without requiring a web entry point. The consuming side remains safe because the gateway's flow binding fails closed on missing targets.
+
+**Section sources**
+- [skill_graduation.py:1-763](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L1-L763)
+- [routes.py:1250-1390](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1250-L1390)
+- [v2.py:378-412](file://products/agent-platform/src/agent_service/schemas/v2.py#L378-L412)
+- [runtime_kernel.py:1300-1320](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1300-L1320)
+- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
+- [browser_connector.py:490-515](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L490-L515)
+
 ## Dependency Analysis
 - skills-hub depends on shared contracts for schema and format; uses FastAPI router, metrics, observability, and request context modules.
 - Retrieval routes depend on query authentication and skill store; store implementations depend on scorer for consistent ranking.
 - tool-gateway depends on base tool framework and registry; skills connector depends on httpx and error mapping utilities.
 - agent-platform depends on runtime settings for prompt and allow-list, and now includes skills validation client for export capability.
 - **New**: Export capability adds dependencies on skills validation client, policy engine for new action, and audit service for new event type.
+- **New**: Graduation system adds dependencies on authoring trace store, blast radius validation, and flow approval management.
 
 ```mermaid
 graph LR
@@ -535,6 +710,10 @@ SKILLS_CLIENT["services/skills_client.py"] --> ROUTE
 EXPORT["skill_draft.py"] --> SKILLS_CLIENT
 POLICY["policy-default.yaml"] --> EXPORT
 AUDIT["audit events"] --> EXPORT
+GRADUATION["skill_graduation.py"] --> TRACE["authoring_trace.py"]
+GRADUATION --> VALIDATOR["validation API"]
+FLOW_APPROVALS["flow_approvals.py"] --> KERNEL["runtime_kernel.py"]
+BROWSER_CONN["browser_connector.py"] --> FLOW_APPROVALS
 ```
 
 **Diagram sources**
@@ -547,6 +726,8 @@ AUDIT["audit events"] --> EXPORT
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-88)
 - [runtime_settings.py:8-22](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-22)
 - [skills_client.py:69-114](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-114)
+- [skill_graduation.py:1-763](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L1-L763)
+- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
 
 **Section sources**
 - [plan.md:24-235](file://docs/specs/SPEC-014-skills-and-grounded-guidance/plan.md#L24-235)
@@ -564,6 +745,11 @@ AUDIT["audit events"] --> EXPORT
   - Digest-only input minimizes prompt size and processing overhead
   - Skeleton fallback ensures availability even when LLM generation fails
   - Client-side download eliminates server-side draft persistence overhead
+- **New**: Graduation system performance considerations:
+  - Blast radius validation runs in memory with bounded step counts
+  - Trace loading is optimized with position-based ordering
+  - Draft rendering is deterministic and cache-friendly
+  - Flow approval checks are lightweight in-memory lookups
 
 [No sources needed since this section provides general guidance]
 
@@ -583,10 +769,18 @@ Common issues and diagnostics:
 - Draft quality issues: Use skeleton mode for quiet sessions; review prompt constraints and digest content.
 - Policy denial: Ensure caller has `session:skill_draft` action granted to their role.
 
+**Graduation-specific issues:**
+- Trace not available: Verify session had approved mutations captured; check authoring trace store connectivity.
+- Blast radius validation failed: Review refusal reasons for step budget, origin deviations, credential resolution, or secret detection.
+- Graduation endpoint unavailable: Check skills validation configuration for graduation workflow.
+- Flow binding failures: Verify skill has proper web_target and risk_class declarations for browser flows.
+- Replay authorization denied: Ensure flow approval exists and hasn't expired; check origin allowlist configuration.
+
 Operational checks:
 - Use GET /api/v1/skills/status to inspect last sync outcomes per source, accepted counts, and rejections.
 - Validate sources locally with the standalone validator CLI to catch issues before deployment.
-- Monitor audit events for `skill_draft_generated` to track export activity and success rates.
+- Monitor audit events for `skill_draft_generated` and `skill_graduated` to track export activity and success rates.
+- Check flow approval TTL and context validity for replay issues.
 
 **Section sources**
 - [ingestion.py:85-149](file://products/skills-hub/src/skills_hub/services/ingestion.py#L85-149)
@@ -595,11 +789,14 @@ Operational checks:
 - [plan.md:86-93](file://docs/specs/SPEC-014-skills-and-grounded-guidance/plan.md#L86-L93)
 - [skills_client.py:31-55](file://products/agent-platform/src/agent_service/services/skills_client.py#L31-L55)
 - [SPEC-044 spec.md:119-127](file://docs/specs/SPEC-044-skill-authoring-export/spec.md#L119-L127)
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
 
 ## Conclusion
 SPEC-014 integrates team-owned operational knowledge into the platform in a secure, auditable, and operator-visible way. By enforcing a strict skill contract, providing deterministic retrieval, and routing access through existing tool-execution guardrails, it enhances agent answers with cited guidance while preserving the trust model. The enhanced ecosystem now supports the complete knowledge lifecycle from creation to consumption, with the new skill authoring export capability closing the loop between operational experience and published guidance.
 
-The design supports future enhancements such as semantic retrieval, per-team scoping, and advanced skill quality assessment without disrupting current behavior. The export capability establishes a foundation for continuous improvement of team knowledge through automated generation from real operational experience.
+The addition of the executable-flow graduation system represents a significant advancement, enabling teams to transform approved mutation sequences into replayable skills while maintaining strict security controls. The decoupling of risk_class from web_target further expands the scope of executable skills beyond browser interactions to include infrastructure automation.
+
+The design supports future enhancements such as semantic retrieval, per-team scoping, advanced skill quality assessment, and expanded non-browser flow binding without disrupting current behavior. The export and graduation capabilities establish foundations for continuous improvement of team knowledge through automated generation from real operational experience.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -607,8 +804,10 @@ The design supports future enhancements such as semantic retrieval, per-team sco
 - Deployment and configuration details are covered in the plan and tasks, including overlay wiring, secrets sync, and sample skill sources.
 - Living-state documentation updates include product READMEs, configuration references, tool configuration guides, and architecture overview diagrams.
 - **New**: Export capability deployment includes three new agent-platform environment variables (`AGENT_SKILLS_SERVICE_URL`, `AGENT_SKILLS_CLIENT_ID`, `AGENT_SKILLS_CLIENT_SECRET`) wired through existing secrets-sync conventions.
+- **New**: Graduation system deployment includes authoring trace store configuration, blast radius validation settings, and flow approval TTL configuration.
 
 **Section sources**
 - [plan.md:168-235](file://docs/specs/SPEC-014-skills-and-grounded-guidance/plan.md#L168-L235)
 - [tasks.md:49-67](file://docs/specs/SPEC-014-skills-and-grounded-guidance/tasks.md#L49-L67)
 - [SPEC-044 spec.md:278-287](file://docs/specs/SPEC-044-skill-authoring-export/spec.md#L278-L287)
+- [SPEC-055 plan.md:255-272](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L255-L272)

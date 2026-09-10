@@ -6,14 +6,15 @@
 - [plan.md](file://docs/specs/SPEC-044-skill-authoring-export/plan.md)
 - [tasks.md](file://docs/specs/SPEC-044-skill-authoring-export/tasks.md)
 - [skill_draft.py](file://products/agent-platform/src/agent_service/services/skill_draft.py)
+- [skill_graduation.py](file://products/agent-platform/src/agent_service/services/skill_graduation.py)
 - [skills_client.py](file://products/agent-platform/src/agent_service/services/skills_client.py)
 - [routes.py (agent-platform)](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [routes.py (gateway)](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
 - [routes.py (skills-hub)](file://products/skills-hub/src/skills_hub/api/routes/skills.py)
-- [sessions.py (gateway)](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [audit.py (audit-service)](file://products/audit-service/src/audit_service/schemas/audit.py)
-- [audit_emitter.py (skills-hub)](file://products/skills-hub/src/skills_hub/services/audit_emitter.py)
 - [sessions.ts (portal)](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
+- [ChatView.tsx (portal)](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 </cite>
 
 ## Update Summary
@@ -24,6 +25,7 @@
 - Updated architecture diagrams to reflect complete end-to-end flow
 - Expanded troubleshooting guide with validation failure scenarios
 - Added provenance marker and content guardrails documentation
+- **Updated for SPEC-055 integration**: Added graduation workflow where approved sessions become executable-flow skills with deterministic replay capability
 
 ## Table of Contents
 1. Introduction
@@ -39,13 +41,15 @@
 ## Introduction
 SPEC-044 enables operators to export a session's troubleshooting into a reusable skill Markdown draft. The platform generates the draft deterministically from durable session facts, validates it against Skill Format v1 through skills-hub's own ingestion code path, and returns it as a client-side download for contribution to the team's Git skills repository. Nothing is persisted on the platform; the only durable additions are a new policy action and an audit event. **Status: Delivered in v0.26.0 with full feature completion.**
 
+**Updated** SPEC-055 extends this capability by adding a graduation workflow that converts approved, signed mutations into executable-flow skills with deterministic replay capability. While SPEC-044 produces knowledge-only drafts, SPEC-055 graduates sessions into executable flows that can be replayed under one HITL gate with every write still signed, audited, receipted, and gateway-guarded.
+
 ## Project Structure
 The feature spans four products plus shared contracts:
-- Agent-platform: skill-draft generator, validation client, and route
+- Agent-platform: skill-draft generator, skill graduation service, validation client, and routes
 - Skills-hub: read-only validation endpoint using ingestion validation
-- Platform-gateway: pass-through route gated by a new policy action
-- Operator-portal: session action and client-side Markdown download
-- Shared contracts: new policy rule and audit event enum extension
+- Platform-gateway: pass-through routes gated by new policy actions
+- Operator-portal: session actions and client-side Markdown download
+- Shared contracts: new policy rules and audit event extensions
 
 ```mermaid
 graph TB
@@ -57,35 +61,34 @@ SkillsHub --> AuditService
 ```
 
 **Diagram sources**
-- [sessions.py (gateway):155-185](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L155-L185)
+- [routes.py (gateway):218-262](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L218-L262)
 - [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
 - [skills_client.py:69-115](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L115)
 - [routes.py (skills-hub):149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
-- [audit_emitter.py (skills-hub):29-41](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L41)
 
 **Section sources**
 - [spec.md:18-52](file://docs/specs/SPEC-044-skill-authoring-export/spec.md#L18-L52)
 - [plan.md:3-15](file://docs/specs/SPEC-044-skill-authoring-export/plan.md#L3-L15)
 
 ## Core Components
-- Skill-draft generator: Assembles a digest bundle from session facts and an optional validated triage report, builds a fenced-contract prompt, runs one bounded LLM call, parses output, applies deterministic post-processing (redaction and caps), and falls back to a facts-only skeleton when needed.
-- Validation client: Calls skills-hub's read-only validate endpoint with Basic query credentials, forwards request correlation headers, maps errors to structured outcomes, and enforces consistency over availability.
-- Validation endpoint: Reuses ingestion validation functions verbatim; accepts one candidate document and returns validity with a reason.
-- Gateway pass-through: Enforces a new policy action, forwards identity and correlation headers, maps upstream errors, and passes responses verbatim without state.
-- Policy and audit: Adds a deny-by-default action and a new audit event type to capture successful generation attempts.
+- **Skill-draft generator**: Assembles a digest bundle from session facts and an optional validated triage report, builds a fenced-contract prompt, runs one bounded LLM call, parses output, applies deterministic post-processing (redaction and caps), and falls back to a facts-only skeleton when needed.
+- **Skill graduation service**: Deterministically renders approved authoring traces into executable-flow skill drafts with blast-radius re-validation, no LLM synthesis, and deterministic replay capability.
+- **Validation client**: Calls skills-hub's read-only validate endpoint with Basic query credentials, forwards request correlation headers, maps errors to structured outcomes, and enforces consistency over availability.
+- **Validation endpoint**: Reuses ingestion validation functions verbatim; accepts one candidate document and returns validity with a reason.
+- **Gateway pass-through**: Enforces new policy actions (`session:skill_draft` and `session:skill_graduate`), forwards identity and correlation headers, maps upstream errors, and passes responses verbatim without state.
+- **Policy and audit**: Adds deny-by-default actions and new audit event types to capture successful generation and graduation attempts.
 
 **Section sources**
 - [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
-- [skill_draft.py:194-212](file://products/agent-platform/src/agent_service/services/skill_draft.py#L194-L212)
-- [skill_draft.py:257-278](file://products/agent-platform/src/agent_service/services/skill_draft.py#L257-L278)
-- [skill_draft.py:358-459](file://products/agent-platform/src/agent_service/services/skill_draft.py#L358-L459)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
 - [skills_client.py:52-115](file://products/agent-platform/src/agent_service/services/skills_client.py#L52-L115)
 - [routes.py (skills-hub):149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
-- [sessions.py (gateway):155-185](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L155-L185)
-- [policy-default.yaml:268-284](file://shared/shared-contracts/policies/policy-default.yaml#L268-L284)
+- [routes.py (gateway):218-262](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L218-L262)
+- [policy-default.yaml:280-326](file://shared/shared-contracts/policies/policy-default.yaml#L280-L326)
 
 ## Architecture Overview
-End-to-end flow from portal to skills-hub validation and back:
+End-to-end flow from portal to skills-hub validation and back, including both knowledge drafts and executable-flow graduations:
 
 ```mermaid
 sequenceDiagram
@@ -104,15 +107,24 @@ S-->>A : {valid, reason?}
 A->>U : emit_audit_event("skill_draft_generated")
 A-->>G : {markdown, mode, validation, suggested_filename}
 G-->>P : verbatim response
+P->>G : POST /api/v1/sessions/{id}/skill-graduate
+G->>G : enforce_policy("session : skill_graduate")
+G->>A : POST /api/v2/sessions/{id}/skill-graduate
+A->>A : revalidate_blast_radius()
+A->>A : build_executable_flow_draft()
+A->>S : POST /api/v1/skills/validate
+S-->>A : {valid, reason?}
+A->>U : emit_audit_event("skill_graduated")
+A-->>G : {markdown, mode, step_count, web_target}
+G-->>P : verbatim response
 ```
 
 **Diagram sources**
-- [sessions.py (gateway):155-185](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L155-L185)
+- [routes.py (gateway):218-262](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L218-L262)
 - [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
-- [skill_draft.py:465-506](file://products/agent-platform/src/agent_service/services/skill_draft.py#L465-L506)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
 - [skills_client.py:69-115](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L115)
 - [routes.py (skills-hub):149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
-- [audit_emitter.py (skills-hub):29-41](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L41)
 
 ## Detailed Component Analysis
 
@@ -157,6 +169,35 @@ Assemble --> End(["Return draft, mode, validation, slug"])
 - [skill_draft.py:358-459](file://products/agent-platform/src/agent_service/services/skill_draft.py#L358-L459)
 - [skill_draft.py:465-506](file://products/agent-platform/src/agent_service/services/skill_draft.py#L465-L506)
 
+### Skill graduation service (agent-platform) - **NEW**
+- **Deterministic rendering**: Converts approved authoring traces into executable-flow skill Markdown with no LLM synthesis - the trace itself is the flow.
+- **Blast-radius re-validation**: Applies five guards before producing drafts: bounded step count, target/origin allowlist verification, consistent `risk_class: write`, credential-set references, and secret literal detection.
+- **Executable-flow skill class**: Produces skills with `kind: executable_flow`, `risk_class: write`, and machine-readable replay step lists.
+- **Human-merge workflow**: Generates previewable drafts for manual review and merge into Git repositories - never auto-publishes executable artifacts.
+- **Replay binding**: Graduated browser flows bind through existing SPEC-051 machinery for one-HITL-gate replay with per-write signing.
+
+```mermaid
+flowchart TD
+Trace["Authoring Trace"] --> Revalidate["Revalidate Blast Radius"]
+Revalidate --> Guards{"All Guards Pass?"}
+Guards --> |No| Refuse["Deterministic Refusal"]
+Guards --> |Yes| Render["Render Executable Flow Draft"]
+Render --> Validate{"Validate via Skills Hub"}
+Validate --> |Valid| Graduate["Emit skill_graduated Event"]
+Validate --> |Invalid| Error["Format Validation Error"]
+Graduate --> Draft["Return Executable Flow Draft"]
+Refuse --> Error
+Error --> Error
+```
+
+**Diagram sources**
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
+
+**Section sources**
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
+
 ### Validation client (agent-platform)
 - Authentication: Uses registered Basic query credential; not configured yields a dependency-not-configured error.
 - Transport: HTTPX async client with bounded timeout; forwards `x-request-id`.
@@ -187,19 +228,19 @@ SkillsClientError <|-- SkillsClientRejected
 **Section sources**
 - [routes.py (skills-hub):149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
 
-### Gateway pass-through and policy gate
-- Route: New session skill-draft endpoint under sessions routes.
-- Policy: Enforces `session:skill_draft`; denies by default if not granted.
-- Forwarding: Passes delegated identity and `x-request-id`; maps 403/404/502/503; no held state.
+### Gateway pass-through and policy gates
+- **Routes**: New session skill-draft and skill-graduate endpoints under sessions routes.
+- **Policy**: Enforces `session:skill_draft` and `session:skill_graduate`; denies by default if not granted.
+- **Forwarding**: Passes delegated identity and `x-request-id`; maps 403/404/502/503; no held state.
 
 **Section sources**
-- [sessions.py (gateway):155-185](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L155-L185)
-- [policy-default.yaml:268-284](file://shared/shared-contracts/policies/policy-default.yaml#L268-L284)
+- [routes.py (gateway):218-262](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L218-L262)
+- [policy-default.yaml:280-326](file://shared/shared-contracts/policies/policy-default.yaml#L280-L326)
 
 ### Provenance and content guardrails
-- Provenance marker: Deterministic HTML-comment block at top of draft with session id, incident id (when present), date, platform version, and mode.
-- Redaction: Applies gateway-equivalent pattern-based scrubbing to model output before validation.
-- Caps: Enforces Skill Format v1 limits regardless of model obedience.
+- **Provenance marker**: Deterministic HTML-comment block at top of draft with session id, incident id (when present), date, platform version, and mode.
+- **Redaction**: Applies gateway-equivalent pattern-based scrubbing to model output before validation.
+- **Caps**: Enforces Skill Format v1 limits regardless of model obedience.
 
 **Section sources**
 - [skill_draft.py:257-278](file://products/agent-platform/src/agent_service/services/skill_draft.py#L257-L278)
@@ -209,20 +250,22 @@ SkillsClientError <|-- SkillsClientRejected
 ### Agent-platform route integration
 - Server-side ownership check ensures foreign sessions return structural 404
 - Integration with skills validation client for format compliance
-- Audit event emission for successful generation attempts
+- Audit event emission for successful generation and graduation attempts
 - Response schema includes markdown, mode, validation status, and suggested filename
 
 **Section sources**
-- [routes.py (agent-platform):787-879](file://products/agent-platform/src/agent_service/api/v2/routes.py#L787-L879)
+- [routes.py (agent-platform):956-1015](file://products/agent-platform/src/agent_service/api/v2/routes.py#L956-L1015)
+- [routes.py (agent-platform):1317-1350](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1317-L1350)
 
 ### Portal integration and client-side export
-- Session actions include "Draft as skill" button with role-based visibility
-- Client-side download using Blob pattern with suggested filename
-- Toast notifications distinguish between generated and skeleton modes
-- Error handling for structured API responses (403/502/503)
+- **Session actions**: Include both "Draft as skill" and "Graduate as skill" buttons with role-based visibility
+- **Client-side download**: Using Blob pattern with suggested filename for knowledge drafts
+- **Preview modal**: Distinguishes between generated, skeleton, and graduated modes with appropriate badges
+- **Error handling**: Structured API responses (403/409/502/503) with user-friendly messages
 
 **Section sources**
-- [sessions.ts (portal):170-189](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L170-L189)
+- [sessions.ts (portal):227-280](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L227-L280)
+- [ChatView.tsx (portal):776-870](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L776-L870)
 
 ## Dependency Analysis
 ```mermaid
@@ -235,35 +278,40 @@ Skills --> Audit
 ```
 
 **Diagram sources**
-- [sessions.py (gateway):155-185](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L155-L185)
+- [routes.py (gateway):218-262](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L218-L262)
 - [skill_draft.py:124-163](file://products/agent-platform/src/agent_service/services/skill_draft.py#L124-L163)
+- [skill_graduation.py:587-663](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L663)
 - [skills_client.py:69-115](file://products/agent-platform/src/agent_service/services/skills_client.py#L69-L115)
 - [routes.py (skills-hub):149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
-- [audit_emitter.py (skills-hub):29-41](file://products/skills-hub/src/skills_hub/services/audit_emitter.py#L29-L41)
 
 **Section sources**
 - [plan.md:17-125](file://docs/specs/SPEC-044-skill-authoring-export/plan.md#L17-L125)
 
 ## Performance Considerations
-- Generation latency: One bounded LLM call per attempt; a second attempt allowed on validation rejection.
-- Validation round-trip: Additional HTTP call to skills-hub; timeouts are bounded and mapped to structured errors.
-- Degradation: Skeleton path avoids blocking on LLM or validation failures; ensures consistent responses.
-- Memory: Body truncation and tag/title/description caps prevent oversized payloads.
+- **Generation latency**: One bounded LLM call per attempt; a second attempt allowed on validation rejection.
+- **Graduation performance**: Deterministic rendering with no LLM calls; blast-radius re-validation is CPU-bound but lightweight.
+- **Validation round-trip**: Additional HTTP call to skills-hub; timeouts are bounded and mapped to structured errors.
+- **Degradation**: Skeleton path avoids blocking on LLM or validation failures; ensures consistent responses.
+- **Memory**: Body truncation and tag/title/description caps prevent oversized payloads.
 
 ## Troubleshooting Guide
-- Validation unavailable: If skills-hub is not configured or unreachable, the generation route fails closed (503/502); no unvalidated draft is returned.
-- Validation rejection: The generator retries once with the rejection reason; persistent failures fall back to skeleton.
-- Ownership checks: Foreign session ids return structural 404; server-side ownership is enforced even after gateway authorization.
-- Content issues: Redaction and caps are applied deterministically; ensure prompts prohibit secrets/hostnames/customer data.
-- Portal integration: Check role permissions for "Draft as skill" button visibility; verify client-side download functionality.
-- Audit trail: Verify `skill_draft_generated` events appear in audit service for successful generations.
+- **Validation unavailable**: If skills-hub is not configured or unreachable, the generation route fails closed (503/502); no unvalidated draft is returned.
+- **Validation rejection**: The generator retries once with the rejection reason; persistent failures fall back to skeleton.
+- **Graduation refusal**: Blast-radius re-validation failures return 409 with detailed reasons naming each failed guard and responsible steps.
+- **Ownership checks**: Foreign session ids return structural 404; server-side ownership is enforced even after gateway authorization.
+- **Content issues**: Redaction and caps are applied deterministically; ensure prompts prohibit secrets/hostnames/customer data.
+- **Portal integration**: Check role permissions for both "Draft as skill" and "Graduate as skill" button visibility; verify client-side download functionality.
+- **Audit trail**: Verify both `skill_draft_generated` and `skill_graduated` events appear in audit service for successful operations.
 
 **Section sources**
 - [skills_client.py:52-115](file://products/agent-platform/src/agent_service/services/skills_client.py#L52-L115)
 - [skill_draft.py:215-241](file://products/agent-platform/src/agent_service/services/skill_draft.py#L215-L241)
-- [skill_draft.py:358-459](file://products/agent-platform/src/agent_service/services/skill_draft.py#L358-L459)
-- [skill_draft.py:465-506](file://products/agent-platform/src/agent_service/services/skill_draft.py#L465-L506)
-- [audit.py (audit-service):14-34](file://products/audit-service/src/audit_service/schemas/audit.py#L14-L34)
+- [skill_graduation.py:217-497](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L217-L497)
+- [audit.py (audit-service):14-39](file://products/audit-service/src/audit_service/schemas/audit.py#L14-L39)
 
 ## Conclusion
-SPEC-044 closes the loop between session troubleshooting and reusable team knowledge by generating, validating, and exporting skill drafts from durable facts. **Delivered in v0.26.0**, the feature reuses established patterns across digest-anchored generation, fenced contracts, client-side export, and internal Basic-auth clients. The design keeps fabrication risk low, preserves operator review as the publication gate, and adds minimal durable surface: one policy action and one audit event. Full implementation includes comprehensive testing coverage, portal integration, and robust error handling for production deployment.
+SPEC-044 closes the loop between session troubleshooting and reusable team knowledge by generating, validating, and exporting skill drafts from durable facts. **Delivered in v0.26.0**, the feature reuses established patterns across digest-anchored generation, fenced contracts, client-side export, and internal Basic-auth clients. 
+
+**Updated** SPEC-055 extends this foundation by adding a graduation workflow that transforms approved, signed mutations into executable-flow skills with deterministic replay capability. While SPEC-044 focuses on knowledge-only drafts, SPEC-055 enables the development-as-you-go paradigm where operators can troubleshoot via chat with properly approved mutations, then graduate those sessions into replayable executable flows that run under one HITL gate with every write still signed, audited, receipted, and gateway-guarded.
+
+The design keeps fabrication risk low, preserves operator review as the publication gate, and adds minimal durable surface: two policy actions (`session:skill_draft` and `session:skill_graduate`) and two audit events (`skill_draft_generated` and `skill_graduated`). Full implementation includes comprehensive testing coverage, portal integration, robust error handling, and deterministic replay capability for production deployment.

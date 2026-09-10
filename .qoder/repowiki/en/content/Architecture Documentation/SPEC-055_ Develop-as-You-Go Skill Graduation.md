@@ -6,6 +6,7 @@
 - [plan.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md)
 - [tasks.md](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md)
 - [skill_graduation.py](file://products/agent-platform/src/agent_service/services/skill_graduation.py)
+- [authoring_trace.py](file://products/agent-platform/src/agent_service/services/authoring_trace.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [sessions.py](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py)
@@ -13,6 +14,7 @@
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [SkillDraftPreview.tsx](file://products/operator-portal/web-ui/app/src/chat/SkillDraftPreview.tsx)
 - [test_skill_graduation.py](file://products/agent-platform/tests/test_skill_graduation.py)
+- [test_authoring_trace.py](file://products/agent-platform/tests/test_authoring_trace.py)
 - [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
 - [test_documents_repository.py](file://products/platform-gateway/tests/test_documents_repository.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -23,16 +25,20 @@
 - [README.md](file://samples/web-checks/skill-graduation/README.md)
 - [WALKTHROUGH.md](file://samples/web-checks/skill-graduation/WALKTHROUGH.md)
 - [demo.sh](file://samples/web-checks/skill-graduation/demo/demo.sh)
+- [skill.schema.json](file://shared/shared-contracts/schemas/skill.schema.json)
+- [metadata.py](file://products/agent-platform/src/agent_service/metadata.py)
+- [metadata.py](file://products/skills-hub/src/skills_hub/metadata.py)
+- [metadata.py](file://products/platform-gateway/src/platform_gateway/metadata.py)
+- [metadata.py](file://products/tool-gateway/src/tool_gateway/metadata.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect the SPEC-055 **v0.36.0 delivery**: all seven requirements (R-1…R-7) shipped across the eight-stage plan, with `make verify` green and the status flipped to `delivered` in `spec.md`, `docs/specs/README.md` and the delivery roadmap
-- Added comprehensive Stage 8 (R-6) sample implementation documentation covering the complete skill graduation lifecycle from ad-hoc authoring through replay verification
-- Enhanced with detailed coverage of the interactive demo script, walkthrough guide, and end-to-end verification procedures
-- Updated implementation status to reflect completed Stage 8 with full sample integration following ADR-0008 exercised-sample rule
-- Added comprehensive testing coverage for the complete graduation workflow including deterministic legs and optional chat legs
-- Enhanced troubleshooting guidance with sample-specific issues and configuration requirements
+- Updated version information across all products from 0.35.0 to 0.36.0 reflecting the complete SPEC-055 implementation
+- Enhanced documentation to reflect the delivery of all seven requirements (R-1 through R-7) including durable authoring-trace store, executable-flow skill class, deterministic graduation, replay under one gate, and enhanced secret-masking
+- Updated implementation status to show completed delivery with comprehensive testing coverage across all eight stages
+- Added detailed verification results showing 2424 Python tests passing across eight products with version lockstep enforcement
+- Enhanced troubleshooting guidance with new configuration options and service-specific issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,92 +53,86 @@
 10. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the implementation of SPEC-055: Develop-as-You-Go Skill Graduation, which has been **delivered in v0.36.0** as the seventeenth R5 hardening slice, completing the A→B→C program (A: the SPEC-051 R-6 headline-leak patch at v0.34.1; B: SPEC-054 action-level approval at v0.35.0; C: this spec and ADR-0009). It explains how a troubleshooting session that performed individually approved, signed mutations can be turned into a replayable executable-flow skill. The spec introduces a durable authoring-trace store, an executable-flow skill class with risk_class decoupled from web_target, deterministic graduation with blast-radius re-validation, and one-gate replay under gateway guards with credential-set references instead of literal secrets.
+This document specifies and analyzes SPEC-055: Develop-as-You-Go Skill Graduation. It explains how a troubleshooting session that performed individually approved, signed mutations can be turned into a replayable executable-flow skill. The spec introduces a durable authoring-trace store, an executable-flow skill class with risk_class decoupled from web_target, deterministic graduation with blast-radius re-validation, and one-gate replay under gateway guards with credential-set references instead of literal secrets.
 
 The goal is to enable operators to "develop as you go" by running actions in chat, approving them, and then graduating the resulting trace into a reusable, human-reviewed skill draft that replays safely under a single HITL gate.
 
-**Completed** Stage 1 implementation is complete with shared-contract lockstep for skill graduation functionality. The completed work includes advanced skill.schema.json from v1 to v2 with additive executable-flow support, new skill_graduated audit event type with detailed payload structure, introduction of session:skill_graduate policy action with appropriate role bindings, and comprehensive lockstep validation ensuring bidirectional parity between schemas and their consumers. The implementation follows strict lockstep refinement where shared schemas are never edited alone - bidirectional parity tests pin each schema to its consumers, so the schema and its bound declarations ship as one atomic unit or `make verify` fails.
+**Delivered** Version 0.36.0 implementation is complete with all seven requirements (R-1 through R-7) successfully shipped across eight products. The completed work includes advanced skill.schema.json v2 with additive executable-flow support, new skill_graduated audit event type with detailed payload structure, introduction of session:skill_graduate policy action with appropriate role bindings, and comprehensive lockstep validation ensuring bidirectional parity between schemas and their consumers. The implementation follows strict lockstep refinement where shared schemas are never edited alone - bidirectional parity tests pin each schema to its consumers, so the schema and its bound declarations ship as one atomic unit or `make verify` fails.
 
-**Critical Security Enhancement (Stage 2 R-7) - COMPLETED**: Implemented comprehensive fail-closed masking logic for the Human-in-the-Loop approval system, addressing fundamental gaps where raw secret-bearing parameters could persist in plaintext across multiple system surfaces. The enhancement introduces KNOWN_SAFE_FIELDS allow-list, raw parameter redaction, and signed-execution invariant preservation through fail-closed projection masking.
+**Critical Security Enhancement (R-7) - DELIVERED**: Implemented comprehensive fail-closed masking logic for the Human-in-the-Loop approval system, addressing fundamental gaps where raw secret-bearing parameters could persist in plaintext across multiple system surfaces. The enhancement introduces KNOWN_SAFE_FIELDS allow-list, raw parameter redaction, and signed-execution invariant preservation through fail-closed projection masking.
 
-**Updated** Stage 3 R-1 Authoring Trace Store implementation is now complete with dual-backend support (InMemory + Postgres), comprehensive runtime configuration for per-session step caps and idle garbage collection, and extensive test coverage validating all core invariants including lifecycle management, field parity, and concurrent access safety.
+**Delivered** R-1 Authoring Trace Store implementation is now complete with dual-backend support (InMemory + Postgres), comprehensive runtime configuration for per-session step caps and idle garbage collection, and extensive test coverage validating all core invariants including lifecycle management, field parity, and concurrent access safety.
 
-**COMPLETED** Stage 4 R-2 Approval Seam Capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management. The implementation includes the `_capture_authoring_step()` method in runtime kernel, secret parameterization functions using the vocabulary-based approach, and best-effort error handling patterns that ensure trace failures never block execution or receipts.
+**Delivered** R-2 Approval Seam Capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management. The implementation includes the `_capture_authoring_step()` method in runtime kernel, secret parameterization functions using the vocabulary-based approach, and best-effort error handling patterns that ensure trace failures never block execution or receipts.
 
-**Updated** Stage 5 R-3 Executable-Flow Skill Class implementation is now complete with comprehensive kind discriminator field, steps list support, risk class decoupling from web_target requirements, enhanced credential validation, and resource limits. The implementation includes database schema extensions with kind and steps JSONB columns, ingestion validation for executable-flow skills, and comprehensive test coverage for all validation scenarios.
+**Delivered** R-3 Executable-Flow Skill Class implementation is now complete with comprehensive kind discriminator field, steps list support, risk class decoupling from web_target requirements, enhanced credential validation, and resource limits. The implementation includes database schema extensions with kind and steps JSONB columns, ingestion validation for executable-flow skills, and comprehensive test coverage for all validation scenarios.
 
-**NEW** Stage 6a Implementation - Dual-target tracking infrastructure with declared vs observed target tracking, session creation with skill_target parameter, automatic origin observation at receipt seam, and comprehensive gateway integration for policy enforcement. This stage adds the foundational substrate for blast-radius validation by capturing both the declared target (authorization scope) and observed origins (evidence of where mutations actually landed).
+**Delivered** Stage 6a Dual-target tracking infrastructure is now complete with declared vs observed target tracking, session creation with skill_target parameter, automatic origin observation at receipt seam, and comprehensive gateway integration for policy enforcement.
 
-**NEW** Stage 6b (R-4) Implementation - **COMPLETE** Deterministic skill graduation endpoint with blast-radius re-validation, executable-flow draft generation, and comprehensive error handling. The implementation includes the POST /api/v2/sessions/{session_id}/skill-graduate endpoint, sophisticated blast-radius validation logic, deterministic draft rendering, and full frontend integration for graduated skill preview and download capabilities.
+**Delivered** Stage 6b (R-4) Deterministic skill graduation endpoint is now fully implemented with blast-radius re-validation, executable-flow draft generation, and comprehensive error handling. The implementation includes the POST /api/v2/sessions/{session_id}/skill-graduate endpoint, sophisticated blast-radius validation logic, deterministic draft rendering, and full frontend integration for graduated skill preview and download capabilities.
 
-**NEW** Stage 7 (R-5) Verification - **COMPLETE** Graduated flow replay functionality proven to work through existing SPEC-051 browser-flow path without new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows.
+**Delivered** Stage 7 (R-5) Verification is now complete with graduated flow replay functionality proven to work through existing SPEC-051 browser-flow path without new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows.
 
-**NEW** Stage 8 (R-6) Sample Implementation - **COMPLETE** Interactive graduation demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow: author ad hoc against a declared target, graduate the trace into an executable-flow draft, merge the draft into the skills repository, and replay under one gate. Includes comprehensive automated testing with deterministic legs and optional chat legs, following ADR-0008 exercised-sample rule.
+**Delivered** Stage 8 (R-6) Sample Implementation provides interactive graduation demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow: author ad hoc against a declared target, graduate the trace into an executable-flow draft, merge the draft into the skills repository, and replay under one gate. Includes comprehensive automated testing with deterministic legs and optional chat legs, following ADR-0008 exercised-sample rule.
 
 **Section sources**
-- [spec.md:29-61](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L29-L61)
+- [spec.md:5-37](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L5-L37)
 - [plan.md:5-37](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L5-L37)
 - [tasks.md:10-29](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L10-L29)
 
 ## Project Structure
-SPEC-055 spans multiple services and shared contracts with a structured eight-stage implementation approach. Stage 1 (Contracts) is now complete with lockstep refinement ensuring all shared contracts are properly bound to their consumers. Stage 2 (R-7 Critical Security Enhancement) has been fully implemented with comprehensive fail-closed masking and raw parameter redaction. Stage 3 (R-1 Authoring Trace Store) is now complete with both InMemory and Postgres backends. Stage 4 (R-2 Approval Seam Capture) is now fully implemented with comprehensive capture mechanisms. Stage 5 (R-3 Executable-Flow Skill Class) is now complete with full ingestion validation and storage support. Stage 6a (Dual-target tracking) is now complete with declared vs observed target tracking infrastructure. Stage 6b (R-4 Graduation Endpoint) is now fully implemented with deterministic draft generation and blast-radius validation. Stage 7 (R-5 Replay) is now complete with comprehensive verification through existing SPEC-051 machinery. Stage 8 (R-6 Samples) is now complete with interactive demo and comprehensive testing.
+SPEC-055 spans multiple services and shared contracts with a structured eight-stage implementation approach. All stages are now complete with comprehensive testing and version lockstep enforcement at 0.36.0.
 
 ```mermaid
 graph TB
-subgraph "Stage 1: Contracts ✓ COMPLETED"
-SC_skill["skill.schema.json v1→v2"]
-SC_audit["audit-event.schema.json"]
-SC_policy["policy-default.yaml"]
-SH_skill["skills-hub schemas/skill.py"]
-AUDIT_audit["audit-service schemas/audit.py"]
-PORTAL_constants["portal views/audit/constants.ts"]
+subgraph "Version 0.36.0 - All Stages Complete"
+SC_skill["skill.schema.json v2 ✓"]
+SC_audit["audit-event.schema.json ✓"]
+SC_policy["policy-default.yaml ✓"]
+SH_skill["skills-hub schemas/skill.py ✓"]
+AUDIT_audit["audit-service schemas/audit.py ✓"]
+PORTAL_constants["portal views/audit/constants.ts ✓"]
 end
-subgraph "Stage 2: Agent Platform - R-7 ✓ IMPLEMENTED"
-AP_mask["Secret-Masking Hardening<br/>Fail-Closed Logic"]
-AP_portal["Portal Updates"]
-AP_redact["Raw Parameter Redaction"]
-AP_allowlist["KNOWN_SAFE_FIELDS Allow-List"]
+subgraph "Agent Platform - All Requirements ✓"
+AP_mask["R-7 Secret-Masking Hardening ✓"]
+AP_portal["Portal Updates ✓"]
+AP_redact["Raw Parameter Redaction ✓"]
+AP_allowlist["KNOWN_SAFE_FIELDS Allow-List ✓"]
+AP_trace["R-1 AuthoringTraceStore ✓"]
+AP_config["Runtime Configuration ✓"]
+AP_test["Comprehensive Test Coverage ✓"]
+AP_capture["R-2 Approval Seam Capture ✓"]
+AP_kernel["Runtime Kernel Hooks ✓"]
+AP_param["Secret Parameterization ✓"]
+AP_lifecycle["Session Lifecycle ✓"]
+AP_grad["R-4 Graduation Endpoint ✓"]
+AP_draft["Deterministic Draft Generation ✓"]
+AP_blast["Blast-Radius Re-validation ✓"]
+AP_audit["Audit Events ✓"]
+AP_frontend["Frontend Integration ✓"]
 end
-subgraph "Stage 3: Agent Platform - R-1 ✓ COMPLETED"
-AP_trace["AuthoringTraceStore<br/>InMemory + Postgres"]
-AP_config["Runtime Configuration<br/>Step Caps & Idle GC"]
-AP_test["Comprehensive Test Coverage"]
+subgraph "Skills Hub - R-3 ✓"
+SH_ingest["Ingestion & Validation ✓"]
+SH_store["Skill Store Backends ✓"]
+SH_schema["Schema Extensions ✓"]
 end
-subgraph "Stage 4: Agent Platform - R-2 ✓ COMPLETED"
-AP_capture["_capture_authoring_step()<br/>Approval Seam Capture"]
-AP_kernel["Runtime Kernel Hooks<br/>Both Signing Sites"]
-AP_param["Secret Parameterization<br/>Vocabulary-Based"]
-AP_lifecycle["Session Lifecycle<br/>Enhanced Management"]
+subgraph "Platform Gateway - Stage 6a ✓"
+DT_declared["Declared Target Tracking ✓"]
+DT_observed["Observed Origin Tracking ✓"]
+DT_gateway["Gateway Integration ✓"]
+DT_session["Session Creation ✓"]
 end
-subgraph "Stage 5: Skills Hub - R-3 ✓ COMPLETED"
-SH_ingest["Ingestion & Validation<br/>Executable-Flow Support"]
-SH_store["Skill Store Backends<br/>Kind & Steps Columns"]
-SH_schema["Schema Extensions<br/>Kind Discriminator"]
+subgraph "Multi-Service - R-5 ✓"
+TG_guard["Gateway Deviation Guard ✓"]
+ER_sign["Execution Runtime Verify Only ✓"]
+OP_portal["Portal Surfacing ✓"]
+BR_tools["Browser Connector Tools ✓"]
 end
-subgraph "Stage 6a: Dual-target Tracking ✓ COMPLETED"
-DT_declared["Declared Target<br/>Authorization Scope"]
-DT_observed["Observed Origin<br/>Evidence Tracking"]
-DT_gateway["Gateway Integration<br/>Policy Enforcement"]
-DT_session["Session Creation<br/>skill_target Parameter"]
-end
-subgraph "Stage 6b: Graduation Endpoint ✓ COMPLETED"
-AP_grad["Graduation Endpoint<br/>POST /api/v2/sessions/{id}/skill-graduate"]
-AP_draft["Deterministic Draft Generation"]
-AP_blast["Blast-Radius Re-validation"]
-AP_audit["Audit Events<br/>skill_graduated"]
-AP_frontend["Frontend Integration<br/>Graduated Skill Preview"]
-end
-subgraph "Stage 7: Multi-Service - R-5 ✓ COMPLETED"
-TG_guard["Gateway Deviation Guard<br/>Verified Indistinguishability"]
-ER_sign["Execution Runtime<br/>Verify Only"]
-OP_portal["Portal Surfacing<br/>Flow Headline + Change Request"]
-BR_tools["Browser Connector Tools<br/>Expanded Surface"]
-end
-subgraph "Stage 8: Samples - R-6 ✓ COMPLETED"
-SAMPLES["Interactive Demo Script"]
-WALKTHROUGH["Live Walkthrough Guide"]
-DEMO["End-to-End Verification"]
-TESTS["Automated Testing<br/>Deterministic + Chat Legs"]
+subgraph "Samples - R-6 ✓"
+SAMPLES["Interactive Demo Script ✓"]
+WALKTHROUGH["Live Walkthrough Guide ✓"]
+DEMO["End-to-End Verification ✓"]
+TESTS["Automated Testing ✓"]
 end
 SC_skill --> SH_skill
 SC_audit --> AUDIT_audit
@@ -172,16 +172,16 @@ SAMPLES --> TESTS
 - [tasks.md:10-102](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L10-L102)
 
 ## Core Components
-- **AuthoringTraceStore (R-1)**: **COMPLETED** - A dual-backend store (InMemory + Postgres) keyed by session_id, capturing ordered, secret-safe parameterized steps from approved mutations. Lifecycle: draft → graduated | discarded. Retention independent of execution_records sweep. Per-session step cap prevents unbounded growth. Includes comprehensive runtime configuration via AGENT_AUTHORING_TRACE_MAX_STEPS and AGENT_AUTHORING_TRACE_IDLE_DAYS environment variables with validation and defaults.
-- **Capture at Approval Seam (R-2)**: **COMPLETED** - Trace append occurs only for mutating calls that are approved and signed (per-action or flow authority). Best-effort and fail-safe; never blocks execution or receipts. Secrets parameterized at capture time using redaction vocabulary and credential-set references. Implementation includes `_capture_authoring_step()` method called at both signing sites (`_prepare_executions` for per-action approvals and `_sign_flow_execution` for flow-unlocked writes).
-- **Executable-Flow Skill Class (R-3)**: **COMPLETED** - Additive skill schema extension with kind discriminator and machine-readable replay step list. risk_class accepted without web_target so non-browser mutating skills can declare write intent. Ingestion validates step-list shape, declared risk_class, and credential-set references. Database schema extended with kind TEXT and steps JSONB columns supporting both knowledge and executable-flow skills.
-- **Dual-target Tracking Infrastructure (Stage 6a)**: **COMPLETED** - Implements declared vs observed target tracking with two distinct forms: declared target (authorization scope declared before mutations) and observed origin (evidence of where mutations actually landed). Includes automatic origin observation at receipt seam, session creation with skill_target parameter, and comprehensive gateway integration for policy enforcement.
-- **Graduation Endpoint (R-4)**: **COMPLETED** - Deterministic assembly of executable-flow skill draft from the authoring trace with comprehensive blast-radius re-validation. New POST /api/v2/sessions/{session_id}/skill-graduate endpoint with proper authorization, validation, and audit logging. Includes sophisticated refusal mechanisms with detailed error reporting, deterministic draft generation, and full frontend integration for graduated skill preview and download capabilities.
-- **One-Gate Replay (R-5)**: **COMPLETED** - Graduated flows replay under a single confirmation card through existing SPEC-051 machinery without new executor or approval mechanisms. Each write remains individually signed, persisted, audited, and receipted. Gateway deviation guard enforces origin/risk_class/step budget. Credentials resolved at replay from named credential sets. Non-browser replay binding generalized to skill identity (deferred if too large).
-- **Approval-Seam Secret-Masking Hardening (R-7)**: **COMPLETED** - Fail-closed projection masking that closes the generic field-masking failure path for off-vocabulary secret values. Ensures no literal secrets appear on streamed or rendered change-request surfaces while preserving the signed-execution invariant. Addresses critical gaps where raw secret-bearing parameters persist in pending_calls field and generic field-masking fails open for off-vocabulary secret values.
-- **Interactive Sample Implementation (R-6)**: **COMPLETED** - Comprehensive end-to-end demonstration of the complete skill graduation lifecycle through interactive demo script and walkthrough guide. Provides six deterministic legs plus four optional chat legs covering authoring, graduation, merging, and replay phases. Includes comprehensive automated testing with assertions for each phase of the graduation workflow.
+- **AuthoringTraceStore (R-1)**: **DELIVERED** - A dual-backend store (InMemory + Postgres) keyed by session_id, capturing ordered, secret-safe parameterized steps from approved mutations. Lifecycle: draft → graduated | discarded. Retention independent of execution_records sweep. Per-session step cap prevents unbounded growth. Includes comprehensive runtime configuration via AGENT_AUTHORING_TRACE_MAX_STEPS and AGENT_AUTHORING_TRACE_IDLE_DAYS environment variables with validation and defaults.
+- **Capture at Approval Seam (R-2)**: **DELIVERED** - Trace append occurs only for mutating calls that are approved and signed (per-action or flow authority). Best-effort and fail-safe; never blocks execution or receipts. Secrets parameterized at capture time using redaction vocabulary and credential-set references. Implementation includes `_capture_authoring_step()` method called at both signing sites (`_prepare_executions` for per-action approvals and `_sign_flow_execution` for flow-unlocked writes).
+- **Executable-Flow Skill Class (R-3)**: **DELIVERED** - Additive skill schema extension with kind discriminator and machine-readable replay step list. risk_class accepted without web_target so non-browser mutating skills can declare write intent. Ingestion validates step-list shape, declared risk_class, and credential-set references. Database schema extended with kind TEXT and steps JSONB columns supporting both knowledge and executable-flow skills.
+- **Dual-target Tracking Infrastructure (Stage 6a)**: **DELIVERED** - Implements declared vs observed target tracking with two distinct forms: declared target (authorization scope declared before mutations) and observed origin (evidence of where mutations actually landed). Includes automatic origin observation at receipt seam, session creation with skill_target parameter, and comprehensive gateway integration for policy enforcement.
+- **Graduation Endpoint (R-4)**: **DELIVERED** - Deterministic assembly of executable-flow skill draft from the authoring trace with comprehensive blast-radius re-validation. New POST /api/v2/sessions/{session_id}/skill-graduate endpoint with proper authorization, validation, and audit logging. Includes sophisticated refusal mechanisms with detailed error reporting, deterministic draft generation, and full frontend integration for graduated skill preview and download capabilities.
+- **One-Gate Replay (R-5)**: **DELIVERED** - Graduated flows replay under a single confirmation card through existing SPEC-051 machinery without new executor or approval mechanisms. Each write remains individually signed, persisted, audited, and receipted. Gateway deviation guard enforces origin/risk_class/step budget. Credentials resolved at replay from named credential sets. Non-browser replay binding generalized to skill identity (deferred if too large).
+- **Approval-Seam Secret-Masking Hardening (R-7)**: **DELIVERED** - Fail-closed projection masking that closes the generic field-masking failure path for off-vocabulary secret values. Ensures no literal secrets appear on streamed or rendered change-request surfaces while preserving the signed-execution invariant. Addresses critical gaps where raw secret-bearing parameters persist in pending_calls field and generic field-masking fails open for off-vocabulary secret values.
+- **Interactive Sample Implementation (R-6)**: **DELIVERED** - Comprehensive end-to-end demonstration of the complete skill graduation lifecycle through interactive demo script and walkthrough guide. Provides six deterministic legs plus four optional chat legs covering authoring, graduation, merging, and replay phases. Includes comprehensive automated testing with assertions for each phase of the graduation workflow.
 
-**Completed** Stage 1 completion includes advanced skill.schema.json v2 with executable-flow support, comprehensive lockstep validation across all consumer services, and enhanced authorization controls through new policy actions and audit events. Stage 2 R-7 critical security enhancement has been fully implemented with fail-closed masking logic, KNOWN_SAFE_FIELDS allow-list, and comprehensive raw parameter redaction. Stage 3 R-1 Authoring Trace Store is now complete with robust backend implementations and comprehensive testing. Stage 4 R-2 Approval Seam Capture is now fully operational with comprehensive capture mechanisms at both per-action and flow-unlock signing sites. Stage 5 R-3 Executable-Flow Skill Class is now complete with full ingestion validation, storage support, and comprehensive test coverage. Stage 6a Dual-target tracking infrastructure is now complete with declared vs observed target tracking, automatic origin observation, and comprehensive gateway integration. Stage 6b (R-4) Graduation Endpoint is now fully implemented with deterministic draft generation, blast-radius validation, and comprehensive frontend integration. Stage 7 (R-5) Replay is now complete with comprehensive verification proving graduated flows work identically to hand-authored flows through existing SPEC-051 path. Stage 8 (R-6) Sample Implementation is now complete with interactive demo script, comprehensive walkthrough guide, and end-to-end verification following ADR-0008 exercised-sample rule.
+**Version 0.36.0 Delivery**: All seven requirements successfully delivered with comprehensive testing coverage across eight products. The implementation includes 2424 Python tests passing, portal npm test 342 across 29 files, and clean build verification. Version lockstep enforced across VERSION + 8 pyproject.toml + 8 metadata.py + 2 __init__.py + 8 uv.lock re-locks.
 
 **Section sources**
 - [spec.md:101-305](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L101-L305)
@@ -202,23 +202,23 @@ participant Grad as "Graduation Endpoint"
 participant Hub as "Skills Hub"
 participant Audit as "Audit Service"
 participant Demo as "Sample Demo"
-Note over Operator,Demo : Stage 1-2 : Contracts & Security Hardening
+Note over Operator,Demo : Version 0.36.0 - All Stages Complete
 Operator->>Agent : Run chat with mutating tools
 Agent->>Mask : Apply fail-closed masking
 Mask-->>Agent : Redacted projection (no literal secrets)
-Note over Agent,Agent : Stage 4 : Approval Seam Capture
+Note over Agent,Agent : R-2 : Approval Seam Capture
 Agent->>Agent : _capture_authoring_step() at signing sites
 Agent->>Trace : Append step (parameterized args)
-Note over Agent,Trace : Stage 3 : Trace Storage (COMPLETED)
+Note over Agent,Trace : R-1 : Trace Storage (Complete)
 Note over Operator,Portal : Stage 6a : Dual-target Tracking
 Operator->>Agent : Create session with skill_target
 Agent->>Trace : Record declared target
 Agent->>Trace : Observe origin at receipt seam
-Note over Operator,Portal : Stage 5 : Executable-Flow Skill Class (COMPLETED)
+Note over Operator,Portal : R-3 : Executable-Flow Skill Class (Complete)
 Operator->>Hub : Ingest executable-flow skill
 Hub->>Hub : Validate kind + steps + risk_class
 Hub-->>Operator : Skill stored with kind/steps columns
-Note over Portal,Operator : Stage 6b : Graduation & Replay
+Note over Portal,Operator : R-4 : Graduation & Replay
 Operator->>Portal : Graduate session
 Portal->>GW : POST /api/v1/sessions/{id}/skill-graduate
 GW->>Agent : POST /api/v2/sessions/{id}/skill-graduate
@@ -234,13 +234,13 @@ else Invalid
 Agent-->>GW : 409 Refusal with reasons
 GW-->>Portal : Error modal with details
 end
-Note over Portal,Operator : Stage 7 : Replay Verification (COMPLETED)
+Note over Portal,Operator : R-5 : Replay Verification (Complete)
 Operator->>GW : Replay graduated flow
 GW->>GW : Execute through SPEC-051 path (existing machinery)
 GW->>GW : Enforce deviation guards (origin, risk_class, budget)
 GW-->>Portal : One confirmation card, bounded writes
 Portal-->>Operator : Results with audit trail
-Note over Demo,Operator : Stage 8 : Sample Implementation (COMPLETED)
+Note over Demo,Operator : R-6 : Sample Implementation (Complete)
 Demo->>Operator : Interactive demo with 6 deterministic legs
 Demo->>Operator : Optional chat legs for full workflow
 Demo->>Demo : Automated verification of all phases
@@ -253,7 +253,7 @@ Demo-->>Operator : End-to-end graduation verification
 
 ## Detailed Component Analysis
 
-### AuthoringTraceStore (R-1) - COMPLETED
+### AuthoringTraceStore (R-1) - DELIVERED
 **Updated** The AuthoringTraceStore implementation is now complete with comprehensive dual-backend support and extensive test coverage.
 
 - **Protocol and backends**: Mirrors existing patterns (execution_records/confirmation_records) with InMemory and Postgres implementations and a build_*_store factory. Both backends expose identical schema fields to avoid silent drops in production. The factory supports AGENT_STATE_STORE_BACKEND selection with automatic fallback from Postgres to InMemory when unavailable.
@@ -279,15 +279,15 @@ class AuthoringTraceStore {
 class InMemoryAuthoringTraceStore {
 +backend_name : "memory"
 +_max_steps : int
-+_idle_days : int
-+_by_session : dict
-+_targets : dict
+-_idle_days : int
+-_by_session : dict
+-_targets : dict
 }
 class PostgresAuthoringTraceStore {
 +backend_name : "postgres"
 +_db_url : str
 +_max_steps : int
-+_idle_days : int
+-_idle_days : int
 +initialize() void
 }
 class TraceStep {
@@ -318,8 +318,8 @@ AuthoringTraceStore --> TraceStep
 - [test_authoring_trace.py:73-257](file://products/agent-platform/tests/test_authoring_trace.py#L73-L257)
 - [test_authoring_trace.py:325-568](file://products/agent-platform/tests/test_authoring_trace.py#L325-L568)
 
-### Capture at Approval Seam (R-2) - COMPLETED
-**COMPLETED** The approval seam capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management.
+### Capture at Approval Seam (R-2) - DELIVERED
+**DELIVERED** The approval seam capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management.
 
 - **Dual signing site integration**: The `_capture_authoring_step()` method is called at both per-action approval site (`_prepare_executions`) and flow-unlock signing site (`_sign_flow_execution`), ensuring mixed sessions yield one coherent ordered trace.
 - **Best-effort error handling**: All capture operations use try-catch blocks with warning logs, ensuring trace failures degrade gracefully to "no graduation candidate" without blocking execution or receipts.
@@ -349,7 +349,7 @@ EndRead --> End
 - [runtime_kernel.py:1352-1411](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1352-L1411)
 - [secret_params.py:265-288](file://products/agent-platform/src/agent_service/services/secret_params.py#L265-L288)
 
-### Executable-Flow Skill Class (R-3) - COMPLETED
+### Executable-Flow Skill Class (R-3) - DELIVERED
 **Updated** The Executable-Flow Skill Class implementation is now complete with comprehensive kind discriminator support, steps list validation, and enhanced credential handling.
 
 - **Schema Extension**: Additive extension to skill.schema.json introducing `kind` discriminator ("knowledge" or "executable_flow") and `steps` array for machine-readable replay sequences. Existing knowledge/guidance skills validate unchanged.
@@ -386,8 +386,8 @@ Store --> End
 - [ingestion.py:375-460](file://products/skills-hub/src/skills_hub/services/ingestion.py#L375-L460)
 - [skill_store.py:158-200](file://products/skills-hub/src/skills_hub/services/skill_store.py#L158-L200)
 
-### Dual-target Tracking Infrastructure (Stage 6a) - COMPLETED
-**NEW** The dual-target tracking infrastructure provides the foundation for blast-radius validation by capturing both declared targets (authorization scopes) and observed origins (evidence of where mutations actually landed).
+### Dual-target Tracking Infrastructure (Stage 6a) - DELIVERED
+**DELIVERED** The dual-target tracking infrastructure provides the foundation for blast-radius validation by capturing both declared targets (authorization scopes) and observed origins (evidence of where mutations actually landed).
 
 - **Declared Target Tracking**: Captures the web target the operator names when opening a develop-as-you-go session, declared *before* any mutations occur. This serves as the authorization scope that the session acts under. Stored in `authoring_trace_target` table with first-wins semantics to prevent retroactive scope changes.
 - **Observed Origin Tracking**: Records the origin the gateway reported each captured mutation actually landed on, captured automatically at the receipt seam after successful browser writes. Stored in `flow_origin` column on each trace step, with first-observation-wins semantics to prevent later frames from rewriting what was seen.
@@ -426,8 +426,8 @@ SkipOrigin --> StepComplete
 - [gateway_service.py:331-337](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L331-L337)
 - [test_documents_repository.py:562-584](file://products/platform-gateway/tests/test_documents_repository.py#L562-L584)
 
-### Graduation Endpoint (R-4) - COMPLETED
-**NEW** The Stage 6b (R-4) graduation endpoint implementation provides deterministic skill graduation with comprehensive blast-radius validation and frontend integration.
+### Graduation Endpoint (R-4) - DELIVERED
+**DELIVERED** The Stage 6b (R-4) graduation endpoint implementation provides deterministic skill graduation with comprehensive blast-radius validation and frontend integration.
 
 - **Endpoint Implementation**: POST /api/v2/sessions/{session_id}/skill-graduate endpoint with proper authorization, ownership verification, and comprehensive error handling. The endpoint enforces `session:skill_graduate` policy action and validates session ownership server-side.
 - **Blast-Radius Re-validation**: Sophisticated validation logic that re-applies replay-time guards at graduation: step budget checks, origin allowlist verification, write-class consistency validation, credential resolution verification, and secret literal detection. Each guard failure produces detailed, actionable error messages.
@@ -462,8 +462,8 @@ PlatformError --> ReturnError
 - [skill_graduation.py:587-763](file://products/agent-platform/src/agent_service/services/skill_graduation.py#L587-L763)
 - [test_skill_graduation.py:1459-1481](file://products/agent-platform/tests/test_skill_graduation.py#L1459-L1481)
 
-### One-Gate Replay (R-5) - COMPLETED
-**UPDATED** Stage 7 (R-5) verification is now complete, proving that graduated flow replay functionality works through existing SPEC-051 browser-flow path without requiring new executor or approval mechanisms.
+### One-Gate Replay (R-5) - DELIVERED
+**DELIVERED** Stage 7 (R-5) verification is now complete, proving that graduated flow replay functionality works through existing SPEC-051 browser-flow path without requiring new executor or approval mechanisms.
 
 - **Indistinguishability Proven**: Comprehensive tests demonstrate that graduated executable flows bind and replay identically to hand-authored flows through the existing SPEC-051 path (`_observe_flow_binding` → `_record_flow_approval` → `_sign_flow_execution` → `build_flow_request`). No new executor, envelope variant, or guard is needed.
 - **Gateway Deviation Guard Validation**: Verified that gateway deviation guards (origin allowlist, declared risk_class, step budget) bound replayed executable-flow writes identically to hand-authored flows. Executable-flow writes join no auto-allow list and fail closed when past budget or off-allowlist.
@@ -503,8 +503,8 @@ Note over GW,Op : Indistinguishable from hand-authored flows
 - [test_browser_connector.py:2159-2358](file://products/tool-gateway/tests/test_browser_connector.py#L2159-L2358)
 - [test_runtime_kernel.py:2709-2908](file://products/agent-platform/tests/test_runtime_kernel.py#L2709-L2908)
 
-### Approval-Seam Secret-Masking Hardening (R-7) - COMPLETED
-**CRITICAL SECURITY ENHANCEMENT - FULLY IMPLEMENTED**
+### Approval-Seam Secret-Masking Hardening (R-7) - DELIVERED
+**CRITICAL SECURITY ENHANCEMENT - FULLY DELIVERED**
 
 **Critical security enhancement addressing fundamental gaps in the action approval workflow where raw secret-bearing parameters could persist in plaintext across multiple system surfaces.**
 
@@ -536,8 +536,8 @@ Durable --> Audit["Audit trail"]
 - [plan.md:331-347](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L331-L347)
 - [tasks.md:19-31](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L19-L31)
 
-### Interactive Sample Implementation (R-6) - COMPLETED
-**NEW** The Stage 8 (R-6) sample implementation provides comprehensive end-to-end verification of the complete skill graduation lifecycle through interactive demo script and walkthrough guide.
+### Interactive Sample Implementation (R-6) - DELIVERED
+**DELIVERED** The Stage 8 (R-6) sample implementation provides comprehensive end-to-end verification of the complete skill graduation lifecycle through interactive demo script and walkthrough guide.
 
 - **Four-Act Workflow**: Demonstrates the complete graduation process: Author (ad hoc against declared target), Graduate (trace becomes executable-flow draft), Merge (human reviews and merges draft), Replay (same work behind one gate). Each act exercises different aspects of the graduation pipeline.
 - **Six Deterministic Legs**: Automated verification covering prerequisites (browser connector, HITL bridging, SPEC-055 knobs), admin portal pages, credential set loading, tool discovery, target declaration behavior, and graduation posture. These legs run without model interaction and provide baseline validation.
@@ -575,23 +575,23 @@ Cleanup --> End
 - [demo.sh:1-800](file://samples/web-checks/skill-graduation/demo/demo.sh#L1-L800)
 
 ## Implementation Strategy
-SPEC-055 follows a structured eight-stage implementation approach that builds incrementally while maintaining backward compatibility and security invariants. Stage 1 is now complete with comprehensive shared-contract lockstep. Stage 2 R-7 critical security enhancement has been fully implemented. Stage 3 R-1 Authoring Trace Store is now complete. Stage 4 R-2 Approval Seam Capture is now fully operational. Stage 5 R-3 Executable-Flow Skill Class is now complete with full ingestion and storage support. Stage 6a Dual-target tracking infrastructure is now complete with declared vs observed target tracking. Stage 6b (R-4) Graduation Endpoint is now fully implemented with deterministic draft generation and blast-radius validation. Stage 7 (R-5) Replay verification is now complete with comprehensive testing through existing SPEC-051 machinery. Stage 8 (R-6) Sample Implementation is now complete with interactive demo and comprehensive testing following ADR-0008 exercised-sample rule.
+SPEC-055 follows a structured eight-stage implementation approach that builds incrementally while maintaining backward compatibility and security invariants. All stages are now complete with comprehensive testing and version lockstep enforcement at 0.36.0.
 
-### Stage 1: Contracts (Foundation) ✓ COMPLETED
+### Stage 1: Contracts (Foundation) ✓ DELIVERED
 - Advanced skill.schema.json from v1 to v2 with additive executable-flow support including `kind` discriminator and `steps` array
 - Added skill_graduated audit event type with detailed payload structure (session_id, mode, validation, step_count)
 - Introduced session:skill_graduate policy action with appropriate role bindings (platform-admin, approver, operator)
 - Implemented comprehensive lockstep validation ensuring bidirectional parity between schemas and consumers
 - Verified execution-runtime requires no changes (verify-only approach)
 
-### Stage 2: Agent Platform - R-7 Secret Masking ✓ IMPLEMENTED
+### Stage 2: Agent Platform - R-7 Secret Masking ✓ DELIVERED
 - **Implemented KNOWN_SAFE_FIELDS allow-list** for per-tool field whitelisting with explicit safe fields: `k8s.delete_pod.name`, `k8s.delete_pod.namespace`, `web.select.value`, `web.fill_credential.credential_set`, `web.fill_credential.field`, `web.press_key.key`, `web.upload_file.filename`
 - **Flipped should_mask to fail-closed posture** (mask-unless-known-safe) ensuring all fields are masked unless explicitly whitelisted
 - **Implemented raw parameter redaction** in place for action-card entries beside change_request projection, preventing secret exposure in both stream and persistent records
 - **Updated portal presentation** to present change_request projection instead of raw parameters, ensuring consistent masking across all surfaces
 - **Comprehensive test coverage** added for secret masking behavior, signed-execution invariant preservation, and fail-closed behavior
 
-### Stage 3: Agent Platform - R-1 Authoring Trace Store ✓ COMPLETED
+### Stage 3: Agent Platform - R-1 Authoring Trace Store ✓ DELIVERED
 - **Created AuthoringTraceStore protocol** with InMemory and Postgres backends implementing identical interfaces
 - **Implemented InMemoryAuthoringTraceStore** with thread-safe session-scoped storage, deep copying for argument immutability, and configurable step caps and idle GC
 - **Implemented PostgresAuthoringTraceStore** with transactional operations, advisory locking for concurrency safety, and JSONB storage for flexible arguments
@@ -599,14 +599,14 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Established lifecycle management** supporting draft → graduated | discarded transitions with terminal state enforcement
 - **Built extensive test coverage** validating field parity between backends, concurrent access safety, idle GC behavior, and configuration validation
 
-### Stage 4: Agent Platform - R-2 Approval Seam Capture ✓ COMPLETED
+### Stage 4: Agent Platform - R-2 Approval Seam Capture ✓ DELIVERED
 - **Implemented `_capture_authoring_step()` method** in runtime_kernel.py called at both per-action and flow-unlock signing sites
 - **Integrated secret parameterization** using `parameterize_for_trace()` function from secret_params module
 - **Added best-effort error handling** with try-catch blocks ensuring trace failures never block execution or receipts
 - **Established reference-only storage** pattern storing only execution_id and confirm_id references
 - **Enhanced session lifecycle management** with proper timing and ordering guarantees
 
-### Stage 5: Skills Hub - R-3 Executable-Flow Skill Class ✓ COMPLETED
+### Stage 5: Skills Hub - R-3 Executable-Flow Skill Class ✓ DELIVERED
 - **Extended skill.schema.json** with additive `kind` discriminator and `steps` array for executable-flow skills
 - **Implemented comprehensive ingestion validation** for executable-flow skills including step-list shape, risk_class requirements, and credential-set reference validation
 - **Extended database schema** with `kind TEXT` and `steps JSONB` columns supporting both knowledge and executable-flow skills
@@ -614,7 +614,7 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Implemented credential validation** ensuring credential values are references (never literals) with special handling for `web.fill_credential` tool
 - **Built comprehensive test coverage** for all validation scenarios including valid documents, malformed inputs, and edge cases
 
-### Stage 6a: Dual-target Tracking Infrastructure ✓ COMPLETED
+### Stage 6a: Dual-target Tracking Infrastructure ✓ DELIVERED
 - **Implemented declared target tracking** with `authoring_trace_target` table storing authorization scopes declared before mutations
 - **Added observed origin tracking** with `flow_origin` column on trace steps capturing where mutations actually landed
 - **Integrated automatic origin observation** at receipt seam through `_observe_step_origin()` method
@@ -622,7 +622,7 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Added comprehensive gateway integration** with policy enforcement and proper error handling
 - **Implemented target normalization** through `skill_target_scope()` function to strip sensitive data while preserving replay binding scope
 
-### Stage 6b: Graduation Endpoint (R-4) ✓ COMPLETED
+### Stage 6b: Graduation Endpoint (R-4) ✓ DELIVERED
 - **Implemented deterministic build_executable_flow_draft function** with no LLM synthesis, producing reproducible drafts from captured traces
 - **Added comprehensive blast-radius re-validation** before draft production, checking step budgets, origin allowlists, credential resolution, and secret literal detection
 - **Created graduation endpoint** POST /api/v2/sessions/{session_id}/skill-graduate with proper authorization, validation, and audit logging
@@ -630,7 +630,7 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Added configuration support** via AGENT_SKILL_GRADUATION_MAX_STEPS environment variable with default value of 20, matching the gateway's replay budget
 - **Established comprehensive error handling** with detailed refusal messages that name specific guard failures and responsible steps
 
-### Stage 7: Multi-Service - R-5 Replay ✓ COMPLETED
+### Stage 7: Multi-Service - R-5 Replay ✓ DELIVERED
 - **Verified browser executable flows bind and one-gate through existing SPEC-051 machinery** without new executor or approval mechanisms
 - **Confirmed gateway deviation guards apply to replayed writes** with identical behavior to hand-authored flows
 - **Asserted infra executable flows park per-action** (safe fallback until OQ-2) with no flow authority armed
@@ -638,7 +638,7 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - **Updated portal to surface replay information** with flow headline + change-request framing
 - **Expanded browser connector tool surface** with additional web interaction capabilities from SPEC-050
 
-### Stage 8: Samples and Verification (R-6) ✓ COMPLETED
+### Stage 8: Samples and Verification (R-6) ✓ DELIVERED
 - **Created interactive graduation demo** under `samples/web-checks/skill-graduation/` demonstrating complete end-to-end workflow
 - **Implemented comprehensive automated testing** with six deterministic legs and four optional chat legs following ADR-0008 exercised-sample rule
 - **Developed detailed walkthrough guide** covering operator portal usage, session creation, ad hoc authoring, graduation process, manual merge steps, and replay verification
@@ -651,7 +651,7 @@ SPEC-055 follows a structured eight-stage implementation approach that builds in
 - [tasks.md:10-102](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/tasks.md#L10-102)
 
 ## Dependency Analysis
-The implementation follows strict dependency ordering with clear separation between products and phases. Stage 1 dependencies are now fully resolved with lockstep validation ensuring all shared contracts are properly bound. Stage 2 R-7 dependencies have been successfully integrated. Stage 3 R-1 dependencies are complete with comprehensive backend implementations. Stage 4 R-2 dependencies are fully operational with runtime kernel integration. Stage 5 R-3 dependencies are complete with full ingestion and storage support. Stage 6a dependencies are complete with dual-target tracking infrastructure. Stage 6b (R-4) dependencies are complete with graduation endpoint integration. Stage 7 (R-5) dependencies are complete with comprehensive verification through existing SPEC-051 machinery. Stage 8 (R-6) dependencies are complete with interactive demo and comprehensive testing.
+The implementation follows strict dependency ordering with clear separation between products and phases. All dependencies are now complete with comprehensive testing and version lockstep enforcement.
 
 ```mermaid
 graph LR
@@ -769,25 +769,25 @@ SAMPLES --> VERIFICATION
 ## Conclusion
 SPEC-055 enables a secure, operator-friendly path from live troubleshooting to reusable executable skills. By capturing approved mutations into a durable trace, validating and graduating them into executable-flow skills, and replaying under one gate with strict gateway guards and secret-safe parameters, the platform preserves trust invariants while dramatically improving skill authoring velocity. Delivery follows ADR-0008 with per-requirement tests and clear separation between exploration (per-action approvals) and mature replay (one gate).
 
-**Completed** Stage 1 implementation is complete with comprehensive shared-contract lockstep for skill graduation functionality. The completed work includes advanced skill.schema.json v2 with executable-flow support, new skill_graduated audit event with detailed payload structure, session:skill_graduate policy action with appropriate role bindings, and comprehensive lockstep validation ensuring bidirectional parity between schemas and their consumers. The lockstep refinement process ensures that shared schemas are never edited alone - bidirectional parity tests pin each schema to its consumers, so the schema and its bound declarations ship as one atomic unit or `make verify` fails.
+**Version 0.36.0 Delivery Complete**: All seven requirements successfully delivered across eight products with comprehensive testing coverage. The implementation includes 2424 Python tests passing, portal npm test 342 across 29 files, and clean build verification. Version lockstep enforced across VERSION + 8 pyproject.toml + 8 metadata.py + 2 __init__.py + 8 uv.lock re-locks.
 
-**Critical Security Enhancement (Stage 2 R-7) - COMPLETED**: Successfully implemented comprehensive fail-closed masking logic for the Human-in-the-Loop approval system, addressing fundamental security gaps where raw secret-bearing parameters could persist in plaintext across multiple system surfaces. The implementation includes KNOWN_SAFE_FIELDS allow-list, raw parameter redaction, and signed-execution invariant preservation through fail-closed projection masking. Comprehensive test coverage ensures the integrity of the masking behavior and maintains the signed-execution invariant throughout the approval workflow.
+**Critical Security Enhancement (R-7) - DELIVERED**: Successfully implemented comprehensive fail-closed masking logic for the Human-in-the-Loop approval system, addressing fundamental security gaps where raw secret-bearing parameters could persist in plaintext across multiple system surfaces. The implementation includes KNOWN_SAFE_FIELDS allow-list, raw parameter redaction, and signed-execution invariant preservation through fail-closed projection masking. Comprehensive test coverage ensures the integrity of the masking behavior and maintains the signed-execution invariant throughout the approval workflow.
 
-**Updated** Stage 3 R-1 Authoring Trace Store implementation is now complete with robust dual-backend support (InMemory + Postgres), comprehensive runtime configuration for per-session step caps and idle garbage collection, and extensive test coverage validating all core invariants including lifecycle management, field parity, concurrent access safety, and configuration validation. The implementation provides enterprise-grade durability with PostgreSQL backend while maintaining development simplicity with InMemory backend, automatic fallback mechanisms, and transactional consistency guarantees.
+**Delivered** R-1 Authoring Trace Store implementation is now complete with robust dual-backend support (InMemory + Postgres), comprehensive runtime configuration for per-session step caps and idle garbage collection, and extensive test coverage validating all core invariants including lifecycle management, field parity, concurrent access safety, and configuration validation. The implementation provides enterprise-grade durability with PostgreSQL backend while maintaining development simplicity with InMemory backend, automatic fallback mechanisms, and transactional consistency guarantees.
 
-**COMPLETED** Stage 4 R-2 Approval Seam Capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management. The implementation includes the `_capture_authoring_step()` method in runtime kernel, secret parameterization functions using the vocabulary-based approach, and best-effort error handling patterns that ensure trace failures never block execution or receipts. Both per-action and flow-unlock signing sites are properly integrated, ensuring mixed sessions yield one coherent ordered trace.
+**Delivered** R-2 Approval Seam Capture implementation is now fully operational with comprehensive authoring-trace capture mechanism, secret parameterization system, and enhanced session lifecycle management. The implementation includes the `_capture_authoring_step()` method in runtime kernel, secret parameterization functions using the vocabulary-based approach, and best-effort error handling patterns that ensure trace failures never block execution or receipts. Both per-action and flow-unlock signing sites are properly integrated, ensuring mixed sessions yield one coherent ordered trace.
 
-**Updated** Stage 5 R-3 Executable-Flow Skill Class implementation is now complete with comprehensive kind discriminator field, steps list support, risk class decoupling from web_target requirements, enhanced credential validation, and resource limits. The implementation includes database schema extensions with kind and steps JSONB columns, ingestion validation for executable-flow skills, and comprehensive test coverage for all validation scenarios. The executable-flow skill class enables operators to create reusable, replayable workflows that maintain security boundaries while providing significant productivity improvements.
+**Delivered** R-3 Executable-Flow Skill Class implementation is now complete with comprehensive kind discriminator field, steps list support, risk class decoupling from web_target requirements, enhanced credential validation, and resource limits. The implementation includes database schema extensions with kind and steps JSONB columns, ingestion validation for executable-flow skills, and comprehensive test coverage for all validation scenarios. The executable-flow skill class enables operators to create reusable, replayable workflows that maintain security boundaries while providing significant productivity improvements.
 
-**NEW** Stage 6a Dual-target tracking infrastructure is now complete with comprehensive declared vs observed target tracking, automatic origin observation at receipt seam, session creation with skill_target parameter, and full gateway integration for policy enforcement. This foundational infrastructure enables blast-radius validation by capturing both the authorization scope (declared target) and evidence of where mutations actually landed (observed origins), providing substantiated proof for graduation decisions rather than relying on post-hoc claims.
+**Delivered** Stage 6a Dual-target tracking infrastructure is now complete with comprehensive declared vs observed target tracking, automatic origin observation at receipt seam, session creation with skill_target parameter, and full gateway integration for policy enforcement. This foundational infrastructure enables blast-radius validation by capturing both the authorization scope (declared target) and evidence of where mutations actually landed (observed origins), providing substantiated proof for graduation decisions rather than relying on post-hoc claims.
 
-**NEW** Stage 6b (R-4) Graduation Endpoint is now fully implemented with deterministic draft generation, comprehensive blast-radius validation, and complete frontend integration. The implementation includes the POST /api/v2/sessions/{session_id}/skill-graduate endpoint with sophisticated validation logic, detailed error reporting, and operator-friendly error handling. The endpoint provides deterministic skill graduation without LLM synthesis, ensuring reproducible outputs and predictable performance. Frontend integration includes comprehensive error handling for various HTTP status codes and graduated skill preview capabilities.
+**Delivered** Stage 6b (R-4) Graduation Endpoint is now fully implemented with deterministic draft generation, comprehensive blast-radius validation, and complete frontend integration. The implementation includes the POST /api/v2/sessions/{session_id}/skill-graduate endpoint with sophisticated validation logic, detailed error reporting, and operator-friendly error handling. The endpoint provides deterministic skill graduation without LLM synthesis, ensuring reproducible outputs and predictable performance. Frontend integration includes comprehensive error handling for various HTTP status codes and graduated skill preview capabilities.
 
-**NEW** Stage 7 (R-5) Replay verification is now complete, proving that graduated flow replay functionality works through existing SPEC-051 browser-flow path without requiring new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows. Enhanced runtime kernel security guards ensure flow execution signing scope boundaries are properly enforced.
+**Delivered** Stage 7 (R-5) Replay verification is now complete, proving that graduated flow replay functionality works through existing SPEC-051 browser-flow path without requiring new executor or approval mechanisms. Comprehensive test coverage validates indistinguishability between graduated and hand-authored flows, gateway deviation guard enforcement, step budget constraints, and secure fallback for non-browser executable flows. Enhanced runtime kernel security guards ensure flow execution signing scope boundaries are properly enforced.
 
-**NEW** Stage 8 (R-6) Sample Implementation is now complete with comprehensive interactive demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow (author, graduate, merge, replay) through six deterministic legs and four optional chat legs, following ADR-0008 exercised-sample rule. Includes detailed walkthrough guide, comprehensive automated testing, cleanup procedures, and configuration guidance for adapting to different environments.
+**Delivered** Stage 8 (R-6) Sample Implementation is now complete with comprehensive interactive demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow (author, graduate, merge, replay) through six deterministic legs and four optional chat legs, following ADR-0008 exercised-sample rule. Includes detailed walkthrough guide, comprehensive automated testing, cleanup procedures, and configuration guidance for adapting to different environments.
 
-The implementation strategy emphasizes incremental delivery with clear dependencies, comprehensive testing requirements, and robust rollback procedures. With Stages 1, 2, 3, 4, 5, 6a, 6b, 7, and 8 complete, the foundation is solid for proceeding with future enhancements. The eight-stage approach ensures that each component is thoroughly tested and validated before proceeding to the next, minimizing risk while maximizing the value delivered at each milestone. The interactive sample implementation provides confidence that the complete graduation workflow functions as designed across all components and services.
+The implementation strategy emphasizes incremental delivery with clear dependencies, comprehensive testing requirements, and robust rollback procedures. With all eight stages complete, the foundation is solid for proceeding with future enhancements. The eight-stage approach ensures that each component is thoroughly tested and validated before proceeding to the next, minimizing risk while maximizing the value delivered at each milestone. The interactive sample implementation provides confidence that the complete graduation workflow functions as designed across all components and services.
 
 **Section sources**
 - [spec.md:445-512](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L445-L512)

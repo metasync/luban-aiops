@@ -33,12 +33,12 @@
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect v0.25.1/v0.25.2 release synchronization with enhanced service discovery and security configurations
-- Added comprehensive documentation for execution runtime service and incident service deployments
-- Enhanced PostgreSQL infrastructure configuration with database initialization scripts
-- Updated service link configuration across all services to prevent environment variable conflicts
-- Expanded audit trail capabilities with centralized secret management
-- Improved health monitoring and probe configurations for development environments
+- Updated to reflect v0.36.0 release with enhanced skills-hub capabilities for executable-flow skill processing and graduation workflows
+- Added comprehensive documentation for executable-flow skill validation and storage schema updates
+- Enhanced skills-hub configuration with support for graduated executable flows and step-based replay capabilities
+- Updated PostgreSQL schema to include executable-flow specific columns (kind, steps)
+- Expanded audit trail capabilities for skill graduation events and executable flow operations
+- Enhanced security contexts and service link configurations across all services
 
 ## Table of Contents
 1. Overview
@@ -67,12 +67,14 @@ The Luban AIOps Platform uses a Kustomize-based deployment structure that suppor
 - **Tool Gateway**: Manages tool execution, Kubernetes resource access, and policy enforcement for tool operations
 - **Execution Runtime**: Provides isolated execution environment for agent workloads with secure handoff mechanisms
 - **Incident Service**: Centralized incident management and collaboration capabilities
-- **Skills Hub**: Provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks
+- **Skills Hub**: Provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks with enhanced executable-flow support
 - **Audit Service**: Centralized audit event ingestion and storage with client authentication
 
 The deployment is organized using Kustomize overlays with a base configuration that includes all core services and their dependencies. All services are deployed with enhanced security contexts to ensure containers run as non-root users with minimal privileges. Additionally, all deployments now use `enableServiceLinks: false` to prevent Kubernetes legacy service-link environment variable injection conflicts, ensuring reliable DNS-based service discovery.
 
 The platform features comprehensive audit trail capabilities through centralized secret management, which provisions shared audit credentials across all emitting services and automatically restarts affected deployments when audit secrets change.
+
+**Updated** The v0.36.0 release introduces significant enhancements to the skills-hub service with full support for executable-flow skill processing and graduation workflows. This enables operators to capture approved session traces and convert them into reusable executable skills with machine-readable step definitions, providing a powerful mechanism for operational automation and knowledge sharing.
 
 ## Kustomize Structure and Base Configuration
 
@@ -375,7 +377,7 @@ The incident-service exposes HTTP service on port 8000 for incident management o
 
 ## Skills Hub Service
 
-The skills-hub service provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks. It serves as the central repository for platform knowledge and operational procedures.
+The skills-hub service provides skill management, ingestion, and query capabilities for AI-powered guidance and runbooks. It serves as the central repository for platform knowledge and operational procedures with enhanced executable-flow support.
 
 ### Deployment Configuration
 
@@ -384,18 +386,18 @@ The skills-hub deployment includes comprehensive health monitoring, security con
 **Key Features:**
 - Prometheus monitoring with scrape annotations for metrics collection
 - Comprehensive health probes with tuned timing parameters
-- PostgreSQL backend for skill storage and querying
-- Federated skill sources from local ConfigMap volumes
+- PostgreSQL backend for skill storage and querying with executable-flow support
+- Federated skill sources from local ConfigMap volumes and git repositories
 - Security context with non-root execution and privilege restrictions
 - Volume mounts for skill sources and temporary cache storage
 - **Security Context**: Non-root execution with UID 1000, privilege escalation disabled, and seccomp profile enabled
 - **Service Link Configuration**: `enableServiceLinks: false` prevents legacy service-link environment variable injection conflicts
 - **Audit Integration**: Configured to emit audit events to the centralized audit-service with shared credentials
 
-**Updated** Enhanced security context ensures the skills-hub container runs with minimal privileges, protecting skill data and processing operations. The service link configuration ensures reliable DNS-based service discovery without conflicting environment variables. Health probes are configured with generous timing to prevent unnecessary restarts during development environment load spikes. Audit integration provides comprehensive audit trail capabilities for all skill operations including search, retrieval, and synchronization events.
+**Updated** The v0.36.0 release significantly enhances the skills-hub service with full executable-flow capability support. The service now validates and stores executable-flow skills with machine-readable step definitions, enabling operators to graduate approved session traces into reusable automated procedures. The PostgreSQL schema includes new columns (`kind`, `steps`) to support executable-flow data structures, and the ingestion pipeline validates step lists against strict security and format requirements.
 
 **Section sources**
-- [skills-hub-deployment.yaml:1-104](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L1-L104)
+- [skills-hub-deployment.yaml:1-122](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/skills-hub-deployment.yaml#L1-L122)
 
 ### Service Configuration
 
@@ -438,16 +440,43 @@ This enables automatic metrics discovery and collection by Prometheus instances 
 
 ### Skill Sources and Storage
 
-The skills-hub service supports federated skill sources through ConfigMap volume mounts:
+The skills-hub service supports federated skill sources through ConfigMap volume mounts and git repositories:
 
 **Local Skill Sources:**
 - SRE Alerting guides mounted at `/skills/sre-alerting`
 - Platform Runbooks mounted at `/skills/platform-runbooks`
+- Tutorial samples mounted at `/skills/samples` (optional)
+
+**Git-Based Sources:**
+- Platform skills from GitHub repository with configurable ref and path
+- Automatic synchronization with configurable intervals
 
 **Storage Configuration:**
-- PostgreSQL database for persistent skill storage
+- PostgreSQL database for persistent skill storage with executable-flow support
 - EmptyDir volume for temporary git-source checkouts at `/var/lib/skills-hub`
 - Read-only ConfigMap mounts for skill source files
+
+### Executable-Flow Capabilities
+
+The v0.36.0 release introduces comprehensive executable-flow support:
+
+**Skill Validation:**
+- Validates executable-flow skills with `kind: executable_flow` discriminator
+- Enforces strict step list validation with maximum 200 steps
+- Requires `risk_class: write` for executable flows
+- Validates browser flow targets and credential references
+- Supports credential set references instead of literal values
+
+**Database Schema Updates:**
+- New `kind` column for skill type discrimination
+- New `steps` JSONB column for executable flow step definitions
+- Backward compatible with existing knowledge skills
+
+**Graduation Workflow Support:**
+- Processes graduated executable flows from operator sessions
+- Validates blast radius and origin constraints
+- Supports credential resolution and parameterization
+- Maintains audit trail for graduation events
 
 ### Environment Variables
 
@@ -465,7 +494,7 @@ The skills-hub service requires configuration for database connectivity, skill s
 | SKILLS_AUDIT_CLIENT_ID | Audit client identifier | skills-hub |
 
 **Section sources**
-- [skills-hub-runtime-config.env:1-18](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L1-L18)
+- [skills-hub-runtime-config.env:1-22](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L1-L22)
 
 ## Audit Service
 
@@ -576,7 +605,7 @@ Redis provides in-memory data storage for session state and message coordination
 
 ### PostgreSQL Service
 
-PostgreSQL provides persistent database storage for skills, incidents, and session data across the platform.
+PostgreSQL provides persistent database storage for skills, incidents, and session data across the platform with enhanced executable-flow support.
 
 **Deployment Characteristics:**
 - StatefulSet deployment for data persistence
@@ -584,12 +613,14 @@ PostgreSQL provides persistent database storage for skills, incidents, and sessi
 - Database initialization scripts for schema setup
 - Service exposure for application connectivity
 - **Security Context**: Non-root execution with proper file permissions
-- **Database Initialization**: Automated schema creation for skills, incidents, and sessions databases
+- **Database Initialization**: Automated schema creation for skills, incidents, and sessions databases with executable-flow columns
+
+**Updated** The PostgreSQL database now includes enhanced schema support for executable-flow skills with new `kind` and `steps` columns. The skills database schema includes idempotent ALTER statements to add executable-flow support without disrupting existing knowledge skills.
 
 **Section sources**
 - [postgres-statefulset.yaml:1-100](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-statefulset.yaml#L1-L100)
 - [postgres-service.yaml:1-12](file://shared/platform-ops/gitops/dev-k8s/base/infra/postgres-service.yaml#L1-L12)
-- [create-skills-db.sql:1-50](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-skills-db.sql#L1-L50)
+- [create-skills-db.sql:1-6](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-skills-db.sql#L1-L6)
 - [create-incidents-db.sql:1-50](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-incidents-db.sql#L1-L50)
 - [create-sessions-db.sql:1-50](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-sessions-db.sql#L1-L50)
 
@@ -648,7 +679,7 @@ style K fill:#f3e5f5
 3. **Authentication**: Platform-gateway communicates with identity-broker for authentication
 4. **Agent Operations**: Platform-gateway calls agent-platform service for agent operations
 5. **Tool Execution**: Agent-platform calls execution-runtime for isolated execution
-6. **Skill Queries**: Agent-platform and tool-gateway call skills-hub for skill information
+6. **Skill Queries**: Agent-platform and tool-gateway call skills-hub for skill information including executable-flows
 7. **Incident Management**: Platform-gateway and tool-gateway call incident-service for collaboration
 8. **Audit Events**: All services emit audit events to audit-service for centralized logging
 9. **Kubernetes Access**: Tool-gateway accesses Kubernetes API server with RBAC permissions
@@ -684,7 +715,7 @@ The current development deployment uses ephemeral storage for simplicity. Produc
 - **Session State**: Stored in memory, not persisted across pod restarts
 - **Configuration**: Stored in ConfigMaps and Secrets
 - **Agent Workspaces**: Uses emptyDir for temporary workspace storage
-- **Skills Hub Data**: Uses emptyDir for temporary git-source checkouts; PostgreSQL for persistent skill storage
+- **Skills Hub Data**: Uses emptyDir for temporary git-source checkouts; PostgreSQL for persistent skill storage with executable-flow support
 - **Audit Data**: Uses PostgreSQL for persistent audit event storage
 - **Incident Data**: Uses PostgreSQL for persistent incident data storage
 
@@ -696,7 +727,7 @@ For production deployments, consider:
 - External configuration management
 - Backup and disaster recovery procedures
 - **Security Considerations**: Ensure persistent volumes are properly secured with appropriate access controls
-- **Skills Hub**: Configure PostgreSQL with persistent volumes and backup strategies
+- **Skills Hub**: Configure PostgreSQL with persistent volumes and backup strategies for executable-flow data
 - **Audit Service**: Implement proper backup and retention policies for audit data
 - **Incident Service**: Configure PostgreSQL with persistent volumes and backup strategies
 - **PostgreSQL**: Implement automated backups and point-in-time recovery
@@ -721,7 +752,7 @@ The deployment process applies the complete platform stack:
 make deploy
 ```
 
-This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture along with the Skills Hub service, Audit Service, Execution Runtime, and Incident Service.
+This performs one-time cleanup of legacy api-gateway objects and deploys the new dual-gateway architecture along with the Skills Hub service, Audit Service, Execution Runtime, and Incident Service with enhanced executable-flow capabilities.
 
 ### Manual Deployment
 
@@ -821,10 +852,12 @@ kubectl scale deployment/execution-runtime --replicas=0
 - Monitor audit-service health endpoints for service readiness
 
 **Skills Hub Specific Issues:**
-- Verify PostgreSQL connectivity and database schema initialization
+- Verify PostgreSQL connectivity and database schema initialization with executable-flow support
 - Check skill source ConfigMap mounts and file permissions
 - Validate Prometheus scraping configuration for metrics collection
 - Monitor health probe endpoints for service readiness
+- **Executable-Flow Issues**: Verify that executable-flow skills have proper `kind: executable_flow` designation and valid step definitions
+- **Graduation Issues**: Check that graduated skills meet blast radius requirements and have resolved credential references
 
 **Execution Runtime Issues:**
 - Verify execution-signing-secret and execution-handoff-secret are properly configured
@@ -960,6 +993,14 @@ curl -v https://aiops.luban.k8s.orb.local/
 kubectl get statefulset postgres -n dev-luban-aiops
 kubectl get pvc -n dev-luban-aiops
 kubectl exec -it postgres-0 -n dev-luban-aiops -- psql -U postgres -c "\l"
+```
+
+**Check Executable-Flow Skills:**
+```bash
+# Check if executable-flow skills are properly ingested
+kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/api/v1/skills?limit=10 | jq '.[] | select(.kind == "executable_flow")'
+# Verify executable-flow step definitions
+kubectl exec -it deployment/skills-hub -n dev-luban-aiops -- curl -s http://localhost:8000/api/v1/skills/{skill-id} | jq '.steps'
 ```
 
 **Section sources**
