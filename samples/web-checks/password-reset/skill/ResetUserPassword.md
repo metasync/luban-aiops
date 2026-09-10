@@ -116,9 +116,15 @@ actually means to approve, rather than on authentication.
    destructive mutation, so gating it here is the whole point of the
    flow.
 
-8. **Verify and capture evidence.** Take a `web.snapshot` to confirm
-   the "Password for <user> has been reset successfully." message is
-   visible. Then capture a `web.screenshot` as final visual evidence
+8. **Verify and capture evidence.** Read the target app's own status line
+   with `web.extract` on `#reset-status` — it carries the "Password for
+   <user> has been reset successfully." sentence. `web.snapshot` will
+   **not** show it: a snapshot enumerates interactive elements only
+   (`a, button, input, select, textarea` and a few ARIA roles), and the
+   status line is a plain `<p role="status">`, so a post-click snapshot
+   legitimately contains no success text. If you follow the "View
+   confirmation" link, extract `#confirmation-message` on that page for the
+   same sentence. Then capture a `web.screenshot` as final visual evidence
    of the successful reset — include the screenshot in your final
    response to the caller.
 
@@ -131,9 +137,10 @@ actually means to approve, rather than on authentication.
 - A snapshot that does not show the target user in the table means
   the user was not found; report this to the caller without
   attempting the reset.
-- A snapshot after step 7 that shows "Error: passwords do not match"
-  means the new password was not transmitted correctly; report this
-  to the caller and ask them to retry with the correct password.
+- An extract of `#reset-status` after step 7 that reads "Error: passwords do
+  not match" means the new password was not transmitted correctly; report
+  this to the caller and ask them to retry with the correct password.
+  (`web.snapshot` cannot show that line either — same reason as step 8.)
 - The step budget is bounded by `GATEWAY_BROWSER_FLOW_MAX_STEPS`;
   exhaustion (`BROWSER_FLOW_EXHAUSTED`) means the flow deviated and
   must be restarted with a fresh confirmation.

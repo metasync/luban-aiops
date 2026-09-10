@@ -103,13 +103,30 @@ The agent should:
 ## Step 5: Approve the Per-Action Card
 
 When the agent clicks "Confirm reset", a **change-request card** appears. Unlike
-the password-reset flow card, it does **not** show a flow headline. Instead it
-leads with the **change request** (SPEC-054 R-3):
+the password-reset flow card, it does **not** show a flow headline. Instead each
+call leads with the **change request** (SPEC-054 R-3):
 
-- A plain-language **summary** of the action ("Click the Confirm reset button")
-- The **decision-relevant fields** promoted out of the collapsed "Technical
-  details" expander, with any secret value masked to `***`
-- The tool (`web.click`) and risk level (**write**) beneath
+- A plain-language **summary** of the effect, rendered bold. For this click it
+  reads `Click "<button type=submit> "Confirm reset""` — the element description
+  the gateway parsed out of the snapshot, wrapped in the projection's own quotes,
+  so the inner pair reads as doubled. Cosmetic, but that is the string you see.
+- A **decision-relevant fields** table beneath it — *only when the projection has
+  fields*. `web.click` promotes none: its single argument is the snapshot `ref`,
+  so there is nothing decision-relevant to lift and the summary carries the
+  element instead. A `web.type` card does promote its `text` field, with a
+  `masked` tag beside the `***`.
+- The element **hint** line, `<button type=submit> "Confirm reset"`.
+
+Note what an action card does *not* show: the per-call tool name and risk tag.
+That header (`web.click` + `write`) is the flow branch of the same component — an
+action card replaces it with the change request, and conveys risk through the
+card-level `mutating` / `approver required` tags instead.
+
+The collapsed "Technical details" expander holds the call arguments, and on an
+action card they arrive **pre-redacted** from the kernel (SPEC-055 R-7,
+fail-closed), so it reads `{ "ref": "***" }` rather than the raw ref. The flow
+sample's card shows the raw value in the same expander: R-7's redaction is gated
+on the action kind.
 
 Under the hood the card carries `approval_kind: "action"` and **no**
 `flow_summary` — the discriminator SPEC-054 R-1 adds so the card states its own
@@ -117,13 +134,19 @@ kind rather than inferring it from ambient session state.
 
 **Someone else approves it.** Mutating execution carries a tier-2 approval
 requirement decided by `approver` or `platform-admin`, and the requester cannot
-decide their own call — so clicking **Approve** in the operator's own chat
-answers `403` and the card stays parked. For an `operator` the reason is
-`not_a_designated_approver`: the decider-role check runs before the
-self-approval one, and `operator` holds no decider role at all. `self_approval`
-is the answer a *designated decider* gets on a session they own — tier 2 blocks
-self-approval even for an approver. Either way that is SPEC-030 R-4 working, not
-a bug in the sample.
+decide their own call. The portal pre-empts the click instead of letting you
+make it: on an `operator`'s screen the card renders **no Approve or Deny button
+at all**, only the note "This request needs a designated approver — your
+current role cannot approve or deny it."
+
+That note is a display hint (SPEC-030 R-5) and the gateway stays authoritative.
+Post the decision straight to `/api/v1/chat/confirm` as the operator and it
+answers `403` with `reason: not_a_designated_approver` and
+`approval_tier: tier_2` — the decider-role check runs before the self-approval
+one, and `operator` holds no decider role at all. `self_approval` is the reason
+a *designated decider* gets on a session they own, because tier 2 blocks
+self-approval even for an approver. Either way the card stays parked. That is
+SPEC-030 R-4 working, not a bug in the sample.
 
 Switch to the window signed in as **`luban-approver`** and open **Approvals** in
 the sidebar — the decider-only inbox, badged with the pending count. The parked
@@ -135,7 +158,7 @@ Because there is no flow-unlock for unbound writes, **had the agent performed
 more than one write, each would park its own card** — approving one never
 unlocks the next.
 
-After approval the agent clicks "Confirm reset", snapshots the success message,
+After approval the agent clicks "Confirm reset", extracts the success message,
 and captures a screenshot.
 
 ## Step 6: Verify the Result
@@ -150,10 +173,15 @@ http://localhost:9090/admin/users/?reset=alice@example.com
 http://localhost:9090/admin/users/reset/done/?user=alice@example.com
 ```
 
-The real evidence is in the chat transcript: the post-click `web.snapshot`,
-whose `#reset-status` reads `Password for alice@example.com has been reset
-successfully.` — emitted by the target app's own submit handler, so it shows the
-approved click landed — plus the `web.screenshot` captured beside it.
+The real evidence is in the chat transcript: a `web.extract` of `#reset-status`
+— or of `#confirmation-message` on the confirmation page — reading `Password for
+alice@example.com has been reset successfully.`, emitted by the target app's own
+submit handler, so it shows the approved click landed; plus the `web.screenshot`
+captured beside it. Do not go looking for that sentence in a `web.snapshot`: a
+snapshot enumerates interactive elements only (`a, button, input, select,
+textarea` and a few ARIA roles) and the status line is a plain `<p
+role="status">`, so it is legitimately absent from every snapshot in the
+transcript.
 
 In the session detail (or the approvals inbox), the durable confirmation record
 carries the **same** `approval_kind: "action"`, the persisted top-line `message`

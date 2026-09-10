@@ -107,15 +107,29 @@ card** appears in the chat. It shows:
 - The tool being called: `web.click` on the "Confirm reset" button
 - The risk level: **write**
 
+Its "Technical details" expander shows the call arguments **raw** — for this card
+that is `{ "ref": 4 }`, the snapshot ref of the button. That is deliberate: the
+SPEC-055 R-7 fail-closed redaction is gated on the *action* kind, and a flow card
+renders the tool-level header instead of a change-request projection. The ad-hoc
+sample's card masks the same field to `***`. Neither card carries a secret here,
+because the only secret in this procedure travels as a `newpw` URL parameter on a
+read-tier `web.navigate`, never as a write-tier argument.
+
 **Someone else approves it.** Mutating execution carries a tier-2 approval
 requirement decided by `approver` or `platform-admin`, and the requester cannot
-decide their own call — so clicking **Approve** in the operator's own chat
-answers `403` and the card stays parked. For an `operator` the reason is
-`not_a_designated_approver`: the decider-role check runs before the
-self-approval one, and `operator` holds no decider role at all. `self_approval`
-is the answer a *designated decider* gets on a session they own — tier 2 blocks
-self-approval even for an approver. Either way that is SPEC-030 R-4 working, not
-a bug in the sample.
+decide their own call. The portal pre-empts the click instead of letting you
+make it: on an `operator`'s screen the card renders **no Approve or Deny button
+at all**, only the note "This request needs a designated approver — your
+current role cannot approve or deny it."
+
+That note is a display hint (SPEC-030 R-5) and the gateway stays authoritative.
+Post the decision straight to `/api/v1/chat/confirm` as the operator and it
+answers `403` with `reason: not_a_designated_approver` and
+`approval_tier: tier_2` — the decider-role check runs before the self-approval
+one, and `operator` holds no decider role at all. `self_approval` is the reason
+a *designated decider* gets on a session they own, because tier 2 blocks
+self-approval even for an approver. Either way the card stays parked. That is
+SPEC-030 R-4 working, not a bug in the sample.
 
 Switch to the window signed in as **`luban-approver`** and open **Approvals** in
 the sidebar — the decider-only inbox, badged with the pending count. The parked
@@ -125,7 +139,7 @@ it; the operator's stream resumes and the agent performs the click.
 
 After approval, the agent:
 - Clicks "Confirm reset" (the admin panel performs the password reset)
-- Takes a final snapshot to verify the target's own status line,
+- Reads the target's own status line with `web.extract`, expecting
   `Password for alice@example.com has been reset successfully.`
 - Captures a screenshot as visual evidence
 
@@ -154,9 +168,14 @@ as evidence that the reset happened — they would say so regardless.
 
 **The real evidence is in the chat transcript:**
 
-- the post-click `web.snapshot`, whose `#reset-status` reads
-  `Password for alice@example.com has been reset successfully.` — emitted by the
-  target app's own submit handler, so it shows the approved click landed
+- a `web.extract` of `#reset-status` — or of `#confirmation-message` on the
+  confirmation page — reading
+  `Password for alice@example.com has been reset successfully.`, emitted by the
+  target app's own submit handler, so it shows the approved click landed. Do not
+  go looking for that sentence in a `web.snapshot`: a snapshot enumerates
+  interactive elements only (`a, button, input, select, textarea` and a few ARIA
+  roles) and the status line is a plain `<p role="status">`, so it is
+  legitimately absent from every snapshot in the transcript
 - the `web.screenshot` captured as visual evidence
 - the HITL approval record and its signed receipt (SPEC-037), stamped with
   `flow` authority provenance (ADR-0010)

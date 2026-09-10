@@ -146,9 +146,15 @@ card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
    denies it on its own merits. There is no flow-unlock: had this procedure
    performed N writes, it would park N cards.
 
-8. **Verify and capture evidence.** `web.snapshot` to confirm the "Password
-   for <user> has been reset successfully." message, then `web.screenshot`
-   as final visual evidence — include it in your response to the caller.
+8. **Verify and capture evidence.** `web.extract` `#reset-status` to read the
+   target app's own "Password for <user> has been reset successfully." line.
+   `web.snapshot` **cannot** show it: a snapshot enumerates interactive
+   elements only (`a, button, input, select, textarea` and a few ARIA roles),
+   and the status line is a plain `<p role="status">`, so a post-click snapshot
+   legitimately contains no success text. If you follow the "View confirmation"
+   link, extract `#confirmation-message` there for the same sentence. Then
+   `web.screenshot` as final visual evidence — include it in your response to
+   the caller.
 
 ## Interpretation
 
@@ -160,9 +166,10 @@ card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
 - `BROWSER_FLOW_AUTHORITY_STALE` should not occur here (nothing binds a
   flow); if it does, a prior turn left a stale flow-provenance envelope —
   restart the procedure cleanly.
-- A snapshot after step 7 showing "Error: passwords do not match" means the
-  new password was not transmitted correctly; report it and ask the caller
-  to retry.
+- An extract of `#reset-status` after step 7 reading "Error: passwords do not
+  match" means the new password was not transmitted correctly; report it and
+  ask the caller to retry. (`web.snapshot` cannot show that line either — same
+  reason as step 8.)
 - Each write-tier card is independent: approving one does **not** unlock the
   next. If you add more writes, expect one card per write.
 

@@ -151,13 +151,19 @@ beneath — exactly what the ad-hoc walkthrough shows. Two users, two cards.
 
 **Someone else approves them.** Mutating execution carries a tier-2 approval
 requirement decided by `approver` or `platform-admin`, and the requester cannot
-decide their own call — so clicking **Approve** in your own chat answers `403`
-and the card stays parked. For an `operator` the reason is
-`not_a_designated_approver`: the decider-role check runs before the
-self-approval one, and `operator` holds no decider role at all. `self_approval`
-is the answer a *designated decider* gets on a session they own — tier 2 blocks
-self-approval even for an approver. Either way that is SPEC-030 R-4 working, not
-a bug in the sample.
+decide their own call. The portal pre-empts the click instead of letting you
+make it: on an `operator`'s screen each card renders **no Approve or Deny button
+at all**, only the note "This request needs a designated approver — your
+current role cannot approve or deny it."
+
+That note is a display hint (SPEC-030 R-5) and the gateway stays authoritative.
+Post the decision straight to `/api/v1/chat/confirm` as the operator and it
+answers `403` with `reason: not_a_designated_approver` and
+`approval_tier: tier_2` — the decider-role check runs before the self-approval
+one, and `operator` holds no decider role at all. `self_approval` is the reason
+a *designated decider* gets on a session they own, because tier 2 blocks
+self-approval even for an approver. Either way the card stays parked. That is
+SPEC-030 R-4 working, not a bug in the sample.
 
 Switch to the window signed in as **`luban-approver`** and open **Approvals**
 in the sidebar — the decider-only inbox, badged with the pending count. Each
