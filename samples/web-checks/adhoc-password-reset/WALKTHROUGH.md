@@ -115,6 +115,14 @@ The agent should:
 6. **Click "Confirm reset"** ← an unbound write-tier interaction, so it parks a
    **per-action** confirmation card
 
+Expect **exactly one** card from this sample. The target's login page
+auto-submits on a timer once both credential fields are filled (legacy SSO), and
+step 4 of the runbook says **"Do not click 'Sign in'"** — authentication is
+read-tier and needs no write. The reset form likewise pre-fills from the URL but
+deliberately does not auto-submit, so "Confirm reset" is the procedure's one
+write-tier interaction. Two cards mean the agent clicked "Sign in" anyway: a
+redundant gated write, not a stronger gate.
+
 ## Step 5: Approve the Per-Action Card
 
 When the agent clicks "Confirm reset", a **change-request card** appears. Unlike
