@@ -36,15 +36,20 @@ Everything is already running in your cluster:
 
 ## Step 1: Open the Operator Portal
 
-```sh
-kubectl port-forward -n dev-luban-aiops svc/web-ui 8080:8080 &
-```
-
-Then open **http://localhost:8080** in your browser and sign in (silent OIDC —
-click "Sign in" if prompted) as **`luban-operator`**, the dev Keycloak user in
-`ops-operators`; all six dev users share the development-only password
-`reconcile-luban-realm.sh` sets (see
+Open **https://aiops.luban.metasync.cc** — the canonical dev-k8s portal
+entrypoint — and sign in (silent OIDC; click "Sign in" if prompted) as
+**`luban-operator`**, the dev Keycloak user in `ops-operators`; all six dev
+users share the development-only password `reconcile-luban-realm.sh` sets (see
 `shared/platform-ops/gitops/dev-k8s/README.md`).
+
+Do not try to reach the portal through a `svc/web-ui` port-forward instead. The
+identity-broker starts every login at `OIDC_REDIRECT_URI`, which makes the
+origin above *the only one where sign-in round-trips*; `OIDC_EXTRA_REDIRECT_URIS`
+registers further origins with Keycloak for post-logout reachability and sign-in
+never selects one, so a localhost tab stays signed out while its callback lands
+on the public origin. The port-forwards this walkthrough does need —
+identity-service and platform-gateway, for the API reads in step 7 and for the
+demo script — are set up where they are used.
 
 `operator` holds both `session:skill_graduate` (graduate) and `chat:confirm`
 (answer a parked card), but it is **not** a tier-2 decider role — so you will
@@ -105,17 +110,31 @@ Type a message that asks for the work **without binding a flow**, e.g.:
 Working ad hoc in the legacy admin panel, reset the password for BOTH
 alice@example.com and bob@example.com to TempPass-2026!. There is no skill for
 this yet: do NOT pass skill_id to web.navigate, so this session stays UNBOUND
-and each write parks its own per-action card. Sign in with web.fill_credential
-from the admin-portal credential set — never web.type. Then, for each user,
-navigate to /admin/users/reset/ with the user and newpw query parameters so the
-form pre-fills, snapshot, and click "Confirm reset".
+and each write parks its own per-action card. Navigate to
+http://browser-check-target:8080/admin/ and fill BOTH admin credentials with
+web.fill_credential from the admin-portal credential set — never web.type. Do
+NOT click "Sign in": that page submits itself as soon as both fields are filled
+and replaces the form, so the click would land on a detached element and fail.
+Then, for each user, navigate to /admin/users/reset/ with the user and newpw
+query parameters so the form pre-fills, snapshot, and click "Confirm reset".
 ```
 
-Two constraints in that prompt are load-bearing for graduation, and both are
-about what gets *captured*:
+Three constraints in that prompt are load-bearing for graduation:
 
 - **Sign in by reference.** `web.fill_credential` is read tier, so it is never
-  captured — the secret stays out of the trace and out of the artifact.
+  captured — the secret stays out of the trace and out of the artifact. It is
+  also why the fill is not one of the two writes: a read-tier call parks no card
+  and enters no trace, even though it touches the page.
+- **Do not click "Sign in".** The admin login page carries a legacy-SSO
+  auto-login timer that fires within 100 ms of *both* credential fields holding
+  a value: it hides the form and navigates to `/admin/users/` by itself. A click
+  on that button after two fills therefore cannot land — the dev-k8s live check
+  of this sample failed with exactly that, `ElementHandle.click: Element is not
+  attached to the DOM`. The model recovered and finished both resets, but the
+  failed write stayed in the trace with **no observed origin**, and graduation
+  refuses an unverified step: fabricating an origin would corroborate a mutation
+  that never happened, and dropping the step would graduate a flow the operator
+  never approved. Wait for the redirect instead.
 - **Do not `web.type` or `web.evaluate` a value.** Capture withholds a value
   argument by name, and a withheld value is an unresolved credential hole that
   graduation **refuses** to export. Passing the new password as a read-tier URL
@@ -238,6 +257,13 @@ the portal's **Skills** view (sidebar → Skills): set `source` to `samples` and
 shows the `executable-flow` / `graduated` tags, the declared target, and the
 runbook body with the step list restated for reading.
 
+> If **View** answers *"skills hub unavailable"* in the second or two after
+> `rollout status` returns, that is the gateway reporting a connection it could
+> not complete while the Service endpoints finish propagating — not a verdict
+> about your skill. Open the row again. The demo's act 3 retries that same call
+> on that status code for exactly this reason, and only on it: a `404` there
+> means the id really is unknown.
+
 The *machine-readable* halves — `kind: executable_flow`, `risk_class: write`
 and the `steps` array — are on the API record but deliberately not in the
 viewer's shape, so read them off the inventory proxy instead (this is exactly
@@ -272,9 +298,16 @@ skill declares one. Ask for the same work by skill id:
 Use skill samples/skill-graduation-batch-password-reset-graduation-demo to
 reset the password for BOTH alice@example.com and bob@example.com to
 TempPass-2026! in the legacy admin panel. Bind the flow by passing skill_id to
-web.navigate. Sign in with web.fill_credential from the admin-portal credential
-set, and pass the new password as the newpw URL parameter.
+web.navigate. Fill both admin credentials with web.fill_credential from the
+admin-portal credential set and do NOT click "Sign in" — the page signs itself
+in once both fields are filled. Then pass the new password as the newpw URL
+parameter on each reset page so the form pre-fills.
 ```
+
+The no-sign-in-click instruction carries over from step 4 for the same reason,
+and it is worth twice as much here: the flow card you are about to approve
+covers *every* write in the replay, so a click that fails on the auto-login's
+already-replaced form is a write the graduated flow never declared.
 
 This time `web.navigate` binds, and the card that parks is a **flow** card: one
 decision for the whole workflow, headed by the skill's title, the target origin
@@ -413,8 +446,10 @@ merged ConfigMap key on exit; set `KEEP_GRADUATED_SKILL=true` to keep it.
 
 | Symptom | Fix |
 |---|---|
+| The portal tab stays signed out after an OIDC round-trip | You opened it on a localhost port-forward. The broker starts every login at `OIDC_REDIRECT_URI`, so sign-in only round-trips on `https://aiops.luban.metasync.cc` (step 1) |
 | **Graduate as skill** button missing | Your role lacks `session:skill_graduate` — sign in as an operator, approver or platform-admin |
 | "step(s) landed outside the declared target's origin" | You declared `localhost:9090` instead of the connector's `http://browser-check-target:8080/admin/`; the declaration is first-wins, so open a new skill-development session |
+| "step(s) … have no observed origin" | A captured write **failed** — most often the model clicked "Sign in" after two `web.fill_credential` calls and hit the auto-login's already-replaced form (step 4). An unverified step is never treated as a corroborated one, so re-author in a fresh session and let the page redirect itself |
 | "the session has no captured authoring trace" | No write was approved yet, or the model only performed read-tier calls — approve at least one write-tier interaction first |
 | "step(s) still carry an unresolved credential hole" | The model used `web.type`/`web.evaluate` with a value; re-author routing the secret through `web.fill_credential` or a URL parameter |
 | Graduation answered `503` | The validation leg is not configured — agent-service needs both `AGENT_SKILLS_SERVICE_URL` and `AGENT_SKILLS_CLIENT_SECRET` (`sync-skills-secrets.sh`) |
@@ -422,4 +457,5 @@ merged ConfigMap key on exit; set `KEEP_GRADUATED_SKILL=true` to keep it.
 | `BROWSER_FLOW_TARGET_MISMATCH` on replay | Binding requires the navigated URL to be on the declared origin **and** on-or-under its path — navigate to `/admin/`, not to `/` |
 | A second card parks during replay | The flow never bound — the model navigated without `skill_id`, usually because the merged step list carries no binding `web.navigate` to follow (step 7, edit 1) |
 | The graduated skill is not in the **Skills** view | skills-hub was not restarted after the ConfigMap patch, or `make deploy-samples` was re-run and dropped the key |
+| "skills hub unavailable" on the skill detail | The gateway could not complete the connection. In the second or two after `rollout restart deployment/skills-hub` the Service endpoints are still propagating — retry. If it persists, check `kubectl -n dev-luban-aiops get pods -l app=skills-hub` |
 | Admin pages 404 | Check the `browser-check-target` port-forward is still running |

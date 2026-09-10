@@ -478,8 +478,35 @@ if [ "${RUN_CHAT_LEG:-}" = "true" ]; then
   # per-action card. web.type and web.evaluate are excluded on purpose —
   # their value arguments are withheld at capture by name, and a withheld
   # value is an unresolved credential hole that graduation refuses. The
-  # reset form pre-fills from the URL, so the only writes are the clicks.
-  AUTHOR_MESSAGE="Working ad hoc in the legacy admin panel, reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}'. There is no skill for this yet: do NOT pass skill_id to web.navigate, so this session stays UNBOUND and each write parks its own per-action card. Sign in at ${ADMIN_TARGET} with web.fill_credential from the admin-portal credential set — never web.type. Then, for each of the two users, navigate to /admin/users/reset/ with the user and newpw query parameters so the form pre-fills, snapshot, and click the 'Confirm reset' button. Do not use web.type or web.evaluate at all: a typed value is withheld at capture and would make this session un-graduable."
+  # reset form pre-fills from the URL, so the only writes are the two
+  # 'Confirm reset' clicks — web.fill_credential is read tier, parks no
+  # card and never enters the trace, so a credential fill is not a write
+  # here even though it touches the page.
+  #
+  # The prompt must NOT ask the model to click 'Sign in', and that is not
+  # stylistic. The target's login page carries a legacy-SSO auto-login timer
+  # that fires within 100ms of BOTH credential fields holding a value: it
+  # hides the form and navigates to /admin/users/. So a click on that button
+  # after two web.fill_credential calls cannot land — the dev-k8s live check
+  # of this gate failed with exactly that, `ElementHandle.click: Element is
+  # not attached to the DOM`, on the first write of the session. The model
+  # recovered (snapshot, re-navigate) and completed both resets, but the
+  # failed write stayed in the trace with no observed origin, and R-4
+  # refuses to graduate a step whose landing is unverified — correctly, since
+  # fabricating an origin would corroborate a mutation that never happened
+  # and dropping it would graduate a flow the operator never approved.
+  #
+  # Both sibling demos already leave that click out — password-reset and
+  # adhoc-password-reset were each reconciled to gate on 'Confirm reset' with
+  # the login kept read-tier — so this prompt is catching up to a posture the
+  # repo already holds, not inventing one. It costs more here than there: the
+  # siblings assert a signature, which a failed write still carries, and
+  # neither reads the authoring trace, so a click that missed would pass them
+  # silently, while act 2 refuses the whole session over it. Act 1's prompt
+  # therefore names the mechanism rather than leaving act 2's refusal — which
+  # reads as "nothing proves the mutation landed on the declared target" — to
+  # be mistaken for a problem with the target declaration.
+  AUTHOR_MESSAGE="Working ad hoc in the legacy admin panel, reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}'. There is no skill for this yet: do NOT pass skill_id to web.navigate, so this session stays UNBOUND and each write parks its own per-action card. Navigate to ${ADMIN_TARGET} and fill BOTH admin credentials with web.fill_credential from the admin-portal credential set — never web.type. Do NOT click the 'Sign in' button: that page's legacy-SSO auto-login submits itself as soon as both fields are filled and replaces the form, so the click would land on a detached element and fail, and a failed write makes this session un-graduable. After the credentials are in, let the page redirect to the user list on its own. Then, for each of the two users, navigate to /admin/users/reset/ with the user and newpw query parameters so the form pre-fills, snapshot, and click the 'Confirm reset' button. Do not use web.type or web.evaluate at all: a typed value is withheld at capture and would make this session un-graduable."
 
   STREAM=$(curl -fsS --max-time 300 -N \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
@@ -792,9 +819,39 @@ assert expected in ids, \
 print(expected)") || fail "skills-hub did not ingest the merged draft under the expected id"
   echo "skills-hub ingested the merged draft as $GRADUATED_SKILL_ID"
 
-  http "$GATEWAY_URL/api/v1/skills/$GRADUATED_SKILL_ID" \
-    -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN"
-  [ "$HTTP_CODE" = "200" ] || fail "the graduated skill detail answered $HTTP_CODE: $HTTP_BODY"
+  # The detail call is retried on the gateway's transport codes only, and for a
+  # reason the inventory retry above does not cover: this is the one call the
+  # act makes to a service the act itself just restarted, and `rollout status`
+  # returning does not mean the Service endpoints have finished propagating.
+  # Measured on dev-k8s at 0.36.0, the FIRST detail request after `rollout
+  # status` answered 502 "skills hub unavailable" — the gateway's mapping of an
+  # httpx transport error, so nothing ever reached skills-hub — on 3 runs out
+  # of 3, and the second attempt answered 200 every time, even when the
+  # inventory call immediately before it had answered 200 on its first try. So
+  # the fragile shape is a single un-retried GET here, not the platform: 502 is
+  # the honest answer for a connection the gateway could not complete. A 404
+  # ("unknown skill id"), 401 or 403 is a real answer about THIS skill and
+  # still fails on the first attempt.
+  DETAIL_ATTEMPTS=0
+  while :; do
+    DETAIL_ATTEMPTS=$((DETAIL_ATTEMPTS+1))
+    http "$GATEWAY_URL/api/v1/skills/$GRADUATED_SKILL_ID" \
+      -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN"
+    if [ "$HTTP_CODE" = "200" ]; then
+      break
+    fi
+    case "$HTTP_CODE" in
+      502|503)
+        [ "$DETAIL_ATTEMPTS" -lt 20 ] \
+          || fail "the graduated skill detail still answered $HTTP_CODE after $DETAIL_ATTEMPTS attempts — a connection the gateway could not complete, not an answer about the skill; check 'kubectl get pods -l app=skills-hub' and the gateway log: $HTTP_BODY"
+        echo "  waiting for the skills-hub endpoints to settle (${DETAIL_ATTEMPTS}/20, HTTP $HTTP_CODE)"
+        sleep 3
+        ;;
+      *)
+        fail "the graduated skill detail answered $HTTP_CODE: $HTTP_BODY"
+        ;;
+    esac
+  done
   printf '%s' "$HTTP_BODY" | ADMIN_TARGET="$ADMIN_TARGET" EXPECT_STEPS="$WRITES" python3 -c "
 import json, os, sys
 skill = json.load(sys.stdin)
@@ -835,8 +892,13 @@ print('  kind=%s risk_class=%s steps=%d web_target=%s'
   [ -n "$REPLAY_SESSION" ] || fail "replay session create returned no session_id"
 
   # This time the skill exists, so web.navigate(skill_id=…) binds a flow and
-  # the same mutations ride one operator decision instead of one each.
-  REPLAY_MESSAGE="Use skill ${GRADUATED_SKILL_ID} to reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}' in the legacy admin panel. Bind the flow by passing skill_id to web.navigate. Sign in with web.fill_credential from the admin-portal credential set (never web.type), and pass the new password as the newpw URL parameter on each reset page so the form pre-fills."
+  # the same mutations ride one operator decision instead of one each. The
+  # no-sign-in-click instruction carries over from act 1 for the same reason,
+  # and here it is worth twice as much: act 4 asserts that every write-tier
+  # execution under the single gate both succeeded and carries a signed
+  # receipt, and a click that fails on the auto-login's already-replaced form
+  # is a write the graduated flow never declared.
+  REPLAY_MESSAGE="Use skill ${GRADUATED_SKILL_ID} to reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}' in the legacy admin panel. Bind the flow by passing skill_id to web.navigate. Fill both admin credentials with web.fill_credential from the admin-portal credential set (never web.type) and do NOT click 'Sign in': that page's legacy-SSO auto-login submits itself once both fields are filled, so the click would fail on a detached element and is a write the flow you are replaying never declared. Then pass the new password as the newpw URL parameter on each reset page so the form pre-fills."
 
   REPLAY_STREAM=$(curl -fsS --max-time 300 -N \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
