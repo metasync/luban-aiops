@@ -698,6 +698,78 @@ class SecretQueryRedactionTests(unittest.TestCase):
         self.assertEqual(_redact_secret_query(url), url)
 
 
+class PostNavigateRedactionTests(unittest.TestCase):
+    """SPEC-049 R-5 past ``web.navigate``: the follow-on results mask too.
+
+    Navigate is only the *first* result carrying a secret-bearing URL. The
+    browser then sits on that URL while the runbook snapshots it, clicks
+    through it, and screenshots it, and each of those results re-serializes
+    ``entry.active_target.url`` into the persisted evidence frames. Redacting
+    navigate alone left ``?newpw=<plaintext>`` readable in the very next call's
+    result — the runbook's own promise ("the gateway redacts the ``newpw``
+    query parameter from every result, evidence frame, and audit record") was
+    false for everything after the navigation.
+    """
+
+    RESET_PATH = "/admin/users/reset/?user=alice@example.com&newpw=TempPass123!"
+
+    def setUp(self) -> None:
+        self.connector, self.browser = _make_connector()
+        self.registry = _registry(self.connector)
+        nav = _run(
+            self.registry.invoke(
+                "web.navigate", {"url": f"{ALLOWED_ORIGIN}{self.RESET_PATH}"}, IDENTITY
+            )
+        )
+        self.assertEqual(nav.status, "success")
+        entry = self.connector.pool.get("dev.operator")
+        entry.page.add_element(tag="BUTTON", text="Confirm reset")
+        # Refs are only minted by a snapshot (R-2/R-4 contract).
+        self.snapshot = _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
+        self.assertEqual(self.snapshot.status, "success")
+
+    def test_fixture_page_really_carries_the_plaintext_secret(self) -> None:
+        """Pin the fixture: every absence assertion below is vacuous unless the
+        plaintext is genuinely sitting in the live page URL to begin with."""
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIn("newpw=TempPass123!", entry.page.url)
+
+    def test_snapshot_masks_url_and_snapshot_text(self) -> None:
+        self.assertNotIn("TempPass123!", self.snapshot.data["url"])
+        self.assertIn("newpw=***", self.snapshot.data["url"])
+        self.assertIn("user=alice@example.com", self.snapshot.data["url"])
+        # The header line inside the snapshot text is the same URL; masking
+        # ``data["url"]`` while leaving the text raw would keep the secret
+        # readable one field over in the very same result.
+        self.assertNotIn("TempPass123!", self.snapshot.data["snapshot"])
+        self.assertIn("newpw=***", self.snapshot.data["snapshot"])
+
+    def test_write_interaction_result_masks_secret(self) -> None:
+        """The reported leak: ``_step_result``, shared by ``web.click`` /
+        ``web.type`` / ``web.select`` / ``web.upload_file`` /
+        ``web.fill_credential``."""
+        result = _run(self.registry.invoke("web.click", {"ref": 1}, IDENTITY))
+        self.assertEqual(result.status, "success")
+        self.assertNotIn("TempPass123!", result.data["url"])
+        self.assertIn("newpw=***", result.data["url"])
+        self.assertIn("user=alice@example.com", result.data["url"])
+        # The interaction still landed on the real page with the real value.
+        entry = self.connector.pool.get("dev.operator")
+        self.assertIn("newpw=TempPass123!", entry.page.url)
+        self.assertEqual(entry.page.elements[0].clicks, 1)
+
+    def test_press_key_result_masks_secret(self) -> None:
+        """``web.press_key`` builds its own data dict rather than calling
+        ``_step_result``, so it needs its own masking."""
+        result = _run(
+            self.registry.invoke("web.press_key", {"key": "Enter"}, IDENTITY)
+        )
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.data["key"], "Enter")
+        self.assertNotIn("TempPass123!", result.data["url"])
+        self.assertIn("newpw=***", result.data["url"])
+
+
 # --- FlowState serialization (SPEC-051 R-6) ---------------------------------
 
 

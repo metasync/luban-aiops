@@ -229,6 +229,25 @@ def _redact_secret_query(url: str) -> str:
     ))
 
 
+def _evidence_url(entry: BrowserSessionEntry) -> str:
+    """The URL to report for a result: the live frame's, secret values masked.
+
+    Every browser result reports ``entry.active_target.url`` — the frame the
+    call actually landed on, not the top-level page, so evidence matches a
+    frame-switched session (SPEC-050 R-9). That URL is also where a secret
+    lands when a target carries one in its query string (the password-reset
+    demo's ``?newpw=...``), and the reported value is persisted into results,
+    evidence frames, and the audit trail, so it goes through
+    ``_redact_secret_query`` first (SPEC-049 R-5).
+
+    Masking here is what makes the navigate-only redaction hold: navigating to
+    a secret-bearing URL is followed by snapshots, clicks, and screenshots on
+    that same URL, and each of those results re-serializes it. The page keeps
+    the real value — only the reported copy is masked.
+    """
+    return _redact_secret_query(entry.active_target.url)
+
+
 def _denied(tool_name: str, code: str, message: str, risk_level: str) -> ToolResult:
     """Denial envelope with a connector-specific code (R-2/R-4)."""
     return ToolResult(
@@ -822,7 +841,7 @@ class WebSnapshotTool(BaseTool):
             tool_name="web.snapshot",
             status="success",
             data={
-                "url": entry.active_target.url,
+                "url": _evidence_url(entry),
                 "title": await entry.active_target.title(),
                 "elements": count,
                 "snapshot": snapshot_text,
@@ -841,7 +860,10 @@ async def _build_snapshot(entry: BrowserSessionEntry) -> tuple[str, int]:
     elements = await target.query_selector_all(INTERACTIVE_SELECTOR)
     elements = elements[:MAX_SNAPSHOT_ELEMENTS]
     entry.refs = elements
-    lines = [f"URL: {target.url}", ""]
+    # The header URL rides into ``data["snapshot"]`` alongside ``data["url"]``,
+    # so it is masked too — masking one and not the other would leave the
+    # secret readable in the same result (SPEC-049 R-5).
+    lines = [f"URL: {_redact_secret_query(target.url)}", ""]
     for index, element in enumerate(elements, start=1):
         info = await element.evaluate(_ELEMENT_INSPECT_JS)
         if not isinstance(info, dict):
@@ -927,7 +949,7 @@ class WebScreenshotTool(BaseTool):
             status="success",
             data={
                 "title": await entry.active_target.title(),
-                "url": entry.active_target.url,
+                "url": _evidence_url(entry),
                 "format": "jpeg",
                 "bytes": len(raw),
                 "screenshot": base64.b64encode(raw).decode("ascii"),
@@ -1017,8 +1039,8 @@ class _WebInteractionTool(BaseTool):
         data = {
             # Report the frame the interaction actually landed on, not the
             # top-level page, so evidence matches a frame-switched session
-            # (SPEC-050 R-9).
-            "url": entry.active_target.url,
+            # (SPEC-050 R-9), with secret query values masked (SPEC-049 R-5).
+            "url": _evidence_url(entry),
         }
         flow = entry.flow
         if flow is not None:
@@ -1472,7 +1494,7 @@ class WebPressKeyTool(BaseTool):
                 duration_ms=duration_ms,
             )
         duration_ms = int((time.perf_counter() - start) * 1000)
-        data = {"url": target.url, "key": key}
+        data = {"url": _redact_secret_query(target.url), "key": key}
         flow = entry.flow
         if flow is not None:
             # Bound flow: account the step (SPEC-051). An unbound ad-hoc
@@ -1918,7 +1940,7 @@ class WebHoverTool(BaseTool):
             tool_name=self.tool_name,
             status="success",
             data={
-                "url": entry.active_target.url,
+                "url": _evidence_url(entry),
                 "tag": tag,
             },
             evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
@@ -2125,7 +2147,7 @@ class WebEvaluateTool(BaseTool):
             tool_name=self.tool_name,
             status="success",
             data={
-                "url": entry.active_target.url,
+                "url": _evidence_url(entry),
                 "result": raw,
                 "bytes": len(serialized),
             },
@@ -2214,7 +2236,7 @@ class WebScrollTool(BaseTool):
             tool_name=self.tool_name,
             status="success",
             data={
-                "url": entry.active_target.url,
+                "url": _evidence_url(entry),
                 "delta_x": delta_x,
                 "delta_y": delta_y,
             },
@@ -2331,7 +2353,7 @@ class WebSwitchFrameTool(BaseTool):
             tool_name=self.tool_name,
             status="success",
             data={
-                "url": frame_url,
+                "url": _redact_secret_query(frame_url),
                 "frame_depth": len(entry.frame_stack),
             },
             evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),
