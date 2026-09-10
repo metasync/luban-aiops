@@ -52,6 +52,10 @@
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
+- [oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
+- [storage.ts](file://products/operator-portal/web-ui/app/src/auth/storage.ts)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
+- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
 - [redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [platform-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/platform-gateway-deployment.yaml)
@@ -66,8 +70,6 @@
 - [identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
 - [web-ui-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-deployment.yaml)
 - [web-ui-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-service.yaml)
-- [web-ui-httproute.yaml](file://shared/platform-ops/gitops/dev-k8s/base/operator-portal/web-ui-httproute.yaml)
-- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [execution-runtime-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-deployment.yaml)
 - [execution-runtime-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/execution-runtime/execution-runtime-service.yaml)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml)
@@ -83,12 +85,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced browser connector security model with NetworkPolicy-based defense-in-depth to prevent cross-pod CDP access
-- Updated CDP port binding to loopback address (127.0.0.1:9222) for improved isolation
-- Improved origin validation for read-tier captures with live origin re-checking before snapshots and screenshots
-- Added comprehensive NetworkPolicy configuration to deny ingress on CDP port from other pods
-- Enhanced browser session security with flow deviation guards and origin mismatch detection
-- Updated deployment topology to reflect enhanced security boundaries and network policies
+- Enhanced OIDC authentication flow documentation to clarify hostname limitations in dev-k8s environment
+- Added explicit explanation of browser PKCE storage per-origin constraints affecting port-forwarding scenarios
+- Updated canonical hostname strategy section with detailed technical rationale
+- Clarified that while wildcard hostname and port-forwarded localhost serve portal assets and proxy /api/ calls, neither can complete browser-based sign-in flows due to OIDC_REDIRECT_URI constraints
+- Enhanced troubleshooting guide with specific guidance for hostname-related authentication issues
 
 ## Table of Contents
 1. [Introduction](#introduction)

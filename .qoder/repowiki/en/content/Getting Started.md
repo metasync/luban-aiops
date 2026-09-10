@@ -18,6 +18,12 @@
 - [products/operator-portal/web-ui/app/src/App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts)
 - [products/operator-portal/web-ui/app/src/chat/ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
+- [products/operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
+- [products/platform-gateway/src/platform_gateway/api/routes/auth.py](file://products/platform-gateway/src/platform_gateway/api/routes/auth.py)
+- [products/platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [products/identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
+- [products/identity-broker/src/identity_service/core/config.py](file://products/identity-broker/src/identity_service/core/config.py)
+- [products/identity-broker/src/identity_service/services/identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [shared/platform-ops/gitops/dev-k8s/README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
@@ -39,10 +45,9 @@
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
 - [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
 - [shared/platform-ops/gitops/dev-k8s/deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
-- [shared/platform-ops/gitops/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/reconcile-portal-oidC-client.sh)
+- [shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
 - [products/operator-portal/web-ui/app/src/auth/storage.ts](file://products/operator-portal/web-ui/app/src/auth/storage.ts)
-- [products/operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
 - [shared/shared-contracts/scripts/validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
 - [products/audit-service/src/audit_service/metadata.py](file://products/audit-service/src/audit_service/metadata.py)
 - [products/incident-service/src/incident_service/metadata.py](file://products/incident-service/src/incident_service/metadata.py)
@@ -65,7 +70,8 @@
 - Updated portal UI improvements including bounded pane enhancements and digest data tab renaming
 - Added comprehensive coverage of v0.25.1/v0.25.2 patch releases focusing on operator portal polish
 - Updated troubleshooting section with new incident report creation workflows and document type support
-- Enhanced operations document repository section with incident report capabilities and dual-action gates
+- **Enhanced**: Added detailed technical explanation of port-forwarding limitations for OIDC sign-in and why `/api/v1/auth/login` takes no redirect override
+- **New**: Comprehensive guidance on hostname configuration requirements for browser-based authentication flows
 
 ## Table of Contents
 1. Introduction
@@ -87,6 +93,8 @@ This guide helps you get up and running with the Luban AIOps Platform for local 
 
 **Updated** This document reflects the coordinated 0.25.2 release with synchronized versions across all platform components, plus enhanced incident report document type capabilities and operator portal polish. The platform now includes comprehensive operations document repository with shift summary and incident report types, featuring dual-action gates and role-based access controls.
 
+**Important**: The platform uses a canonical hostname (`https://aiops.luban.metasync.cc`) for all browser-based authentication flows. Port-forwarding is supported for development but has specific limitations for OIDC sign-in due to per-origin storage constraints and fixed callback URIs.
+
 ## Prerequisites
 Ensure your environment meets the following requirements before proceeding:
 - Python 3.x (for local development and building services)
@@ -103,6 +111,7 @@ Notes:
 - **Updated**: Version 0.25.2 introduces enhanced incident report document type capabilities requiring proper role assignments for document creation and access.
 - **Updated**: The operator portal now includes bounded pane enhancements with pinned chrome and improved digest rendering.
 - **New**: Incident report document type requires both `documents:create` and `incident:read` actions for creation.
+- **Critical**: For browser-based authentication, ensure DNS resolution works for the canonical hostname `https://aiops.luban.metasync.cc` as this is required for OIDC callbacks.
 
 **Section sources**
 - [products/operator-portal/web-ui/app/package.json:6-8](file://products/operator-portal/web-ui/app/package.json#L6-L8)
@@ -201,12 +210,15 @@ Follow these steps to run the platform locally using Kustomize overlays:
 
 ### Access and Testing
 8. Access the Operator Portal
-   - Open http://localhost:5173 in your browser for the React-based UI
+   - **For API testing only**: Open http://localhost:5173 in your browser for the React-based UI via port-forwarding
+   - **For full authentication**: Access via the deployed service at `https://aiops.luban.metasync.cc` after setting up proper DNS/ingress
    - For production builds, access via the deployed service after port-forwarding
 
 9. Make your first API call
    - Use the tool-gateway endpoints to send a chat request and receive a response.
    - Validate health endpoints to ensure services are ready.
+
+**Important Authentication Note**: While port-forwarding allows you to test APIs and view the UI, **OIDC sign-in will not work from port-forwarded tabs**. The login process always redirects to the canonical hostname `https://aiops.luban.metasync.cc/callback`, so you must use the canonical hostname for successful authentication.
 
 Key scripts and overlays:
 - Select runtime profile: shared/platform-ops/gitops/select-runtime-profile.sh
@@ -230,6 +242,7 @@ For production, use the same Kustomize overlays with appropriate overlays and se
    - Provision a managed Kubernetes cluster and configure kubectl.
    - Set up persistent storage for Redis and any stateful components.
    - Configure ingress and TLS termination at the cluster edge.
+   - **Critical**: Ensure DNS resolution works for `https://aiops.luban.metasync.cc` as this is required for OIDC authentication.
 
 2. Select and configure runtime profile
    - Choose the desired runtime profile and populate secrets securely (e.g., via sealed secrets or external secret managers).
@@ -289,6 +302,12 @@ Environment variables and secrets are managed through Kustomize overlays and scr
   - Per-origin storage constraints require consistent hostname usage for browser flows
   - OIDC redirect URIs configured in identity-broker runtime configuration
 
+- **Critical**: OIDC Authentication Flow
+  - The `/api/v1/auth/login` endpoint **never accepts redirect URI overrides** - it always uses the configured `OIDC_REDIRECT_URI`
+  - Browser PKCE pending requests are stored per-origin, preventing cross-origin authentication flows
+  - Port-forwarded tabs cannot complete sign-in because the callback always goes to the canonical hostname
+  - The `OIDC_EXTRA_REDIRECT_URIS` configuration allows multiple hostnames for reachability, but sign-in always selects the primary redirect URI
+
 - Example references
   - OpenAI runtime configmap: shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml
   - OpenAI runtime secrets example: shared/platform-ops/gitops/runtime-profiles/openai/runtime-secrets.example.env
@@ -303,6 +322,7 @@ Best practices:
 - **New**: Test incident report document type functionality by creating documents with proper dual-action permissions.
 - **New**: Configure bounded pane behavior for optimal document viewing experience.
 - **Updated**: Use the canonical hostname (`aiops.luban.metasync.cc`) for all browser-based authentication flows to ensure proper OIDC callback handling.
+- **Critical**: Ensure DNS resolution works for the canonical hostname before attempting browser-based authentication.
 
 **Section sources**
 - [shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/openai/configmap.yaml)
@@ -312,6 +332,8 @@ Best practices:
 - [products/operator-portal/web-ui/app/vite.config.ts:6-18](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L18)
 - [products/operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
+- [products/identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
+- [shared/platform-ops/gitops/dev-k8s/README.md:182-194](file://shared/platform-ops/gitops/dev-k8s/README.md#L182-L194)
 
 ## Coordinated Version Management
 Version 0.25.2 introduces enhanced coordinated versioning that ensures all platform components maintain synchronized versions:
@@ -366,7 +388,8 @@ After deployment, validate the platform and make your first API call:
    - Ensure all pods are Running and Services are Ready.
 
 2. Operator Portal
-   - Access the web UI via port-forwarding or ingress.
+   - **For API testing**: Access via port-forwarding at `http://localhost:5173` (no authentication)
+   - **For full authentication**: Access via `https://aiops.luban.metasync.cc` (requires DNS resolution)
    - **Updated**: The React-based portal displays the platform version in the sidebar and provides enhanced user experience with Ant Design components.
    - **New**: Test incident report document creation by selecting incidents and generating reports with proper permissions.
    - Confirm basic navigation and service status displays.
@@ -390,6 +413,8 @@ After deployment, validate the platform and make your first API call:
    - **New**: Validate digest data tab rendering and house layout rules
 
 Use curl or an HTTP client to test endpoints. Refer to service READMEs for endpoint details and examples.
+
+**Authentication Testing Note**: To test OIDC authentication, you must use the canonical hostname `https://aiops.luban.metasync.cc`. Port-forwarding will not work for sign-in due to the fixed redirect URI behavior.
 
 **Section sources**
 - [products/tool-gateway/README.md](file://products/tool-gateway/README.md)
@@ -474,11 +499,13 @@ Common issues and resolutions:
   - Ensure all SERVICE_VERSION values match the root VERSION file
   - Verify pyproject.toml files have consistent version declarations
 
-- **Updated**: Hostname and OIDC Authentication Issues
-  - **Canonical vs Fallback Hostname**: Always use `https://aiops.luban.metasync.cc` for browser authentication flows. The OIDC callback is pinned to this canonical hostname.
-  - **Per-Origin Storage Constraints**: Browser session storage is per-origin, so sign-in started on `aiops.luban.k8s.orb.local` cannot round-trip back to it due to PKCE pending request storage isolation.
-  - **OIDC Callback Behavior**: The identity broker always starts login flows with the primary `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`). Extra URIs like `https://aiops.luban.k8s.orb.local/callback` are registered for reachability but never selected as callbacks.
-  - **Resolution**: If login fails with redirect URI mismatch, reconcile the Keycloak client using `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`.
+- **Critical**: OIDC Authentication and Port-Forwarding Issues
+  - **Root Cause**: The `/api/v1/auth/login` endpoint **never accepts redirect URI overrides** - it always uses the configured `OIDC_REDIRECT_URI` from identity-broker configuration
+  - **Per-Origin Storage**: Browser PKCE pending requests are stored per-origin, preventing cross-origin authentication flows
+  - **Port-Forwarding Limitation**: Sign-in started on `http://localhost:18080` cannot complete because the authorization code callback goes to `https://aiops.luban.metasync.cc/callback`
+  - **Canonical Hostname Required**: Always use `https://aiops.luban.metasync.cc` for browser authentication flows
+  - **Resolution**: If login fails with redirect URI mismatch, reconcile the Keycloak client using `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
+  - **Development Workaround**: Use port-forwarding for API testing only; use the canonical hostname for actual sign-in
 
 - **New**: Operations document repository issues
   - Verify users have appropriate roles (platform-admin, approver, or operator) for document access
@@ -528,6 +555,7 @@ Useful commands:
 - **New**: Test incident report creation through portal interface with proper permissions
 - **New**: Verify bounded pane behavior in document viewer
 - **Updated**: Reconcile OIDC client: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
+- **Critical**: For authentication issues, verify DNS resolution for `https://aiops.luban.metasync.cc`
 
 **Section sources**
 - [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -545,6 +573,8 @@ Useful commands:
 - [products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts:51-80](file://products/operator-portal/web-ui/app/src/chat/usePendingDecisionPoll.ts#L51-L80)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
 - [products/operator-portal/web-ui/app/src/auth/storage.ts:1-63](file://products/operator-portal/web-ui/app/src/auth/storage.ts#L1-L63)
+- [products/identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
+- [shared/platform-ops/gitops/dev-k8s/README.md:182-194](file://shared/platform-ops/gitops/dev-k8s/README.md#L182-L194)
 
 ## Next Steps by Persona
 - Developers
@@ -556,6 +586,7 @@ Useful commands:
   - **New**: Implement and test incident report document type functionality with dual-action gates.
   - **New**: Develop custom document types extending the operations document repository substrate.
   - **Updated**: Understand hostname configuration requirements for browser-based authentication flows.
+  - **Critical**: Remember that port-forwarding is for API testing only; use canonical hostname for authentication development.
 
 - Operators
   - Manage Kustomize overlays and secrets lifecycle.
@@ -566,6 +597,7 @@ Useful commands:
   - **New**: Utilize incident report documents for structured incident documentation and team collaboration.
   - **New**: Configure proper roles and permissions for operations document repository access with dual-action gates.
   - **Updated**: Ensure canonical hostname configuration for reliable OIDC authentication flows.
+  - **Critical**: Ensure DNS resolution works for `https://aiops.luban.metasync.cc` in production environments.
 
 - Security Teams
   - Review RBAC rules and policy definitions.
@@ -576,6 +608,7 @@ Useful commands:
   - **New**: Assess the security implications of incident report document type with dual-action gates.
   - **New**: Verify operations document repository access controls and audit trails meet compliance requirements.
   - **Updated**: Validate OIDC callback security and per-origin storage constraints for browser authentication.
+  - **Critical**: Review OIDC redirect URI configuration to prevent unauthorized callback destinations.
 
 Additional resources:
 - Repository README for high-level overview and links
@@ -586,6 +619,7 @@ Additional resources:
 - **New**: SPEC-043 documentation for understanding incident report document type implementation
 - **New**: Portal user guide for detailed operations document repository workflows
 - **Updated**: Identity broker configuration reference for hostname and OIDC settings
+- **Critical**: Development README for understanding port-forwarding limitations and authentication flow
 
 **Section sources**
 - [README.md](file://README.md)
@@ -596,6 +630,7 @@ Additional resources:
 - [docs/agentic-aiops-platform/release-notes/README.md:10-40](file://docs/agentic-aiops-platform/release-notes/README.md#L10-L40)
 - [docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md:1-21](file://docs/agentic-aiops-platform/release-notes/2026-08-29-incident-report-document-type.md#L1-L21)
 - [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:6-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L6-L11)
+- [shared/platform-ops/gitops/dev-k8s/README.md:182-194](file://shared/platform-ops/gitops/dev-k8s/README.md#L182-L194)
 
 ## Architecture Overview
 The platform consists of several microservices orchestrated via Kubernetes and exposed through an API gateway. Core components include:
@@ -622,6 +657,7 @@ ER["Execution Runtime"]
 RDS["Redis"]
 K8S["Kubernetes"]
 NGINX["Nginx (Static Assets)"]
+KC["Keycloak (OIDC Provider)"]
 Client --> GW
 Client --> OP
 GW --> IDB
@@ -632,6 +668,7 @@ GW --> ER
 OP --> NGINX
 NGINX --> GW
 AP --> RDS
+IDB --> KC
 IDB --> RDS
 AS --> RDS
 IS --> RDS
@@ -645,8 +682,10 @@ You now have the essential information to install, configure, and operate the Lu
 
 **Updated** The coordinated version management system in version 0.25.2 provides enhanced reliability and simplifies multi-component releases across the entire platform ecosystem, while the modernized frontend stack offers improved performance and developer experience. The addition of incident report document type capabilities addresses critical gaps identified during live validation, enabling operators to create structured incident documentation with dual-action gates and role-based access controls.
 
+**Critical Enhancement**: The platform's authentication system has been clarified with detailed technical explanations about port-forwarding limitations. The `/api/v1/auth/login` endpoint **never accepts redirect URI overrides** and always uses the configured `OIDC_REDIRECT_URI`, which prevents successful sign-in from port-forwarded tabs. This is by design to maintain security and consistency across different deployment scenarios. For browser-based authentication, always use the canonical hostname `https://aiops.luban.metasync.cc` as this is where the OIDC callback is pinned.
+
 **Updated** The enhanced hostname configuration guidance ensures reliable browser-based authentication flows by clearly distinguishing between the canonical hostname (`aiops.luban.metasync.cc`) used for OIDC callbacks and the fallback hostname (`aiops.luban.k8s.orb.local`) for general access. Understanding per-origin storage constraints and OIDC callback behavior is crucial for successful deployment and operation of the platform's authentication system.
 
 **Updated** The bounded pane enhancements in v0.25.1/v0.25.2 provide improved document viewing experience with pinned chrome for digest tabs and narrative headers, along with expand affordances for long content. The digest data tab renaming clarifies the purpose of typed digest rendering, and the house layout rules ensure consistent presentation of repeated records, objects, and identifiers.
 
-Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics.
+Use the provided scripts and overlays to manage deployments, secrets, and runtime profiles. For deeper exploration, consult the product READMEs and GitOps assets. If you encounter issues, refer to the troubleshooting guide and leverage Kubernetes diagnostics. Remember that port-forwarding is excellent for API testing and development, but use the canonical hostname for any browser-based authentication flows.
