@@ -66,7 +66,7 @@ In the operator portal:
 Type a natural language message in the chat composer, like:
 
 ```
-Reset the password for user alice to TempPass123! in the admin portal.
+Reset the password for user alice@example.com to TempPass123! in the admin portal.
 ```
 
 Notice you don't need to specify the skill name — the agent will find
@@ -107,24 +107,30 @@ The agent's final message should confirm the password was reset. You'll see:
 - The HITL approval record (signed receipt)
 - The final snapshot showing the success page
 
-### Verify in the Admin Portal
+### The Admin Portal URLs Are Not Verification
 
-The browser connector uses a headless browser that is separate from your
-regular browser. To verify the reset in your own browser, open one of
-these URLs (replace `alice@example.com` with the target user):
+The connector drives a headless browser separate from your own, and the sample
+admin panel is a **static mock with no server-side state** — every
+"confirmation" page renders its own query parameters back at you. These URLs
+therefore show a success banner for *any* value you pass, including a user who
+is not in the roster:
 
-**User management page with reset banner:**
 ```
 http://localhost:9090/admin/users/?reset=alice@example.com
-```
-
-**Confirmation page:**
-```
 http://localhost:9090/admin/users/reset/done/?user=alice@example.com
 ```
 
-These URLs use query parameters to display the reset status, since the
-headless browser and your regular browser don't share state.
+Open them to read the mock's output in your own browser, but do not treat them
+as evidence that the reset happened — they would say so regardless.
+
+**The real evidence is in the chat transcript:**
+
+- the post-click `web.snapshot`, whose `#reset-status` reads
+  `Password for alice@example.com has been reset successfully.` — emitted by the
+  target app's own submit handler, so it shows the approved click landed
+- the `web.screenshot` captured as visual evidence
+- the HITL approval record and its signed receipt (SPEC-037), stamped with
+  `flow` authority provenance (ADR-0010)
 
 ## What Just Happened
 

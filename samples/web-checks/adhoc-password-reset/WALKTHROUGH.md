@@ -111,13 +111,20 @@ and captures a screenshot.
 
 ## Step 6: Verify the Result
 
-The agent's final message confirms the reset. To see it in your own browser
-(the connector uses a separate headless browser):
+The agent's final message confirms the reset. The sample admin panel is a
+**static mock with no server-side state**, so these URLs only re-render their
+own query parameters back at you — they report success for *any* user, including
+one absent from the roster, and are not evidence that the reset happened:
 
 ```
 http://localhost:9090/admin/users/?reset=alice@example.com
 http://localhost:9090/admin/users/reset/done/?user=alice@example.com
 ```
+
+The real evidence is in the chat transcript: the post-click `web.snapshot`,
+whose `#reset-status` reads `Password for alice@example.com has been reset
+successfully.` — emitted by the target app's own submit handler, so it shows the
+approved click landed — plus the `web.screenshot` captured beside it.
 
 In the session detail (or the approvals inbox), the durable confirmation record
 carries the **same** `approval_kind: "action"`, the persisted top-line `message`
