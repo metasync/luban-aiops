@@ -1564,6 +1564,149 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(legacy.info["value"], PASSWORD_LITERAL)
 
 
+# --- Session serialization ---------------------------------------------------
+
+
+class SessionSerializationTests(unittest.TestCase):
+    """One chat session's page is driven by one web.* call at a time.
+
+    The kernel runs every tool call a model emits in a turn concurrently
+    (agentscope gathers the batch), and one chat session owns exactly one
+    browser page. Playwright's ``fill()`` focuses its element and then
+    inserts text into whatever holds focus, so two concurrent fills race:
+    one lands in the wrong field or is lost entirely, and both still report
+    ``success``. The two tests below are a pair — the second proves the
+    first has teeth by driving the same two calls past the guard.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        json.dump(
+            {"inventory-app": {"username": "svc-check", "password": PASSWORD_LITERAL}},
+            self._tmp,
+        )
+        self._tmp.close()
+        self.connector, self.browser = _make_connector(
+            credential_sets_path=self._tmp.name
+        )
+        self.registry = _registry(self.connector)
+        _stub_skill(self.connector, _web_skill("write"))
+        _run(
+            self.registry.invoke(
+                "web.navigate",
+                {
+                    "url": f"{ALLOWED_ORIGIN}/login",
+                    "skill_id": "team-a/web/inventoryhealth",
+                },
+                IDENTITY,
+            )
+        )
+        self.page = self.connector.pool.get("dev.operator").page
+        self.username_field = self.page.add_element(
+            tag="INPUT", type="text", name="username"
+        )
+        self.password_field = self.page.add_element(
+            tag="INPUT", type="password", name="password"
+        )
+        snap = _run(self.registry.invoke("web.snapshot", {}, IDENTITY))
+        self.assertEqual(snap.status, "success")  # refs 1 and 2 minted
+
+        # Overlap detector: the sleep(0) is the window a real fill exposes
+        # between focusing its element and inserting the text.
+        self.in_flight = 0
+        self.max_in_flight = 0
+        for handle in (self.username_field, self.password_field):
+            handle.fill = self._tracked_fill(handle)
+
+    def tearDown(self) -> None:
+        os.unlink(self._tmp.name)
+
+    def _tracked_fill(self, handle: FakeElementHandle):
+        async def fill(value: str) -> None:
+            self.in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+            try:
+                await asyncio.sleep(0)
+                handle.fills.append(value)
+                handle.info["value"] = value
+            finally:
+                self.in_flight -= 1
+
+        return fill
+
+    async def _two_fills(self, invoke) -> list:
+        return list(
+            await asyncio.gather(
+                invoke(
+                    "web.fill_credential",
+                    {
+                        "ref": 1,
+                        "credential_set": "inventory-app",
+                        "field": "username",
+                    },
+                    IDENTITY,
+                ),
+                invoke(
+                    "web.fill_credential",
+                    {
+                        "ref": 2,
+                        "credential_set": "inventory-app",
+                        "field": "password",
+                    },
+                    IDENTITY,
+                ),
+            )
+        )
+
+    def test_concurrent_fills_are_serialized(self) -> None:
+        results = _run(self._two_fills(self.registry.invoke))
+        self.assertEqual([r.status for r in results], ["success", "success"])
+        self.assertEqual(
+            self.max_in_flight, 1,
+            "two web.* calls for one session overlapped on its page",
+        )
+        # Each value landed in the field it was aimed at.
+        self.assertEqual(self.username_field.info.get("value"), "svc-check")
+        self.assertEqual(self.password_field.info.get("value"), PASSWORD_LITERAL)
+
+    def test_unguarded_calls_would_overlap(self) -> None:
+        # Teeth check: driving the same two calls past the guard (straight to
+        # the wrapped tool) reproduces the race the lock removes.
+        def _bypass(name: str, parameters: dict, identity: dict):
+            tool = self.registry.get(name)
+            assert tool is not None
+            return tool._inner.execute(parameters, identity)
+
+        results = _run(self._two_fills(_bypass))
+        self.assertEqual([r.status for r in results], ["success", "success"])
+        self.assertEqual(self.max_in_flight, 2)
+
+    def test_refused_call_leaves_no_lock_behind(self) -> None:
+        # The guard takes a lock by key without resolving a session, so a key
+        # whose only call was refused must not keep its lock for good: the
+        # next sweep prunes it, while a live session's lock survives.
+        pool = self.connector.pool
+        stranger = {
+            "sub": "dev.stranger",
+            "username": "dev.stranger",
+            "roles": ["operator"],
+        }
+        denied = _run(
+            self.registry.invoke(
+                "web.navigate", {"url": "https://evil.example/login"}, stranger
+            )
+        )
+        self.assertEqual(denied.error["code"], "BROWSER_ORIGIN_NOT_ALLOWED")
+        self.assertIn("dev.stranger", pool._interaction_locks)
+        pool.sweep_expired()
+        self.assertNotIn("dev.stranger", pool._interaction_locks)
+        self.assertIn("dev.operator", pool._interaction_locks)
+
+
 # --- Screenshots ------------------------------------------------------------
 
 

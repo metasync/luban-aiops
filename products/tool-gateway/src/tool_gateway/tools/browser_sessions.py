@@ -18,9 +18,12 @@ connector falls back to the verified subject (see ``browser_connector``).
 Sessions idle-expire after ``GATEWAY_BROWSER_SESSION_TTL`` and the pool is
 capped at ``GATEWAY_BROWSER_MAX_SESSIONS`` with oldest-idle eviction; both
 paths close the browser context so the sidecar's memory budget stays
-bounded. The pool never launches a browser binary itself — with the flag
-off it is never constructed, and with the sidecar absent every operation
-fails closed with a structured error instead of an exception.
+bounded. Calls on one session are serialized by a per-key lock
+(``interaction_lock``), because the kernel dispatches every tool call a
+model emits in a turn concurrently and one session owns one page. The pool
+never launches a browser binary itself — with the flag off it is never
+constructed, and with the sidecar absent every operation fails closed with a
+structured error instead of an exception.
 """
 
 from __future__ import annotations
@@ -190,6 +193,47 @@ class BrowserSessionPool:
         # Serializes first-use context creation (see get_or_create) so two
         # concurrent callers for the same key can't each build a context.
         self._create_lock = asyncio.Lock()
+        # Per-key interaction locks (see interaction_lock), keyed apart from
+        # the entries so a caller can serialize *before* its context exists.
+        # Pruned by sweep_expired, which every lookup runs.
+        self._interaction_locks: dict[str, asyncio.Lock] = {}
+
+    def interaction_lock(self, session_key: str) -> asyncio.Lock:
+        """The lock serializing interactions for one session key.
+
+        Deliberately independent of the entry. A session owns one page, so
+        two calls dispatched concurrently for one key must not both drive it
+        (see ``_SessionSerializedTool``), and the *first* pair of calls for a
+        key needs the same guarantee the later ones do. Taking the lock by
+        key also lets the caller serialize without resolving a session — a
+        call that is refused before it would create a context (an
+        off-allowlist ``web.navigate``) must not create one merely to line up
+        behind a lock.
+
+        Callers must acquire the returned lock without awaiting anything in
+        between, so no other task can observe it unheld and prune it.
+        """
+        lock = self._interaction_locks.get(session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._interaction_locks[session_key] = lock
+        return lock
+
+    def _prune_interaction_locks(self) -> None:
+        """Drop locks for keys that never became (or no longer are) sessions.
+
+        Runs from sweep_expired, i.e. on every session lookup, so the map is
+        bounded by the live sessions plus whatever keys were touched since
+        the last sweep. A held lock is never pruned — its holder has no
+        session yet (a first navigate in flight) or is mid-interaction.
+        """
+        stale = [
+            key
+            for key, lock in self._interaction_locks.items()
+            if key not in self._sessions and not lock.locked()
+        ]
+        for key in stale:
+            del self._interaction_locks[key]
 
     # --- Connection lifecycle ---
 
@@ -233,6 +277,7 @@ class BrowserSessionPool:
         for entry in list(self._sessions.values()):
             await _close_quietly(entry.context)
         self._sessions.clear()
+        self._interaction_locks.clear()
         await _close_quietly(self._browser)
         self._browser = None
         await self._teardown_playwright()
@@ -309,6 +354,7 @@ class BrowserSessionPool:
         for key in expired:
             entry = self._sessions.pop(key)
             _schedule_close(entry.context)
+        self._prune_interaction_locks()
         if expired:
             LOGGER.info("browser sessions expired: %s", ", ".join(sorted(expired)))
         return expired

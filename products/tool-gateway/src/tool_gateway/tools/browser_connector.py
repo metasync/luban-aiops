@@ -258,6 +258,52 @@ def _denied(tool_name: str, code: str, message: str, risk_level: str) -> ToolRes
     )
 
 
+class _SessionSerializedTool(BaseTool):
+    """Runs one browser tool at a time per chat session.
+
+    A model may emit several ``web.*`` calls in a single turn and the
+    kernel dispatches them concurrently, but one chat session owns exactly
+    one browser context and one active page. Playwright interactions are
+    not mutually isolated on a shared page: ``fill()`` focuses its element
+    and then inserts text into whatever holds focus at that moment, so two
+    concurrent ``web.fill_credential`` calls can both land in the same
+    field — the loser reports ``success`` with its value silently absent.
+    The same shared state covers ``refs``/``frame_stack`` (a snapshot or
+    navigation invalidates refs another in-flight call is about to use) and
+    ``flow.steps_used`` (concurrent increments lose budget accounting).
+
+    So each call takes the session key's ``interaction_lock`` for its whole
+    duration. The lock is applied here, at the registration boundary, rather
+    than at the fifteen call sites: a tool added later inherits the guarantee
+    instead of having to remember to opt in.
+
+    The lock is looked up by key rather than by resolving a session, and no
+    failure is intercepted here: a call with no identity, an unreachable
+    sidecar, or an off-allowlist URL reaches the wrapped tool untouched and
+    still produces its own ``BROWSER_NO_IDENTITY`` / ``BROWSER_NOT_READY`` /
+    ``BROWSER_ORIGIN_NOT_ALLOWED`` envelope — so the error surface is
+    unchanged and a refused call still creates no browser context.
+    """
+
+    def __init__(self, inner: BaseTool, connector: BrowserConnector) -> None:
+        self._inner = inner
+        self._connector = connector
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return self._inner.definition
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        session_key = self._connector._session_key(identity)
+        if not session_key:
+            return await self._inner.execute(parameters, identity)
+        # No await between the lookup and the acquire: the pool prunes locks
+        # that are neither held nor backed by a session, and an unheld lock
+        # observed in between would let a second caller take a fresh one.
+        async with self._connector.pool.interaction_lock(session_key):
+            return await self._inner.execute(parameters, identity)
+
+
 class BrowserConnector:
     """Registers the bounded web.* tool surface behind the browser flag."""
 
@@ -312,27 +358,36 @@ class BrowserConnector:
         SPEC-050 adds nine more tools (web.select, web.press_key,
         web.upload_file, web.evaluate as write; web.extract, web.wait_for,
         web.hover, web.scroll, web.switch_frame as read).
+
+        Each one is registered behind ``_SessionSerializedTool``, so a chat
+        session's single page is driven by one call at a time even when the
+        model emits several in one turn.
         """
-        # Original six (SPEC-049).
-        registry.register(WebNavigateTool(self))
-        registry.register(WebSnapshotTool(self))
-        registry.register(WebScreenshotTool(self))
-        registry.register(WebFillCredentialTool(self))
-        registry.register(WebClickTool(self))
-        registry.register(WebTypeTool(self))
-        # SPEC-050: write-tier interaction tools. web.evaluate is write-tier
-        # because arbitrary JS can mutate the DOM and read back masked
-        # secrets, so it inherits the HITL gate (SPEC-050 R-6).
-        registry.register(WebSelectTool(self))
-        registry.register(WebPressKeyTool(self))
-        registry.register(WebUploadFileTool(self))
-        registry.register(WebEvaluateTool(self))
-        # SPEC-050: read-tier observation tools.
-        registry.register(WebExtractTool(self))
-        registry.register(WebWaitForTool(self))
-        registry.register(WebHoverTool(self))
-        registry.register(WebScrollTool(self))
-        registry.register(WebSwitchFrameTool(self))
+        tools: list[BaseTool] = [
+            # Original six (SPEC-049).
+            WebNavigateTool(self),
+            WebSnapshotTool(self),
+            WebScreenshotTool(self),
+            WebFillCredentialTool(self),
+            WebClickTool(self),
+            WebTypeTool(self),
+            # SPEC-050: write-tier interaction tools. web.evaluate is
+            # write-tier because arbitrary JS can mutate the DOM and read
+            # back masked secrets, so it inherits the HITL gate (SPEC-050
+            # R-6).
+            WebSelectTool(self),
+            WebPressKeyTool(self),
+            WebUploadFileTool(self),
+            WebEvaluateTool(self),
+            # SPEC-050: read-tier observation tools.
+            WebExtractTool(self),
+            WebWaitForTool(self),
+            WebHoverTool(self),
+            WebScrollTool(self),
+            WebSwitchFrameTool(self),
+        ]
+        for tool in tools:
+            registry.register(_SessionSerializedTool(tool, self))
 
     # --- Enforcement surfaces ---
 
