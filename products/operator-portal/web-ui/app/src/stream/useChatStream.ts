@@ -396,6 +396,14 @@ export function useChatStream(): ChatStreamApi {
             "expired",
             "This confirmation expired before a decision was applied.",
           );
+          // Terminal: this card can never be answered again, so settle the
+          // turn. Clearing confirmationPending WITHOUT completed left
+          // ChatView's `loading` true forever
+          // (!completed && !confirmationPending && !error), so the assistant
+          // bubble spun with no reply and no error — an expired card looked
+          // exactly like a hung agent even though the backend had already
+          // resolved the park and the composer still worked.
+          turn.completed = true;
           turn.confirmationPending = false;
         } else if (error instanceof StreamOpenError && error.status === 409) {
           // SPEC-031 R-4 race: another approver decided first. The card
@@ -412,10 +420,17 @@ export function useChatStream(): ChatStreamApi {
             );
             decided.deciderUserId = race.decider_user_id ?? undefined;
             decided.decidedAt = race.decided_at ?? undefined;
+            // Terminal for this operator, so settle the turn exactly as the
+            // 410 branch does — the same spinner otherwise outlives the race.
+            turn.completed = true;
+            turn.confirmationPending = false;
           } else {
+            // Retryable: the card stays pending, so the turn stays parked.
+            // Clearing confirmationPending here spun the bubble forever and
+            // dropped the session panel's "awaiting approval" tag from a card
+            // the operator could still answer.
             decided.note = `Confirm request failed (409).`;
           }
-          turn.confirmationPending = false;
         } else if (error instanceof StreamOpenError) {
           // Legacy parity: the card stays pending so the operator can retry.
           decided.note = `Confirm request failed (${error.status}).`;

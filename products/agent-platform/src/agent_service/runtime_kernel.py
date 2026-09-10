@@ -2188,6 +2188,7 @@ class AgentKernel:
         self,
         session_id: str,
         confirm_id: str,
+        model_id: str | None = None,
     ) -> None:
         """Close a TTL-expired parked reply without resuming it (SPEC-020 R-2).
 
@@ -2198,6 +2199,16 @@ class AgentKernel:
         an in-flight resume owns the entry and resolves it in its own
         ``finally``, so a racing expiry can never interrupt an approved
         batch mid-stream (``take_for_expiry`` raises instead).
+
+        ``model_id`` must be the session's resolved pin, exactly as
+        ``resume_confirmation`` receives it. Left ``None`` it normalizes to
+        ``settings.provider`` — a bare provider name — which never equals a
+        session pinned to a concrete model, so ``ensure_agent`` evicts and
+        rebuilds the agent before the interrupt is fed. The rebuilt agent
+        restores persisted *memory* but not the in-flight parked reply, so
+        the ``UserInterruptEvent`` lands on nothing: the parked call never
+        receives its interrupted result and the turn is left with no
+        closure. Expiry must not change the model a session runs on.
         """
         from agentscope.event import UserInterruptEvent
 
@@ -2207,7 +2218,7 @@ class AgentKernel:
         pending = CONFIRMATION_REGISTRY.take_for_expiry(session_id, confirm_id)
         try:
             agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
-                session_id, None
+                session_id, None, model_id
             )
             interrupt = UserInterruptEvent(reply_id=pending.reply_id)
             async for _event in agent.reply_stream(interrupt):

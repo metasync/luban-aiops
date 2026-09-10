@@ -198,13 +198,21 @@ def _validated_skill_target(raw: str) -> str:
     return scoped
 
 
-async def _reject_if_parked(session_id: str) -> None:
+async def _reject_if_parked(
+    session_id: str, pinned_model: str | None = None
+) -> None:
     """SPEC-020 R-2: a parked session rejects new turns until resolved.
 
     A TTL-expired park is closed through ``expire_confirmation``
     (``UserInterruptEvent``) before the new turn proceeds — the kernel
     cannot accept a fresh message while a reply sits parked, so silent
     eviction would wedge the session.
+
+    ``pinned_model`` is the session's stored pin. Expiry must interrupt the
+    agent that parked the reply, so it resolves through the same
+    request > pinned > default ladder as the resume path (SPEC-024 R-3);
+    passing nothing would rebuild that agent on the provider default and
+    the interrupt would land on an agent with no parked reply.
     """
     kernel = get_runtime_kernel()
     pending = get_confirmation_registry().peek_parked(session_id)
@@ -212,7 +220,11 @@ async def _reject_if_parked(session_id: str) -> None:
         return
     if pending.is_expired(kernel.settings.hitl_confirm_timeout):
         try:
-            await kernel.expire_confirmation(session_id, pending.confirm_id)
+            await kernel.expire_confirmation(
+                session_id,
+                pending.confirm_id,
+                _resolve_model(None, pinned_model),
+            )
         except ConfirmationNotFound:
             # A concurrent confirm or expiry claimed the entry first — the
             # session is still busy with the resumed stream, so the new
@@ -271,7 +283,7 @@ async def chat(
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(body.session_id, user_id)
-    await _reject_if_parked(session.session_id)
+    await _reject_if_parked(session.session_id, session.model)
     resolved_model = _resolve_model(body.model, session.model)
     pin_session_model(session.session_id, resolved_model)
     # SPEC-024 R-4: the serving model rides the audit trail via the
@@ -322,7 +334,7 @@ async def chat_stream(
     request_id = x_request_id or "untracked"
     record_chat_request()
     session = ensure_session(session_id, user_id)
-    await _reject_if_parked(session.session_id)
+    await _reject_if_parked(session.session_id, session.model)
     resolved_model = _resolve_model(model, session.model)
     pin_session_model(session.session_id, resolved_model)
     LOGGER.info(
@@ -382,8 +394,12 @@ async def chat_confirm(
         )
     except ConfirmationExpired:
         try:
+            # Same ladder as the resume below: the interrupt must reach the
+            # agent that parked the reply, not a rebuild on the default.
             await kernel.expire_confirmation(
-                session.session_id, body.confirm_id
+                session.session_id,
+                body.confirm_id,
+                _resolve_model(None, session.model),
             )
         except ConfirmationNotFound:
             # A concurrent request already closed the expired entry.

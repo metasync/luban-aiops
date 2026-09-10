@@ -340,6 +340,12 @@ describe("useChatStream", () => {
       status: "expired",
       note: "This confirmation expired before a decision was applied.",
     });
+    // The TURN must settle, not just the card. ChatView derives its activity
+    // indicator from !completed && !confirmationPending && !error, so locking
+    // the card while leaving the turn unfinished spun the assistant bubble
+    // forever — an expired card rendered exactly like a hung agent.
+    expect(result.current.turns[0]?.completed).toBe(true);
+    expect(result.current.turns[0]?.confirmationPending).toBe(false);
   });
 
   // SPEC-031 R-4: two approvers click at once — the loser's confirm call
@@ -386,6 +392,10 @@ describe("useChatStream", () => {
       deciderUserId: "luban-approver",
       decidedAt: "2026-08-25T10:05:00Z",
     });
+    // The winner's outcome is final for this operator, so the turn settles
+    // too — otherwise the loser's bubble spins on a decided card.
+    expect(result.current.turns[0]?.completed).toBe(true);
+    expect(result.current.turns[0]?.confirmationPending).toBe(false);
   });
 
   it("keeps the card retryable on an unstructured 409", async () => {
@@ -418,6 +428,11 @@ describe("useChatStream", () => {
       status: "pending",
       note: "Confirm request failed (409).",
     });
+    // Retryable means still parked: the turn must NOT settle, or the bubble
+    // spins on a card the operator can still answer and the session panel
+    // drops its "awaiting approval" tag.
+    expect(result.current.turns[0]?.confirmationPending).toBe(true);
+    expect(result.current.turns[0]?.completed).toBe(false);
   });
 
   it("locks the card as error when the resumed stream ends without confirmation_result", async () => {

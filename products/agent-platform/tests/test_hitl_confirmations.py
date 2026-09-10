@@ -969,6 +969,38 @@ def test_expire_confirmation_interrupts_expired_entry(monkeypatch):
         asyncio.run(kernel.expire_confirmation("s1", pending.confirm_id))
 
 
+def test_expire_confirmation_binds_the_pinned_model(monkeypatch):
+    """The interrupt must reach the agent that parked the reply.
+
+    ``ensure_agent`` evicts and rebuilds whenever the bound model differs
+    from the requested one, and a rebuilt agent restores persisted *memory*
+    but not the in-flight parked reply — so an interrupt fed to it closes
+    nothing and the parked call never receives its interrupted result.
+    Passing the pin through keeps the cached agent, and the parked reply it
+    holds, alive.
+    """
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    bound: list = []
+
+    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None):
+        bound.append(model_id)
+        return agent, FakeUserMsg, model_id or kernel.settings.provider
+
+    monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
+    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent: None)
+    pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
+    pending.created_at = time.monotonic() - 601
+
+    asyncio.run(
+        kernel.expire_confirmation("s1", pending.confirm_id, "deepseek-v4-flash")
+    )
+
+    assert bound == ["deepseek-v4-flash"]
+    assert isinstance(agent.inputs[0], UserInterruptEvent)
+    assert agent.inputs[0].reply_id == "reply-1"
+
+
 def test_expire_confirmation_cleanup_survives_interrupt_failure(
     monkeypatch,
 ):
@@ -1242,7 +1274,7 @@ def test_confirm_expired_returns_410(monkeypatch) -> None:
     kernel = get_runtime_kernel()
     expired_calls: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
         expired_calls.append((session_id_arg, confirm_id_arg))
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
@@ -1399,6 +1431,95 @@ def test_confirm_with_evicted_model_pin_degrades_to_default(monkeypatch) -> None
     assert captured == ["deepseek-v4-flash"]
 
 
+class _PinnedCatalog:
+    """The pinned id survives; the provider default is a DIFFERENT id, so a
+    call that fails to forward the pin resolves to something observable."""
+
+    def get(self, model_id):
+        if model_id == "deepseek-v4-flash":
+            return SimpleNamespace(id=model_id)
+        return None
+
+    def default_entry(self):
+        return SimpleNamespace(id="provider-default")
+
+
+def test_confirm_expiry_interrupts_on_the_pinned_model(monkeypatch) -> None:
+    """The 410 branch must hand ``expire_confirmation`` the resolved pin.
+
+    Left to default, the kernel normalizes ``None`` to ``settings.provider``
+    — a bare provider name that never equals a concrete pin — so
+    ``ensure_agent`` evicts and rebuilds the agent before the interrupt is
+    fed, and the interrupt lands on an agent with no parked reply. A live
+    run logged exactly that switch (``deepseek-v4-flash -> deepseek``) while
+    expiring a card, and the expired call left zero evidence frames behind.
+    """
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    session_service.pin_session_model(session_id, "deepseek-v4-flash")
+    pending = _park_registered(session_id, age=601)
+
+    monkeypatch.setattr(v2_routes, "MODEL_CATALOG", _PinnedCatalog())
+    kernel = get_runtime_kernel()
+    captured: list = []
+
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+        captured.append(model_id_arg)
+        CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
+
+    monkeypatch.setattr(kernel, "expire_confirmation", fake_expire)
+    response = client.post(
+        "/api/v2/chat/confirm",
+        json={
+            "session_id": session_id,
+            "confirm_id": pending.confirm_id,
+            "decision": "approve",
+        },
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 410
+    assert captured == ["deepseek-v4-flash"]
+
+
+def test_expired_park_interrupts_on_the_pinned_model_before_new_turn(
+    monkeypatch,
+) -> None:
+    """The lazy expiry path forwards the pin too.
+
+    A new turn closing an aged park reaches ``expire_confirmation`` from
+    ``_reject_if_parked`` — a different call site than the confirm
+    endpoint's 410 branch, and one that only has the session record to read
+    the pin from.
+    """
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    session_service.pin_session_model(session_id, "deepseek-v4-flash")
+    pending = _park_registered(session_id, age=601)
+
+    monkeypatch.setattr(v2_routes, "MODEL_CATALOG", _PinnedCatalog())
+    kernel = get_runtime_kernel()
+    captured: list = []
+
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+        captured.append(model_id_arg)
+        CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
+
+    async def fake_reply_text(**kwargs):
+        return "resumed", None
+
+    monkeypatch.setattr(kernel, "expire_confirmation", fake_expire)
+    monkeypatch.setattr(kernel, "reply_text", fake_reply_text)
+    response = client.post(
+        "/api/v2/chat",
+        json={"message": "hello", "session_id": session_id},
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 200
+    assert captured == ["deepseek-v4-flash"]
+
+
 def test_expired_park_interrupts_before_new_turn(monkeypatch) -> None:
     client = _client()
     session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
@@ -1408,7 +1529,7 @@ def test_expired_park_interrupts_before_new_turn(monkeypatch) -> None:
     kernel = get_runtime_kernel()
     expired_calls: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
         expired_calls.append((session_id_arg, confirm_id_arg))
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
