@@ -56,6 +56,13 @@ from agent_service.services.hitl_confirmations import (
     redact_pending_calls,
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
+from agent_service.services.prose_redaction import (
+    StreamingProseRedactor,
+    credential_literals,
+    redact_assistant_text,
+    redact_structure,
+    redact_user_text,
+)
 from agent_service.services.secret_params import parameterize_for_trace
 
 LOGGER = logging.getLogger(__name__)
@@ -77,6 +84,12 @@ TEXT_DELTA_EVENTS = {
     "thinking_block_start",
     "thinking_block_delta",
 }
+
+# Frames that settle a turn for the portal: it marks the turn complete and
+# never rewrites the accumulated reply text afterwards, so a streaming prose
+# redactor must release its held-back tail *before* one of these is yielded.
+# Mirrors the portal decoder's own TERMINAL_EVENT_TYPES.
+TERMINAL_STREAM_EVENTS = frozenset({"message_end", "reply_end"})
 
 # Deterministic guard injected into the turn when a tool gateway is configured
 # but no tool could be registered. A standing system prompt is only a
@@ -164,6 +177,36 @@ def extract_stream_text(value: object) -> str:
                     return text
         return ""
     return ""
+
+
+def flush_prose_frames(
+    redactor: StreamingProseRedactor,
+    request_id: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """A redactor's held-back tail as a final ``message_delta`` frame.
+
+    Streaming prose redaction withholds the last characters of a chunk until
+    it knows they are not the start of a credential, so every stream exit has
+    to release them. The portal accumulates deltas (``turn.replyText +=
+    frame.text``) and has no handler that overwrites them from a
+    complete-message frame, so a tail that is never flushed is dropped from
+    the live view rather than merely arriving late.
+
+    ``flush`` empties the buffer, which makes this safe to call at more than
+    one exit point on the same stream: only the first returns a frame.
+    """
+    tail = redactor.flush()
+    if not tail:
+        return []
+    return [
+        {
+            "event": "message_delta",
+            "request_id": request_id,
+            "session_id": session_id,
+            "delta": tail,
+        }
+    ]
 
 
 class AgentKernel:
@@ -555,6 +598,32 @@ class AgentKernel:
         except Exception:  # pragma: no cover - defensive index fallback
             return 0
 
+    def _user_text_literals(self, agent, message: str) -> frozenset[str]:
+        """Credential literals the operator typed in this session's prose.
+
+        Harvested from every user turn in the agent context plus the message
+        being sent now, which the context does not yet hold: ``stream_events``
+        captures its turn ordinal before the turn mutates the context, so the
+        current message is appended only as the reply runs. Including it is
+        what lets the very first turn mask its own echoed password, and
+        walking the rest is what catches a cross-turn echo.
+
+        Best-effort by design — a context this cannot read yields the current
+        message's literals alone, which is still the turn that matters.
+        """
+        texts = [message]
+        try:
+            for msg in getattr(agent.state, "context", None) or []:
+                if getattr(msg, "role", None) != "user":
+                    continue
+                texts.append(extract_text(getattr(msg, "content", "")))
+        except Exception as exc:  # pragma: no cover - defensive harvest
+            LOGGER.debug("prose literal harvest from context failed: %s", exc)
+        literals: set[str] = set()
+        for text in texts:
+            literals |= credential_literals(text)
+        return frozenset(literals)
+
     def _persist_evidence(
         self,
         session_id: str,
@@ -705,10 +774,14 @@ class AgentKernel:
             return agent, user_msg_cls, cached_model_id
 
     def build_unconfigured_message(self, message: str, session_id: str) -> str:
+        # The operator's own text is interpolated into a kernel-authored
+        # string, so it carries a typed credential exactly as the prompt did.
+        # This is user-authored text inside a display projection, which is the
+        # scope ``prose_redaction`` allows its heuristic to run in.
         return (
             "Platform baseline placeholder response. "
             f"AgentScope runtime not configured for session {session_id}. "
-            f"Received '{message}'."
+            f"Received '{redact_user_text(message)}'."
         )
 
     def build_provider_error_message(
@@ -731,7 +804,7 @@ class AgentKernel:
         return (
             "Platform runtime fallback response. "
             f"AgentScope provider {attribution} failed for session {session_id}. "
-            f"Received '{message}'. Last error: {detail}"
+            f"Received '{redact_user_text(message)}'. Last error: {detail}"
         )
 
     async def fallback_stream(
@@ -794,6 +867,9 @@ class AgentKernel:
             agent, user_msg_cls, serving_model = await self.ensure_agent(
                 session_id, bearer_token, model_id, read_only
             )
+            # Prose redaction for a blocking turn: no streaming, so the reply
+            # is masked whole and no hold-back is needed.
+            prose_literals = self._user_text_literals(agent, message)
             # Expose the turn's delegated token to the cached tool closures
             # (SPEC-018 R-2). No evidence sink is set: blocking turns emit
             # no trace frames.
@@ -813,7 +889,10 @@ class AgentKernel:
                 structured = None
             self._snapshot_state(session_id, agent)
             return (
-                extract_text(getattr(reply_msg, "content", reply_msg)),
+                redact_assistant_text(
+                    extract_text(getattr(reply_msg, "content", reply_msg)),
+                    prose_literals,
+                ),
                 structured,
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
@@ -831,7 +910,16 @@ class AgentKernel:
         event: object,
         request_id: str,
         session_id: str,
+        redactor: StreamingProseRedactor | None = None,
     ) -> dict[str, object]:
+        """One AgentScope event as a normalized stream frame.
+
+        ``redactor`` carries the turn's harvested credential literals and the
+        held-back tail of a stream in progress (SPEC-049 R-5 applied to chat
+        prose). Callers that pass one own flushing it: a delta boundary can
+        fall inside a credential, so the redactor withholds a tail that the
+        caller must emit at every stream exit.
+        """
         payload = make_serializable(event)
         event_type = "agentscope_event"
         if isinstance(payload, dict) and "type" in payload:
@@ -850,7 +938,22 @@ class AgentKernel:
 
         text = extract_stream_text(payload)
         if event_type in TEXT_DELTA_EVENTS and text:
-            data["delta"] = text
+            if redactor is None:
+                data["delta"] = text
+            else:
+                masked = redactor.feed(text)
+                # An empty result means the whole chunk was held back. Omit
+                # the key rather than send "": that is the shape this already
+                # produces for a text-block start with no text, and the
+                # portal's decoder gates on a truthy delta either way.
+                if masked:
+                    data["delta"] = masked
+                # The payload is the same text again in raw event form. It
+                # reaches no wire today — the v2 contract strips it as an
+                # AgentScope internal and the v1 stream helper has no caller
+                # — so this is a chunk-local mask of a duplicate, not the
+                # guarantee: the hold-back lives in ``delta`` above.
+                data["payload"] = redact_structure(payload, redactor.literals)
         return data
 
     async def stream_events(
@@ -909,6 +1012,13 @@ class AgentKernel:
             # evidence, captured before the turn mutates the context.
             turn_index = self._count_user_turns(agent)
             evidence_frames: list[dict[str, object]] = []
+            # SPEC-049 R-5 applied to chat prose: harvest what the operator
+            # typed so the model's own reply cannot restate it. Built from the
+            # raw message rather than effective_message — the notices injected
+            # below are kernel text and carry no credential.
+            prose = StreamingProseRedactor(
+                self._user_text_literals(agent, message)
+            )
 
             # Deterministic anti-hallucination guard: with a gateway
             # configured but zero gateway tools registered the model has no
@@ -985,13 +1095,29 @@ class AgentKernel:
                         evidence_frames=evidence_frames,
                     )
                     if frame is not None:
+                        # A parked stream ends without message_end, so this is
+                        # its only chance to release the held-back tail.
+                        for flushed in flush_prose_frames(
+                            prose, request_id, session_id
+                        ):
+                            yield flushed
                         yield {
                             **frame,
                             "request_id": request_id,
                             "session_id": session_id,
                         }
                         break
-                    frame = self.normalize_event(event, request_id, session_id)
+                    frame = self.normalize_event(
+                        event, request_id, session_id, redactor=prose
+                    )
+                    if frame.get("event") in TERMINAL_STREAM_EVENTS:
+                        # Release the tail before the terminal frame: the
+                        # portal settles the turn here and never rewrites
+                        # replyText afterwards.
+                        for flushed in flush_prose_frames(
+                            prose, request_id, session_id
+                        ):
+                            yield flushed
                     if frame.get("event") == "message_end":
                         # SPEC-024 R-3: attribute the turn to the model that
                         # actually served it (resolved or session default).
@@ -1007,6 +1133,12 @@ class AgentKernel:
                     execution_requests,
                 ):
                     yield decorated
+                # Safety net for a provider that closes without message_end:
+                # flush is idempotent, so the paths above add nothing here.
+                for flushed in flush_prose_frames(
+                    prose, request_id, session_id
+                ):
+                    yield flushed
             finally:
                 DELEGATED_TOKEN.reset(token_var)
                 CHAT_SESSION_ID.reset(session_var)
@@ -2056,6 +2188,12 @@ class AgentKernel:
         # to align with the pre-park ordinal.
         turn_index = max(0, self._count_user_turns(agent) - 1)
         evidence_frames: list[dict[str, object]] = []
+        # SPEC-049 R-5 applied to chat prose, resumed: the operator's message
+        # is already in the context here, so the harvest needs no extra text.
+        # A resumed turn is a continuation of the same assistant reply, and
+        # the model restating the password after an approval is exactly as
+        # much a leak as restating it before one.
+        prose = StreamingProseRedactor(self._user_text_literals(agent, ""))
         confirmed = decision == "approve"
         confirm_event = UserConfirmResultEvent(
             reply_id=pending.reply_id,
@@ -2143,13 +2281,27 @@ class AgentKernel:
                     evidence_frames=evidence_frames,
                 )
                 if frame is not None:
+                    # A re-park ends this stream without a terminal frame, so
+                    # this is its only chance to release the held-back tail.
+                    for flushed in flush_prose_frames(
+                        prose, request_id, session_id
+                    ):
+                        yield flushed
                     yield {
                         **frame,
                         "request_id": request_id,
                         "session_id": session_id,
                     }
                     return
-                yield self.normalize_event(event, request_id, session_id)
+                frame = self.normalize_event(
+                    event, request_id, session_id, redactor=prose
+                )
+                if frame.get("event") in TERMINAL_STREAM_EVENTS:
+                    for flushed in flush_prose_frames(
+                        prose, request_id, session_id
+                    ):
+                        yield flushed
+                yield frame
             for decorated in self._drain_trace_queue(
                 trace_queue,
                 request_id,
@@ -2158,6 +2310,10 @@ class AgentKernel:
                 execution_requests,
             ):
                 yield decorated
+            # Safety net for a resumed stream that ends without a terminal
+            # frame: flush is idempotent, so the paths above add nothing here.
+            for flushed in flush_prose_frames(prose, request_id, session_id):
+                yield flushed
         finally:
             # Covers both completion and re-park (the early return above):
             # either way the frames drained so far belong to this turn.

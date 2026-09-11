@@ -11,6 +11,12 @@ or an unknown shape degrades to ``transcript_available: false`` with an
 empty transcript — never a 500 and never a fabricated turn. Tool/evidence
 frames stay out of scope for v1 transcripts (chat text only); the evidence
 panel remains live-stream-scoped.
+
+Credential masking (SPEC-049 R-5 posture) applies to the reconstructed turns
+before they leave this module: the operator types a password into the chat and
+the model echoes it back in prose, so a transcript is the one projection both
+halves of that exchange land in. ``prose_redaction`` documents why the
+heuristic layer runs on the user turns only.
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ import json
 import logging
 
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
+from agent_service.services.prose_redaction import redact_transcript
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +38,8 @@ def extract_transcript(session_id: str) -> tuple[bool, list[dict[str, str]]]:
     """Return ``(transcript_available, turns)`` for a session.
 
     Each turn is ``{"role", "content"}`` plus ``created_at`` when the
-    snapshot carries one, in conversation order.
+    snapshot carries one, in conversation order, with credential material
+    masked in both roles.
     """
     try:
         raw = AGENT_STATE_STORE.load_state(session_id)
@@ -56,7 +64,7 @@ def extract_transcript(session_id: str) -> tuple[bool, list[dict[str, str]]]:
             if isinstance(created_at, str) and created_at:
                 turn["created_at"] = created_at
             turns.append(turn)
-        return True, turns
+        return True, redact_transcript(turns)
     except Exception as exc:
         LOGGER.warning(
             "transcript extraction failed for session %s: %s", session_id, exc

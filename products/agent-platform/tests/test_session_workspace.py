@@ -515,9 +515,10 @@ def test_title_masks_a_key_anchored_secret(workspace):
 
 def test_title_masks_a_secret_url_query_and_keeps_the_other_params(workspace):
     """The URL layer, exercised on free text: the secret param masks and the
-    non-secret one beside it stays readable. Prose *after* the query is
-    consumed by the mask — an accepted over-mask, since the alternative is
-    deciding where a URL ends inside a sentence."""
+    non-secret one beside it stays readable. Prose *after* the query survives
+    too — the parse is bounded to the whitespace-delimited URL rather than
+    handed the whole sentence, which used to read "and confirm" as part of
+    the last query value and mask it away."""
     title = _mint(
         workspace,
         "open https://target/reset?user=alice&newpw=TempPass123%21 and confirm",
@@ -526,6 +527,7 @@ def test_title_masks_a_secret_url_query_and_keeps_the_other_params(workspace):
     assert "TempPass123" not in title
     assert "newpw=***" in title
     assert "user=alice" in title
+    assert title.endswith("and confirm")
 
 
 def test_title_masks_a_pinned_secret_shape(workspace):
