@@ -35,7 +35,7 @@ The repository uses a **multi-product Python workspace** built entirely with **G
 - Base image: `shared/base-images/base-uv/Dockerfile` builds `luban-aiops/base-uv:<tag>` from Amazon Linux 2023 with a pinned `uv` version.
 - GitOps overlays: `shared/platform-ops/gitops/dev-k8s/` (base overlay), plus runtime-profile overlays (`runtime-profiles/default|mutating-dev|browser-dev`). Rendered via `kustomize build --load-restrictor LoadRestrictionsNone`.
 - Policy bundle: canonical `shared/shared-contracts/policies/policy-default.yaml` is copied into consumers via `make sync-policy` and validated via scripts under `shared/shared-contracts/scripts/`.
-- Version lock: root `VERSION` (currently `0.36.1`) is read as `PLATFORM_VERSION` and enforced against product versions by `shared/shared-contracts/scripts/validate_version.py`.
+- Version lock: root `VERSION` (currently `0.34.0`) is read as `PLATFORM_VERSION` and enforced against product versions by `shared/shared-contracts/scripts/validate_version.py`.
 
 ## Architecture and conventions
 

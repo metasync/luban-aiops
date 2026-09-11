@@ -57,7 +57,7 @@ Each service lives under `products/<name>/` and follows an identical layout: `sr
 A **coordinated tag** is computed once by the root Makefile and reused across all products:
 - Clean tree: `<PLATFORM_VERSION>-<IMAGE_TAG_PREFIX>[-<IMAGE_TAG_PROFILE>]-<gitsha>`
 - Dirty tree: same but suffixed `-dirty-<YYYYMMDDHHMMSS>`
-- `PLATFORM_VERSION` is read from the root `VERSION` file (currently `0.36.1`).
+- `PLATFORM_VERSION` is read from the root `VERSION` file (currently `0.35.0`).
 
 After `make build`, the root Makefile writes `shared/platform-ops/gitops/dev-k8s/.images.env` mapping logical names (`AGENT_SERVICE_IMAGE`, `PLATFORM_GATEWAY_IMAGE`, etc.) to `luban-aiops/<product>:<IMAGE_TAG>`, which the deploy script consumes.
 

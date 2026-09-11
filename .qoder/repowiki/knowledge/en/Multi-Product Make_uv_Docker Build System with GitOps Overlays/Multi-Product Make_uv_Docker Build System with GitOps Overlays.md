@@ -31,7 +31,7 @@ The Luban AIOps platform uses a **multi-product workspace** built on three layer
   - `mk/image.mk` — per-product `build` / `push` / `lint` targets using `docker build --platform $(IMAGE_PLATFORM)`; supports optional registry re-tagging.
   - `mk/python.mk` — `sync` (`uv sync --frozen`) and `test` (`uv run pytest` with OTLP exporters disabled).
 - **Per-product manifests**: each product under `products/<name>/` has a minimal `Makefile` that sets `IMAGE_NAME` and includes both `../../mk/image.mk` and `../../mk/python.mk`; a `Dockerfile` based on `luban-aiops/base-uv:al2023` that runs `uv sync --frozen --no-dev` and `EXPOSE 8000`.
-- **Versioning**: root `VERSION` file (`0.36.1`) is the single source of truth; `validate-version` script enforces every product's `pyproject.toml` version matches it.
+- **Versioning**: root `VERSION` file (`0.34.0`) is the single source of truth; `validate-version` script enforces every product's `pyproject.toml` version matches it.
 - **GitOps overlays**: `shared/platform-ops/gitops/dev-k8s/` (base + overlay) plus `runtime-profiles/{default,mutating-dev,browser-dev}`; rendered by `kustomize build --load-restrictor LoadRestrictionsNone` during `overlays`.
 - **Policy bundle**: canonical `shared/shared-contracts/policies/policy-default.yaml` is copied into `tool-gateway`, `platform-gateway`, and the dev-k8s base via `sync-policy`; validated against JSON schema and scenario expectations via scripts under `shared/shared-contracts/scripts/`.
 - **Base image**: `shared/base-images/base-uv/Dockerfile` builds the pinned `luban-aiops/base-uv:al2023` image (Python 3.12 + uv 0.12.1) from `mk/defaults.mk`.

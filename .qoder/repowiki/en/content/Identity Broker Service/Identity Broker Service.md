@@ -73,7 +73,7 @@ Key responsibilities:
 - **Dual-path service client authentication: static credentials and Kubernetes workload identity**
 - **Kubernetes projected service-account token validation with JWKS discovery**
 - **Standardized error handling with 4xx pass-through and 5xx conversion to structured 502 responses**
-- **Fixed canonical callback: login start uses the configured OIDC_REDIRECT_URI with no per-origin override**
+- **Canonical redirect URI handling with support for multiple reachable endpoints**
 
 **Section sources**
 - [identity-broker README](file://products/identity-broker/README.md)
@@ -151,7 +151,7 @@ end
 ## Core Components
 - Authentication Routes: Handle login, token exchange, refresh, logout, and service client authentication flows.
 - Identity Routes: Provide profile lookup and identity context resolution.
-- Identity Service: Orchestrates OIDC interactions, user mapping, and session creation.
+- Identity Service: Orchestrates OIDC interactions, user mapping, and session creation with enhanced redirect URI handling.
 - Token Service: Issues, signs, refreshes, and validates JWTs; manages claims and scopes.
 - Exchange Service: Handles service client authentication and delegated token minting with registry validation and workload identity support.
 - Configuration: Loads environment-specific settings for OIDC providers, signing keys, security policies, and workload identity configuration.
@@ -166,7 +166,7 @@ Key behaviors:
 - **JWKS-based validation of Kubernetes projected service-account tokens**
 - **Delegated token minting with configurable TTL (300 seconds)**
 - **Standardized error handling with 4xx pass-through and 5xx conversion to structured 502 responses**
-- **Login start resolves its callback from the configured OIDC_REDIRECT_URI; the HTTP routes pass no override**
+- **Canonical redirect URI resolution with support for multiple reachable endpoints**
 
 **Section sources**
 - [identity broker auth routes](file://products/identity-broker/src/identity_service/api/routes/auth.py)
@@ -178,7 +178,7 @@ Key behaviors:
 - [identity broker observability](file://products/identity-broker/src/identity_service/core/observability.py)
 
 ## Architecture Overview
-The Identity Broker sits between clients and external OIDC providers, issuing platform tokens that downstream services validate. It also persists sessions and propagates identity contexts to enforce policies consistently. The service now supports both user authentication and dual-path service client authentication flows with enhanced Kubernetes workload identity support and standardized error handling.
+The Identity Broker sits between clients and external OIDC providers, issuing platform tokens that downstream services validate. It also persists sessions and propagates identity contexts to enforce policies consistently. The service now supports both user authentication and dual-path service client authentication flows with enhanced Kubernetes workload identity support, standardized error handling, and improved redirect URI management.
 
 ```mermaid
 sequenceDiagram
@@ -225,13 +225,13 @@ end
 
 ### Authentication Endpoints
 Endpoints typically include:
-- Login initiation and callback handling
+- Login initiation and callback handling with enhanced redirect URI support
 - Token exchange and refresh
 - Logout and session termination
 - **Dual-path service client authentication via POST /api/v1/auth/exchange**
 
 Behavior highlights:
-- Redirects to OIDC provider when necessary
+- Redirects to OIDC provider when necessary with canonical redirect URI handling
 - Validates state and nonce parameters
 - Exchanges authorization code for tokens securely
 - Issues platform JWTs with appropriate claims and scopes
@@ -240,14 +240,15 @@ Behavior highlights:
 - **JWKS-based validation of projected service-account tokens**
 - **Issues delegated tokens with 300-second TTL for service-to-service communication**
 - **Standardized error handling with 4xx pass-through and 5xx conversion**
-- **The callback is pinned to OIDC_REDIRECT_URI, so a sign-in started on another origin cannot round-trip back to it**
+- **Redirect URI resolution ensures canonical hostname routing for all callbacks**
 
 ```mermaid
 flowchart TD
 Start(["Request /auth/login"]) --> CheckSession{"Existing session?"}
 CheckSession --> |Yes| ReturnToken["Return existing tokens"]
 CheckSession --> |No| InitOIDC["Initiate OIDC flow"]
-InitOIDC --> Callback["Handle OIDC callback"]
+InitOIDC --> ResolveRedirect["Resolve canonical redirect URI"]
+ResolveRedirect --> Callback["Handle OIDC callback"]
 Callback --> ValidateCode["Validate authorization code"]
 ValidateCode --> ExchangeTokens["Exchange for tokens"]
 ExchangeTokens --> MapClaims["Map claims to roles/scopes"]
@@ -317,6 +318,7 @@ class IdentityService {
 +mapOIDCTokensToPlatformClaims(tokens) IdentityContext
 +createSession(identityContext) Session
 +getSession(sessionId) Session
++buildLoginStart(settings, redirect_uri) LoginStartResponse
 }
 class Config {
 +oidcDiscoveryURL
@@ -453,7 +455,7 @@ Typical configuration includes:
 
 Environment-driven configuration ensures secure deployment across environments.
 
-**Updated** Clarified that the broker resolves its callback from a single `OIDC_REDIRECT_URI`, while `OIDC_EXTRA_REDIRECT_URIS` is consumed only by the dev-k8s reconcile script to register additional reachable origins with Keycloak.
+**Updated** Enhanced redirect URI configuration to support canonical hostname routing while allowing multiple reachable endpoints for load balancing and failover scenarios.
 
 **Section sources**
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)
@@ -470,6 +472,7 @@ Best practices:
 - **TTL-based token expiration for enhanced security**
 - **JWKS-based validation for workload identity tokens**
 - **Standardized error handling for security-sensitive operations**
+- **Canonical redirect URI validation to prevent open redirect vulnerabilities**
 
 **Section sources**
 - [policy center policy default](file://shared/shared-contracts/policies/policy-default.yaml)
@@ -696,6 +699,7 @@ GW --> ERROR_HANDLING["_identity_leg Error Handler"]
 - **Monitor delegated token minting rates and failures**
 - **Optimize network calls to Kubernetes OIDC endpoints**
 - **Leverage cached error handling for reduced latency**
+- **Optimize redirect URI resolution for improved performance**
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -711,9 +715,10 @@ Common issues and resolutions:
 - **Redirect URI mismatches: Verify canonical redirect URI configuration matches OIDC provider settings**
 
 ### Redirect URI Troubleshooting
-- **Fixed Canonical Callback**: `GET /api/v1/auth/login` builds the login start from `settings.oidc_redirect_uri` and passes no override, so in dev-k8s the callback is always `https://aiops.luban.metasync.cc/callback`.
-- **Extra URIs Are Reachability Only**: `OIDC_EXTRA_REDIRECT_URIS` is read solely by `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh` to register additional Keycloak redirect URIs and web origins; the broker never selects one of them as a callback.
-- **Port-Forwarded Tabs Cannot Sign In**: the portal's PKCE pending request lives in per-origin browser storage while the authorization code lands on the canonical origin, so use a port-forward to inspect assets and the proxied `/api/` path, not to sign in.
+- **Canonical Redirect URI**: Ensure `OIDC_REDIRECT_URI` matches the exact endpoint registered with your OIDC provider
+- **Multiple Reachable Endpoints**: Configure load balancers and reverse proxies to route all requests to the canonical redirect URI
+- **Callback Routing**: Verify that all authentication callbacks are routed to the canonical hostname regardless of how users access the service
+- **SSL/TLS Configuration**: Ensure proper SSL certificates are configured for all redirect URI endpoints
 
 ### Error-Specific Troubleshooting
 - **4xx Errors**: These are passed through unchanged, indicating client-side issues
@@ -731,6 +736,7 @@ Audit logs should capture:
 - **Delegated token minting and expiration events**
 - **Workload identity validation attempts and JWKS discovery results**
 - **Error handling events and status code conversions**
+- **Redirect URI resolution and validation events**
 
 **Section sources**
 - [identity broker observability](file://products/identity-broker/src/identity_service/core/observability.py)
@@ -738,12 +744,12 @@ Audit logs should capture:
 - [platform gateway service](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
 
 ## Conclusion
-The Identity Broker Service provides a robust foundation for authentication and authorization across the platform. By integrating with OIDC providers, managing JWT lifecycles, enforcing policies via shared definitions, and supporting dual-path service client authentication with enhanced Kubernetes workload identity support, it enables secure and compliant operations. The addition of standardized error handling through the `_identity_leg` function significantly improves reliability during rollouts while maintaining backward compatibility with static credentials. Because the callback is pinned to a single configured redirect URI, only the canonical origin can complete a browser sign-in, even though other origins can serve the portal shell. Proper configuration, observability, and adherence to best practices ensure reliability and maintainability.
+The Identity Broker Service provides a robust foundation for authentication and authorization across the platform. By integrating with OIDC providers, managing JWT lifecycles, enforcing policies via shared definitions, and supporting dual-path service client authentication with enhanced Kubernetes workload identity support, it enables secure and compliant operations. The addition of standardized error handling through the `_identity_leg` function significantly improves reliability during rollouts while maintaining backward compatibility with static credentials. Enhanced redirect URI handling ensures consistent authentication flows across different access methods while maintaining security boundaries. Proper configuration, observability, and adherence to best practices ensure reliability and maintainability.
 
 ## Appendices
 
 ### API Endpoints Summary
-- Authentication: login, callback, refresh, logout
+- Authentication: login, callback, refresh, logout with enhanced redirect URI support
 - **Service Client Authentication: POST /api/v1/auth/exchange (supports both Basic and Bearer auth)**
 - Identity: profile lookup, context resolution
 - Health: readiness and liveness checks
@@ -782,9 +788,10 @@ For Kubernetes workload identity support:
 
 ### Redirect URI Configuration
 For proper OIDC redirect URI handling:
-- Set `OIDC_REDIRECT_URI` to the single canonical callback endpoint; `build_login_start` reads it directly and the HTTP routes pass no override.
-- Register additional reachable origins through `OIDC_EXTRA_REDIRECT_URIS`, which `reconcile-portal-oidc-client.sh` applies to the Keycloak client. Those origins make the portal reachable but never receive the authorization code.
-- Ensure the OIDC provider registration matches `OIDC_REDIRECT_URI` exactly.
+- Set `OIDC_REDIRECT_URI` to the canonical redirect endpoint
+- Configure load balancers to route all requests to the canonical hostname
+- Ensure OIDC provider registration matches the exact redirect URI
+- Verify that all authentication callbacks are processed through the canonical endpoint
 
 **Section sources**
 - [identity broker config](file://products/identity-broker/src/identity_service/core/config.py)

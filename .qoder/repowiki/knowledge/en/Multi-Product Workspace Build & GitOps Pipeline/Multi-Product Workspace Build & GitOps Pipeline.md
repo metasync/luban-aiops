@@ -32,7 +32,7 @@ The repository uses a **multi-product workspace** built with GNU Make, Docker, a
 ## Key files and packages
 
 - Root orchestration: `Makefile`, `mk/defaults.mk`, `mk/image.mk`, `mk/python.mk`
-- Version source of truth: `VERSION` (semver, e.g. `0.36.1`)
+- Version source of truth: `VERSION` (semver, e.g. `0.36.0`)
 - Shared base image: `shared/base-images/base-uv/Dockerfile` (Amazon Linux 2023 minimal, pinned `uv` 0.12.1, Python 3.12, runs as non-root `app` uid 1000)
 - Per-product entrypoints: each `products/<name>/Makefile` sets `IMAGE_NAME` and includes `../../mk/image.mk` and `../../mk/python.mk` (Python products); `operator-portal/Makefile` only includes `image.mk` because it builds a static SPA served by nginx
 - Product Dockerfiles: one per product, all `FROM luban-aiops/base-uv:al2023`, `uv sync --frozen --no-dev`, `EXPOSE 8000`, `CMD ["uv", "run", ...]`

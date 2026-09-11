@@ -56,11 +56,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced documentation for per-session browser tool serialization mechanism that prevents race conditions in concurrent web.* tool calls through asyncio.Lock implementation
-- Updated browser connector section to detail the `_SessionSerializedTool` wrapper class and `BrowserSessionPool.interaction_lock()` mechanism
-- Added comprehensive coverage of concurrent session serialization testing and lock lifecycle management
-- Updated troubleshooting guide with guidance on concurrent session serialization issues and race condition symptoms
-- Enhanced performance considerations section with details on lock contention monitoring and memory usage optimization
+- Enhanced browser connector query redaction functions to handle DSN-style credentials in URL userinfo sections
+- Added explicit handling for parsed.password to mask credentials in netloc before processing query parameters
+- Fixed critical security gap in error handling path where exception messages containing URLs with credentials were passed directly to make_error_result()
+- Updated documentation to reflect improved credential masking coverage across all browser tool results and error paths
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -96,6 +95,7 @@ Key responsibilities (current):
 - **Comprehensive secret query parameter masking** extended to all browser tool results, not just navigation
 - **Enhanced evidence URL handling** with consistent secret parameter masking across all browser tools
 - **Critical concurrent session serialization** preventing race conditions when multiple web.* tool calls execute concurrently within a single chat session
+- **Enhanced DSN-style credential masking** protecting credentials in URL userinfo sections across all browser tool operations
 - Elastic connector integration for observability data access including log search, service health metrics, and alert management
 - Incidents connector integration for querying incident data through the new incident service
 - Skills connector integration for accessing team-owned operational skills and runbooks with full audit trail correlation
@@ -161,7 +161,7 @@ D --> T
 D --> U
 ```
 
-**Updated** Architecture diagram reflects the current structure with all five connectors including the expanded browser connector with 15 tools and enhanced security controls, plus flow-based approval system with skill-declared step intent and ad-hoc interaction support per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tools, and critical concurrent session serialization mechanism.
+**Updated** Architecture diagram reflects the current structure with all five connectors including the expanded browser connector with 15 tools and enhanced security controls, plus flow-based approval system with skill-declared step intent and ad-hoc interaction support per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tools including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -202,7 +202,7 @@ D --> U
 - Output Redaction System: Automatically detects and redacts sensitive information from tool outputs using pattern matching and key-list filtering.
 - **Enhanced Request Correlation**: Propagates x-request-id headers through the entire tool execution pipeline to enable end-to-end audit trail tracking from initial tool invocation through downstream service calls.
 - **Enhanced Kubernetes Connector**: Provides safe abstractions for interacting with Kubernetes clusters across all namespaces using cluster-wide read-only ClusterRole permissions, enabling comprehensive diagnostic capabilities while maintaining strict read-only access controls, plus bounded mutating operations through k8s.delete_pod.
-- **Expanded Browser Connector**: Provides comprehensive web application interaction capabilities through Playwright-based headless browser automation with stateful session management, origin allowlist enforcement, flow binding, credential set management, and 15 total tools including nine new capabilities. **Now supports ad-hoc interactions without bound flows through per-action approval cards per SPEC-054 R-2**. **Features comprehensive secret query parameter masking across all tool results**. **Implements critical concurrent session serialization to prevent race conditions**.
+- **Expanded Browser Connector**: Provides comprehensive web application interaction capabilities through Playwright-based headless browser automation with stateful session management, origin allowlist enforcement, flow binding, credential set management, and 15 total tools including nine new capabilities. **Now supports ad-hoc interactions without bound flows through per-action approval cards per SPEC-054 R-2**. **Features comprehensive secret query parameter masking across all browser tool results including DSN-style credential protection**. **Implements critical concurrent session serialization to prevent race conditions**.
 - **Flow-Based Approval System**: Implements semantic confirmation cards that show workflow intent (skill title/description + origin) rather than bare tool actions, providing operators with meaningful context for approval decisions. **Extended to support both bound flow approvals and ad-hoc per-action approvals**.
 - **Skill-Declared Step Intent**: Adds author-written plain language descriptions of what gated mutating steps achieve, displayed prominently on confirmation cards above technical details.
 - Elastic Connector: Provides read-only access to Elasticsearch for observability data including log search, service health metrics, and active alerts.
@@ -211,7 +211,7 @@ D --> U
 - Schemas and Contracts: Enforce consistent request/response shapes for tool invocations and results.
 - Core Utilities: Configuration, runtime settings, observability, metrics, telemetry, request context propagation, and dependency injection.
 
-**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, the new flow-based approval system per SPEC-051, skill-declared step intent per SPEC-053, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tool results, and critical concurrent session serialization mechanism.
+**Updated** Component descriptions reflect the current implementation with enhanced request correlation capabilities, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, the new flow-based approval system per SPEC-051, skill-declared step intent per SPEC-053, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tool results including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Section sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -240,7 +240,7 @@ The Tool Gateway follows a streamlined architecture focused on multi-source tool
 **Current Architecture:**
 - API Layer: FastAPI routers expose endpoints for tool discovery and invocation only.
 - Service Layer: Gateway orchestrates tool invocation flows; policy engine enforces rules for tool actions with enhanced permissions including mutating actions; token verifier authenticates with audience validation for `tool-gateway`.
-- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; **expanded browser connector provides 15 web application interaction tools with comprehensive security controls, flow-based approval including ad-hoc interactions per SPEC-054 R-2, and comprehensive secret query parameter masking**; **critical concurrent session serialization prevents race conditions in browser automation**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
+- Tool Layer: Registry discovers and executes tools from multiple connectors with risk-tier admission control; **enhanced request correlation propagates x-request-id headers through the entire pipeline**; **enhanced Kubernetes connector provides cluster-wide read-only access plus bounded mutating operations**; **expanded browser connector provides 15 web application interaction tools with comprehensive security controls, flow-based approval including ad-hoc interactions per SPEC-054 R-2, and comprehensive secret query parameter masking including DSN-style credential protection**; **critical concurrent session serialization prevents race conditions in browser automation**; Elastic connector provides observability data access; incidents connector provides incident data access; skills connector provides skills and runbook access; output redaction ensures sensitive data never leaves the service.
 - Core Layer: Configuration, runtime, observability, metrics, telemetry, and request context support cross-cutting concerns.
 
 ```mermaid
@@ -283,7 +283,7 @@ else "Ad-hoc Interaction (SPEC-054 R-2)"
 Browser->>Portal : "Per-action approval card with change request"
 Portal-->>Browser : "Individual approval decision"
 end
-Browser->>Browser : "Apply secret query parameter masking"
+Browser->>Browser : "Apply secret query parameter masking (including DSN credentials)"
 Browser->>SessionPool : "Release interaction_lock(session_key)"
 Browser-->>Registry : "Web result with masked evidence URL"
 else "Kubernetes Tool"
@@ -314,7 +314,7 @@ ToolsRoute-->>Client : "403 Forbidden"
 end
 ```
 
-**Updated** Sequence diagram reflects the current architecture with enhanced request correlation, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities, the new flow-based approval system with skill-declared step intent, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tool results, and critical concurrent session serialization mechanism.
+**Updated** Sequence diagram reflects the current architecture with enhanced request correlation, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities, the new flow-based approval system with skill-declared step intent, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tool results including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -459,7 +459,7 @@ BrowserConnector --> BrowserSessionPool : "uses"
 BrowserConnector --> CredentialSetStore : "uses"
 ```
 
-**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, flow-based approval system per SPEC-051 with skill-declared step intent per SPEC-053, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tools, and critical concurrent session serialization mechanism.
+**Updated** Streamlined architecture with enhanced request correlation, risk-tier admission control, all five connectors integrated, the expanded browser connector with 15 tools including nine new capabilities per SPEC-050, flow-based approval system per SPEC-051 with skill-declared step intent per SPEC-053, ad-hoc browser interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all browser tools including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Diagram sources**
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
@@ -694,7 +694,7 @@ Provides comprehensive web application interaction capabilities through Playwrig
 - **Cross-origin frame denial** prevents switching to iframes from different origins
 - **JavaScript evaluation mutation guard** blocks known state-changing DOM APIs as defense-in-depth
 - **File upload path allowlisting** prevents path traversal attacks
-- **Comprehensive secret query parameter masking** applied to all browser tool results through the `_evidence_url` helper function
+- **Comprehensive secret query parameter masking** applied to all browser tool results through the `_evidence_url` helper function, including DSN-style credentials in URL userinfo sections
 - **Concurrent session serialization** through `_SessionSerializedTool` wrapper class and `BrowserSessionPool.interaction_lock()` to prevent interleaving of operations on shared state
 
 **Tool Surface - 15 Total Tools**:
@@ -724,6 +724,7 @@ Provides comprehensive web application interaction capabilities through Playwrig
 - **Consistent Implementation**: Uses `_redact_secret_query` function to mask sensitive parameters like passwords, tokens, API keys, and credentials
 - **Evidence URL Standardization**: All tools report `entry.active_target.url` through `_evidence_url` ensuring consistent secret masking
 - **Parameter Vocabulary**: Matches the same secret parameter vocabulary used by the kernel's change-request projection for consistency
+- **DSN-Style Credential Protection**: Enhanced `_redact_secret_query` function now handles credentials in URL userinfo sections (e.g., `postgres://admin:password@host`) with explicit handling for `parsed.password` to mask credentials in netloc before processing query parameters
 
 **Concurrent Session Serialization**:
 - **Race Condition Prevention**: The `_SessionSerializedTool` wrapper class wraps each browser tool to ensure only one web.* call executes per session at a time
@@ -761,7 +762,7 @@ Approve --> |No| DenyAdHoc["Deny Ad-hoc Action"]
 BoundFlow --> ExecuteFlow["Execute Under Flow Scope"]
 ExecuteFlow --> IncrementSteps["Increment Flow Steps"]
 ExecuteAdHoc --> IncrementSteps
-IncrementSteps --> EvidenceURL["Apply _evidence_url Secret Masking"]
+IncrementSteps --> EvidenceURL["Apply _evidence_url Secret Masking (Including DSN Credentials)"]
 EvidenceURL --> ReturnAction["Return Action Result with Masked URL"]
 NewTools["SPEC-050 Tools"] --> Select["web.select - Dropdown Selection"]
 NewTools --> PressKey["web.press_key - Keyboard Input"]
@@ -772,14 +773,14 @@ NewTools --> WaitFor["web.wait_for - Element State Wait"]
 NewTools --> Hover["web.hover - Tooltip Reveal"]
 NewTools --> Scroll["web.scroll - Page Scrolling"]
 NewTools --> SwitchFrame["web.switch_frame - Cross-Origin Denial"]
-AllTools --> SecretMasking["Comprehensive Secret Query Parameter Masking"]
+AllTools --> SecretMasking["Comprehensive Secret Query Parameter Masking (Including DSN Credentials)"]
 SecretMasking --> MaskedURL["URL with *** for sensitive params"]
 ConcurrentSerialization["Concurrent Session Serialization"] --> SessionLock["Acquire interaction_lock(session_key)"]
 SessionLock --> ExecuteTool["Execute Tool Operation"]
 ExecuteTool --> ReleaseLock["Release interaction_lock(session_key)"]
 ```
 
-**Updated** Expanded browser connector provides 15 web application interaction tools with comprehensive security controls including origin re-checks, mutation guards, path allowlisting, cross-origin frame denial, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all tool results through the `_evidence_url` helper function, and critical concurrent session serialization mechanism.
+**Updated** Expanded browser connector provides 15 web application interaction tools with comprehensive security controls including origin re-checks, mutation guards, path allowlisting, cross-origin frame denial, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking across all tool results through the `_evidence_url` helper function including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Diagram sources**
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -1054,7 +1055,7 @@ The Tool Gateway has clear dependency boundaries with focused security component
 - Services depend on policy engine, token verifier, tool registry, and output redaction
 - Tool registry depends on base tool implementations, connectors, and redaction system
 - **Enhanced Kubernetes connector depends on cluster-wide RBAC permissions and policy enforcement**
-- **Expanded browser connector depends on Playwright, CDP connectivity, credential set management, and comprehensive security controls including SPEC-054 R-2 ad-hoc interactions and secret query parameter masking**
+- **Expanded browser connector depends on Playwright, CDP connectivity, credential set management, and comprehensive security controls including SPEC-054 R-2 ad-hoc interactions and secret query parameter masking including DSN-style credential protection**
 - **Critical concurrent session serialization depends on BrowserSessionPool.interaction_lock() mechanism**
 - Elastic connector depends on Elasticsearch client and configuration
 - **Incidents connector depends on incident-service HTTP API and Basic authentication**
@@ -1080,7 +1081,7 @@ Services --> Schemas["Schemas & Contracts"]
 Services --> Core["Core Config/Runtime/Observability"]
 ```
 
-**Updated** Simplified dependency graph reflecting all five connectors with enhanced Kubernetes permissions, expanded browser connector with 15 tools and comprehensive security controls including SPEC-054 R-2 ad-hoc interactions, risk-tier admission control, request correlation capabilities, flow-based approval system with skill-declared step intent, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
+**Updated** Simplified dependency graph reflecting all five connectors with enhanced Kubernetes permissions, expanded browser connector with 15 tools and comprehensive security controls including SPEC-054 R-2 ad-hoc interactions, risk-tier admission control, request correlation capabilities, flow-based approval system with skill-declared step intent, comprehensive secret query parameter masking including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Diagram sources**
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
@@ -1149,7 +1150,7 @@ Services --> Core["Core Config/Runtime/Observability"]
 - **Ad-hoc interaction approval card caching to reduce redundant approval prompts**
 - **Live-origin re-check optimization to minimize browser state lookups**
 - **Signed envelope provenance validation caching to reduce signature verification overhead**
-- **Efficient secret query parameter masking through centralized _evidence_url function**
+- **Efficient secret query parameter masking through centralized _evidence_url function including DSN-style credential protection**
 - **Minimized URL parsing overhead for secret parameter detection**
 - **Concurrent session serialization to prevent race conditions and ensure reliable operation**
 - **Lock pruning mechanism to prevent memory leaks from unused session locks**
@@ -1200,6 +1201,7 @@ Common issues and resolutions:
 - **Live-origin re-check failures**: Verify current page origin matches allowlist before executing ad-hoc interactions
 - **Secret query parameter masking issues**: Verify `_evidence_url` function is properly applied to all browser tool results
 - **Evidence URL not masked**: Check that all browser tools use `_evidence_url` instead of direct URL access
+- **DSN-style credential masking issues**: Verify enhanced `_redact_secret_query` function handles credentials in URL userinfo sections (e.g., `postgres://admin:password@host`)
 - **Performance degradation**: Monitor metrics and adjust rate limits
 - **Output redaction issues**: Check redaction configuration and overflow thresholds
 - **Dependency injection problems**: Verify service initialization and configuration
@@ -1212,7 +1214,7 @@ Common issues and resolutions:
 - **Memory pressure**: Check interaction lock map size and ensure proper pruning of unused locks
 - **Timeout issues**: Understand that queued calls now wait behind slow ones, potentially causing TIMEOUT errors instead of race-induced false successes
 
-**Updated** Added troubleshooting guidance for browser connector, risk-tier admission control, mutating tools, request correlation, SPEC-050 tools, file uploads, JavaScript evaluation, iframe traversal, flow-based approval system, skill-declared step intent, SPEC-054 R-2 ad-hoc interactions, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
+**Updated** Added troubleshooting guidance for browser connector, risk-tier admission control, mutating tools, request correlation, SPEC-050 tools, file uploads, JavaScript evaluation, iframe traversal, flow-based approval system, skill-declared step intent, SPEC-054 R-2 ad-hoc interactions, comprehensive secret query parameter masking including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Section sources**
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
@@ -1237,11 +1239,13 @@ The platform-gateway extraction has successfully separated portal-facing respons
 
 **Most significantly, the implementation of SPEC-054 R-2 has relaxed previous restrictions on browser tool write operations, allowing ad-hoc interactions with per-action approval cards instead of requiring bound flows.** This enhancement transforms the browser connector from a flow-centric model to support both bound flow approvals and ad-hoc per-action approvals, enabling interactive web application troubleshooting scenarios that were previously impossible. The new ad-hoc interaction model includes comprehensive security controls including live-origin re-checks, signed authority provenance validation, and structured change request displays with secret masking.
 
-**Additionally, comprehensive secret query parameter masking has been extended to all browser tool results, not just navigation.** The `_evidence_url` helper function ensures consistent secret parameter masking across all 15 browser tools, preventing sensitive query parameters like passwords, tokens, and API keys from appearing in plaintext in results, evidence, or audit trails. This enhancement strengthens the security posture of the browser connector by ensuring that any URL containing secret-bearing parameters is consistently masked before being returned to callers.
+**Additionally, comprehensive secret query parameter masking has been extended to all browser tool results, not just navigation.** The `_evidence_url` helper function ensures consistent secret parameter masking across all 15 browser tools, preventing sensitive query parameters like passwords, tokens, and API keys from appearing in plaintext in results, evidence, or audit trails. **This enhancement now includes DSN-style credential protection** where credentials in URL userinfo sections (e.g., `postgres://admin:password@host`) are properly masked through explicit handling of `parsed.password` to mask credentials in netloc before processing query parameters.
 
 **Critically, the concurrent session serialization mechanism has been implemented to prevent race conditions when multiple web.* tool calls execute concurrently within a single chat session.** The `_SessionSerializedTool` wrapper class and `BrowserSessionPool.interaction_lock()` mechanism ensure reliable operation when the agentscope framework executes tool calls from model response batches, preventing interleaving of operations on shared state like refs, frame_stack, filled_values, and flow.steps_used. This enhancement addresses fundamental concurrency issues that could cause silent failures in browser automation workflows.
 
-This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility. The expanded browser connector extends the platform's capabilities to interact with web applications through a bounded, secure interface with comprehensive security controls including origin allowlisting, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, file upload path allowlisting, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking, and critical concurrent session serialization. The new flow-based approval system transforms operator experience by displaying workflow intent ("Reset User Password in Admin Portal") rather than bare tool actions, making approval decisions more meaningful and reducing cognitive load during critical operations. The skill-declared step intent feature further enhances this by providing author-written plain language descriptions of what the gated mutating step achieves, displayed prominently on confirmation cards above technical details.
+**Furthermore, a critical security gap has been fixed in the error handling path where exception messages containing URLs with credentials were passed directly to make_error_result().** The enhanced `_redact_secret_query` function now properly masks credentials in error messages, ensuring that sensitive information never leaks through error responses even when exceptions occur during browser operations.
+
+This architectural change improves ownership alignment, security boundaries, and maintainability while preserving all external contracts and functionality. The transition from namespaced Role to cluster-wide ClusterRole significantly enhances operational capabilities while maintaining strict read-only access controls. The introduction of risk-tier admission control ensures that mutating operations require explicit authorization through both environment configuration and policy enforcement. The enhanced request correlation capabilities ensure that every tool invocation can be traced end-to-end through downstream services, providing comprehensive audit trail visibility. The expanded browser connector extends the platform's capabilities to interact with web applications through a bounded, secure interface with comprehensive security controls including origin allowlisting, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, file upload path allowlisting, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking including DSN-style credential protection, and critical concurrent session serialization. The new flow-based approval system transforms operator experience by displaying workflow intent ("Reset User Password in Admin Portal") rather than bare tool actions, making approval decisions more meaningful and reducing cognitive load during critical operations. The skill-declared step intent feature further enhances this by providing author-written plain language descriptions of what the gated mutating step achieves, displayed prominently on confirmation cards above technical details.
 
 ## Appendices
 
@@ -1349,7 +1353,7 @@ The browser connector provides comprehensive web application interaction capabil
 - **Cross-origin frame denial** prevents switching to iframes from different origins
 - **JavaScript evaluation mutation guard** blocks known state-changing DOM APIs as defense-in-depth
 - **File upload path allowlisting** prevents path traversal attacks
-- **Comprehensive secret query parameter masking** through `_evidence_url` helper function
+- **Comprehensive secret query parameter masking** through `_evidence_url` helper function including DSN-style credential protection
 - **Concurrent session serialization** through `_SessionSerializedTool` wrapper class and `BrowserSessionPool.interaction_lock()`
 
 **Tool Surface - 15 Total Tools**:
@@ -1379,6 +1383,7 @@ The browser connector provides comprehensive web application interaction capabil
 - **Consistent Implementation**: Uses `_redact_secret_query` function to mask sensitive parameters like passwords, tokens, API keys, and credentials
 - **Evidence URL Standardization**: All tools report `entry.active_target.url` through `_evidence_url` ensuring consistent secret masking
 - **Parameter Vocabulary**: Matches the same secret parameter vocabulary used by the kernel's change-request projection for consistency
+- **DSN-Style Credential Protection**: Enhanced `_redact_secret_query` function now handles credentials in URL userinfo sections (e.g., `postgres://admin:password@host`) with explicit handling for `parsed.password` to mask credentials in netloc before processing query parameters
 
 **Concurrent Session Serialization**:
 - **Race Condition Prevention**: The `_SessionSerializedTool` wrapper class wraps each browser tool to ensure only one web.* call executes per session at a time
@@ -1407,7 +1412,7 @@ The browser connector provides comprehensive web application interaction capabil
 - Concurrent session creation safety
 - **SPEC-050 tool tests covering all nine new capabilities**
 - **SPEC-054 R-2 ad-hoc interaction tests covering per-action approval cards and live-origin re-checks**
-- **Secret query parameter masking tests covering all browser tool results**
+- **Secret query parameter masking tests covering all browser tool results including DSN-style credentials**
 - **Concurrent session serialization tests covering lock acquisition and release**
 
 **Section sources**
@@ -1512,10 +1517,10 @@ When developing custom tools:
 - **For browser tools with flow binding, understand flow-based approval semantics and semantic confirmation cards**
 - **For browser tools with flow binding, consider adding flow_intent to skill frontmatter for enhanced operator experience**
 - **For browser tools, understand SPEC-054 R-2 ad-hoc interaction model supporting per-action approval cards without bound flows**
-- **For browser tools, understand comprehensive secret query parameter masking through _evidence_url function**
+- **For browser tools, understand comprehensive secret query parameter masking through _evidence_url function including DSN-style credential protection**
 - **For browser tools, understand concurrent session serialization mechanism preventing race conditions**
 
-**Updated** Added guidance for risk-level classification, mutating tool requirements, request correlation capabilities, expanded browser connector integration with 15 tools and comprehensive security controls, flow-based approval system integration, skill-declared step intent, SPEC-054 R-2 ad-hoc interactions, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
+**Updated** Added guidance for risk-level classification, mutating tool requirements, request correlation capabilities, expanded browser connector integration with 15 tools and comprehensive security controls including DSN-style credential protection, flow-based approval system integration, skill-declared step intent, SPEC-054 R-2 ad-hoc interactions, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
 
 **Section sources**
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
@@ -1532,11 +1537,12 @@ When developing custom tools:
 - **Enhanced RBAC enforcement with cluster-wide read-only access via `luban-tool-gateway-readonly` ClusterRole**
 - **Risk-tier admission control preventing unauthorized access to mutating tools**
 - **Enhanced request correlation with x-request-id header forwarding for audit trail continuity**
-- **Expanded browser connector security controls including origin allowlist, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, file upload path allowlisting, and comprehensive secret query parameter masking**
+- **Expanded browser connector security controls including origin allowlist, flow binding, credential masking, cross-origin frame denial, JavaScript evaluation mutation guards, file upload path allowlisting, and comprehensive secret query parameter masking including DSN-style credential protection**
 - **Flow-based approval system security controls including origin deviation detection and flow context validation**
 - **Skill-declared step intent display-only rendering ensuring no security impact**
 - **SPEC-054 R-2 ad-hoc interaction security controls including live-origin re-checks, signed authority provenance validation, and per-action approval cards**
 - **Critical concurrent session serialization security controls preventing race conditions and ensuring reliable operation**
+- **Fixed critical security gap in error handling path where exception messages containing URLs with credentials were passed directly to make_error_result()**
 - Input validation and sanitization
 - Policy-based access control with enhanced tool permissions including tools:mutate
 - Secure configuration management
@@ -1555,10 +1561,10 @@ When developing custom tools:
 - **File upload path traversal prevention with directory allowlisting**
 - **Flow context validation ensuring approvals are scoped to specific skill declarations**
 - **Ad-hoc interaction staleness prevention through signed envelope provenance validation**
-- **Comprehensive secret query parameter masking preventing sensitive data leakage in browser tool results**
+- **Comprehensive secret query parameter masking preventing sensitive data leakage in browser tool results including DSN-style credentials**
 - **Concurrent session serialization preventing race conditions in browser automation workflows**
 
-**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, enhanced request correlation capabilities, comprehensive browser connector security controls including SPEC-050 additions, flow-based approval system security controls, skill-declared step intent display-only rendering, SPEC-054 R-2 ad-hoc interaction security controls, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
+**Updated** Enhanced security model with risk-tier admission control, improved cluster-wide RBAC permissions, enhanced request correlation capabilities, comprehensive browser connector security controls including SPEC-050 additions and DSN-style credential protection, flow-based approval system security controls, skill-declared step intent display-only rendering, SPEC-054 R-2 ad-hoc interaction security controls, comprehensive secret query parameter masking including DSN-style credential protection, critical concurrent session serialization mechanism, and fixed critical security gap in error handling path.
 
 **Section sources**
 - [token_verifier.py](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
@@ -1597,13 +1603,13 @@ When developing custom tools:
 - **Monitor skill-declared step intent rendering and display-only field validation**
 - **Monitor SPEC-054 R-2 ad-hoc interaction approval card effectiveness and live-origin re-check performance**
 - **Track signed envelope provenance validation and staleness prevention effectiveness**
-- **Monitor secret query parameter masking effectiveness across all browser tools**
+- **Monitor secret query parameter masking effectiveness across all browser tools including DSN-style credentials**
 - **Track evidence URL masking consistency and secret parameter detection accuracy**
 - **Monitor concurrent session serialization effectiveness and lock contention**
 - **Track interaction lock acquisition and release patterns**
 - **Monitor lock pruning effectiveness and memory usage**
 
-**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, request correlation monitoring, comprehensive browser connector metrics including SPEC-050 security controls, flow-based approval system monitoring, skill-declared step intent display validation, SPEC-054 R-2 ad-hoc interaction monitoring, comprehensive secret query parameter masking monitoring, and critical concurrent session serialization monitoring.
+**Updated** Enhanced monitoring strategies with risk-tier admission control, cluster-wide access monitoring, request correlation monitoring, comprehensive browser connector metrics including SPEC-050 security controls and DSN-style credential protection, flow-based approval system monitoring, skill-declared step intent display validation, SPEC-054 R-2 ad-hoc interaction monitoring, comprehensive secret query parameter masking monitoring including DSN-style credentials, and critical concurrent session serialization monitoring.
 
 **Section sources**
 - [metrics.py](file://products/tool-gateway/src/tool_gateway/core/metrics.py)
@@ -1652,13 +1658,14 @@ The browser connector provides comprehensive web application interaction capabil
 - **Centralized Implementation**: All browser tools use `_evidence_url` helper function for consistent secret masking
 - **Parameter Vocabulary**: Matches kernel's secret parameter vocabulary for consistency
 - **Evidence URL Standardization**: All tool results report masked URLs through standardized helper function
+- **DSN-Style Credential Protection**: Enhanced `_redact_secret_query` function handles credentials in URL userinfo sections with explicit handling for `parsed.password`
 
 **Concurrent Session Serialization Configuration**:
 - **Automatic Wrapping**: All browser tools are automatically wrapped with `_SessionSerializedTool` at registration time
 - **Lock Management**: `BrowserSessionPool.interaction_lock()` manages per-session locking automatically
 - **Lock Pruning**: Automatic cleanup of unused locks through `sweep_expired()` mechanism
 
-**New** Expanded browser connector configuration options for 15 web application interaction tools with comprehensive security controls per SPEC-050, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking, and critical concurrent session serialization mechanism.
+**New** Expanded browser connector configuration options for 15 web application interaction tools with comprehensive security controls per SPEC-050, ad-hoc interactions per SPEC-054 R-2, comprehensive secret query parameter masking including DSN-style credential protection, and critical concurrent session serialization mechanism.
 
 **Section sources**
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
@@ -1834,7 +1841,7 @@ The SPEC-050 implementation expands the browser tool surface from 6 to 15 tools 
 - **JavaScript evaluation safety**: Result bounding (16,000 chars, 100 array elements), mutation guard blocking known state-changing DOM APIs
 - **File upload security**: Path allowlisting against `GATEWAY_BROWSER_UPLOAD_DIR`, traversal prevention
 - **Iframe traversal security**: Cross-origin frame denial preventing steering into external origins
-- **Comprehensive secret query parameter masking**: All tool results include secret-bearing query parameter masking through `_evidence_url` helper function
+- **Comprehensive secret query parameter masking**: All tool results include secret-bearing query parameter masking through `_evidence_url` helper function including DSN-style credential protection
 
 **Security Enhancements**:
 - **Mutation guard**: Pre-execution analysis of JavaScript expressions to block known state-changing DOM APIs
@@ -1842,7 +1849,7 @@ The SPEC-050 implementation expands the browser tool surface from 6 to 15 tools 
 - **Cross-origin frame denial**: Frame origin checked against flow bound origin to prevent iframe hijacking
 - **Result bounding**: JavaScript evaluation results limited to prevent memory exhaustion
 - **HITL confirmation**: All write-tier tools require operator approval through existing confirmation bridge
-- **Secret parameter masking**: Consistent masking of sensitive query parameters across all browser tool results
+- **Secret parameter masking**: Consistent masking of sensitive query parameters across all browser tool results including DSN-style credentials
 
 **Testing Coverage**:
 - Session pool lifecycle tests (create/reuse/TTL/eviction)
@@ -1852,7 +1859,7 @@ The SPEC-050 implementation expands the browser tool surface from 6 to 15 tools 
 - Screenshot byte cap enforcement
 - Concurrent session creation safety
 - **SPEC-050 specific tests**: All nine new tools with success/error paths, security boundary testing
-- **Secret masking tests**: Verification of secret parameter masking across all tool results
+- **Secret masking tests**: Verification of secret parameter masking across all tool results including DSN-style credentials
 
 **Backward Compatibility**:
 - Six existing SPEC-049 tools retain their signatures, risk tiers, and enforcement
@@ -1970,6 +1977,7 @@ The SPEC-054 implementation formalizes action-level HITL approval and relaxes br
 - **Consistent Implementation**: Uses `_redact_secret_query` function to mask sensitive parameters like passwords, tokens, API keys, and credentials
 - **Evidence URL Standardization**: All tools report `entry.active_target.url` through `_evidence_url` ensuring consistent secret masking
 - **Parameter Vocabulary**: Matches the same secret parameter vocabulary used by the kernel's change-request projection for consistency
+- **DSN-Style Credential Protection**: Enhanced `_redact_secret_query` function handles credentials in URL userinfo sections with explicit handling for `parsed.password`
 
 **Testing Coverage**:
 - Ad-hoc browser write park-then-execute expectations replacing hard-deny assertions
@@ -1977,7 +1985,7 @@ The SPEC-054 implementation formalizes action-level HITL approval and relaxes br
 - Signed envelope provenance validation for stale flow authorities
 - Change request projection with secret masking
 - Per-action approval card generation and execution
-- **Secret masking tests**: Verification of secret parameter masking across all browser tool results
+- **Secret masking tests**: Verification of secret parameter masking across all browser tool results including DSN-style credentials
 
 **Section sources**
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)

@@ -76,7 +76,7 @@ The goal is to enable operators to "develop as you go" by running actions in cha
 
 **Delivered** Stage 8 (R-6) Sample Implementation provides interactive graduation demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow: author ad hoc against a declared target, graduate the trace into an executable-flow draft, merge the draft into the skills repository, and replay under one gate. Includes comprehensive automated testing with deterministic legs and optional chat legs, following ADR-0008 exercised-sample rule.
 
-**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three defects around the R-6 sample: login flow SSO auto-login handling, service availability retry logic, and portal access documentation. The first two changed the sample's own walkthrough prompts and demo script; the third corrected documentation on both sample and platform surfaces (the two sibling web-check walkthroughs, `docs/guides`, and the dev-k8s overlay README). No product code changed, so the deployed platform images are unaffected.
+**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three defects in the R-6 sample implementation, including login flow SSO auto-login handling, service availability retry logic, and portal access documentation improvements. All fixes were applied to the sample code only, leaving the deployed platform images unaffected.
 
 **Section sources**
 - [spec.md:5-37](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L5-L37)
@@ -188,7 +188,7 @@ SAMPLES --> POST_DELIVERY
 
 **Version 0.36.0 Delivery**: All seven requirements successfully delivered with comprehensive testing coverage across eight products. The implementation includes 2424 Python tests passing, portal npm test 342 across 29 files, and clean build verification. Version lockstep enforced across VERSION + 8 pyproject.toml + 8 metadata.py + 2 __init__.py + 8 uv.lock re-locks.
 
-**Post-Delivery Sample Fixes**: Three defects identified during dev-k8s browser live check were resolved: login flow SSO auto-login handling (preventing detached element clicks) and service availability retry logic (handling 502/503 errors gracefully), both in the sample, plus portal access documentation (canonical OIDC origin rather than a localhost port-forward), which spanned the sample walkthroughs and the platform guides.
+**Post-Delivery Sample Fixes**: Three defects identified during dev-k8s browser live check were resolved in the sample implementation: login flow SSO auto-login handling (preventing detached element clicks), service availability retry logic (handling 502/503 errors gracefully), and portal access documentation (correct OIDC redirect URI usage).
 
 **Section sources**
 - [spec.md:101-305](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/spec.md#L101-L305)
@@ -251,6 +251,7 @@ Note over Demo,Operator : R-6 : Sample Implementation (Complete)
 Demo->>Operator : Interactive demo with 6 deterministic legs
 Demo->>Operator : Optional chat legs for full workflow
 Demo->>Demo : Automated verification of all phases
+Demo->>Demo : Post-delivery fixes applied
 Demo-->>Operator : End-to-end graduation verification
 ```
 
@@ -573,7 +574,8 @@ Act1 --> Act2["Act 2: Graduate<br/>Trace becomes executable-flow draft"]
 Act2 --> Act3["Act 3: Merge<br/>Human reviews and merges draft"]
 Act3 --> Act4["Act 4: Replay<br/>Same work behind one gate"]
 Act4 --> Cleanup["Cleanup temporary resources"]
-Cleanup --> End
+Cleanup --> PostFixes["Apply post-delivery fixes"]
+PostFixes --> End
 ```
 
 **Diagram sources**
@@ -808,7 +810,7 @@ SPEC-055 enables a secure, operator-friendly path from live troubleshooting to r
 
 **Delivered** Stage 8 (R-6) Sample Implementation is now complete with comprehensive interactive demo providing end-to-end verification of the complete skill graduation lifecycle. The sample demonstrates the four-act workflow (author, graduate, merge, replay) through six deterministic legs and four optional chat legs, following ADR-0008 exercised-sample rule. Includes detailed walkthrough guide, comprehensive automated testing, cleanup procedures, and configuration guidance for adapting to different environments.
 
-**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three critical defects around the sample, ensuring reliable end-to-end verification. These fixes included login flow SSO auto-login handling and service availability retry logic in the sample itself, plus portal access documentation across the sample walkthroughs and the platform guides; none touched product code, so the deployed platform images are unaffected.
+**Post-Delivery Enhancements**: The dev-k8s browser live check identified and resolved three critical defects in the sample implementation, ensuring reliable end-to-end verification. These fixes included login flow SSO auto-login handling, service availability retry logic, and portal access documentation improvements, all applied to sample code only without affecting deployed platform images.
 
 The implementation strategy emphasizes incremental delivery with clear dependencies, comprehensive testing requirements, and robust rollback procedures. With all eight stages complete, the foundation is solid for proceeding with future enhancements. The eight-stage approach ensures that each component is thoroughly tested and validated before proceeding to the next, minimizing risk while maximizing the value delivered at each milestone. The interactive sample implementation provides confidence that the complete graduation workflow functions as designed across all components and services.
 

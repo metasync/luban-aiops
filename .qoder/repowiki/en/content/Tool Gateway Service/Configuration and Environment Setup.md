@@ -805,12 +805,15 @@ Deny --> End(["Connection Blocked"])
 
 ```mermaid
 flowchart TD
-LoginStart["Login Initiated from Any Origin"] --> FixedCallback["Broker reads OIDC_REDIRECT_URI<br/>no per-origin override"]
-FixedCallback --> KeycloakAuth["Authenticate with Keycloak"]
+LoginStart["Login Initiated from Any Origin"] --> CheckOrigin{"Origin matches<br/>canonical URI?"}
+CheckOrigin --> |yes| UseCanonical["Use OIDC_REDIRECT_URI as callback"]
+CheckOrigin --> |no| UseExtra["Use extra URI for reachability"]
+UseCanonical --> KeycloakAuth["Authenticate with Keycloak"]
+UseExtra --> KeycloakAuth
 KeycloakAuth --> RedirectBack["Keycloak redirects to canonical URI"]
 RedirectBack --> ExchangeCode["Exchange code for tokens"]
 ExchangeCode --> Complete["Authentication complete"]
-ExtraURIs["OIDC_EXTRA_REDIRECT_URIS<br/>registered for reachability only<br/>never selected as a callback"] -.-> KeycloakAuth
+Note over LoginStart,Complete : Port-forwarding cannot complete sign-in flows<br/>because canonical URI is always used for callbacks
 ```
 
 **Diagram sources**
