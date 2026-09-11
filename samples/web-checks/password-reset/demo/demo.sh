@@ -304,7 +304,7 @@ print('  %d write-tier execution(s) all signed under the one card: %s' % (
   echo "    one absent from the roster, so opening"
   echo "      http://localhost:9090/admin/users/reset/done/?user=${TARGET_USER}"
   echo "    proves nothing about this run. The evidence is the transcript's"
-  echo "    post-click #reset-status snapshot and screenshot, plus the single"
+  echo "    post-click #reset-status extract and screenshot, plus the single"
   echo "    approved card and the signed execution receipts asserted above."
 else
   echo "==> [CHAT] chat leg skipped (RUN_CHAT_LEG unset; opt-in)"

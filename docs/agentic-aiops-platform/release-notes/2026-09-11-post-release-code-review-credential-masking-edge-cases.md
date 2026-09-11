@@ -223,16 +223,20 @@ all passed post-fix.
 
 ## Deployment state
 
-This release **rebuilds and redeploys** so the cluster carries the release sha
-while live testing continues. Nine images are built at the coordinated tag
-`0.36.2-dev-k8s-<release-sha>`.
+This release's cluster rebuild was **batched into the v0.36.3 follow-up**, not
+cut standalone. The post-release documentation review landed right after this
+tag as v0.36.3, so the two ship one coordinated build/deploy and no
+`0.36.2-dev-k8s-<sha>` image tag exists on its own; the masking fixes here go
+live on that v0.36.3 build. Until it lands the cluster keeps serving the
+previously deployed v0.36.1 functional images, which is what live testing
+continues against.
 
-As in v0.36.1, that tag cannot be recorded inside the commit that creates it —
-the short sha is an input to the tag — so the authoritative record is the
-gitignored `shared/platform-ops/gitops/dev-k8s/.images.env`, which `make build`
-writes and `make deploy` consumes, verifiable from the running pods. This is
-the platform's traceability posture (ADR-0008): the tag is derived from a git
-ref rather than asserted in prose. The rebuild resets in-flight agent state,
-since redis runs on an `emptyDir`; sessions persist in Postgres, and approval
-cards parked before the redeploy are disrupted by it — the accepted cost of
-testing against a properly tagged image.
+The coordinated tag still cannot be recorded inside the commit that creates it
+— the short sha is an input to the tag — so the authoritative record remains
+the gitignored `shared/platform-ops/gitops/dev-k8s/.images.env`, which
+`make build` writes and `make deploy` consumes, verifiable from the running
+pods. This is the platform's traceability posture (ADR-0008): the tag is
+derived from a git ref rather than asserted in prose. A rebuild resets
+in-flight agent state, since redis runs on an `emptyDir`; sessions persist in
+Postgres, and approval cards parked before the redeploy are disrupted by it —
+the accepted cost of testing against a properly tagged image.

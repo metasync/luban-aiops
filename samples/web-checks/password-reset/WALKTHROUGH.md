@@ -191,7 +191,10 @@ The agent's final message should confirm the password was reset. You'll see:
   action card's arguments, which would render `{ "url": "***" }` and destroy the
   evidence the panel exists to show
 - The HITL approval record (signed receipt)
-- The final snapshot showing the success page
+- The success evidence: a `web.extract` of `#reset-status` reading the reset
+  confirmation, plus the `web.screenshot` — not a `web.snapshot`, since the
+  status line is a plain `<p role="status">` absent from every snapshot
+  (detailed under "The real evidence is in the chat transcript" below)
 
 ### The Admin Portal URLs Are Not Verification
 

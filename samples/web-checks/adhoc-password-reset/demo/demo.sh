@@ -333,7 +333,7 @@ print('  %d per-action card(s), all action-kind with a change request; %d signed
   echo "    one absent from the roster, so opening"
   echo "      http://localhost:9090/admin/users/reset/done/?user=${TARGET_USER}"
   echo "    proves nothing about this run. The evidence is the transcript's"
-  echo "    post-click #reset-status snapshot and screenshot, plus the action-kind"
+  echo "    post-click #reset-status extract and screenshot, plus the action-kind"
   echo "    cards and the signed execution receipts asserted above."
 else
   echo "==> [CHAT] chat leg skipped (RUN_CHAT_LEG unset; opt-in)"

@@ -34,7 +34,8 @@ waves and validation outcomes rather than published product releases.
     green (2551 tests, +42), each fix pinned by a test confirmed to fail
     pre-fix (36 red on a source-only stash). The review's remaining non-leak
     findings are tracked for the follow-up code-and-doc review, not dropped;
-    images rebuilt at the sha.
+    the cluster rebuild was batched into that v0.36.3 follow-up, not cut
+    standalone.
 - `2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md`
   - patch release (v0.36.1) closing findings from live browser runs of both
     password-reset samples plus one live HITL session. The organizing finding
