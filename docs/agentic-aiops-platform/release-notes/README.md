@@ -7,6 +7,34 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-11-post-release-code-review-credential-masking-edge-cases.md`
+  - patch release (v0.36.2) closing an in-depth code review of the
+    credential-masking surface v0.36.1 introduced (`prose_redaction.py` and the
+    two `redact_secret_query` twins). Where every v0.36.1 entry closed a defect
+    observed in a live run, these seven were found by reading the new code,
+    then reproduced against it before being fixed. Six are edges where a
+    credential still reaches a human-readable or persisted surface: a secret in
+    a URL's *userinfo* rather than its query, masked in both twins so a DSN
+    `scheme://user:pw@host` no longer sails through the `if not parsed.query`
+    early return; a non-HTTP DSN recognised in prose (`URL_TOKEN` widened to
+    any RFC-3986 scheme, userinfo harvested beside the query values); a pinned
+    shape (PEM/JWT/Bearer/AKIA) split across stream deltas now held by its
+    anchor up to a 512-char cap, closing a limit the class docstring had
+    explicitly declared; an uppercase scheme split across deltas
+    (`_scheme_hold` lowercases the tail it compares against the lowercase
+    `URL_SCHEME_STARTS`); the `web.navigate` exception path masking the URL
+    Playwright interpolates into `str(exc)` before it reaches
+    results/evidence/audit; and `is_credential_literal` gating length *before*
+    stripping sentence punctuation, so `Secret1!` is not cut to seven and
+    rejected. The seventh is the opposite failure — an over-mask where
+    `credential_literals` harvested a whole `key=value` token and collapsed
+    "the `newpw=***` field" to "the `***` field", losing the non-secret name.
+    The masking vocabulary is unchanged (still 20 substrings / 4 shape
+    patterns); no contract, policy, schema, or audit change; `make verify`
+    green (2551 tests, +42), each fix pinned by a test confirmed to fail
+    pre-fix (36 red on a source-only stash). The review's remaining non-leak
+    findings are tracked for the follow-up code-and-doc review, not dropped;
+    images rebuilt at the sha.
 - `2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md`
   - patch release (v0.36.1) closing findings from live browser runs of both
     password-reset samples plus one live HITL session. The organizing finding

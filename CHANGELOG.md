@@ -11,6 +11,94 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.36.2 — 2026-09-11
+
+Patch hardening batch closing an in-depth code review of the credential-masking
+surface 0.36.1 introduced — `services/prose_redaction.py` and the two
+`redact_secret_query` twins. Where every 0.36.1 entry closed a defect *observed
+in a live run*, these seven were *found by reading the new code*, then
+reproduced against it before being fixed: six are edges where a credential
+still reaches a human-readable or persisted surface, and the seventh is the
+opposite failure — an over-mask that destroys a non-secret word. Each is pinned
+by a regression test confirmed to fail against the unpatched code (36 pre-fix
+failures across the two products). No contract, policy, schema, or audit
+change: the stream contract stays at v11 and Skill at v2.
+
+### Fixed
+
+- **A credential in a URL's userinfo is masked, in both query-redactor twins
+  (SPEC-049 R-5)** — `redact_secret_query` (kernel `secret_params`) and its
+  gateway twin `_redact_secret_query` opened with `if not parsed.query: return
+  url`, so a secret carried in the *userinfo* — `scheme://user:password@host`,
+  the shape of a database DSN, which frequently has no query string at all —
+  was returned untouched and re-serialized into results, evidence, and the
+  audit trail. Both now mask `parsed.password` in the netloc by a single
+  first-occurrence replace that preserves every non-secret byte exactly (no
+  re-encoding, matching the segment-wise query rewrite), and the empty-query
+  early return is gone so the userinfo is masked whether or not a query is also
+  present. The two copies stay lockstep, as `validate_secret_vocabulary.py`
+  requires of the vocabulary they share.
+- **A non-HTTP DSN is recognised as a URL in prose, and its userinfo
+  harvested** — the prose-layer twin of the gap above. `URL_TOKEN` matched only
+  `https?://` or `www.`, so a `postgres://admin:pw@db/app` DSN the model echoed
+  sailed straight through the URL layer and `_secret_query_values` harvested
+  nothing from it. The scheme is now any RFC-3986 scheme
+  (`[a-z][a-z0-9+.\-]*://`, case-insensitive), and `_secret_query_values`
+  harvests the userinfo password — quoted and unquoted — on the same footing as
+  a query value, so an assistant restating a DSN credential bare still meets
+  the exact-literal layer.
+- **A pinned secret shape split across stream deltas is held, not emitted in
+  pieces** — `StreamingProseRedactor` held a URL split across deltas (0.36.1)
+  but a *pinned shape* split the same way — a PEM `-----BEGIN…` header, a JWT
+  `eyJ…`, a `Bearer`/`Basic` token, an AWS `AKIA…` id — was published in pieces
+  no later buffer re-forms into a match, so `redact_assistant_text` never saw a
+  complete shape and the credential leaked to the live stream; the durable
+  transcript, which masks complete text, still caught it. The class docstring
+  had *listed this as a known limit* ("a shape that has not finished arriving
+  is not recognised … would need unbounded lookahead"). The redactor now holds
+  a tail that is, or opens with, one of the five shape anchors until its
+  pattern completes or `flush` releases it, capped at `SHAPE_HOLD_MAX_CHARS =
+  512` so a false anchor (`Bearer token expired`, where `token` is too short to
+  match) stalls the stream only briefly and a shape longer than the cap falls
+  back to the transcript's unbounded guarantee. The anchors are the leading
+  literals of the pinned `skill_draft.REDACTION_VALUE_PATTERNS`, not a third
+  vocabulary, and a test streams one canonical example of each shape so an
+  anchor cannot go stale against its pattern silently.
+- **An uppercase URL scheme split across deltas is held** — `URL_TOKEN` is
+  `re.IGNORECASE`, so the match layer redacts `HTTPS://…`, but `_scheme_hold`
+  compared the raw buffer tail against the lowercase `URL_SCHEME_STARTS`, so an
+  uppercase scheme split across deltas (`… to HTTPS` | `://…`) published
+  `HTTPS` before the `://` arrived and the URL was never recognised. The held
+  tail is lowercased before the comparison, so the case the match layer already
+  accepts is the case the hold layer protects.
+- **A navigation error masks the secret Playwright interpolates into its
+  message (SPEC-049 R-5)** — `web.navigate`'s exception path passed `str(exc)`
+  straight to `make_error_result`, and a Playwright navigation error
+  interpolates the target URL, which for the password-reset demo carries
+  `?newpw=<value>` and for a DSN-style target could carry it in the userinfo.
+  That message rides into the tool result, the evidence frame, and the audit
+  trail, so the secret left in plaintext on the *error* path even though the
+  success path masks it. The message now goes through `_redact_secret_query`
+  first; the fix is kept at the navigate call site rather than in the shared
+  `make_error_result`, which has no URL context to redact.
+- **A credential whose length is met only by its trailing sentence punctuation
+  is still masked** — `is_credential_literal` stripped sentence punctuation
+  *before* applying the `CREDENTIAL_MIN_CHARS` length gate, so a valid
+  eight-character credential the operator ended with a sentence `!` or `.`
+  (`Secret1!`) was cut to seven and rejected, leaving it unmasked in the
+  assistant's restatement. The gate now runs on the token as written; the
+  character-class test still runs on the stripped core, so surrounding
+  punctuation never counts toward either budget.
+- **A `key=value` token is not harvested whole, so the secret's *name*
+  survives** — the one over-mask in the batch, and the opposite of a leak.
+  `credential_literals`'s secret-name heuristic harvested whole whitespace
+  tokens, so `newpw=TempPass123!` went onto the literal list *including its
+  key*; the `KEY_VALUE_SECRET` pass had already harvested the value on its own,
+  so the effect was purely to destroy a non-secret word — an assistant writing
+  "the `newpw=***` field" collapsed to "the `***` field", losing the one token
+  that said what the field was. The heuristic branch now skips a token
+  `KEY_VALUE_SECRET` matches; the value side stays covered by that pass.
+
 ## 0.36.1 — 2026-09-11
 
 Patch hardening batch. Every entry closes a defect observed in a live run
