@@ -209,9 +209,17 @@ def _redact_secret_query(url: str) -> str:
         parsed = urlsplit(url)
     except ValueError:
         return url
-    if not parsed.query:
-        return url
     changed = False
+    # A credential can ride in the userinfo (``scheme://user:password@host``)
+    # with no query string at all, so the password is masked independently of
+    # the query loop below and an empty query is no longer an early return.
+    # Kernel twin of ``secret_params.redact_secret_query`` — keep the two in
+    # lockstep. The raw netloc is rewritten by a single first-occurrence
+    # replace so every non-secret byte is preserved exactly (no re-encoding).
+    netloc = parsed.netloc
+    if parsed.password:
+        netloc = netloc.replace(f":{parsed.password}@", ":***@", 1)
+        changed = True
     segments: list[str] = []
     for segment in parsed.query.split("&"):
         key, sep, _value = segment.partition("=")
@@ -224,7 +232,7 @@ def _redact_secret_query(url: str) -> str:
     if not changed:
         return url
     return urlunsplit((
-        parsed.scheme, parsed.netloc, parsed.path,
+        parsed.scheme, netloc, parsed.path,
         "&".join(segments), parsed.fragment,
     ))
 
@@ -808,7 +816,13 @@ class WebNavigateTool(BaseTool):
                 entry.flow = None
                 entry.reset_page_state()
             return make_error_result(
-                "web.navigate", "BROWSER_NAVIGATION_ERROR", str(exc),
+                "web.navigate", "BROWSER_NAVIGATION_ERROR",
+                # A Playwright navigation error interpolates the target URL,
+                # which for the password-reset demo carries ``?newpw=<value>``
+                # (and a DSN-style target could carry it in the userinfo). The
+                # message rides into results, evidence and the audit trail, so
+                # the secret is masked before it leaves (SPEC-049 R-5).
+                _redact_secret_query(str(exc)),
                 source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
             )
         duration_ms = int((time.perf_counter() - start) * 1000)

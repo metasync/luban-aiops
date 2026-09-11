@@ -1028,6 +1028,27 @@ class FlowBindingTests(unittest.TestCase):
         # dropped rather than left stale for a later interaction.
         self.assertIsNone(entry.flow)
 
+    def test_navigation_error_masks_a_secret_in_the_exception_message(self) -> None:
+        # A Playwright navigation error interpolates the target URL, which for
+        # the password-reset demo carries ``?newpw=<value>``. That message rides
+        # into results, evidence and the audit trail, so the secret query is
+        # masked before it leaves (SPEC-049 R-5) — the page still navigated
+        # with the real value, only the reported copy is redacted.
+        entry = _run(self.connector.pool.get_or_create("dev.operator"))
+        target = f"{ALLOWED_ORIGIN}/admin/reset?user=alice&newpw=TempPass123!"
+
+        async def _boom(url: str, **kwargs) -> None:
+            raise RuntimeError(f'Page.goto: navigating to "{url}", timed out')
+
+        entry.page.goto = _boom  # type: ignore[method-assign]
+        result = self._navigate({"url": target})
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error["code"], "BROWSER_NAVIGATION_ERROR")
+        self.assertNotIn("TempPass123!", result.error["message"])
+        self.assertIn("newpw=***", result.error["message"])
+        # The non-secret param survives, so the failure stays diagnosable.
+        self.assertIn("user=alice", result.error["message"])
+
 
 # --- Deviation guard --------------------------------------------------------
 

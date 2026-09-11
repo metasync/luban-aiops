@@ -136,14 +136,19 @@ CREDENTIAL_MIN_CHARS = 8
 # A URL inside prose. A scheme (or ``www.``) is required so an ordinary
 # question in a sentence is not read as a query; a scheme-less URL's secret is
 # still caught by ``KEY_VALUE_SECRET``, since a query parameter is already in
-# ``key=value`` form. The greedy tail also matches a URL that has not finished
-# arriving, running to the end of whatever buffer it is given — which is what
-# lets ``StreamingProseRedactor`` hold it rather than split it. The tail is
-# ``*`` rather than ``+`` for the same reason: a buffer ending exactly at
-# ``https://`` is a URL still arriving, and a ``+`` would not see it as one and
-# would publish the scheme before the rest turned up. A bare scheme has no
-# query, so every layer that consumes a match leaves it unchanged.
-URL_TOKEN = re.compile(r"(?:\bhttps?://|\bwww\.)[^\s<>\"']*", re.IGNORECASE)
+# ``key=value`` form. The scheme is any RFC-3986 scheme, not just ``http(s)``:
+# a database DSN (``postgres://admin:pw@db/app``) carries its credential in the
+# userinfo and sails straight through an ``https?``-only match. The greedy tail
+# also matches a URL that has not finished arriving, running to the end of
+# whatever buffer it is given — which is what lets ``StreamingProseRedactor``
+# hold it rather than split it. The tail is ``*`` rather than ``+`` for the same
+# reason: a buffer ending exactly at ``https://`` is a URL still arriving, and a
+# ``+`` would not see it as one and would publish the scheme before the rest
+# turned up. A bare scheme has no query, so every layer that consumes a match
+# leaves it unchanged.
+URL_TOKEN = re.compile(
+    r"(?:\b[a-z][a-z0-9+.\-]*://|\bwww\.)[^\s<>\"']*", re.IGNORECASE
+)
 
 # The schemes ``URL_TOKEN`` can open with. A stream splits inside the scheme
 # itself — ``... to htt`` then ``ps://...`` — and once the first half is
@@ -151,6 +156,27 @@ URL_TOKEN = re.compile(r"(?:\bhttps?://|\bwww\.)[^\s<>\"']*", re.IGNORECASE)
 # is still a prefix of one of these.
 URL_SCHEME_STARTS = ("https://", "http://", "www.")
 URL_SCHEME_MAX_CHARS = max(len(scheme) for scheme in URL_SCHEME_STARTS)
+
+# The literal prefix every pinned secret shape (``skill_draft.
+# REDACTION_VALUE_PATTERNS`` — PEM header, JWT ``eyJ``, ``Bearer``/``Basic``
+# auth, AWS ``AKIA`` key id) opens with. A stream splits inside a shape the
+# same way it splits inside a URL scheme, and once the head is emitted no later
+# buffer re-forms the match, so ``StreamingProseRedactor`` holds a tail that is
+# an anchor (or a prefix of one) whose pattern has not matched yet. These are
+# the leading literals of the pinned patterns, not a third vocabulary —
+# ``test_streaming_holds_every_pinned_shape`` streams one canonical example of
+# each shape and fails if an anchor here goes stale against a pattern there.
+SHAPE_ANCHORS = ("-----BEGIN", "eyJ", "AKIA", "Bearer", "Basic")
+
+# How far back ``StreamingProseRedactor`` holds for a shape anchor whose
+# pattern has not completed. A real single-token credential (JWT, Bearer token,
+# AKIA id) is comfortably under this; a shape longer than the cap — a large
+# multi-line PEM key — is best-effort in the stream and falls back to the
+# durable transcript for the unbounded guarantee, exactly as the class
+# docstring's "not finished arriving" limit already states. The cap also bounds
+# how long a *false* anchor (``Bearer token expired``, where ``token`` is too
+# short to match) stalls the stream before it resumes with a bounded lag.
+SHAPE_HOLD_MAX_CHARS = 512
 
 # Punctuation a token may carry from the sentence around it rather than from
 # the credential itself. Harvesting the stripped form is what makes an exact
@@ -170,9 +196,16 @@ LITERAL_MIN_CHARS = 8
 
 def is_credential_literal(token: str) -> bool:
     """True when a whitespace-delimited token looks like a typed credential."""
-    candidate = token.strip(TOKEN_EDGE_PUNCTUATION)
-    if len(candidate) < CREDENTIAL_MIN_CHARS:
+    # Gate on the token as written, before stripping sentence punctuation. A
+    # credential the operator typed with a trailing ``!``/``.`` that belongs to
+    # the sentence (``Secret1!``) is 8 characters as written; stripping the
+    # edge punctuation first would drop it to 7, below
+    # ``CREDENTIAL_MIN_CHARS``, and leak a valid credential. The stripped core
+    # is still what the character-class test below runs on, so surrounding
+    # punctuation never counts toward the class budget.
+    if len(token.strip()) < CREDENTIAL_MIN_CHARS:
         return False
+    candidate = token.strip(TOKEN_EDGE_PUNCTUATION)
     # An address or anything carrying a path separator is an identifier or a
     # URL, not a password — and a URL's secret is the query layer's job,
     # which has already run by the time this is consulted.
@@ -236,12 +269,16 @@ def _redact_secret_queries(text: str) -> str:
 
 
 def _secret_query_values(text: str) -> Iterable[str]:
-    """Secret-named URL query values in ``text``, quoted and unquoted.
+    """Secret URL credentials in ``text`` — query values and DSN userinfo.
 
     Mirrors ``redact_secret_query``'s own parsing, per URL, so the harvested
-    literals are exactly the values that layer masks. Both forms matter: the
-    unquoted one is what the model restates in prose, the quoted one is what
-    it restates inside a URL it echoes back.
+    literals are exactly the values that layer masks. Both the quoted and the
+    unquoted form of a query value matter: the unquoted one is what the model
+    restates in prose, the quoted one is what it restates inside a URL it
+    echoes back. A DSN carries its credential in the userinfo instead
+    (``scheme://user:password@host``), frequently with no query at all, so that
+    password is harvested on the same footing — otherwise an assistant
+    restating it bare would miss the literal layer.
     """
     values: list[str] = []
     for match in URL_TOKEN.finditer(text):
@@ -249,6 +286,9 @@ def _secret_query_values(text: str) -> Iterable[str]:
             parsed = urlsplit(match.group(0))
         except ValueError:
             continue
+        if parsed.password:
+            values.append(parsed.password)
+            values.append(unquote(parsed.password))
         if not parsed.query:
             continue
         for segment in parsed.query.split("&"):
@@ -292,6 +332,14 @@ def credential_literals(text: str) -> frozenset[str]:
     if SECRET_NAME_HINT.search(text):
         for match in WHITESPACE_TOKEN.finditer(text):
             token = match.group(0)
+            # A ``key=value`` token is already harvested value-first by the
+            # KEY_VALUE_SECRET pass above. Harvesting the whole token here too
+            # would put the secret *name* on the literal list, so an assistant
+            # restating ``newpw=<value>`` collapses the informative key along
+            # with the value (``the newpw=*** field`` -> ``the *** field``).
+            # Skip it; the value side is already covered.
+            if KEY_VALUE_SECRET.search(token):
+                continue
             if is_credential_literal(token):
                 _harvest(found, token)
     return frozenset(found)
@@ -418,10 +466,12 @@ class StreamingProseRedactor:
       across two deltas publishes the second half — the first chunk has no
       ``?`` yet and the second has lost the scheme. The scheme itself is held
       too, since a boundary can fall inside ``https://``.
-    * A shape that has *not* finished arriving is not recognised, so its
-      leading characters can be emitted before it completes. Closing that
-      would need unbounded lookahead; the durable transcript, which masks
-      complete text, is the projection that carries the full guarantee.
+    * A shape still arriving is held by its anchor (``SHAPE_ANCHORS``) up to
+      ``SHAPE_HOLD_MAX_CHARS`` back, so a JWT/Bearer/AKIA/PEM split across
+      deltas is not published in pieces that no later buffer re-forms. Past
+      that cap a very long shape is best-effort here; the durable transcript,
+      which masks complete text, is the projection carrying the unbounded
+      guarantee.
 
     Degraded case: a match starting at the head of the buffer holds the cut
     at zero until it completes, so nothing is emitted meanwhile. That is the
@@ -449,6 +499,10 @@ class StreamingProseRedactor:
         # A tail that could still grow into a URL scheme waits too, or the
         # scheme is published in pieces and the URL is never recognised.
         cut = min(cut, len(self._pending) - self._scheme_hold())
+        # Likewise a tail that is (or opens with) a pinned shape anchor still
+        # arriving — a JWT split across deltas is otherwise emitted in pieces
+        # that no later buffer re-forms into a match.
+        cut = min(cut, len(self._pending) - self._shape_hold())
         head, self._pending = self._pending[:cut], self._pending[cut:]
         if not head:
             return ""
@@ -472,12 +526,59 @@ class StreamingProseRedactor:
         """
         longest = min(URL_SCHEME_MAX_CHARS, len(self._pending))
         for length in range(longest, 0, -1):
-            tail = self._pending[-length:]
+            # ``.lower()``: ``URL_TOKEN`` is ``re.IGNORECASE`` so ``HTTPS://``
+            # is a URL the match layer redacts, but ``URL_SCHEME_STARTS`` is
+            # lowercase — comparing the raw tail would miss an uppercase scheme
+            # and publish ``HTTP`` before ``S://`` arrived.
+            tail = self._pending[-length:].lower()
             if any(
                 scheme.startswith(tail) for scheme in URL_SCHEME_STARTS
             ):
                 return length
         return 0
+
+    def _shape_hold(self) -> int:
+        """Chars at the buffer's end that could still grow into a pinned shape.
+
+        Two cases, mirroring ``_scheme_hold``:
+
+        * the boundary fell *inside* an anchor (``...ey``, ``-----BEG``), so
+          the tail is a proper prefix of one — hold that prefix; and
+        * an anchor arrived whole but its pattern has not matched yet (a JWT
+          still streaming segments), so a credential is in progress — hold
+          from the anchor toward the buffer's end, capped at
+          ``SHAPE_HOLD_MAX_CHARS``. ``_safe_cut`` takes over once the shape
+          completes; ``flush`` releases it if it never does.
+
+        Anchors already inside a completed match are skipped — that match is
+        ``_safe_cut``'s job, not a shape still arriving.
+        """
+        text = self._pending
+        if not text:
+            return 0
+        completed = [
+            match.span()
+            for pattern in _secret_shape_patterns()
+            for match in pattern.finditer(text)
+        ]
+        hold = 0
+        for anchor in SHAPE_ANCHORS:
+            # Case A: the tail is a proper prefix of the anchor.
+            for length in range(min(len(anchor) - 1, len(text)), 0, -1):
+                if text.endswith(anchor[:length]):
+                    hold = max(hold, length)
+                    break
+            # Case B: a whole anchor not inside a completed match — a shape
+            # still arriving. Hold from it, bounded by the cap.
+            start = text.find(anchor)
+            while start != -1:
+                if not any(lo <= start < hi for lo, hi in completed):
+                    hold = max(
+                        hold, min(len(text) - start, SHAPE_HOLD_MAX_CHARS)
+                    )
+                    break
+                start = text.find(anchor, start + 1)
+        return hold
 
     def _safe_cut(self, cut: int) -> int:
         """Pull ``cut`` back to the start of any match it would split.

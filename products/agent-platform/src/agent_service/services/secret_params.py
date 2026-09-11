@@ -232,9 +232,17 @@ def redact_secret_query(url: str) -> str:
         parsed = urlsplit(url)
     except ValueError:
         return url
-    if not parsed.query:
-        return url
     changed = False
+    # A credential can ride in the userinfo (``scheme://user:password@host``)
+    # with no query string at all — a database DSN is exactly this — so the
+    # password is masked independently of the query loop below, and an empty
+    # query is no longer an early return. The raw netloc is rewritten by a
+    # single first-occurrence replace so every non-secret byte is preserved
+    # exactly (no re-encoding), matching the segment-wise query rewrite.
+    netloc = parsed.netloc
+    if parsed.password:
+        netloc = netloc.replace(f":{parsed.password}@", f":{MASK}@", 1)
+        changed = True
     segments: list[str] = []
     for segment in parsed.query.split("&"):
         key, sep, _value = segment.partition("=")
@@ -247,7 +255,7 @@ def redact_secret_query(url: str) -> str:
     if not changed:
         return url
     return urlunsplit((
-        parsed.scheme, parsed.netloc, parsed.path,
+        parsed.scheme, netloc, parsed.path,
         "&".join(segments), parsed.fragment,
     ))
 

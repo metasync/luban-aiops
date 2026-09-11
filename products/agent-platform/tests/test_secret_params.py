@@ -309,6 +309,23 @@ def test_the_query_redactor_is_a_no_op_without_a_secret_param() -> None:
         assert redact_secret_query(value) == value
 
 
+def test_the_query_redactor_masks_a_credential_in_the_url_userinfo() -> None:
+    """A DSN carries its password in the userinfo with no query at all, so the
+    early return on an empty query left it in plaintext. The password masks and
+    the rest of the netloc is preserved byte for byte (no re-encoding), exactly
+    as the query branch does; a userinfo credential and a secret query param
+    both mask in one pass."""
+    assert redact_secret_query(
+        "postgres://admin:TempPass123!@db:5432/app"
+    ) == "postgres://admin:" + MASK + "@db:5432/app"
+    assert redact_secret_query(
+        "https://alice:TempPass123!@app.local/x"
+    ) == "https://alice:" + MASK + "@app.local/x"
+    assert redact_secret_query(
+        "https://alice:TempPass123!@app.local/x?newpw=Rotated456!"
+    ) == "https://alice:" + MASK + "@app.local/x?newpw=" + MASK
+
+
 def test_the_evidence_projection_diverges_from_fail_closed_masking() -> None:
     """The whole reason a third posture exists. R-7's ``redact_parameters``
     masks a URL wholesale because a change-request card conveys an intention;

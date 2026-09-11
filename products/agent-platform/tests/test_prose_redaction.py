@@ -38,6 +38,7 @@ from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.prose_redaction import (
     StreamingProseRedactor,
     credential_literals,
+    is_credential_literal,
     redact_assistant_text,
     redact_structure,
     redact_transcript,
@@ -362,6 +363,57 @@ def test_a_short_key_value_is_not_harvested_as_a_literal():
     assert "***" in redact_user_text("set pwd=x1 now")
 
 
+def test_harvests_and_masks_a_dsn_credential_in_the_userinfo():
+    """A DSN carries its password in the userinfo, not a query param, and
+    usually under a non-http scheme. ``URL_TOKEN`` has to recognise
+    ``postgres://`` as a URL and ``redact_secret_query`` has to mask the
+    userinfo (an ``https?``-only match and an early return on an empty query
+    did neither), or the credential sails through the user projection *and*
+    the harvest that feeds the assistant's literal layer.
+    """
+    prompt = "connect postgres://admin:TempPass123!@db:5432/app and migrate"
+    masked = redact_user_text(prompt)
+    assert "TempPass123!" not in masked
+    assert "postgres://admin:***@db:5432/app" in masked
+    assert masked.endswith(" and migrate")
+
+    literals = credential_literals(prompt)
+    assert "TempPass123!" in literals
+    # A reply restating the password bare, with no DSN in it, is still caught.
+    assert redact_assistant_text(
+        "the password TempPass123! works", literals
+    ) == "the password *** works"
+
+
+def test_a_credential_gated_on_the_token_as_written_not_its_stripped_core():
+    """``Secret1!`` is eight characters as written. Stripping the sentence's
+    trailing ``!`` *before* the length gate dropped it to seven, below
+    ``CREDENTIAL_MIN_CHARS``, so the heuristic refused it and the operator's
+    own turn leaked it. The gate now runs on the token as written while the
+    stripped core still drives the character-class test.
+    """
+    assert is_credential_literal("Secret1!") is True
+    assert redact_user_text(
+        "set the password to Secret1! for alice"
+    ) == "set the password to *** for alice"
+
+
+def test_a_key_value_token_harvests_the_value_not_the_secret_name():
+    """The heuristic branch used to harvest the whole ``newpw=<value>`` token,
+    putting the secret *name* on the literal list. An assistant restating
+    ``newpw=<value>`` then collapsed the informative key along with the value
+    (``the newpw=*** field`` became ``the *** field``). The value is already
+    harvested by the dedicated ``KEY_VALUE_SECRET`` pass, so the whole token
+    is skipped here and the key survives.
+    """
+    literals = credential_literals("newpw=TempPass123! confirm")
+    assert "TempPass123!" in literals
+    assert "newpw=TempPass123!" not in literals
+    assert redact_assistant_text(
+        "the newpw=TempPass123! field", literals
+    ) == "the newpw=*** field"
+
+
 # --- Scope: what harvested literals may do to model output ------------------
 
 
@@ -587,7 +639,14 @@ def test_flush_is_idempotent_so_every_exit_point_can_call_it():
 
 
 def test_no_harvested_literals_means_no_hold_and_no_change():
-    """An ordinary session streams exactly as it did before this existed."""
+    """An ordinary session streams exactly as it did before this existed.
+
+    No harvested literal, no URL and no pinned-shape anchor in the text, so
+    every hold is zero and the reply passes through byte for byte. A shape
+    anchor *would* hold — that is the point of
+    ``test_streaming_holds_a_pinned_shape_split_across_deltas``; the guarantee
+    here is that anchor-free, URL-free prose is left untouched.
+    """
     text = "the web-ui pod restarted 2 times in the last hour"
     redactor = StreamingProseRedactor(credential_literals(
         "check the web-ui pod in dev-luban-aiops"
@@ -626,6 +685,68 @@ def test_a_scheme_prefix_at_the_buffer_end_is_held_not_published():
     # then masked on flush.
     assert redactor.feed("ps://t/r?newpw=x1y2z3!") == ""
     assert redactor.flush() == "https://t/r?newpw=***"
+
+
+@pytest.mark.parametrize(
+    "secret,text",
+    [
+        (
+            "abc123def",
+            "key -----BEGIN RSA PRIVATE KEY-----abc123def"
+            "-----END RSA PRIVATE KEY----- loaded",
+        ),
+        (
+            "eyJhbGci",
+            "the pod returned eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzdmMtYWNjb3Vu"
+            "dCJ9.c2lnbmF0dXJlLXBhcnQ and restarted",
+        ),
+        (
+            "skLiveAbCdEf",
+            "auth is Bearer skLiveAbCdEf0123456789 for the service",
+        ),
+        (
+            "AKIAIOSFODNN7EXAMPLE",
+            "the access key AKIAIOSFODNN7EXAMPLE was rotated",
+        ),
+    ],
+)
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 7, 13, 40, 10_000])
+def test_streaming_holds_a_pinned_shape_split_across_deltas(secret, text, size):
+    """Nothing was harvested — the model produced the shape itself — so the
+    literal hold is zero and only ``_shape_hold`` keeps a PEM/JWT/Bearer/AKIA
+    arriving in pieces from being published piece by piece, which no later
+    buffer re-forms into a match.
+
+    Streaming one canonical example of each pinned shape is also what pins
+    ``SHAPE_ANCHORS`` to ``skill_draft.REDACTION_VALUE_PATTERNS``: drop or
+    misspell an anchor and that shape leaks here. Compared against redacting
+    the whole message, which additionally pins that nothing is dropped,
+    duplicated or reordered on the way through.
+    """
+    redactor = StreamingProseRedactor(())
+    emitted = "".join(
+        [redactor.feed(text[i : i + size]) for i in range(0, len(text), size)]
+        + [redactor.flush()]
+    )
+    assert secret not in emitted
+    assert emitted == redact_assistant_text(text, ())
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 5, 7])
+def test_streaming_holds_an_uppercase_url_scheme_split_across_deltas(size):
+    """``URL_TOKEN`` is case-insensitive but ``URL_SCHEME_STARTS`` is lowercase,
+    so a boundary inside ``HTTPS://`` publishes ``HTTP`` before ``S://``
+    arrives — and once the head is out the URL is never recognised — unless the
+    scheme hold lowercases the tail it compares against the scheme list.
+    """
+    text = "go to HTTPS://t/r?newpw=Secret123! now"
+    redactor = StreamingProseRedactor(())
+    emitted = "".join(
+        [redactor.feed(text[i : i + size]) for i in range(0, len(text), size)]
+        + [redactor.flush()]
+    )
+    assert "Secret123!" not in emitted
+    assert emitted == redact_assistant_text(text, ())
 
 
 # --- Kernel wiring ---------------------------------------------------------
