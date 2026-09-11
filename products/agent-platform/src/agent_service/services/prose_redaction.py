@@ -63,11 +63,15 @@ Known accepted limits, stated rather than hidden
   a URL query masks at any length.
 * Literal matching is case-sensitive. The model restating a password in a
   different case is not caught by the literal layer.
-* ``StreamingProseRedactor`` guarantees its hold only for harvested literals,
-  for shape matches already present in its buffer, and for a URL that has not
-  finished arriving; see that class. A ``key=value`` secret that is neither a
-  harvested literal nor inside a URL is not held, because the ``key=value``
-  layer deliberately does not run on model output.
+* ``StreamingProseRedactor`` guarantees its hold for harvested literals, for
+  shape matches already present in its buffer, for a pinned shape still
+  arriving — held by its ``SHAPE_ANCHORS`` prefix, up to ``SHAPE_HOLD_MAX_CHARS``
+  back — and for a URL that has not finished arriving; see that class. Past the
+  anchor cap a very long shape (a large multi-line PEM key) is best-effort in
+  the stream and falls back to the durable transcript for the unbounded
+  guarantee. A ``key=value`` secret that is neither a harvested literal nor
+  inside a URL is not held, because the ``key=value`` layer deliberately does
+  not run on model output.
 """
 
 from __future__ import annotations
@@ -85,6 +89,16 @@ from agent_service.services.secret_params import (
 )
 
 
+# Resolved once, on first call, into this cache: the pinned tuple is immutable
+# for the process lifetime, and ``_secret_shape_patterns`` is reached three
+# times per streamed delta (``_shape_hold``, ``_match_spans`` and
+# ``redact_assistant_text``), so re-running the deferred import each time is
+# overhead with no upside. A module global rather than a default argument so
+# the deferral is preserved — the first call still lands at runtime, where the
+# import cycle below is inert.
+_SECRET_SHAPE_PATTERNS: tuple[re.Pattern[str], ...] | None = None
+
+
 def _secret_shape_patterns() -> tuple[re.Pattern[str], ...]:
     """The pinned secret-shape vocabulary (PEM/JWT/Bearer-Basic/AKIA).
 
@@ -100,10 +114,15 @@ def _secret_shape_patterns() -> tuple[re.Pattern[str], ...]:
     path) and dropping the ``session_transcript`` edge would make masking
     opt-in per caller instead of a property of the projection, so the import
     moves to call time — where every module is loaded and the cycle is inert.
+    The first call caches the tuple in ``_SECRET_SHAPE_PATTERNS`` and later
+    calls return it directly.
     """
-    from agent_service.services.skill_draft import REDACTION_VALUE_PATTERNS
+    global _SECRET_SHAPE_PATTERNS
+    if _SECRET_SHAPE_PATTERNS is None:
+        from agent_service.services.skill_draft import REDACTION_VALUE_PATTERNS
 
-    return REDACTION_VALUE_PATTERNS
+        _SECRET_SHAPE_PATTERNS = REDACTION_VALUE_PATTERNS
+    return _SECRET_SHAPE_PATTERNS
 
 
 # --- Detection vocabulary (shared with the session-title projection) ---

@@ -31,12 +31,13 @@ from agentscope.message import ToolCallBlock
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import DEFAULT_SYSTEM_PROMPT, RuntimeSettings
-from agent_service.services import session_transcript
+from agent_service.services import session_transcript, skill_draft
 from agent_service.services.agent_state_store import InMemoryAgentStateStore
 from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
 from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.prose_redaction import (
     StreamingProseRedactor,
+    _secret_shape_patterns,
     credential_literals,
     is_credential_literal,
     redact_assistant_text,
@@ -747,6 +748,26 @@ def test_streaming_holds_an_uppercase_url_scheme_split_across_deltas(size):
     )
     assert "Secret123!" not in emitted
     assert emitted == redact_assistant_text(text, ())
+
+
+def test_secret_shape_patterns_caches_the_deferred_import(monkeypatch):
+    """The resolver sits on the streaming hot path — ``feed`` reaches it three
+    times per delta (``_shape_hold``, ``_match_spans``, ``redact_assistant_text``)
+    — so it caches the pinned tuple instead of re-running the deferred
+    ``skill_draft`` import each time. Poisoning the source *after* the first
+    call is what gives this teeth: a still-re-importing resolver would pick up
+    the empty tuple and every pinned shape would leak, while the cached one
+    returns the real vocabulary it resolved on the first call. The deferral
+    itself is unchanged — the first call still resolves at runtime, where the
+    import cycle is inert.
+    """
+    first = _secret_shape_patterns()
+    assert first is skill_draft.REDACTION_VALUE_PATTERNS
+    assert first  # the real vocabulary, not an empty tuple
+    monkeypatch.setattr(skill_draft, "REDACTION_VALUE_PATTERNS", ())
+    second = _secret_shape_patterns()
+    assert second is first  # cached; did not re-read the poisoned source
+    assert second  # still the real, non-empty vocabulary
 
 
 # --- Kernel wiring ---------------------------------------------------------
