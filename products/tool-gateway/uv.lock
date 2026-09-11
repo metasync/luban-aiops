@@ -1379,7 +1379,7 @@ wheels = [
 
 [[package]]
 name = "tool-gateway"
-version = "0.36.2"
+version = "0.36.3"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

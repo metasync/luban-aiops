@@ -11,6 +11,70 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.36.3 — 2026-09-11
+
+Patch closing the in-depth *documentation* review that followed the 0.36.2
+code review, plus two low-severity code-quality items re-derived from the
+credential-masking module while re-reading it. No credential leak, no
+behaviour change, and no contract, policy, schema, or audit change: the
+stream contract stays at v11 and Skill at v2. The review found the shipped
+tutorial docs — three walkthroughs, three demo scripts, two skill files, the
+samples README — accurate on every load-bearing claim (the fifteen `web.*`
+tools and their 9-read/6-write split, the 20-step budgets and both env-var
+names, the `skill_graduate` grant, the OIDC redirect mechanism) and surfaced
+only the small drifts recorded below. This release also carries the cluster
+build/deploy batched out of 0.36.2, so the masking fixes from both patches go
+live together.
+
+### Changed
+
+- **`prose_redaction._secret_shape_patterns` caches its deferred import** —
+  the resolver reads the pinned secret-shape vocabulary
+  (`skill_draft.REDACTION_VALUE_PATTERNS`) through an import deferred to call
+  time to keep a real circular dependency inert. It sits on the streaming hot
+  path — `StreamingProseRedactor.feed` reaches it three times per delta via
+  `_shape_hold`, `_match_spans`, and `redact_assistant_text` — so it now
+  resolves once into a module global and returns the cached tuple thereafter.
+  The tuple is immutable for the process lifetime and the deferral is
+  unchanged (the first call still lands at runtime), so behaviour is
+  identical; a regression test poisons the source after the first call and
+  asserts the cache is returned rather than re-read, which fails against the
+  uncached form.
+
+### Documented
+
+- **`prose_redaction`'s module-docstring hold limit now names the anchor
+  hold** — the "Known accepted limits" entry for `StreamingProseRedactor`
+  listed only harvested literals, shapes already present in the buffer, and a
+  URL still arriving. The 0.36.2 fix added a fourth guarantee — a pinned
+  shape *still arriving* is held by its `SHAPE_ANCHORS` prefix up to
+  `SHAPE_HOLD_MAX_CHARS` back — which the class docstring already described
+  but the module docstring did not. The two now agree, including the residual
+  cap: past 512 chars a large multi-line PEM key is best-effort in the stream
+  and falls back to the durable transcript.
+- **Sample evidence wording corrected from `web.snapshot` to `web.extract`**
+  — the password-reset walkthrough's Step 6 summary and both demo scripts'
+  evidence banners called the `#reset-status` success read a "snapshot",
+  contradicting the same files' detailed evidence sections: a `web.snapshot`
+  enumerates interactive elements only, and the status line is a plain
+  `<p role="status">`, so the success sentence is legitimately absent from
+  every snapshot and is read with `web.extract`. Three sites reworded.
+- **The 0.36.2 release note's deploy state reflects the batched deploy** —
+  it described a standalone `0.36.2-dev-k8s-<sha>` rebuild that the decision
+  to batch the deploy into this release superseded; it now says so, and the
+  release-notes index entry agrees.
+- **Known limitation: the generated repowiki overstates the Identity Broker
+  surface** — three IDE-generated articles under the repowiki's Identity
+  Broker API reference fabricate a user-management CRUD surface
+  (`/identity/register`, `/identity/profile`, `register_user`,
+  `update_user_profile`, a `UserProfile` class, a `user.updated` event) that
+  the broker does not implement: its real surface is twelve routes (auth,
+  token, JWKS, exchange/refresh, health, and `identity/normalize` +
+  `identity/me`), with user management delegated to Keycloak. The repowiki is
+  a regenerable cache, so hand-edits revert on the next regeneration; this is
+  recorded rather than patched, and the routes and `token_service.py` remain
+  the source of truth.
+
 ## 0.36.2 — 2026-09-11
 
 Patch hardening batch closing an in-depth code review of the credential-masking

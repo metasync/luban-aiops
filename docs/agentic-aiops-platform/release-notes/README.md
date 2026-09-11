@@ -7,6 +7,29 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-11-post-release-doc-review-and-redaction-cache.md`
+  - patch release (v0.36.3) closing the in-depth *documentation* review that
+    followed the v0.36.2 code review, plus two low-severity code-quality items
+    re-derived from `prose_redaction.py` while re-reading it. No credential
+    leak, no behaviour change, no contract/policy/schema/audit change (stream
+    contract stays v11, Skill v2). The one shipped-code change caches the
+    deferred `skill_draft.REDACTION_VALUE_PATTERNS` import that
+    `_secret_shape_patterns()` re-ran three times per streamed delta, into a
+    module global resolved once — identical behaviour, pinned by a test that
+    poisons the source after the first call and fails against the uncached
+    form. The documented items: the module docstring's hold limit now names
+    the v0.36.2 anchor hold it lagged; three tutorial sites calling the
+    `#reset-status` success read a `web.snapshot` corrected to `web.extract`
+    (a snapshot enumerates interactive elements only, and the status line is a
+    plain `<p role="status">`); the v0.36.2 note's deploy state corrected to
+    the batched deploy; and a recorded known limitation — three generated
+    repowiki articles fabricate an Identity Broker user-management CRUD
+    surface (`/identity/register`, `register_user`, a `UserProfile` class) the
+    broker does not implement, its real surface being twelve routes with user
+    management delegated to Keycloak. Recorded not patched, since the repowiki
+    is a regenerable cache whose hand-edits revert. `make verify` green (2552
+    tests, +1). This release also carries the cluster build/deploy batched out
+    of v0.36.2, so both patches' masking fixes go live together.
 - `2026-09-11-post-release-code-review-credential-masking-edge-cases.md`
   - patch release (v0.36.2) closing an in-depth code review of the
     credential-masking surface v0.36.1 introduced (`prose_redaction.py` and the
