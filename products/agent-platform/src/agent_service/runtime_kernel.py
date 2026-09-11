@@ -1075,13 +1075,29 @@ class AgentKernel:
                 ):
                     self.clear_error()
                     # Drain any accumulated trace events before yielding text.
-                    for decorated in self._drain_trace_queue(
-                        trace_queue,
-                        request_id,
-                        session_id,
-                        evidence_frames,
-                        execution_requests,
-                    ):
+                    drained = list(
+                        self._drain_trace_queue(
+                            trace_queue,
+                            request_id,
+                            session_id,
+                            evidence_frames,
+                            execution_requests,
+                        )
+                    )
+                    if drained:
+                        # SPEC-035 R-2: the portal opens a new paragraph on the
+                        # first delta following a tool frame. A tail the
+                        # redactor is still holding belongs to the segment
+                        # *before* that tool call, so release it first — left
+                        # held, it rides out in the same delta as the new
+                        # segment's opening text, the portal prepends "\n\n" to
+                        # the whole frame, and the paragraph break lands one
+                        # hold-length early, mid-word.
+                        for flushed in flush_prose_frames(
+                            prose, request_id, session_id
+                        ):
+                            yield flushed
+                    for decorated in drained:
                         yield decorated
                     # SPEC-020 R-2: a kernel ASK park surfaces as a
                     # confirmation_request frame and ends the stream without
@@ -1124,6 +1140,14 @@ class AgentKernel:
                         frame["model"] = bound_model_id
                     yield frame
 
+                # Release the tail before the closing trace frames, for the
+                # same paragraph reason as in the loop, and as a safety net for
+                # a provider that closes without message_end. flush is
+                # idempotent, so the paths above add nothing here.
+                for flushed in flush_prose_frames(
+                    prose, request_id, session_id
+                ):
+                    yield flushed
                 # Drain any remaining trace events after the stream completes.
                 for decorated in self._drain_trace_queue(
                     trace_queue,
@@ -1133,12 +1157,6 @@ class AgentKernel:
                     execution_requests,
                 ):
                     yield decorated
-                # Safety net for a provider that closes without message_end:
-                # flush is idempotent, so the paths above add nothing here.
-                for flushed in flush_prose_frames(
-                    prose, request_id, session_id
-                ):
-                    yield flushed
             finally:
                 DELEGATED_TOKEN.reset(token_var)
                 CHAT_SESSION_ID.reset(session_var)
@@ -2257,13 +2275,25 @@ class AgentKernel:
             }
             async for event in agent.reply_stream(confirm_event):
                 self.clear_error()
-                for decorated in self._drain_trace_queue(
-                    trace_queue,
-                    request_id,
-                    session_id,
-                    evidence_frames,
-                    execution_requests,
-                ):
+                drained = list(
+                    self._drain_trace_queue(
+                        trace_queue,
+                        request_id,
+                        session_id,
+                        evidence_frames,
+                        execution_requests,
+                    )
+                )
+                if drained:
+                    # SPEC-035 R-2, as in stream_events: release the held tail
+                    # before the tool frames so the portal's paragraph break
+                    # falls on the segment boundary and not one hold-length
+                    # early inside the preceding word.
+                    for flushed in flush_prose_frames(
+                        prose, request_id, session_id
+                    ):
+                        yield flushed
+                for decorated in drained:
                     yield decorated
                 # A resumed turn can park again on another ASK-gated tool.
                 # SPEC-054 R-2: attribute the re-parked card to the SESSION
@@ -2302,6 +2332,12 @@ class AgentKernel:
                     ):
                         yield flushed
                 yield frame
+            # Safety net for a resumed stream that ends without a terminal
+            # frame, released before the closing trace frames for the same
+            # paragraph reason as in the loop. flush is idempotent, so the
+            # paths above add nothing here.
+            for flushed in flush_prose_frames(prose, request_id, session_id):
+                yield flushed
             for decorated in self._drain_trace_queue(
                 trace_queue,
                 request_id,
@@ -2310,10 +2346,6 @@ class AgentKernel:
                 execution_requests,
             ):
                 yield decorated
-            # Safety net for a resumed stream that ends without a terminal
-            # frame: flush is idempotent, so the paths above add nothing here.
-            for flushed in flush_prose_frames(prose, request_id, session_id):
-                yield flushed
         finally:
             # Covers both completion and re-park (the early return above):
             # either way the frames drained so far belong to this turn.

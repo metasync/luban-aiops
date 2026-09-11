@@ -34,6 +34,7 @@ from agent_service.runtime_settings import DEFAULT_SYSTEM_PROMPT, RuntimeSetting
 from agent_service.services import session_transcript
 from agent_service.services.agent_state_store import InMemoryAgentStateStore
 from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.prose_redaction import (
     StreamingProseRedactor,
     credential_literals,
@@ -108,6 +109,80 @@ class FakeAgent:
         return SimpleNamespace(content=self.reply)
 
 
+# The two frames the evidence middleware really pushes around one gateway
+# call (``kernel_middleware.on_acting``): the call before it runs, the result
+# after. Both land in the sink before the kernel sees the next text event,
+# because the tool executes inside ``reply_stream``.
+TOOL_FRAMES = [
+    {
+        "type": "tool_call",
+        "tool_name": "web.navigate",
+        "call_id": "call-1",
+        "parameters": {"url": "https://target/signin"},
+    },
+    {
+        "type": "tool_result",
+        "tool_name": "web.navigate",
+        "call_id": "call-1",
+        "status": "ok",
+    },
+]
+
+# Narration either side of a tool call, the shape the ad-hoc sample streams:
+# the model explains, calls a read tool, then reports what it saw.
+FIRST_SEGMENT = "Reading the runbook so I follow its procedure precisely."
+SECOND_SEGMENT = "Navigation succeeded and we are on the sign-in page."
+
+
+class InterleavedAgent(FakeAgent):
+    """Text, then tool evidence frames, then more text.
+
+    The tool frames are the segment boundary the portal renders as a paragraph
+    break, so where a held-back tail sits relative to them is observable in
+    the *rendered* reply even though the concatenated deltas are identical
+    either way — which is why the corruption this pins survived a
+    text-equality test.
+    """
+
+    def __init__(
+        self,
+        first: list,
+        second: list,
+        tool_frames: list | None = None,
+        context: list | None = None,
+    ) -> None:
+        super().__init__(
+            events=[],
+            # A typed credential in the context is what gives the redactor a
+            # hold at all; without it the tail is empty and nothing can be
+            # misordered.
+            context=(
+                context
+                if context is not None
+                else [FakeMsg("user", AD_HOC_PROMPT)]
+            ),
+        )
+        self.first = first
+        self.second = second
+        self.tool_frames = (
+            TOOL_FRAMES if tool_frames is None else tool_frames
+        )
+
+    async def reply_stream(self, inputs):
+        self.inputs.append(inputs)
+        sink = TOOL_EVIDENCE_SINK.get()
+        for event in self.first:
+            yield event
+        # Drained at the top of the kernel's next loop iteration, i.e. between
+        # the two text segments — the real ordering, and the one that put the
+        # paragraph break in the wrong place.
+        if sink is not None:
+            for frame in self.tool_frames:
+                sink.put_nowait(frame)
+        for event in self.second:
+            yield event
+
+
 def _kernel() -> AgentKernel:
     return AgentKernel(settings=RuntimeSettings(api_key="test-key"))
 
@@ -158,6 +233,31 @@ def _kind(frame: dict) -> str:
     ``event``; the portal's decoder reads ``type || event``, so this does too.
     """
     return str(frame.get("event") or frame.get("type") or "")
+
+
+def _portal_render(frames: list) -> str:
+    """The reply text the portal accumulates, paragraph breaks included.
+
+    Mirrors ``useChatStream``: every delta appends to ``replyText``, and the
+    first delta after a tool frame is preceded by ``\\n\\n`` (SPEC-035 R-2) so
+    block markdown at a segment start still renders. Concatenating deltas
+    cannot show a misplaced break — the characters are conserved either way —
+    so a test that cares about paragraphing has to reproduce the accumulator.
+    """
+    text = ""
+    segment_break = False
+    for frame in frames:
+        if _kind(frame) in ("tool_call", "tool_result"):
+            segment_break = True
+            continue
+        delta = frame.get("delta")
+        if not isinstance(delta, str) or not delta:
+            continue
+        if segment_break and text:
+            text += "\n\n"
+        segment_break = False
+        text += delta
+    return text
 
 
 def _delta_events(text: str, size: int) -> list:
@@ -661,6 +761,118 @@ def test_a_stream_that_ends_without_a_terminal_frame_still_releases_the_tail(
     assert not any(frame.get("event") == "message_end" for frame in frames)
     assert "TempPass" not in json.dumps(frames, default=str)
     assert _deltas(frames).endswith("***")
+
+
+# --- Frame ordering: the held tail vs. the portal's paragraph break --------
+#
+# Masking holds back ``max(len(literal)) - 1`` characters, so the tail of one
+# text segment is still inside the redactor when the tool frames that follow
+# it are drained. The portal opens a new paragraph on the first delta after a
+# tool frame (SPEC-035 R-2), so a tail released *with* the next segment's
+# opening text carries that paragraph break back into the previous segment —
+# mid-word, one hold-length early — and the real boundary loses its break.
+# Concatenated deltas cannot show this: the characters are conserved either
+# way, which is how a live run rendered "procedu\n\nre" past every
+# text-equality test in this file.
+
+
+def test_a_held_tail_is_released_before_the_tool_frames_that_follow_it(
+    monkeypatch,
+):
+    kernel = _kernel()
+    agent = InterleavedAgent(
+        first=[{"type": "TEXT_BLOCK_DELTA", "delta": FIRST_SEGMENT}],
+        second=[{"type": "TEXT_BLOCK_DELTA", "delta": SECOND_SEGMENT}],
+    )
+    _patch(monkeypatch, kernel, agent)
+
+    frames = _stream(kernel, AD_HOC_PROMPT)
+    rendered = _portal_render(frames)
+
+    # The break falls on the segment boundary, not 13 characters inside the
+    # first one. Asserted as a position as well as a whole string so the
+    # failure this pins is named rather than implied.
+    assert rendered == f"{FIRST_SEGMENT}\n\n{SECOND_SEGMENT}"
+    assert rendered.index("\n\n") == len(FIRST_SEGMENT)
+    # Ordering, which is the actual invariant: the flush is a delta frame and
+    # it precedes the tool frames that make the portal break the paragraph.
+    kinds = [_kind(frame) for frame in frames]
+    assert kinds.index("message_delta") < kinds.index("tool_call")
+    # Nothing was lost or duplicated on the way through the extra frame.
+    assert _deltas(frames) == FIRST_SEGMENT + SECOND_SEGMENT
+
+
+def test_a_flushed_tail_still_masks_and_still_precedes_the_tool_frames(
+    monkeypatch,
+):
+    """The composite case, and the one that matters: the held tail is exactly
+    where a credential at the end of a segment would be sitting, so the frame
+    that fixes the paragraphing is the frame that carries the mask. Both
+    properties have to hold on the same frame."""
+    kernel = _kernel()
+    first = f"Resetting alice to {PASSWORD} now."
+    agent = InterleavedAgent(
+        first=_delta_events(first, 6),
+        second=[{"type": "TEXT_BLOCK_DELTA", "delta": SECOND_SEGMENT}],
+    )
+    _patch(monkeypatch, kernel, agent)
+
+    frames = _stream(kernel, AD_HOC_PROMPT)
+
+    assert "TempPass" not in json.dumps(frames, default=str)
+    assert _portal_render(frames) == (
+        f"{redact_assistant_text(first, LITERALS)}\n\n{SECOND_SEGMENT}"
+    )
+    # The flush is the last delta before the tool frames — the first segment
+    # streams in chunks of 6, so several deltas precede it.
+    kinds = [_kind(frame) for frame in frames]
+    boundary = kinds.index("tool_call")
+    flushed = [
+        frames[i]
+        for i in range(boundary)
+        if kinds[i] == "message_delta" and frames[i].get("delta")
+    ][-1]
+    # The mask rides the flush frame itself: the literal is held to the end,
+    # so this frame is where "*** now." is released — before the tool frames,
+    # which is what puts it in the right paragraph.
+    assert "***" in flushed["delta"]
+    assert PASSWORD not in flushed["delta"]
+
+
+def test_a_resumed_stream_releases_the_tail_before_its_tool_frames(
+    monkeypatch,
+):
+    """``resume_confirmation`` drains on the same top-of-loop schedule, so it
+    carried the same misordering; the fix is mirrored there and this is the
+    only thing pinning that mirror."""
+    kernel = _kernel()
+    agent = InterleavedAgent(
+        first=[{"type": "TEXT_BLOCK_DELTA", "delta": FIRST_SEGMENT}],
+        second=[{"type": "TEXT_BLOCK_DELTA", "delta": SECOND_SEGMENT}],
+    )
+    _patch(monkeypatch, kernel, agent)
+    CONFIRMATION_REGISTRY.register(
+        "ses-1", "alice", "reply-1", [PARK_CALL], 600
+    )
+    pending = CONFIRMATION_REGISTRY.peek_parked("ses-1")
+    claimed = CONFIRMATION_REGISTRY.claim("ses-1", pending.confirm_id, 600)
+
+    frames = _drain(
+        kernel.resume_confirmation(
+            session_id="ses-1",
+            pending=claimed,
+            decision="approve",
+            user_name="alice",
+            request_id="req-1",
+        )
+    )
+
+    assert frames[0]["type"] == "confirmation_result"
+    assert _portal_render(frames) == (
+        f"{FIRST_SEGMENT}\n\n{SECOND_SEGMENT}"
+    )
+    kinds = [_kind(frame) for frame in frames]
+    assert kinds.index("message_delta") < kinds.index("tool_call")
 
 
 def test_stream_events_harvests_from_earlier_context_turns(monkeypatch):
