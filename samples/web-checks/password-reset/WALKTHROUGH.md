@@ -97,6 +97,29 @@ lists this session by, so it reaches a second identity. Masking runs *before* th
 80-character cap, which is why nothing of the secret survives: truncating first
 would leave its leading characters readable (SPEC-049 R-5).
 
+**So is the reply prose, and your own turn when it is read back.** The model reads
+`TempPass123!` in its own prompt and can write it back out — a live run of the
+ad-hoc counterpart ended a turn with "worth flagging: the temporary password … is
+now in this chat transcript", rendered verbatim beneath a `… to ***` title: two
+projections of one conversation disagreeing about whether the value is secret.
+Both now mask: the live stream as it arrives, and the durable transcript on
+reload, for the assistant's reply *and* for your own message. A reload of this
+session reads your turn back as `Reset the password for user alice@example.com to
+*** in the admin portal. …`, line structure intact and `admin-portal` unmasked —
+it is a portal name, not a secret.
+
+Two boundaries, because a walkthrough that overclaims is worse than one that
+underclaims:
+
+- **Your own bubble reads plaintext while the turn is live.** It is rendered from
+  your composer in your own browser, not from a stream frame; where the kernel
+  does echo your message — its unconfigured and provider-error fallbacks — it
+  masks it first. The bubble reads `***` once the session is reloaded.
+- **The value stays real in the agent's own context at rest**, because the model
+  needs it to perform the reset. Masking is a property of every *human-readable
+  projection* — title, transcript, live stream, cards, evidence — not of the
+  machine input the reset runs from.
+
 The agent should:
 1. Search for the `ResetUserPassword` skill via `skills.search`
 2. Navigate to the admin login page via `web.navigate` (binding the flow)
