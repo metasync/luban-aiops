@@ -7,6 +7,40 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md`
+  - patch release (v0.36.1) closing findings from live browser runs of both
+    password-reset samples plus one live HITL session. The organizing finding
+    is that a credential an operator types into the chat reaches six
+    human-readable surfaces and at v0.36.0 only two masked it —
+    `web.navigate`'s result (SPEC-049 R-5) and a change-request card's
+    arguments (SPEC-055 R-7). This batch closes the other four: every browser
+    result *after* the navigation (nine emission sites, previously one, so a
+    `web.click` frame re-serialized the plaintext one frame after
+    `web.navigate` had masked it); the `tool_call` evidence frame's
+    `parameters`, which the kernel emits before the gateway is ever called and
+    R-7 does not reach; the minted session title, built from the first user
+    message — the one carrier no tool-side redactor sees, and one that crosses
+    an identity boundary because an approver's inbox lists a pending card by
+    title; and the model's own prose, in both the durable transcript and the
+    live stream, for both roles, via a new `prose_redaction.py` that absorbs
+    the title heuristic so it is declared once. Also fixes an expired approval
+    card wedging the transcript (the portal's 410/409 branches cleared
+    `confirmationPending` without setting `completed`, and the kernel's
+    `expire_confirmation` rebuilt the agent on a provider default so the
+    interrupt landed on nothing) and concurrent `web.*` calls racing on one
+    page (Playwright's `fill()` types into whatever holds focus, so two
+    parallel fills both reported success while one value was silently lost);
+    corrects six stale model-facing `web.*` descriptions that still asserted
+    the pre-SPEC-054 hard-deny and made the ad-hoc sample unreachable through
+    chat, plus `DEFAULT_SYSTEM_PROMPT` guidance so a model attempts the step
+    and lets the platform gate it instead of substituting its own refusal for
+    the operator's decision; and corrects four sample claims the platform
+    cannot satisfy. Records a regression the prose fix introduced — paragraph
+    breaks landing one hold-length early, mid-word — and the testing lesson:
+    concatenated-delta assertions conserve text and so cannot detect a
+    misplaced frame boundary, which is why the suite was green while the render
+    was corrupt. No contract, policy, schema, or audit change; `make verify`
+    green (2509 tests, 8 products), images rebuilt at the release sha
 - `2026-09-09-develop-as-you-go-skill-graduation.md`
   - release train (v0.36.0) delivering SPEC-055 (seventeenth R5 slice, the C
     phase of the A→B→C HITL redesign, implementing **ADR-0009**): lets an

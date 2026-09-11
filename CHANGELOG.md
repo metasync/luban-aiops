@@ -11,6 +11,270 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.36.1 — 2026-09-11
+
+Patch hardening batch. Every entry closes a defect observed in a live run
+against the dev-k8s cluster — most while browser-testing the two password-reset
+samples end to end — and each is pinned by a regression test confirmed to fail
+against the unpatched code. No contract, policy, schema, or audit change: the
+stream contract stays at v11 and Skill at v2.
+
+One theme dominates. A credential an operator types into the chat reaches six
+human-readable surfaces, and at 0.36.0 only two masked it: `web.navigate`'s
+result (SPEC-049 R-5) and a change-request card's arguments (SPEC-055 R-7).
+Four entries below close the rest, following that path — the gateway's other
+tool results, then the kernel's evidence frame and minted session title, then
+the model's own prose — and are followed by a HITL expiry defect and two
+browser-tool correctness fixes.
+
+### Fixed
+
+- **A secret-bearing query value is masked in every browser tool result, not
+  only in `web.navigate`'s (SPEC-049 R-5)** — `_redact_secret_query` was called
+  from exactly one place, so every other browser tool reported
+  `entry.active_target.url` raw. Navigating is only the *first* result carrying
+  the URL: the browser then sits on it while the runbook snapshots, clicks
+  through, and screenshots it, and each result re-serialized it. Live evidence
+  from a bound password-reset flow — the `web.navigate` frame reported
+  `...&newpw=***` while the following `web.click` frame reported
+  `...&newpw=TempPass-2026%21` in both `data.url` and the derived
+  `data_summary.url`, persisting the plaintext into the evidence store. All
+  nine emission sites now mask: `_step_result` (shared by `web.click`,
+  `web.type`, `web.select`, `web.upload_file`, `web.fill_credential`), plus
+  `web.snapshot`, `web.screenshot`, `web.hover`, `web.evaluate`, `web.scroll`,
+  `web.switch_frame`, and the two paths that build their own data dict rather
+  than calling `_step_result` (`web.press_key`, and the `URL:` header line
+  inside the snapshot text), the entry-based ones through a new `_evidence_url`
+  helper that carries the rationale once. The page still holds the real value —
+  only the reported copy is masked — so nothing about what reaches the target
+  application changes, and the runbook's existing claim that the gateway
+  redacts `newpw` from every result became true for the steps after navigation,
+  which it previously was not. `PostNavigateRedactionTests` pins the plaintext
+  really is in the live page URL first, so the absence assertions cannot pass
+  vacuously.
+- **A typed secret is masked in the `tool_call` evidence frame and in the
+  minted session title** — two persisted *and* rendered surfaces that neither
+  SPEC-049 R-5 nor SPEC-055 R-7 reaches. The kernel emits the arguments the
+  model chose *before* the gateway is ever called, so gateway redaction cannot
+  see them, and R-7's `_redact_pending_parameters` is gated on `approval_kind
+  == "action"` and reads the parked payload rather than this frame — which
+  streams to the portal's evidence panel and persists into the evidence store.
+  The session title is minted by `mark_session_turn` from the first user
+  message, the one credential carrier no tool-side redactor sees at all,
+  because the operator typed the password into the chat rather than into a tool
+  argument; it renders in the workspace sidebar and the session header and — an
+  approver's inbox listing a pending card by its session title — in front of a
+  second identity. Live evidence from both walkthroughs: the flow run's
+  evidence panel showed `newpw=TempPass123%21` in the `web.navigate` parameters
+  and the ad-hoc run's `newpw=TempPass-2026!`; the flow sidebar title carried
+  the whole password, while the ad-hoc one carried its first four characters
+  because the 80-char cap bit the secret in half rather than removing it. The
+  evidence frame gets a third masking posture,
+  `secret_params.redact_evidence_parameters`, whose divergence from the other
+  two is forced by what the frame is for.
+- **Credentials are masked in chat prose, for both roles** — the fourth path a
+  typed credential travels, and the one 0.36.0 left open: the model reads the
+  value in its own prompt and writes it back out. A live run of the ad-hoc
+  reset sample ended turn 1 with "worth flagging: the temporary password
+  `TempPass123!` is now in this chat transcript", rendered verbatim underneath
+  a sidebar title reading `... to ***`. The defect is that incoherence — two
+  projections of one conversation disagreeing about whether the value is
+  secret. A new `services/prose_redaction.py` is the fifth application of the
+  SPEC-049 R-5 posture and absorbs the title-masking machinery verbatim
+  (`session_service` loses 98 lines and now calls `redact_user_text`), so the
+  heuristic is declared once and the six existing title tests pass unchanged —
+  what proves the move was behaviour-preserving. The vocabulary stays where
+  `validate_secret_vocabulary.py` pins it, read through a deferred accessor
+  rather than a module-level import. Heuristic detection runs on user-authored
+  text only: `SECRET_PARAM_SUBSTRINGS` includes `token`, `session_id`, and
+  `signature`, ordinary words in an operations reply, so running it over model
+  output would mask the session id in "the delegated token for ses-c8171f20
+  refreshed" — precisely the evidence-destroying false positive
+  `secret_params.is_secret_value` documents rejecting. `redact_assistant_text`
+  is therefore narrower: the pinned shapes, the URL query layer, and an exact
+  match against literals the operator typed, where a false positive is
+  impossible by construction because the string matched is one the operator
+  wrote. Masking lives in the projection rather than in its callers, so neither
+  can forget it, and `extract_transcript` harvests every user turn first so a
+  cross-turn echo is caught — the model restating in turn five a password typed
+  in turn one. Verified byte-identical to whole-text redaction across 6
+  scenarios × 11 chunk sizes, after tests found three real bugs in the first
+  implementation: `urlsplit` called on a whole *sentence* both ate prose and
+  missed the bare credential, a URL split across deltas leaked because
+  `[^\s<>"']+` cannot match a buffer ending at `https://`, and a split *scheme*
+  (`o htt` | `ps://`) needed its own hold, since once `htt` is emitted no later
+  buffer can ever match a URL.
+- **The held prose tail is released before the tool frames that follow it
+  (SPEC-035 R-2)** — a regression the entry above introduced, caught only by a
+  browser. Holding back `max(len(literal)) - 1` characters of each streamed
+  chunk keeps a secret split across deltas from being published in pieces, but
+  the hold outlived the text segment it belongs to: the kernel drains the
+  tool-evidence queue at the *top* of each loop iteration, before
+  `normalize_event`, so when a tool call follows narration the previous
+  segment's tail is still inside the redactor and rides out in the same delta
+  as the next segment's opening text. The portal opens a new paragraph on the
+  first delta after a tool frame and applies it to the whole frame, so the
+  break landed one hold-length early and mid-word — `procedu` | `re precisely`
+  — while the real segment boundary lost its break and sentences ran together
+  (`procedure.Navigation`). A live run showed six such breaks and five lost
+  separators. No text was lost, and that is why every text-equality test passed
+  while the rendered reply was corrupt: concatenating the deltas reproduces the
+  durable transcript character for character, so a misplaced *frame boundary*
+  is invisible to a concatenated assertion. In both `stream_events` and
+  `resume_confirmation` the drain now lands in a list and, when non-empty,
+  flushes the prose tail before the tool frames are yielded; the flush stays
+  conditional because flushing on every event would defeat the hold entirely,
+  and the post-loop safety-net flush moves ahead of the final drain. The tests
+  reproduce the portal's accumulator rather than concatenating deltas —
+  `_portal_render` mirrors `useChatStream`'s `segmentBreak` handling — which is
+  the only way the misordering is observable. Reverting only the kernel fails
+  all three at position 43 of a 56-character segment (43 = 56 − 13, the hold
+  length) with the mask still intact: the leak never returned, only the
+  paragraphing broke.
+- **An expired confirmation settles the turn, and interrupts the agent that
+  parked it** — an expired approval card left the operator staring at a spinner
+  that never resolved, which read exactly like a hung agent. Two independent
+  defects, found in a live run (card parked 16:22:53, decided after the TTL
+  elapsed, 410 Gone at 16:33:31, then ~6.4 minutes of polling with no further
+  chat turn). In the portal, the 410 branch of `decide()` cleared
+  `turn.confirmationPending` without setting `turn.completed`; `ChatView`
+  derives `loading = !completed && !confirmationPending && !error`, so that
+  combination is true forever, and the reply text is only produced once
+  `completed` — a permanent spinner with no reply and no error. The 409 branch
+  shared the omission, and worse: the unstructured-409 case is *retryable* with
+  the card still pending, so clearing there also dropped the session panel's
+  awaiting-approval tag from a card the operator could still answer.
+  `confirmationPending` is now cleared only in the terminal branches (410 and
+  the SPEC-031 R-4 already-resolved race), which also set `completed`, and the
+  retryable branch leaves the turn parked. In the kernel,
+  `expire_confirmation()` called `ensure_agent(session_id, None)`, leaving
+  `model_id` at its default; `_normalize_model_id(None)` returns
+  `settings.provider` — a bare provider name — which never equals a session
+  pinned to a concrete model, so `ensure_agent` evicted and rebuilt the agent
+  on *every* expiry, deterministically. The rebuilt agent restores persisted
+  memory but not the in-flight parked reply, so the `UserInterruptEvent` landed
+  on nothing: of 42 `session_evidence` rows for that session, none contain
+  `interrupted` and none reference the expired call id, so the docstring's
+  promise to close the parked calls did not hold and the transcript ended
+  mid-procedure with no closure.
+- **Browser calls are serialized per session so parallel fills cannot race
+  (SPEC-049 R-1)** — one chat session has exactly one browser context and one
+  active page, but nothing serialized the calls driving it. The kernel runs
+  every tool call a model emits in a turn concurrently, so two `web.*` calls
+  for one session interleaved on one page and on the shared entry state that
+  goes with it (`refs`, `frame_stack`, `filled_values`, `flow.steps_used`).
+  Playwright's `fill()` focuses its element and then inserts text into whatever
+  holds focus at that moment, so two concurrent fills can both land in the same
+  field and the loser reports `success` with its value silently absent. Live
+  evidence from the flow demo's chat leg: the two `web.fill_credential` calls
+  for the admin login completed 1.4 ms apart, both `status: success`, and the
+  snapshot taken afterwards showed the username field carrying no value at all
+  — the credential set was correct, so the value was lost in flight rather than
+  mis-sourced. The target's legacy-SSO auto-submit waits for both fields, so it
+  never fired, the flow stalled before its single gated write, and no card was
+  parked. A per-session-key `asyncio.Lock` now covers the whole of each call,
+  applied at the registration boundary so `register_tools` wraps all fifteen
+  tools and a tool added later inherits the guarantee instead of having to
+  remember to opt in. The lock lives on the pool rather than on the session
+  entry: taking it from the entry would mean resolving the session first, which
+  creates a browser context — that changed the behaviour of a call refused
+  before it ever reached the pool, and would let refused calls consume the
+  `GATEWAY_BROWSER_MAX_SESSIONS` budget and evict live sessions — and the first
+  pair of calls for a key needs the same guarantee the later ones do.
+  `sweep_expired` prunes locks neither held nor backed by a session, so the map
+  stays bounded by the live sessions. The tradeoff is honest: a queued call now
+  waits behind a slow one, up to the 30 s cap against the caller's own 30 s
+  budget, so a pathological pairing can surface as a `TIMEOUT` — retryable,
+  where the race produced a false success.
+- **Six model-facing `web.*` descriptions no longer assert the pre-SPEC-054
+  contract (SPEC-054 R-2)** — they still told the model a write is permitted
+  only "inside a bound, approved write-class web-check flow". R-2 relaxed that:
+  an unbound interaction is no longer a hard deny, it re-checks the live origin
+  and the signed envelope's authority provenance, so an ad-hoc write executes
+  once its per-action card is approved. The module docstring and the in-code
+  gate comments already documented the relaxation; only the description strings
+  the model actually reads were stale, which made the ad-hoc reset sample
+  unreachable through chat — the agent refused before issuing a single `web.*`
+  call, quoting the description text back. `web.click`, `web.type`,
+  `web.select`, `web.press_key`, and `web.upload_file` now name both permitted
+  paths and state that the live origin must stay on the allowlist;
+  `web.evaluate` already carried correct wording and is untouched.
+  `web.fill_credential` is corrected in the opposite direction: it is read tier
+  by design, because filling a field submits nothing and needs no operator
+  confirmation — the write gate lands on the submitting interaction.
+- **The kernel and the ad-hoc sample now treat an unbound write as a gated
+  path, not an attack** — live testing showed the platform wiring was correct
+  and the models would not use it. On the ad-hoc sample the agent read the
+  runbook, then refused: a skill's steps are only authoritative when the flow
+  is bound, `newpw` is "a credential-handling anti-pattern", and an instruction
+  to stay unbound is "exactly what a prompt-injection or privilege-escalation
+  attempt looks like". On the flow sample it stalled asking whether it may
+  proceed. Either way no card was parked, so SPEC-054's R-2/R-3 per-action seam
+  and its R-7 masking went undemonstrated and the automated ad-hoc chat leg
+  failed with "no per-action card parked". This was not model-specific: a
+  stronger model produced zero tool calls across both turns and demanded the
+  URL and `skill_id` outright. The model was substituting its own refusal for
+  the operator's decision — the control that actually protects the system,
+  since refusing pre-emptively parks no card, shows no approver a change
+  request, and records no signed receipt. `DEFAULT_SYSTEM_PROMPT` now names
+  both platform-enforced authorization paths and states that neither is a
+  bypass, so the model attempts the step and lets the platform gate it. The
+  refusal boundary is kept explicit and narrowed to what is genuinely the
+  model's call: an instruction that contradicts the runbook, an origin off the
+  allowlist, or a request to invent evidence. Consent to a mutation is not.
+
+### Documented
+
+- **The reset walkthroughs send the tier-2 approval to a second identity** —
+  both told the reader to click Approve on the parked card in the same chat
+  that requested the reset. Mutating execution carries a tier-2 approval
+  requirement (`decided_by_roles`: approver, platform-admin), so that click
+  answers 403 and the card stays parked; for an operator the reason is
+  `not_a_designated_approver`, because the decider-role check runs before the
+  self-approval one and the operator role holds no decider role. The
+  walkthroughs described a step that cannot succeed. Step 5 now names the
+  identity to sign in as and asks for a second window signed in as the approver
+  up front, mirroring the framing the skill-graduation walkthrough already
+  carried against the same policy bundle.
+- **The reset samples point at the tools that can actually produce the
+  evidence** — two claims the platform cannot satisfy, both grounded in source
+  rather than in the runs alone. Both runbooks' step 8 told the agent to take a
+  `web.snapshot` to confirm the "Password for <user> has been reset
+  successfully." message, but `_build_snapshot` enumerates interactive
+  selectors only and the status line is a plain `<p role="status">`, which that
+  list does not include — a snapshot cannot show it. Step 8 names
+  `web.extract`, which can. Separately, both walkthroughs told operators to
+  verify the result by opening `/admin/users/?reset=...` in their own browser;
+  the target is a static mock with no server-side state, so those pages render
+  their own query parameters back and report success for any value, including a
+  user absent from the fixed three-row roster. Relabelled as not evidence, and
+  pointed at what is: the post-click `web.extract` of `#reset-status`, emitted
+  by the target's own submit handler, the accompanying screenshot, and the
+  signed receipt.
+- **The ad-hoc walkthrough pins the expected card count at exactly one** — it
+  described a per-action card in the singular but never stated the number, so a
+  run that parked two looked like a pass and a run that parked one looked like
+  a failure. It is the reverse. The target's login page auto-submits on a timer
+  once both credential fields are filled, and step 4 of the runbook says not to
+  click Sign in — authentication is read tier and needs no write. The reset
+  form pre-fills from the URL but deliberately does not auto-submit, so Confirm
+  reset is the procedure's single write-tier interaction. Two cards mean the
+  agent clicked Sign in anyway: a redundant gated write, not a stronger gate.
+- **Both walkthroughs state the prose and transcript masking guarantee, and its
+  boundaries** — they documented only the sidebar title as masked, which was
+  true when written and has been incomplete since the prose fix above: the live
+  stream and the durable transcript now mask too, for both roles, so a reader
+  following Step 4 sees their own turn come back as `... to ***` on reload with
+  the doc silent on why. Each also records the two boundaries rather than
+  letting the guarantee read as absolute. The operator's own bubble is
+  plaintext while the turn is live, because it is rendered from the composer in
+  their own browser and never from a stream frame — the only kernel frames that
+  echo the message are the unconfigured and provider-error fallbacks, which
+  mask it first. And the value stays real in the agent's context at rest,
+  because the model needs it to perform the reset: masking is a property of
+  every human-readable projection — title, transcript, live stream, cards,
+  evidence — not of the machine input the reset runs from.
+
 ## 0.36.0 — 2026-09-09
 
 ### Added
