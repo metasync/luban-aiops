@@ -1,6 +1,0 @@
-- Each product follows a uniform layout of `src/<service_name>/api`, `core`, `schemas`, `services`, optional `policies`/`tools`, plus a sibling `tests/` directory, `Dockerfile`, `Makefile`, `pyproject.toml`, and `uv.lock`.
-- Cross-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas` and consumed by multiple products instead of being duplicated.
-- Policy bundles are authored once as the canonical file in `shared/shared-contracts/policies/policy-default.yaml` and copied to consumers via the `make sync-policy` target rather than edited per product.
-- Product versions are kept in lockstep with the root `VERSION` file, enforced by `make validate-version` which checks every product's declared version.
-- Secret literals across agent-platform, tool-gateway, and skills-hub are validated against a shared vocabulary via `make validate-secret-vocabulary` to prevent ad-hoc secrets.
-- Per-product Makefiles delegate to shared fragments in `mk/` (defaults.mk, image.mk, python.mk) so build, lint, and image targets are consistent across products.

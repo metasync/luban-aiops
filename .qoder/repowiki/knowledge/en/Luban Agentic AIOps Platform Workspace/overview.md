@@ -1,1 +1,0 @@
-Multi-product workspace for an enterprise agentic AIOps platform, orchestrating agent runtime, gateways, identity, audit, skills, incidents, and operator portal behind shared contracts and GitOps overlays.

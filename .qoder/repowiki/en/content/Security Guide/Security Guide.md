@@ -23,6 +23,7 @@
 - [2026-09-04-browser-flow-hitl-gate-enforcement.md](file://docs/agentic-aiops-platform/release-notes/2026-09-04-browser-flow-hitl-gate-enforcement.md)
 - [2026-09-07-action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
 - [2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [documents.py](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py)
 - [test_documents.py](file://products/agent-platform/tests/test_documents.py)
@@ -73,11 +74,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated v0.36.2 security enhancements including expanded URL token recognition for RFC-3986 compliant schemes, enhanced streaming redactor with shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and browser navigation error path protection
-- Added comprehensive test coverage documentation for edge cases including DSN credentials, streaming protection, uppercase URL schemes, literal detection with punctuation, and over-mask prevention
-- Enhanced prose redaction system with improved handling of non-HTTP schemes (postgres://, mysql://, etc.) and better support for DSN-style credentials in userinfo sections
-- Updated streaming prose redactor to properly handle uppercase URL schemes split across message chunks and maintain shape holding for multi-chunk credentials
-- Improved browser connector error path protection to mask secret-bearing URLs in navigation error messages and evidence frames
+- Enhanced streaming prose redactor performance with cached secret shape pattern detection, maintaining the four-layer protection system while eliminating redundant import overhead in the critical streaming path
+- Updated v0.36.3 release notes documenting hot-path cache optimization for deferred secret-shape import resolution
+- Added comprehensive test coverage for caching behavior including monkeypatch validation and import cycle preservation
+- Improved module docstring accuracy to reflect all four hold guarantees including pinned shape anchor holding
+- Maintained backward compatibility while providing significant performance improvements for streaming operations
 
 ## Table of Contents
 1. Introduction
@@ -94,7 +95,7 @@
 ## Introduction
 This Security Guide documents the Luban AIOps Platform's enhanced security architecture, threat mitigation strategies, and compliance requirements. The platform now implements a sophisticated security model featuring audience-bound JWTs, delegated token flows, service-to-service identity patterns, deterministic tool output redaction, workload identity service tokens, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, comprehensive secret masking across all tool outputs, evidence protection mechanisms, durable audit trail with secure service-to-service authentication, and **comprehensive credential masking for chat prose**. It covers identity and authorization design (OIDC integration, JWT token security, and role-based access control), the authorization matrix across services and resources, secure configuration and secrets management, network security, vulnerability assessment procedures, scanning and penetration testing guidelines, compliance and audit logging, incident response procedures, and secure development practices with security review processes.
 
-The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, session-scoped flow authorities with time-bounded expiration, per-action signed gates for unbound browser interactions replacing hard-denial policies, kernel-side authority clearing as staleness backstop, signed authority provenance via ADR-0010, comprehensive secret masking for change-request cards and tool outputs, evidence protection mechanisms, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements comprehensive credential masking for chat prose as part of SPEC-049 R-5 posture, addressing critical security gaps where passwords and sensitive information typed by operators into chat conversations could be echoed back verbatim by AI models. This includes four layers of protection: pinned secret shape patterns (PEM/JWT/Bearer-Basic/AKIA formats), URL query parameter redaction, key=value pair detection with secret-named parameters, and heuristic layer for credential-looking tokens when text contains references to secrets. Additionally, the platform features enhanced browser interaction security where unbound browser writes park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance that prevents stale flow authorities from being exploited, along with structured change-request cards providing secret-masked visibility into pending operations. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements a specialized third masking posture for evidence frames, integrates session title protection into shared masking infrastructure, and adds streaming prose redaction for live assistant streams with incremental credential masking. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond just HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection.
+The platform has been significantly hardened with multiple security enhancements including explicit tool permission allow-listing to prevent unauthorized tool execution, deterministic redaction of tool outputs to prevent credential leakage to external model providers, workload identity service tokens that replace static client secrets with short-lived, Kubernetes-projected tokens validated against cluster OIDC issuers, flow-based approval enforcement ensuring exactly one HITL gate per mutating browser flow, session-scoped flow authorities with time-bounded expiration, per-action signed gates for unbound browser interactions replacing hard-denial policies, kernel-side authority clearing as staleness backstop, signed authority provenance via ADR-0010, comprehensive secret masking for change-request cards and tool outputs, evidence protection mechanisms, and a comprehensive audit trail system that provides immutable records of all platform activities with strong authentication and authorization controls. **Updated**: The platform now implements comprehensive credential masking for chat prose as part of SPEC-049 R-5 posture, addressing critical security gaps where passwords and sensitive information typed by operators into chat conversations could be echoed back verbatim by AI models. This includes four layers of protection: pinned secret shape patterns (PEM/JWT/Bearer-Basic/AKIA formats), URL query parameter redaction, key=value pair detection with secret-named parameters, and heuristic layer for credential-looking tokens when text contains references to secrets. Additionally, the platform features enhanced browser interaction security where unbound browser writes park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance that prevents stale flow authorities from being exploited, along with structured change-request cards providing secret-masked visibility into pending operations. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements a specialized third masking posture for evidence frames, integrates session title protection into shared masking infrastructure, and adds streaming prose redaction for live assistant streams with incremental credential masking. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system.
 
 ## Project Structure
 The platform is organized into multiple products and shared components with enhanced security boundaries:
@@ -170,7 +171,7 @@ Key responsibilities:
 - [SPEC-054-action-approval-and-change-request-card/spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
 
 ## Architecture Overview
-The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, enforces explicit tool permission allow-listing, maintains flow deviation guards, and implements per-action approval enforcement for unbound browser interactions with comprehensive secret masking. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The flow-based approval system ensures exactly one HITL gate per mutating browser flow, with session-scoped authorities scoped to flow identity (skill_id + origin) and time-bounded by configurable TTL, eliminating cross-flow privilege escalation while maintaining individual execution signing and audit trails for each unlocked write. Additionally, unbound browser interactions now park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance (ADR-0010) that prevent exploitation of stale flow authorities, and structured change-request cards providing secret-masked visibility into pending operations. The platform now implements comprehensive evidence frame secret masking with a specialized third masking posture that preserves structural integrity while removing secrets from tool-call evidence frames, multi-layered session title credential protection preventing credential leakage through session titles displayed to approvers, and **comprehensive credential masking for chat prose** preventing password and sensitive information echo-back by AI models through four-layer protection. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection.
+The enhanced security architecture centers on a trust boundary at the Tool Gateway, which authenticates clients, verifies audience-bound tokens, enforces policies with service identity awareness, delegates tokens securely to internal services, applies deterministic redaction to prevent credential leakage, enforces explicit tool permission allow-listing, maintains flow deviation guards, and implements per-action approval enforcement for unbound browser interactions with comprehensive secret masking. The Identity Broker acts as the single source of truth for user and service identities, issuing OIDC-compliant tokens with audience scoping, validating workload identity tokens from Kubernetes, and providing introspection endpoints. The Audit Service provides durable, tamper-evident audit trails with secure service-to-service authentication and role-based query access. Policies are declarative and evaluated per-request, enabling dynamic authorization based on roles, scopes, resource attributes, and service identity relationships. **Updated**: The flow-based approval system ensures exactly one HITL gate per mutating browser flow, with session-scoped authorities scoped to flow identity (skill_id + origin) and time-bounded by configurable TTL, eliminating cross-flow privilege escalation while maintaining individual execution signing and audit trails for each unlocked write. Additionally, unbound browser interactions now park per-action signed gates instead of being hard-denied, with comprehensive staleness backstops including kernel-side authority clearing and signed authority provenance (ADR-0010) that prevent exploitation of stale flow authorities, and structured change-request cards providing secret-masked visibility into pending operations. The platform now implements comprehensive evidence frame secret masking with a specialized third masking posture that preserves structural integrity while removing secrets from tool-call evidence frames, multi-layered session title credential protection preventing credential leakage through session titles displayed to approvers, and **comprehensive credential masking for chat prose** preventing password and sensitive information echo-back by AI models through four-layer protection. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system.
 
 ```mermaid
 sequenceDiagram
@@ -702,7 +703,7 @@ ExpandedURLRecognition --> BrowserErrorProtection["Navigation Error Path Protect
 - [test_secret_params.py:312-394](file://products/agent-platform/tests/test_secret_params.py#L312-L394)
 
 ### Comprehensive Chat Prose Credential Masking (SPEC-049 R-5 Posture)
-**New** The platform now implements comprehensive credential masking for chat prose as part of SPEC-049 R-5 posture, addressing critical security gaps where passwords and sensitive information typed by operators into chat conversations could be echoed back verbatim by AI models. This four-layer protection system masks both user-authored text and assistant responses to prevent credential leakage throughout the conversation flow. **Updated**: v0.36.1 enhances this system with streaming prose redaction for live assistant streams and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection.
+**New** The platform now implements comprehensive credential masking for chat prose as part of SPEC-049 R-5 posture, addressing critical security gaps where passwords and sensitive information typed by operators into chat conversations could be echoed back verbatim by AI models. This four-layer protection system masks both user-authored text and assistant responses to prevent credential leakage throughout the conversation flow. **Updated**: v0.36.1 enhances this system with streaming prose redaction for live assistant streams and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system.
 
 Key aspects:
 - **Four-Layer Protection System**: Implements pinned secret shape patterns (PEM/JWT/Bearer-Basic/AKIA formats), URL query parameter redaction, key=value pair detection with secret-named parameters, and heuristic layer for credential-looking tokens when text contains references to secrets.
@@ -716,6 +717,7 @@ Key aspects:
 - **Enhanced Streaming Redactor**: Improved shape holding for multi-chunk credentials with better handling of uppercase URL schemes split across deltas.
 - **Improved DSN-Style Credential Masking**: Enhanced handling of credentials in userinfo sections for non-HTTP schemes.
 - **Browser Navigation Error Path Protection**: Secret-bearing URLs in navigation error messages are masked before emission to results, evidence, and audit trails.
+- **Optimized Performance**: Hot-path cache for deferred secret-shape import resolution eliminates redundant import overhead in the critical streaming path while maintaining import cycle safety.
 
 ```mermaid
 flowchart TD
@@ -745,7 +747,8 @@ UserMessage --> DSNCredentials["DSN-Style Credentials"]
 DSNCredentials --> UserInfoMasking["UserInfo Section Masking"]
 UserInfoMasking --> ExpandedURLRecognition["RFC-3986 Scheme Support"]
 ExpandedURLRecognition --> EnhancedStreaming["Enhanced Streaming Redactor"]
-EnhancedStreaming --> BrowserErrorProtection["Navigation Error Path Protection"]
+EnhancedStreaming --> CachedPatterns["Cached Secret Shape Patterns"]
+CachedPatterns --> BrowserErrorProtection["Navigation Error Path Protection"]
 ```
 
 **Diagram sources**
@@ -759,14 +762,16 @@ EnhancedStreaming --> BrowserErrorProtection["Navigation Error Path Protection"]
 - [browser_connector.py:820-827](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L820-L827)
 
 **Section sources**
-- [prose_redaction.py:1-611](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L611)
+- [prose_redaction.py:1-630](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L630)
 - [test_prose_redaction.py:1-200](file://products/agent-platform/tests/test_prose_redaction.py#L1-L200)
 - [test_prose_redaction.py:366-386](file://products/agent-platform/tests/test_prose_redaction.py#L366-L386)
 - [test_prose_redaction.py:736-750](file://products/agent-platform/tests/test_prose_redaction.py#L736-L750)
+- [test_prose_redaction.py:753-771](file://products/agent-platform/tests/test_prose_redaction.py#L753-L771)
 - [SPEC-049-browser-web-check-tools/spec.md:185-208](file://docs/specs/SPEC-049-browser-web-check-tools/spec.md#L185-L208)
 - [runtime_kernel.py:1015-1020](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1015-1020)
 - [session_service.py:129-148](file://products/agent-platform/src/agent_service/services/session_service.py#L129-L148)
 - [2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md:103-142](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md#L103-L142)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md:37-72](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L37-L72)
 
 ### Enhanced Browser Result Redaction (v0.36.1 and v0.36.2)
 **New** The v0.36.1 release extends credential masking to all nine browser result emission sites, ensuring consistent protection across all browser interactions. Previously, only the initial `web.navigate` result was protected, leaving subsequent interactions like snapshots, screenshots, clicks, and other browser operations vulnerable to credential leakage. **v0.36.2 Enhancement**: The platform now provides comprehensive browser navigation error path protection, ensuring secret-bearing URLs in navigation error messages are properly masked before being emitted to results, evidence, and audit trails.
@@ -847,7 +852,7 @@ Note over Gateway,Broker : Fallback to Static Secret if Workload Token Unavailab
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
 
 ### Agent Platform: Enhanced Session and Runtime Security with Least-Privilege
-**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing for staleness backstops, enhanced document repository with envelope-only listings, comprehensive secret masking for all tool outputs, evidence protection through reference-only credential entry, specialized evidence frame masking, multi-layered session title credential protection, and **comprehensive credential masking for chat prose**. **Enhanced**: v0.36.1 integrates session title protection into shared masking infrastructure and extends credential masking to all browser result emission sites. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection.
+**Updated** The Agent Platform manages sessions and runtime dependencies for agent workloads with enhanced security controls including explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing for staleness backstops, enhanced document repository with envelope-only listings, comprehensive secret masking for all tool outputs, evidence protection through reference-only credential entry, specialized evidence frame masking, multi-layered session title credential protection, and **comprehensive credential masking for chat prose**. **Enhanced**: v0.36.1 integrates session title protection into shared masking infrastructure and extends credential masking to all browser result emission sites. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system.
 
 Key aspects:
 - Session creation and persistence with secure identifiers and audience validation.
@@ -870,6 +875,7 @@ Key aspects:
 - **Enhanced streaming redactor** with improved shape holding for multi-chunk credentials.
 - **Improved DSN-style credential masking** for userinfo sections in non-HTTP schemes.
 - **Browser navigation error path protection** ensuring secret-bearing URLs in error messages are masked before emission.
+- **Optimized streaming performance** with cached secret shape pattern detection eliminating redundant import overhead.
 
 **Section sources**
 - [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
@@ -919,6 +925,7 @@ Security-critical dependencies include:
 - **Enhanced streaming redactor** with improved shape holding for multi-chunk credentials.
 - **Improved DSN-style credential masking** for userinfo sections in non-HTTP schemes.
 - **Browser navigation error path protection** for masking secret-bearing URLs in error messages.
+- **Optimized streaming performance** with cached secret shape pattern detection eliminating redundant import overhead.
 
 ```mermaid
 graph TB
@@ -956,6 +963,8 @@ SecretVocabulary --> ValidateSecret["Secret Vocabulary Validator"]
 EvidenceMasker --> EvidenceProtection["Evidence Protection"]
 TitleMasker --> TitleProtection["Title Protection"]
 ProseMasker --> ProseProtection["Chat Prose Protection"]
+ProseProtection --> CachedPatterns["Cached Secret Shape Patterns"]
+CachedPatterns --> OptimizedStreaming["Optimized Streaming Performance"]
 BrowserRedactor --> NineSites["Nine Emission Sites"]
 BrowserRedactor --> ExpandedURLRecognition["Expanded URL Recognition"]
 BrowserRedactor --> EnhancedStreaming["Enhanced Streaming Redactor"]
@@ -975,6 +984,7 @@ ProseProtection --> ExpandedURLRecognition
 ProseProtection --> EnhancedStreaming
 ProseProtection --> DSNMasking
 ProseProtection --> BrowserErrorProtection
+ProseProtection --> CachedPatterns
 ChangeRequest --> EvidenceProtection
 EvidenceProtection --> ReferenceOnly["Reference-Only Credential Entry"]
 ReferenceOnly --> SecretVocabulary
@@ -1043,6 +1053,7 @@ AuditService --> AuditStore["Audit Store"]
 - **Enhanced streaming redactor performance**: Improved shape holding for multi-chunk credentials maintains low latency while ensuring credential protection.
 - **DSN-style credential masking performance**: Enhanced userinfo section masking adds minimal overhead through efficient URL parsing.
 - **Browser navigation error path protection performance**: Error message masking adds negligible overhead through targeted URL parsing.
+- **Optimized streaming performance**: Hot-path cache for secret shape pattern detection eliminates redundant import overhead in the critical streaming path, providing significant performance improvements for high-throughput streaming scenarios.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1077,6 +1088,8 @@ Common issues and resolutions:
 - **DSN-style credential masking problems**: Check that credentials in userinfo sections for non-HTTP schemes are properly masked.
 - **Browser navigation error path protection issues**: Verify that secret-bearing URLs in navigation error messages are properly masked before emission.
 - **Enhanced streaming redactor problems**: Ensure improved shape holding for multi-chunk credentials works correctly with uppercase URL schemes.
+- **Streaming performance issues**: Verify that cached secret shape pattern detection is working correctly and check for import cycle issues.
+- **Cache invalidation problems**: Ensure that the hot-path cache for secret shape patterns is properly initialized and maintained across streaming operations.
 
 Recommended diagnostics:
 - Enable verbose logging for auth and policy decisions with service identity context.
@@ -1106,6 +1119,8 @@ Recommended diagnostics:
 - **Test DSN-style credential masking** to ensure credentials in userinfo sections for non-HTTP schemes are properly masked.
 - **Test browser navigation error path protection** to ensure secret-bearing URLs in error messages are properly masked before emission.
 - **Test enhanced streaming redactor** to ensure improved shape holding for multi-chunk credentials works correctly with uppercase URL schemes.
+- **Test streaming performance optimization** to ensure cached secret shape pattern detection provides expected performance improvements.
+- **Monitor cache hit rates** for secret shape pattern detection to validate performance optimization effectiveness.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
@@ -1119,7 +1134,7 @@ Recommended diagnostics:
 - [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ## Conclusion
-The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing and signed authority provenance (ADR-0010) as staleness backstops, deterministic tool output redaction, workload identity service tokens, comprehensive secret masking across all tool outputs, evidence protection mechanisms, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, flow-based approval enforcement with single HITL gates per browser flow, per-action signed gates replacing hard-denial policies for unbound interactions, kernel-side authority clearing preventing stale flow authority exploitation, signed authority provenance via ADR-0010, comprehensive secret masking for all tool outputs and change-request cards, evidence protection through reference-only credential entry, specialized evidence frame masking preserving structural integrity, multi-layered session title credential protection, **comprehensive credential masking for chat prose preventing password and sensitive information echo-back by AI models**, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure, providing comprehensive protection across all user-facing surfaces. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection, providing even more comprehensive protection against credential leakage across all platform surfaces. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
+The Luban AIOps Platform implements an enhanced robust security architecture centered on OIDC-based authentication, audience-bound JWT token security, policy-driven authorization with service identity awareness, explicit tool permission allow-listing, flow-based approval enforcement with session-scoped authorities, per-action signed gates for unbound browser interactions, kernel-side authority clearing and signed authority provenance (ADR-0010) as staleness backstops, deterministic tool output redaction, workload identity service tokens, comprehensive secret masking across all tool outputs, evidence protection mechanisms, and a comprehensive audit trail system with secure service-to-service authentication. By enforcing least-privilege access through RBAC, audience-scoped permissions, declarative policies, and explicit tool permission controls, integrating comprehensive observability and audit logging for service-to-service communications, implementing fail-closed credential protection, and providing durable audit trails with role-based access control, the platform provides strong protection against common threats. The addition of delegated token flows, service-to-service identity patterns, explicit tool permission allow-listing, deterministic redaction, workload identity tokens, secure audit trail capabilities, flow-based approval enforcement with single HITL gates per browser flow, per-action signed gates replacing hard-denial policies for unbound interactions, kernel-side authority clearing preventing stale flow authority exploitation, signed authority provenance via ADR-0010, comprehensive secret masking for all tool outputs and change-request cards, evidence protection through reference-only credential entry, specialized evidence frame masking preserving structural integrity, multi-layered session title credential protection, **comprehensive credential masking for chat prose preventing password and sensitive information echo-back by AI models**, and **enhanced document read audit integrity with envelope-only listings** further strengthens the security posture while maintaining operational efficiency. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure, providing comprehensive protection across all user-facing surfaces. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection, providing even more comprehensive protection against credential leakage across all platform surfaces. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system, providing significant performance improvements for high-throughput streaming scenarios without compromising security guarantees. Continuous security scanning, penetration testing, and adherence to compliance standards further enhance the platform's security framework.
 
 ## Appendices
 
@@ -1152,6 +1167,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Test DSN-style credential masking** to ensure credentials in userinfo sections for non-HTTP schemes are properly masked.
 - **Test browser navigation error path protection** to ensure secret-bearing URLs in error messages are properly masked before emission.
 - **Test enhanced streaming redactor** to ensure improved shape holding for multi-chunk credentials works correctly with uppercase URL schemes.
+- **Validate streaming performance optimization** to ensure cached secret shape pattern detection provides expected performance improvements without compromising security.
+- **Monitor cache effectiveness** for secret shape pattern detection to validate performance optimization benefits.
 
 **Section sources**
 - [SECURITY.md](file://SECURITY.md)
@@ -1195,6 +1212,8 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Test DSN-style credential masking** by attempting to inject credentials in userinfo sections for database DSNs and verify proper masking.
 - **Test browser navigation error path protection** by attempting to inject credentials in navigation error messages and verify proper masking before emission.
 - **Test enhanced streaming redactor** by attempting to split credentials across message chunks with uppercase URL schemes and verify proper handling.
+- **Test streaming performance optimization** by verifying cached secret shape pattern detection provides expected performance improvements without security compromises.
+- **Test cache security** by attempting to poison cached patterns and verify import cycle safety is maintained.
 - Document findings and remediation steps; track vulnerabilities to closure with security impact assessment.
 - Integrate security checks into CI/CD pipelines for continuous assurance with audience-bound token validation and redaction testing.
 
@@ -1242,6 +1261,9 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Test DSN-style credential masking** to ensure credentials in userinfo sections for non-HTTP schemes are properly masked and tested.
 - **Test browser navigation error path protection** to ensure secret-bearing URLs in error messages are properly masked before emission.
 - **Test enhanced streaming redactor** to ensure improved shape holding for multi-chunk credentials works correctly with uppercase URL schemes.
+- **Test streaming performance optimization** to ensure cached secret shape pattern detection maintains security while providing performance benefits.
+- **Test cache initialization** to ensure import cycle safety is preserved while providing performance improvements.
+- **Validate cache poisoning resistance** to ensure runtime monkeypatching cannot compromise cached patterns.
 
 **Section sources**
 - [SPEC-003-identity-trust-hardening/spec.md](file://docs/specs/SPEC-003-identity-trust-hardening/spec.md)
@@ -1255,7 +1277,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [0010-signed-execution-envelopes-declare-authority-provenance.md](file://docs/adr/0010-signed-execution-envelopes-declare-authority-provenance.md)
 
 ### Threat Modeling Updates
-**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, flow-based approval enforcement, per-action signed gates for unbound interactions, kernel-side authority clearing, signed authority provenance, audit trail integrity, document content exposure prevention, comprehensive secret masking, evidence protection mechanisms, specialized evidence frame masking, multi-layered session title credential protection, and **comprehensive credential masking for chat prose**. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection.
+**Updated** The security hardening features address several critical attack vectors, with particular emphasis on tool permission vulnerabilities, flow-based approval enforcement, per-action signed gates for unbound interactions, kernel-side authority clearing, signed authority provenance, audit trail integrity, document content exposure prevention, comprehensive secret masking, evidence protection mechanisms, specialized evidence frame masking, multi-layered session title credential protection, and **comprehensive credential masking for chat prose**. **Enhanced**: v0.36.1 extends credential masking to all nine browser result emission sites, implements streaming prose redaction for live assistant streams, and integrates session title protection into shared masking infrastructure. **v0.36.2 Enhancement**: The platform now supports expanded URL token recognition for RFC-3986 compliant schemes beyond HTTP/HTTPS, enhanced streaming redactor with improved shape holding for multi-chunk credentials, improved DSN-style credential masking in userinfo sections, and comprehensive browser navigation error path protection. **v0.36.3 Enhancement**: The platform now includes optimized streaming prose redactor performance with cached secret shape pattern detection, eliminating redundant import overhead in the critical streaming path while maintaining the same four-layer protection system.
 
 **Credential Leakage Prevention:**
 - Deterministic redaction prevents service-account JWTs, bearer tokens, and basic credentials from reaching external model providers.
@@ -1270,6 +1292,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Enhanced streaming redactor** with improved shape holding for multi-chunk credentials ensures credentials split across message chunks are properly masked.
 - **Improved DSN-style credential masking** handles credentials in userinfo sections for non-HTTP schemes.
 - **Browser navigation error path protection** ensures secret-bearing URLs in navigation error messages are masked before emission to results, evidence, and audit trails.
+- **Optimized streaming performance** with cached secret shape pattern detection eliminates redundant import overhead while maintaining import cycle safety and security guarantees.
 
 **Service Identity Hardening:**
 - Workload identity tokens replace extractable static client secrets with short-lived, auditable credentials.
@@ -1318,6 +1341,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Enhanced streaming redactor** with improved shape holding for multi-chunk credentials ensures credentials split across message chunks are properly masked.
 - **Improved DSN-style credential masking** handles credentials in userinfo sections for non-HTTP schemes.
 - **Browser navigation error path protection** ensures secret-bearing URLs in navigation error messages are masked before emission to results, evidence, and audit trails.
+- **Optimized streaming performance** with cached secret shape pattern detection eliminates redundant import overhead while maintaining import cycle safety and security guarantees.
 
 **Audit Trail Security:**
 - **Dual authentication paths** provide flexibility while maintaining security through static credentials or workload identity.
@@ -1347,6 +1371,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Enhanced streaming redactor prevents credential leakage** through credentials split across message chunks.
 - **Improved DSN-style credential masking prevents credential leakage** through userinfo sections in non-HTTP schemes.
 - **Browser navigation error path protection prevents credential leakage** through error messages containing secret-bearing URLs.
+- **Optimized streaming performance prevents performance degradation** through cached secret shape pattern detection while maintaining security guarantees.
 
 **Section sources**
 - [SPEC-009-pre-production-hardening/spec.md](file://docs/specs/SPEC-009-pre-production-hardening/spec.md)
@@ -1371,6 +1396,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - [runtime_kernel.py:1417-1449](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1417-L1449)
 - [routes.py:858-915](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L915)
 - [2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md:77-90](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md#L77-L90)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md:37-72](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L37-L72)
 
 ### Security Configuration Reference
 **Updated** The following environment variables control critical security behaviors:
@@ -1434,6 +1460,7 @@ The Luban AIOps Platform implements an enhanced robust security architecture cen
 - **Enhanced streaming redactor** with improved shape holding for multi-chunk credentials ensures credentials split across message chunks are properly masked.
 - **Improved DSN-style credential masking** handles credentials in userinfo sections for non-HTTP schemes.
 - **Browser navigation error path protection** ensures secret-bearing URLs in navigation error messages are masked before emission.
+- **Optimized streaming performance** with cached secret shape pattern detection eliminates redundant import overhead while maintaining import cycle safety.
 
 **Section sources**
 - [gateway_tools.py:46-61](file://products/agent-platform/src/agent_service/tools/gateway_tools.py#L46-L61)

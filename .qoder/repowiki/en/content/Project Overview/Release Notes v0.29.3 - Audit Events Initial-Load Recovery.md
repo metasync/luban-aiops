@@ -3,6 +3,8 @@
 <cite>
 **Referenced Files in This Document**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md)
+- [2026-09-11-post-release-code-review-credential-masking-edge-cases.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-code-review-credential-masking-edge-cases.md)
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
 - [query.py](file://products/audit-service/src/audit_service/api/routes/query.py)
 - [summary.py](file://products/audit-service/src/audit_service/api/routes/summary.py)
@@ -11,6 +13,8 @@
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [browser_sessions.py](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py)
 - [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
+- [prose_redaction.py](file://products/agent-platform/src/agent_service/services/prose_redaction.py)
+- [test_prose_redaction.py](file://products/agent-platform/tests/test_prose_redaction.py)
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
@@ -18,11 +22,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive security hardening section for SPEC-049 browser connector
-- Updated architecture diagrams to include browser connector components
-- Added new sections covering origin re-checking, CDP port pinning, concurrent access fixes, and information disclosure prevention
-- Enhanced troubleshooting guide with browser connector security considerations
-- Updated conclusion to reflect both audit events recovery and browser connector hardening
+- Added comprehensive credential masking performance optimization section covering v0.36.3 hot-path cache implementation
+- Updated deployment state references to reflect batched cluster rebuild into v0.36.3 rather than standalone image tags
+- Enhanced security hardening documentation with new performance optimization details
+- Added documentation corrections and known limitations from v0.36.3 patch release
+- Updated conclusion to include both audit events recovery and credential masking performance improvements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -31,13 +35,14 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Security Hardening for Browser Connector (SPEC-049)](#security-hardening-for-browser-connector-spec-049)
-7. [Dependency Analysis](#dependency-analysis)
-8. [Performance Considerations](#performance-considerations)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
+7. [Credential Masking Performance Optimization (v0.36.3)](#credential-masking-performance-optimization-v0363)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
 
 ## Introduction
-This release addresses two critical areas: an intermittent initial-load issue in the Operator Portal's Audit Events tab and comprehensive security hardening for the SPEC-049 browser connector. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning to loopback with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention.
+This release addresses three critical areas: an intermittent initial-load issue in the Operator Portal's Audit Events tab, comprehensive security hardening for the SPEC-049 browser connector, and significant performance optimizations for credential masking through a hot-path cache implementation. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention. The v0.36.3 performance optimization introduces a module-global cache for secret shape pattern resolution, eliminating repeated deferred imports on the streaming hot path while preserving import cycle safety.
 
 ## Project Structure
 The changes span multiple components across the platform:
@@ -54,6 +59,10 @@ subgraph "Audit Service"
 QRY["query.py"]
 SUM["summary.py"]
 STORE["audit_store.py"]
+end
+subgraph "Agent Platform"
+PR["prose_redaction.py"]
+TR["test_prose_redaction.py"]
 end
 subgraph "Tool Gateway - Browser Connector"
 BC["browser_connector.py"]
@@ -72,11 +81,13 @@ BC --> BS
 BC --> CS
 BC --> NP
 BC --> SC
+PR --> TR
 ```
 
 **Diagram sources**
 - [AuditView.tsx:134-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L134-L199)
 - [gateway_service.py:201-261](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L201-L261)
+- [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
 - [browser-sidecar-network-policy.yaml:1-30](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L30)
 
@@ -88,12 +99,14 @@ BC --> SC
 - **BrowserConnector**: Implements bounded web-check tool surface with comprehensive security controls including origin allowlist enforcement, flow binding, deviation guards, and credential masking.
 - **BrowserSessionPool**: Manages stateful browser sessions with concurrent access protection, TTL-based expiration, and memory-bounded eviction.
 - **CredentialSetStore**: Provides secure named credential management with file-based configuration and automatic reload capabilities.
+- **ProseRedactor Cache**: Implements hot-path caching for secret shape pattern resolution to optimize streaming performance.
 
 **Section sources**
 - [AuditView.tsx:101-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L101-L199)
 - [browser_connector.py:159-260](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L159-L260)
 - [browser_sessions.py:120-289](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L120-L289)
 - [credential_sets.py:30-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L30-L103)
+- [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 
 ## Architecture Overview
 The portal's Audit view triggers an initial load when the user has the required roles. If the browser boots with a stale expired session, the first request can receive 401 while the shell still appears signed-in due to cached identity fallback. The fix ensures that when the session changes (stale cleared, fresh sign-in, or silent refresh), the effect clears any latched error and retries once if not yet loaded.
@@ -257,6 +270,69 @@ Named credential sets provide secure login automation:
 - [browser_sessions.py:144-147](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L144-L147)
 - [credential_sets.py:1-17](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L1-L17)
 
+## Credential Masking Performance Optimization (v0.36.3)
+
+### Hot-Path Cache Implementation
+The v0.36.3 patch introduces a significant performance optimization for credential masking by implementing a module-global cache for secret shape pattern resolution. This addresses a critical bottleneck in the streaming hot path where the deferred import machinery ran on every chunk of every streamed reply.
+
+#### Problem Analysis
+The `_secret_shape_patterns()` function reads pinned secret-shape vocabulary through a deferred import to avoid circular dependencies. However, this resolver sits on the streaming hot path, being reached three times per delta through `_shape_hold`, `_match_spans`, and `redact_assistant_text`. Each call triggered the full deferred import process, creating unnecessary overhead.
+
+#### Solution Design
+The optimization introduces a module global `_SECRET_SHAPE_PATTERNS` that caches the resolved tuple after the first call. The design preserves the original deferral semantics while eliminating repeated import overhead:
+
+```python
+_SECRET_SHAPE_PATTERNS: tuple[re.Pattern[str], ...] | None = None
+
+def _secret_shape_patterns() -> tuple[re.Pattern[str], ...]:
+    global _SECRET_SHAPE_PATTERNS
+    if _SECRET_SHAPE_PATTERNS is None:
+        from agent_service.services.skill_draft import REDACTION_VALUE_PATTERNS
+        _SECRET_SHAPE_PATTERNS = REDACTION_VALUE_PATTERNS
+    return _SECRET_SHAPE_PATTERNS
+```
+
+#### Safety Guarantees
+- **Import Cycle Preservation**: The cache is a module global rather than a default argument, ensuring the first call still lands at runtime where the import cycle is inert
+- **Immutable Tuple**: The cached tuple remains immutable for the process lifetime, maintaining behavioral consistency
+- **Runtime Monkeypatch Protection**: Runtime monkeypatches of `REDACTION_VALUE_PATTERNS` after the first call are no longer seen, which is acceptable since no production code performs such operations
+
+#### Verification and Testing
+The optimization is validated by a comprehensive regression test that confirms the cache behavior under adversarial conditions:
+
+```python
+def test_secret_shape_patterns_caches_the_deferred_import(monkeypatch):
+    """Poisoning the source after the first call fails against the uncached form"""
+    first = _secret_shape_patterns()
+    assert first is skill_draft.REDACTION_VALUE_PATTERNS
+    assert first  # the real vocabulary, not an empty tuple
+    monkeypatch.setattr(skill_draft, "REDACTION_VALUE_PATTERNS", ())
+    second = _secret_shape_patterns()
+    assert second is first  # cached; did not re-read the poisoned source
+    assert second  # still the real, non-empty vocabulary
+```
+
+### Documentation Corrections and Known Limitations
+The v0.36.3 patch also includes important documentation corrections and records known limitations:
+
+#### Module Docstring Alignment
+The module docstring's hold limit now accurately names the anchor hold it previously lagged behind, ensuring the summary matches the detailed class description.
+
+#### Tutorial Documentation Corrections
+Three tutorial sites were corrected from calling the `#reset-status` success read a `web.snapshot` to `web.extract`, aligning with the actual tool behavior where snapshots enumerate interactive elements only.
+
+#### Generated Repowiki Known Limitation
+A documented limitation exists where three IDE-generated articles under the repowiki's Identity Broker reference fabricate a user-management CRUD surface that the broker does not implement. This is recorded rather than patched since the repowiki is a regenerable IDE cache.
+
+### Deployment State Correction
+The deployment state reference was corrected to reflect that the cluster rebuild was batched into the v0.36.3 follow-up rather than cut as a standalone image tag. This ensures accurate traceability and avoids confusion about deployment sequencing.
+
+**Section sources**
+- [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
+- [test_prose_redaction.py:753-770](file://products/agent-platform/tests/test_prose_redaction.py#L753-L770)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md:35-58](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L35-L58)
+- [2026-09-11-post-release-doc-review-and-redaction-cache.md:147-157](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L147-L157)
+
 ## Dependency Analysis
 - The portal's AuditView depends on:
   - Auth context for roles and session
@@ -268,6 +344,10 @@ Named credential sets provide secure login automation:
   - Chromium headless shell sidecar via CDP
   - Credential set configuration files
   - Skills hub for flow validation
+- The prose redactor depends on:
+  - Skill draft module for secret shape patterns
+  - Shift summary and session transcript modules
+  - Test suite for cache validation
 
 ```mermaid
 graph LR
@@ -278,11 +358,16 @@ BC["BrowserConnector"] --> BS["BrowserSessionPool"]
 BC --> CS["CredentialSetStore"]
 BS --> NP["NetworkPolicy"]
 BS --> SC["Sidecar Config"]
+PR["ProseRedactor"] --> SD["Skill Draft"]
+PR --> SS["Shift Summary"]
+PR --> ST["Session Transcript"]
+PR --> TR["Test Suite"]
 ```
 
 **Diagram sources**
 - [AuditView.tsx:134-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L134-L199)
 - [gateway_service.py:201-261](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L201-L261)
+- [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:159-260](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L159-L260)
 - [browser-sidecar-network-policy.yaml:1-30](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L30)
 
@@ -296,6 +381,7 @@ BS --> SC["Sidecar Config"]
 - The browser connector implements efficient session pooling with TTL-based expiration and memory-bounded eviction.
 - Concurrent access patterns minimize resource contention while preventing race conditions.
 - Credential set reloading uses file modification time checks to avoid unnecessary file reads.
+- **New**: The v0.36.3 hot-path cache eliminates repeated deferred imports on the streaming hot path, reducing overhead from three import cycles per delta to a single module-level cache lookup.
 
 ## Troubleshooting Guide
 - **Symptom**: Audit Events tab shows "No audit events match these filters" on first load, but Summary counts show events.
@@ -317,10 +403,17 @@ BS --> SC["Sidecar Config"]
 - **Root cause**: Current page origin differs from bound flow origin.
 - **Resolution**: Navigate back to the flow's target origin before interacting.
 
+### Credential Masking Performance Troubleshooting
+- **Symptom**: Streaming responses showing increased latency or CPU usage.
+- **Root cause**: Potential issues with the secret shape pattern cache or import cycle resolution.
+- **Resolution**: Verify the cache is functioning correctly by checking that `_SECRET_SHAPE_PATTERNS` is properly initialized and cached after the first call.
+- **Verification**: Run the cache regression test to confirm proper caching behavior under normal and adversarial conditions.
+
 **Section sources**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md:11-41](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md#L11-L41)
 - [AuditView.tsx:185-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L185-L199)
 - [test_browser_connector.py:440-483](file://products/tool-gateway/tests/test_browser_connector.py#L440-L483)
+- [test_prose_redaction.py:753-770](file://products/agent-platform/tests/test_prose_redaction.py#L753-L770)
 
 ## Conclusion
-Release v0.29.3 delivers two significant improvements: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, and comprehensive security hardening for the SPEC-049 browser connector. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. Together, these changes enhance both user experience and security posture across the platform.
+Release v0.29.3 delivers three significant improvements: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, comprehensive security hardening for the SPEC-049 browser connector, and substantial performance optimization for credential masking through a hot-path cache implementation. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. The v0.36.3 performance optimization eliminates repeated deferred imports on the streaming hot path while maintaining import cycle safety and behavioral consistency. Together, these changes enhance both user experience, security posture, and performance across the platform, with the batched deployment approach ensuring coordinated rollout of all improvements.

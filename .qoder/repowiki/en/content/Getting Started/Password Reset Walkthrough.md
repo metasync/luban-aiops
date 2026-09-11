@@ -18,11 +18,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced documentation to clarify comprehensive masking guarantees for sensitive information in chat transcripts and live streams
-- Added detailed explanations of masking boundaries including user message plaintext display during live interaction vs masked display after session reload
-- Updated with specific test credentials examples (TempPass-2026! for ad-hoc flow, TempPass123! for bound flow) to help testers verify masking behavior
-- Clarified that non-sensitive data like portal names remain unmasked while sensitive credentials are fully protected
-- Added technical details about the prose redaction system implementation
+- Corrected inconsistent references to success evidence extraction method from 'web.snapshot' to proper 'web.extract' operation
+- Updated skill documentation to accurately reflect that web.extract is required for non-interactive status elements
+- Maintained consistency between summary statements and detailed evidence sections throughout all walkthrough materials
+- Preserved comprehensive masking guarantees and technical implementation details
 
 ## Table of Contents
 1. [Introduction](#introduction)

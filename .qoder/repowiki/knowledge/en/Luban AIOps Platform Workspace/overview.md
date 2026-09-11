@@ -1,0 +1,1 @@
+Multi-product agentic AIOps platform workspace that coordinates Python services (agent-platform, gateways, identity, audit, skills, incidents, execution runtime) plus shared contracts, GitOps overlays, and spec-driven delivery.

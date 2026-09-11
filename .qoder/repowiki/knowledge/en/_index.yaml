@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-09-11T16:14:38Z"
+exported_at: "2026-09-11T17:37:21Z"
 modules:
     "":
-        dir_name: Luban Agentic AIOps Platform Workspace
-        title: Luban Agentic AIOps Platform Workspace
+        dir_name: Luban AIOps Platform Workspace
+        title: Luban AIOps Platform Workspace
         scope: []
         source_files: []
         children: []

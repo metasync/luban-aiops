@@ -1,1 +1,0 @@
-Python services managed with `uv` (per-product `pyproject.toml` + `uv.lock`), packaged into Docker images built from per-product `Dockerfile`s using a shared `base-uv` image; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; policy evaluation driven by YAML bundles validated against JSON schemas in `shared/shared-contracts/policies`.
