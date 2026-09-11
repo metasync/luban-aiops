@@ -3,24 +3,22 @@
 <cite>
 **Referenced Files in This Document**
 - [spec.md](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md)
-- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
-- [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
-- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
-- [execution_signing.py](file://products/agent-platform/src/agent_service/services/execution_signing.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
+- [test_executor.py](file://products/execution-runtime/tests/test_executor.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated all sections to reflect SPEC-054 v0.35.0 delivery status with successful browser live check validation
-- Enhanced documentation of the critical session owner attribution bug fix resolved during dev-k8s deployment testing
-- Added comprehensive coverage of flow authority clearing mechanisms and BROWSER_FLOW_AUTHORITY_STALE enforcement
-- Expanded change request card functionality with secret masking and curated formatters
-- Updated architecture diagrams to reflect new enforcement boundaries and approval_kind provenance
+- Updated model-facing contract description to reflect relaxed authorization model from SPEC-054, clarifying unbound interactions can execute write operations after per-action card approval
+- Enhanced documentation of the `_gate_unbound_interaction` method with live origin re-check validation and authority provenance enforcement
+- Expanded change request card functionality with curated formatters and fail-closed secret masking
+- Updated architecture diagrams to reflect new enforcement boundaries and approval_kind provenance validation
 - **Critical Enhancement**: Session owner attribution prevents self-approval blocks when tier_2 approvers handle subsequent unbound per-action cards
-- **Forward Cross-Reference**: Added explicit reference to SPEC-055 R-7 addressing the recorded deferral for approval-seam secret-masking hardening
+- **Forward Cross-Reference**: Recorded deferral for approval-seam secret-masking hardening is now scheduled under SPEC-055 R-7
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -64,33 +62,29 @@ graph TB
 subgraph "Agent Platform"
 RK["runtime_kernel.py"]
 HC["hitl_confirmations.py"]
-CR["confirmation_records.py"]
 FA["flow_approvals.py"]
-ES["execution_signing.py"]
-RT["routes.py"]
+SP["secret_params.py"]
 end
 subgraph "Tool Gateway"
 BC["browser_connector.py"]
 end
+subgraph "Execution Runtime"
+ER["test_executor.py"]
+end
 RK --> HC
-RK --> CR
 RK --> FA
-RK --> ES
+RK --> SP
 RK --> BC
-RT --> RK
-HC --> CR
-FA --> RK
-ES --> RK
+ER --> RK
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:1-200](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1-L200)
-- [hitl_confirmations.py:1-548](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L548)
-- [confirmation_records.py:1-744](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L1-L744)
-- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
-- [execution_signing.py:1-175](file://products/agent-platform/src/agent_service/services/execution_signing.py#L1-L175)
-- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
+- [runtime_kernel.py:1900-2099](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1900-L2099)
+- [hitl_confirmations.py:1-200](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L200)
+- [flow_approvals.py:1-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L200)
+- [secret_params.py:97-155](file://products/agent-platform/src/agent_service/services/secret_params.py#L97-L155)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
+- [test_executor.py:113-129](file://products/execution-runtime/tests/test_executor.py#L113-L129)
 
 **Section sources**
 - [spec.md:440-534](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L440-L534)
@@ -121,36 +115,30 @@ The approval flow spans the agent platform kernel, HITL registry, durable store,
 ```mermaid
 sequenceDiagram
 participant Client as "Operator / Portal"
-participant Routes as "Confirm Route"
 participant Kernel as "AgentKernel"
 participant Registry as "ConfirmationRegistry"
 participant Store as "ConfirmationRecordStore"
 participant Signer as "ExecutionSigner"
 participant GW as "BrowserConnector"
-Client->>Routes : "Confirm (approve/deny)"
-Routes->>Kernel : "resume_confirmation(owner_user_name=session.owner)"
+Client->>Kernel : "Confirm (approve/deny)"
 Kernel->>Registry : "Register PendingConfirmation with approval_kind"
 Registry->>Store : "save_parked(record)"
 Kernel-->>Client : "SSE confirmation_request frame"
-Client->>Routes : "Confirm (approve/deny)"
-Routes->>Kernel : "claim + resolve with owner_user_name"
+Client->>Kernel : "Confirm (approve/deny)"
 Kernel->>Registry : "claim + resolve"
 Registry->>Store : "mark_resolved(status, decider, decision)"
 Kernel->>Signer : "build_requests() with approval_kind='action'"
 Signer-->>Kernel : "Signed execution envelope"
 Kernel->>GW : "Resume with signed execution envelope"
-GW->>GW : "Verify approval_kind provenance"
+GW->>GW : "_gate_unbound_interaction() validates approval_kind"
 GW-->>Kernel : "Execution result"
 Kernel-->>Client : "Stream completion"
 ```
 
 **Diagram sources**
-- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
-- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
-- [hitl_confirmations.py:208-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L208-L349)
-- [confirmation_records.py:511-545](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L511-L545)
-- [execution_signing.py:70-105](file://products/agent-platform/src/agent_service/services/execution_signing.py#L70-L105)
-- [browser_connector.py:423-477](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L423-L477)
+- [runtime_kernel.py:1998-2099](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1998-L2099)
+- [hitl_confirmations.py:47-145](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L47-L145)
+- [browser_connector.py:470-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L470-L590)
 
 ## Detailed Component Analysis
 
@@ -172,20 +160,20 @@ Persist --> Render["Portal renders headline or change request"]
 ```
 
 **Diagram sources**
-- [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
-- [hitl_confirmations.py:66-73](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L66-L73)
-- [confirmation_records.py:52-82](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L52-L82)
+- [hitl_confirmations.py:47-87](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L47-L87)
+- [runtime_kernel.py:1923-1952](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1923-L1952)
 
 **Section sources**
 - [spec.md:144-179](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L144-L179)
 
-### Ad-Hoc Browser Writes Park as Per-Action Signed Gates (R-2) - Delivered
-**Updated** The per-action signed gate mechanism is fully implemented with enhanced security controls. Unbound browser writes on allowlisted origins now park as individual confirmation cards rather than being hard-denied.
+### Ad-Hoc Browser Writes Park as Per-Action Signed Gates (R-2) - Enhanced
+**Updated** The per-action signed gate mechanism is fully implemented with enhanced security controls through `_gate_unbound_interaction`. Unbound browser writes on allowlisted origins now park as individual confirmation cards rather than being hard-denied.
 
 - Behavior: An unbound web.* write on an allowlisted origin parks a per-action confirmation instead of being hard-denied. Each write gets its own execution_id, args_digest, and confirm_id.
 - Safety: No auto-allow; if bridging is disabled, such writes are denied. Non-browser tools remain unchanged; bound flows still collapse to one gate.
 - Enforcement: Origin allowlist remains deny-by-default; deviation guard still bounds execution.
-- Staleness Protection: New `BROWSER_FLOW_AUTHORITY_STALE` refusal prevents stale flow-provenance envelopes from executing without bound flows.
+- **Enhanced Security**: Live origin re-check via `_gate_unbound_interaction` prevents client-side redirects between navigation and interaction from landing approved writes on drifted pages.
+- **Authority Provenance Validation**: Stale flow-provenance envelopes are refused with `BROWSER_FLOW_AUTHORITY_STALE` rather than being reinterpreted as per-action approvals.
 
 ```mermaid
 flowchart TD
@@ -193,7 +181,12 @@ A["web.* write"] --> B{"Origin allowed?"}
 B --> |No| Deny["Deny (deviation guard)"]
 B --> |Yes| C{"Bound flow?"}
 C --> |Yes| FlowGate["One gate per SPEC-051"]
-C --> |No| Park["Park per-action confirmation"]
+C --> |No| GateUnbound["_gate_unbound_interaction()"]
+GateUnbound --> D{"Live origin check"}
+D --> |Off-allowlist| Halt["Halt page + refuse"]
+D --> |On-allowlist| E{"approval_kind == 'flow'?"}
+E --> |Yes| Stale["Refuse BROWSER_FLOW_AUTHORITY_STALE"]
+E --> |No| Park["Park per-action confirmation"]
 Park --> Approve{"Approved?"}
 Approve --> |Yes| SignExec["Signed execution via SPEC-037/038"]
 Approve --> |No| Deny
@@ -203,8 +196,8 @@ Verify --> Execute["Execute with enforced guards"]
 ```
 
 **Diagram sources**
-- [browser_connector.py:423-477](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L423-L477)
-- [execution_signing.py:70-105](file://products/agent-platform/src/agent_service/services/execution_signing.py#L70-L105)
+- [browser_connector.py:536-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L536-L590)
+- [flow_approvals.py:56-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L56-L75)
 
 **Section sources**
 - [spec.md:180-273](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L180-L273)
@@ -216,6 +209,7 @@ Verify --> Execute["Execute with enforced guards"]
 - Secret masking: Uses the existing redaction vocabulary to mask secret-bearing values while preserving keys.
 - Integrity: The projection never alters the signed args_digest; full parameters remain available in technical details.
 - Curated Formatters: Special handling for demo-critical tools like `k8s.delete_pod`, `web.click`, `web.type`, etc.
+- **Fail-Closed Masking**: Generic projections now mask by default unless explicitly whitelisted in KNOWN_SAFE_FIELDS.
 
 ```mermaid
 classDiagram
@@ -230,19 +224,21 @@ class PendingConfirmation {
 class BrowserConnector {
 +is_origin_allowed(url) bool
 +gate_interaction(entry, tool_name, require_write_class) ToolResult?
++_gate_unbound_interaction(entry, tool_name, risk_level, approval_kind) ToolResult?
 }
-class ExecutionSigner {
-+build_requests(pending, decider_user_id, key) list
-+build_flow_request(call_id, tool_name, parameters, flow_approval, key) dict
+class SecretParams {
++OPAQUE_VALUE_FIELDS frozenset
++KNOWN_SAFE_FIELDS frozenset
++should_mask(tool_name, param_name) bool
 }
 PendingConfirmation --> BrowserConnector : "uses risk levels and tool names"
-PendingConfirmation --> ExecutionSigner : "generates signed envelopes"
+PendingConfirmation --> SecretParams : "applies secret masking"
 ```
 
 **Diagram sources**
-- [hitl_confirmations.py:41-118](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L41-L118)
-- [browser_connector.py:151-201](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L151-L201)
-- [execution_signing.py:70-105](file://products/agent-platform/src/agent_service/services/execution_signing.py#L70-L105)
+- [hitl_confirmations.py:195-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L195-L349)
+- [browser_connector.py:470-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L470-L590)
+- [secret_params.py:97-155](file://products/agent-platform/src/agent_service/services/secret_params.py#L97-L155)
 
 **Section sources**
 - [spec.md:274-333](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L274-L333)
@@ -267,11 +263,48 @@ Portal-->>Portal : "confirmationRecordToCard sets card.message"
 ```
 
 **Diagram sources**
-- [confirmation_records.py:52-82](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L52-L82)
-- [confirmation_records.py:511-545](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L511-L545)
+- [runtime_kernel.py:1900-1921](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1900-L1921)
 
 **Section sources**
 - [spec.md:334-368](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L334-L368)
+
+### Enhanced Browser Interaction Security Model - Critical Enhancement
+**New** The `_gate_unbound_interaction` method provides enhanced security validation for unbound browser interactions with live origin re-check and authority provenance enforcement.
+
+- **Live Origin Re-check**: Validates the current page URL against the allowlist before executing any unbound interaction, preventing client-side redirects from landing approved writes on drifted pages.
+- **Authority Provenance Validation**: Refuses executions claiming flow provenance when no flow is bound, returning `BROWSER_FLOW_AUTHORITY_STALE` instead of reinterpreting as per-action approval.
+- **Fail-Closed Design**: The check can only add refusals, never remove them - the guard set applied is selected by the gateway's own flow binding, never by the forwarded approval_kind value.
+- **Page State Management**: Halts the page to `about:blank` and resets page state when off-allowlist origins are detected, ensuring clean state for subsequent operations.
+
+```mermaid
+sequenceDiagram
+participant Connector as "BrowserConnector"
+participant Entry as "BrowserSessionEntry"
+participant Page as "Browser Page"
+Note over Connector,Page : _gate_unbound_interaction() Security Validation
+Connector->>Entry : "Get active_target.url"
+Entry-->>Connector : "live_url"
+Connector->>Connector : "is_origin_allowed(live_url)"
+alt Off-allowlist origin
+Connector->>Page : "goto('about : blank')"
+Page-->>Connector : "page halted"
+Connector->>Entry : "reset_page_state()"
+Connector-->>Connector : "Return BROWSER_REDIRECT_NOT_ALLOWED"
+else On-allowlist origin
+Connector->>Connector : "Check approval_kind == 'flow'"
+alt Flow provenance without bound flow
+Connector-->>Connector : "Return BROWSER_FLOW_AUTHORITY_STALE"
+else Action provenance or none
+Connector-->>Connector : "Allow execution"
+end
+end
+```
+
+**Diagram sources**
+- [browser_connector.py:536-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L536-L590)
+
+**Section sources**
+- [browser_connector.py:536-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L536-L590)
 
 ### Session Owner Attribution and Self-Approval Prevention - Critical Enhancement
 **New** A critical enhancement addresses the self-approval blocking issue that prevented tier_2 approvers from deciding subsequent unbound per-action cards.
@@ -298,13 +331,10 @@ Note over Kernel : If another action parks,<br/>it's attributed to session owner
 ```
 
 **Diagram sources**
-- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
-- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
-- [runtime_kernel.py:1920-1933](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1920-L1933)
+- [runtime_kernel.py:1998-2033](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1998-L2033)
 
 **Section sources**
-- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
-- [runtime_kernel.py:1792-1974](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1792-L1974)
+- [runtime_kernel.py:1998-2033](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1998-L2033)
 
 ### Flow Authority and Context (Supporting R-1/R-2) - Enhanced
 **Updated** Flow authority management now includes enhanced clearing mechanisms to prevent stale approvals.
@@ -347,46 +377,41 @@ FlowApproval --> FlowKillingCodes : "cleared on these errors"
 ```
 
 **Diagram sources**
-- [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
-- [flow_approvals.py:143-178](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L143-L178)
-- [flow_approvals.py:70-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L70-L75)
+- [flow_approvals.py:78-121](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L78-L121)
+- [flow_approvals.py:167-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L167-L200)
 
 **Section sources**
-- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
+- [flow_approvals.py:1-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L200)
 
 ## Dependency Analysis
 **Updated** Dependencies now include the execution signing service for approval_kind provenance and enhanced session owner threading.
 
 - runtime_kernel.py composes middlewares and integrates HITL registration, durable record creation, flow approval state, and execution signing.
 - hitl_confirmations.py maintains the in-memory registry of pending confirmations and serializes payloads for the confirmation_request frame.
-- confirmation_records.py provides in-memory and Postgres backends for durable confirmation lifecycle storage.
 - flow_approvals.py holds session-scoped flow context and approval authority used by the kernel to decide flow vs action framing.
-- execution_signing.py stamps approval_kind on both per-action and flow-signed envelopes.
-- routes.py enhances the confirm endpoint to thread session owner information into resume calls.
-- browser_connector.py enforces origin allowlist, flow binding, and deviation guard; write-tier calls ride the upstream HITL and signed execution path.
+- secret_params.py provides the shared secret masking vocabulary with opaque-value rules and known-safe field whitelists.
+- browser_connector.py enforces origin allowlist, flow binding, and deviation guard; write-tier calls ride the upstream HITL and signed execution path with enhanced `_gate_unbound_interaction` validation.
+- test_executor.py validates approval_kind forwarding from execution runtime to gateway.
 
 ```mermaid
 graph LR
 RK["runtime_kernel.py"] --> HC["hitl_confirmations.py"]
-RK --> CR["confirmation_records.py"]
 RK --> FA["flow_approvals.py"]
-RK --> ES["execution_signing.py"]
+RK --> SP["secret_params.py"]
 RK --> BC["browser_connector.py"]
-RT["routes.py"] --> RK
-HC --> CR
+ER["test_executor.py"] --> RK
+HC --> SP
 FA --> RK
-ES --> RK
 BC --> RK
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:1-200](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1-L200)
-- [hitl_confirmations.py:1-548](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L548)
-- [confirmation_records.py:1-744](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L1-L744)
-- [flow_approvals.py:1-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L274)
-- [execution_signing.py:1-175](file://products/agent-platform/src/agent_service/services/execution_signing.py#L1-L175)
-- [routes.py:297-389](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L389)
+- [runtime_kernel.py:1900-2099](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1900-L2099)
+- [hitl_confirmations.py:1-200](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L200)
+- [flow_approvals.py:1-200](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L200)
+- [secret_params.py:97-155](file://products/agent-platform/src/agent_service/services/secret_params.py#L97-L155)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
+- [test_executor.py:113-129](file://products/execution-runtime/tests/test_executor.py#L113-L129)
 
 **Section sources**
 - [spec.md:440-534](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L440-L534)
@@ -398,12 +423,12 @@ BC --> RK
 - Bounded caps and sweeps prevent unbounded growth in confirmation records and evidence.
 - Flow authority TTL limits the window for auto-signed writes, reducing risk and memory footprint.
 - Secret masking and snapshot element parsing are lightweight operations scoped to confirmation payloads.
-- **New**: Execution signing adds minimal overhead but provides crucial security guarantees through HMAC signatures.
 - **New**: Enhanced flow authority clearing prevents stale state accumulation.
 - **New**: Session owner threading adds negligible overhead but enables complex multi-approver workflows.
+- **New**: `_gate_unbound_interaction` performs efficient live origin checks using cached session state, minimizing performance impact while providing robust security validation.
 
 ## Troubleshooting Guide
-**Updated** Troubleshooting guide now includes issues related to approval_kind, flow authority clearing, and session owner attribution.
+**Updated** Troubleshooting guide now includes issues related to approval_kind, flow authority clearing, session owner attribution, and enhanced browser interaction security.
 
 Common issues and where to look:
 - Missing card message on durable surfaces: verify message persistence path and mapping in the durable record and portal model.
@@ -414,21 +439,21 @@ Common issues and where to look:
 - **New**: Approval_kind mismatch: verify that execution envelopes carry the correct approval_kind value matching the actual authorization source.
 - **New**: Self-approval blocking: ensure session owner is properly threaded through resume calls when tier_2 approvers handle multiple actions.
 - **New**: Multi-step approval failures: verify that re-parked cards are attributed to session owner rather than the current approver.
+- **New**: Browser interaction drift: check for `BROWSER_REDIRECT_NOT_ALLOWED` errors indicating client-side redirects between navigation and interaction.
+- **New**: Stale flow authority: investigate scenarios where flow-provenance executions are presented without bound flows, requiring operator re-initiation.
 
 **Section sources**
-- [hitl_confirmations.py:208-349](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L208-L349)
-- [confirmation_records.py:491-545](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L491-L545)
-- [browser_connector.py:423-477](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L423-L477)
-- [flow_approvals.py:70-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L70-L75)
-- [routes.py:365-383](file://products/agent-platform/src/agent_service/api/v2/routes.py#L365-L383)
-- [runtime_kernel.py:1920-1933](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1920-L1933)
+- [hitl_confirmations.py:47-145](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L47-L145)
+- [browser_connector.py:536-590](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L536-L590)
+- [flow_approvals.py:56-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L56-L75)
+- [runtime_kernel.py:1998-2033](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1998-L2033)
 
 ## Conclusion
 **Updated** SPEC-054 has been successfully delivered in v0.35.0 as part of the R5 hardening release with comprehensive validation and critical bug fixes. The specification elevates action-level approvals to first-class status, enables interactive browser mutations through per-action signed gates on allowlisted origins, improves operator decision-making with secret-masked change requests, and ensures durable parity of the card message across all surfaces.
 
 Key achievements:
 - First-class action-level approval alongside flow-level approval
-- Enhanced browser interaction security model with per-action signed gates
+- Enhanced browser interaction security model with per-action signed gates and `_gate_unbound_interaction` validation
 - Human-readable change request projections with secret masking
 - Explicit approval_kind discriminator preventing stale state issues
 - Robust flow authority clearing mechanisms preventing security regressions
@@ -438,4 +463,4 @@ Key achievements:
 
 The delivery includes comprehensive testing, contract validation, and backward compatibility measures ensuring smooth adoption across the platform. The critical bug fix for self-approval blocking enables more complex approval workflows where different approvers can handle sequential actions without policy violations. Successful browser live check validation confirms the robustness of the implementation in real-world deployment scenarios.
 
-The recorded deferral for approval-seam secret-masking hardening (addressing vulnerabilities where raw secrets were persisting and rendering unmasked in portal technical details) has been successfully folded into SPEC-055 R-7, completing the end-to-end secret-safety guarantee chain from approval seam through graduation trace capture.
+The enhanced security model through `_gate_unbound_interaction` provides critical protection against client-side redirects and stale flow authorities, ensuring that approved browser interactions always execute on the intended, allowlisted origin with valid authority provenance. The recorded deferral for approval-seam secret-masking hardening (addressing vulnerabilities where raw secrets were persisting and rendering unmasked in portal technical details) has been successfully folded into SPEC-055 R-7, completing the end-to-end secret-safety guarantee chain from approval seam through graduation trace capture.

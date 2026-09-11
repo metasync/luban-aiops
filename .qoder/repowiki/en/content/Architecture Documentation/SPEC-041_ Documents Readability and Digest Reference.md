@@ -84,7 +84,7 @@ G --> F
   - Derived from the handover skeleton (counts only), stored as a top-level summary field on the document record, and returned in list envelopes while digest/prose remain stripped.
   - AI-generated blurb field (v0.23.3+) provides one-line story extracted from prose reply, also flowing through envelope listings.
 - Tabbed structured digest panel:
-  - Replaces the recursive JSON tree with tabs: Handover (default), Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, Digest data.
+  - Replaces the recursive JSON tree with tabs: Handover (default), Sessions, Confirmations, Executions, Evidence & transcript, Open items, Digest data.
 - Bounded scrollable panes:
   - Digest and prose areas render with a maximum height and internal scrolling, plus an expand/collapse affordance.
 - Operator digest reference:
@@ -155,7 +155,7 @@ ListEnvelope --> End(["Ready"])
 - [test_documents.py:218-277](file://products/agent-platform/tests/test_documents.py#L218-L277)
 
 ### Tabbed Structured Digest Panel (R-2)
-- Replaces the nested JSON tree with tabs: Handover (default), Sessions, Confirmations, Executions, Evidence & transcript counts, Open items, Digest data.
+- Replaces the nested JSON tree with tabs: Handover (default), Sessions, Confirmations, Executions, Evidence & transcript, Open items, Digest data.
 - Foreign coverage entries render as metadata-only tiers and never show owner-tier fields.
 - Pre-SPEC-040 documents hide the handover tab and keep Digest data.
 

@@ -3,6 +3,7 @@
 <cite>
 **Referenced Files in This Document**
 - [session_service.py](file://products/agent-platform/src/agent_service/services/session_service.py)
+- [prose_redaction.py](file://products/agent-platform/src/agent_service/services/prose_redaction.py)
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 - [evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [session_transcript.py](file://products/agent-platform/src/agent_service/services/session_transcript.py)
@@ -10,6 +11,7 @@
 - [test_redis_session_store.py](file://products/agent-platform/tests/test_redis_session_store.py)
 - [test_postgres_session_store.py](file://products/agent-platform/tests/test_postgres_session_store.py)
 - [test_session_service.py](file://products/agent-platform/tests/test_session_service.py)
+- [test_prose_redaction.py](file://products/agent-platform/tests/test_prose_redaction.py)
 - [test_evidence_store.py](file://products/agent-platform/tests/test_evidence_store.py)
 - [runtime_dependencies.py](file://products/agent-platform/src/agent_service/services/runtime_dependencies.py)
 - [config.py](file://products/agent-platform/src/agent_service/core/config.py)
@@ -22,6 +24,9 @@
 - [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [main.py](file://products/agent-platform/src/agent_service/main.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
+- [skill_draft.py](file://products/agent-platform/src/agent_service/services/skill_draft.py)
+- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
 - [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 - [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 - [redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
@@ -35,7 +40,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive evidence persistence system for tool call/reasoning frames with SPEC-025 compliance
+- Refactored session service to use centralized prose redaction module instead of implementing its own title-masking logic
+- Updated session transcript handling for transcript-level masking with consistent credential protection
+- Consolidated credential handling across the system for improved consistency and maintainability
+- Enhanced evidence persistence system for tool call/reasoning frames with SPEC-025 compliance
 - Integrated evidence store service with session lifecycle for complete conversation replay capability
 - Implemented size-bounded evidence storage with per-entry caps and per-session budgets
 - Enhanced session deletion to cascade cleanup of agent state and evidence data
@@ -58,11 +66,12 @@
 ## Introduction
 This document explains session management and state persistence for the Agent Platform, focusing on how sessions are created, updated, retrieved, and cleaned up across multiple storage backends. The platform now supports three pluggable session stores: in-memory (development), Redis (legacy deployments), and Postgres (production). It covers the unified interface abstraction, serialization formats, data models, security measures, performance considerations for large conversations, migration strategies between backends, and disaster recovery procedures. The goal is to provide both a conceptual overview and code-level insights to help developers operate and extend session functionality safely and efficiently.
 
-**Updated** Enhanced with comprehensive evidence persistence capabilities that store tool call and reasoning frames for complete conversation replay, ensuring that reopened sessions can reconstruct the exact same evidence cards that were rendered during live streaming.
+**Updated** The session service has been refactored to use centralized prose redaction from the `prose_redaction` module, consolidating credential handling across the system. This change eliminates duplicate title-masking logic and ensures consistent credential protection for session titles, transcripts, and live streams. The enhanced system now includes comprehensive evidence persistence capabilities that store tool call and reasoning frames for complete conversation replay, ensuring that reopened sessions can reconstruct the exact same evidence cards that were rendered during live streaming.
 
 ## Project Structure
 Session-related logic resides primarily in the agent-platform service with a unified interface supporting multiple backends:
 - Services layer implements session orchestration, evidence persistence, and storage abstraction with pluggable backends
+- Centralized prose redaction module provides consistent credential masking across all text projections
 - Schemas define API contracts and request/response shapes
 - Tests validate behavior for all session services, evidence stores, and storage backends
 - Kubernetes manifests deploy Redis and Postgres infrastructure with runtime configuration
@@ -75,6 +84,7 @@ APP["app.py"]
 MAIN["main.py"]
 ROUTES["api/v2/routes.py"]
 SESSION_SVC["services/session_service.py"]
+PROSE_REDACTION["services/prose_redaction.py"]
 SESSION_STORE["services/session_store.py"]
 EVIDENCE_STORE["services/evidence_store.py"]
 SESSION_TRANSCRIPT["services/session_transcript.py"]
@@ -86,6 +96,8 @@ METRICS["core/metrics.py"]
 OBS["core/observability.py"]
 SCHEMAS_API["schemas/api.py"]
 SCHEMAS_V2["schemas/v2.py"]
+SECRET_PARAMS["services/secret_params.py"]
+SKILL_DRAFT["services/skill_draft.py"]
 end
 subgraph "Storage Backends"
 MEMORY["InMemorySessionStore"]
@@ -107,9 +119,17 @@ end
 APP --> MAIN
 MAIN --> ROUTES
 ROUTES --> SESSION_SVC
+SESSION_SVC --> PROSE_REDACTION
 SESSION_SVC --> SESSION_STORE
 SESSION_SVC --> EVIDENCE_STORE
 SESSION_SVC --> RUNTIME_DEPS
+SESSION_SVC --> SECRET_PARAMS
+SESSION_SVC --> SKILL_DRAFT
+PROSE_REDACTION --> SECRET_PARAMS
+PROSE_REDACTION --> SKILL_DRAFT
+RUNTIME_KERNEL --> PROSE_REDACTION
+RUNTIME_KERNEL --> EVIDENCE_STORE
+RUNTIME_KERNEL --> SESSION_STORE
 RUNTIME_DEPS --> CONFIG
 RUNTIME_DEPS --> ENV
 SESSION_SVC --> METRICS
@@ -121,8 +141,7 @@ SESSION_STORE --> REDIS
 SESSION_STORE --> POSTGRES
 EVIDENCE_STORE --> MEM_EVIDENCE
 EVIDENCE_STORE --> PG_EVIDENCE
-RUNTIME_KERNEL --> EVIDENCE_STORE
-RUNTIME_KERNEL --> SESSION_STORE
+SESSION_TRANSCRIPT --> PROSE_REDACTION
 REDIS --> REDIS_INFRA
 POSTGRES --> POSTGRES_INFRA
 POSTGRES --> DB_SCHEMA
@@ -133,16 +152,19 @@ RT_ENV --> SESSION_STORE
 
 **Diagram sources**
 - [session_store.py:47-66](file://products/agent-platform/src/agent_service/services/session_store.py#L47-L66)
-- [evidence_store.py:87-106](file://products/agent-platform/src/agent_service/services/evidence_store.py#L87-L106)
-- [runtime_kernel.py:439-473](file://products/agent-platform/src/agent_service/runtime_kernel.py#L439-L473)
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
+- [runtime_kernel.py:908-1158](file://products/agent-platform/src/agent_service/runtime_kernel.py#L908-L1158)
 
 **Section sources**
 - [session_store.py:1-770](file://products/agent-platform/src/agent_service/services/session_store.py#L1-L770)
-- [evidence_store.py:1-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L1-L551)
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
 - [runtime-config.env:1-18](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L1-L18)
 
 ## Core Components
-- **SessionService**: Orchestrates session lifecycle operations such as creation, retrieval, update, append messages, and cleanup. It integrates with metrics and observability, validates payloads against schemas, and delegates persistence to the session store through a unified interface. Now includes cascading cleanup of agent state and evidence data on session deletion.
+- **SessionService**: Orchestrates session lifecycle operations such as creation, retrieval, update, append messages, and cleanup. Now uses centralized prose redaction for consistent credential protection. Integrates with metrics and observability, validates payloads against schemas, and delegates persistence to the session store through a unified interface. Includes cascading cleanup of agent state and evidence data on session deletion.
+- **ProseRedaction Module**: Centralized credential masking module that provides consistent protection for user-authored text, assistant text, transcripts, and live streams. Implements four-layer defense strategy with shape-based patterns, URL query parameter masking, key-value pattern matching, and credential literal heuristics.
 - **EvidenceStore**: New component that persists tool call and reasoning frames for each streamed turn, enabling complete conversation replay when sessions are reopened. Supports both in-memory and Postgres backends with size-bounded storage.
 - **SessionStore Protocol**: Defines a consistent interface for all storage backends including `create_session`, `get_session`, `list_sessions_by_user`, `delete_session`, `is_ready`, and `__len__` methods, plus new `touch_session` and `set_session_title` methods for workspace bookkeeping.
 - **Multi-Backend Support**: Three implementations available:
@@ -160,23 +182,26 @@ Key responsibilities:
 - Implement fail-open fallback when primary backend is unavailable
 - Handle atomic title minting and workspace bookkeeping operations
 - **Enhanced**: Cascade cleanup of agent state and evidence data when sessions are deleted
+- **Enhanced**: Centralized credential protection through prose redaction module for session titles, transcripts, and live streams
 
-**Updated** Evidence persistence system ensures complete conversation replay capability by storing tool call and reasoning frames with size-bounded storage and automatic cleanup.
+**Updated** The session service now delegates all credential masking to the centralized `prose_redaction` module, eliminating duplicate title-masking logic and ensuring consistent protection across all text projections. Evidence persistence system ensures complete conversation replay capability by storing tool call and reasoning frames with size-bounded storage and automatic cleanup.
 
 **Section sources**
 - [session_store.py:47-66](file://products/agent-platform/src/agent_service/services/session_store.py#L47-L66)
 - [session_store.py:536-615](file://products/agent-platform/src/agent_service/services/session_store.py#L536-L615)
-- [session_service.py:1-130](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L130)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
 - [evidence_store.py:87-106](file://products/agent-platform/src/agent_service/services/evidence_store.py#L87-L106)
 
 ## Architecture Overview
-The session architecture follows a layered design with pluggable storage backends and integrated evidence persistence:
+The session architecture follows a layered design with pluggable storage backends, centralized prose redaction, and integrated evidence persistence:
 - API routes expose endpoints for session operations
-- SessionService handles business logic, validation, and cascading cleanup
+- SessionService handles business logic, validation, and cascading cleanup using centralized prose redaction
+- ProseRedaction module provides consistent credential masking across all text projections
 - EvidenceStore manages tool call and reasoning frame persistence with size bounds
 - SessionStore protocol abstracts persistence with multiple implementations
 - Factory pattern provides backend selection with fail-open fallback
-- Runtime kernel integrates evidence collection during streaming turns
+- Runtime kernel integrates evidence collection and prose redaction during streaming turns
 - Configuration and environment drive connection parameters and feature flags
 - Observability and metrics capture performance and errors across all backends
 
@@ -186,6 +211,7 @@ participant Client as "Client"
 participant Routes as "API Routes"
 participant Service as "SessionService"
 participant Kernel as "RuntimeKernel"
+participant Redactor as "ProseRedaction"
 participant Evidence as "EvidenceStore"
 participant Store as "SessionStore Backend"
 participant Metrics as "Metrics/Observability"
@@ -195,18 +221,20 @@ Service->>Store : "persist session"
 Note over Service,Store : "Session creation"
 Client->>Routes : "POST /chat (stream)"
 Routes->>Kernel : "stream_events()"
+Kernel->>Redactor : "harvest literals from user text"
 Kernel->>Kernel : "collect evidence frames"
 Kernel->>Evidence : "save_turn(frames)"
 Evidence-->>Kernel : "best-effort persistence"
 Kernel->>Store : "snapshot state"
 Store-->>Kernel : "success or error"
-Kernel-->>Routes : "streamed events"
+Kernel-->>Routes : "streamed events (redacted)"
 Routes-->>Client : "HTTP stream + events"
-Note over Evidence,Store : "Evidence stored alongside session state"
+Note over Redactor,Store : "Centralized credential protection applied"
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:662-773](file://products/agent-platform/src/agent_service/runtime_kernel.py#L662-L773)
+- [runtime_kernel.py:959-1158](file://products/agent-platform/src/agent_service/runtime_kernel.py#L959-L1158)
+- [prose_redaction.py:197-218](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L197-L218)
 - [evidence_store.py:118-148](file://products/agent-platform/src/agent_service/services/evidence_store.py#L118-L148)
 - [session_store.py:536-615](file://products/agent-platform/src/agent_service/services/session_store.py#L536-L615)
 
@@ -218,7 +246,7 @@ Note over Evidence,Store : "Evidence stored alongside session state"
 - Update: Applies partial updates atomically, validates changes, preserves integrity constraints
 - Append Messages: Efficiently appends conversation turns while maintaining order and size limits
 - Cleanup: Uses TTL-based expiration; Postgres backend includes bounded sweep mechanism for expired row cleanup
-- **Enhanced Title Management**: Server-minted titles are stored in separate Redis keys with atomic set-once semantics, preventing overwrites once established
+- **Enhanced Title Management**: Server-minted titles are stored in separate Redis keys with atomic set-once semantics, preventing overwrites once established. Titles undergo centralized credential protection through the prose redaction module before being stored.
 - **Enhanced Cascading Cleanup**: Session deletion now cascades to delete associated agent state and evidence data
 
 ```mermaid
@@ -235,7 +263,8 @@ MemoryPersist --> Success{"Persist Success?"}
 RedisPersist --> Success
 PostgresPersist --> Success
 Success --> |No| Fallback["Fallback to InMemory"]
-Success --> |Yes| ReturnResult["Return Session Response"]
+Success --> |Yes| ApplyRedaction["Apply Centralized Credential Protection"]
+ApplyRedaction --> ReturnResult["Return Session Response"]
 Fallback --> ReturnResult
 ReturnResult --> End(["Exit"])
 ReturnError --> End
@@ -244,14 +273,41 @@ Note at End: "On delete: cascade cleanup of state + evidence"
 
 **Diagram sources**
 - [session_store.py:536-615](file://products/agent-platform/src/agent_service/services/session_store.py#L536-L615)
-- [session_service.py:105-130](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L130)
+- [session_service.py:129-149](file://products/agent-platform/src/agent_service/services/session_service.py#L129-L149)
 
 **Section sources**
-- [session_service.py:1-130](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L130)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
 - [session_store.py:536-615](file://products/agent-platform/src/agent_service/services/session_store.py#L536-L615)
 
+### Centralized Prose Redaction System
+The new centralized prose redaction system provides consistent credential masking across all text projections:
+
+#### Four-Layer Defense Strategy
+1. **Shape-Based Patterns**: Reuses pinned vocabulary from skill draft module to mask PEM keys, JWT tokens, Bearer/Basic auth headers, and AWS access keys
+2. **URL Query Parameter Masking**: Detects and masks secret-bearing query parameters in URLs embedded in text using `redact_secret_query`
+3. **Key-Value Pattern Matching**: Identifies `password=value` patterns in prose text, preserving the key name while masking the value
+4. **Credential Literal Heuristics**: Gated heuristic that fires only when message contains secret indicators, masking potential credentials based on character class complexity
+
+#### Critical Implementation Details
+- **Pre-Truncation Masking**: All masking runs BEFORE the 80-character title cap to prevent partial secret exposure (e.g., avoiding "to Temp" fragments)
+- **Idempotent Processing**: Each layer is designed to be idempotent on previous layer output
+- **Gated Heuristic**: The fourth layer only activates when secret indicators are present, reducing false positives
+- **Preserved Context**: Non-secret portions of messages remain readable for operational context
+- **Scope Separation**: Different functions for user text (`redact_user_text`) vs assistant text (`redact_assistant_text`) with appropriate heuristic application
+
+#### Integration Points
+- **Session Titles**: Used in `mark_session_turn` for server-minted titles
+- **Transcripts**: Applied in `extract_transcript` for durable conversation history
+- **Live Streams**: Integrated into runtime kernel for real-time streaming events
+- **Structure Redaction**: Available for nested data structures via `redact_structure`
+
+**Section sources**
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
+- [session_service.py:129-149](file://products/agent-platform/src/agent_service/services/session_service.py#L129-L149)
+- [session_transcript.py:37-72](file://products/agent-platform/src/agent_service/services/session_transcript.py#L37-L72)
+
 ### Evidence Persistence System
-The new evidence persistence system captures tool call and reasoning frames for complete conversation replay:
+The evidence persistence system captures tool call and reasoning frames for complete conversation replay:
 
 - **Frame Types**: Persists only `tool_call` and `tool_result` frames, excluding diagnostic and future frames
 - **Size Bounds**: Two-level enforcement - per-entry cap replaces oversized data with truncated preview, per-session budget evicts oldest result payloads
@@ -345,12 +401,15 @@ The evidence store implements SPEC-025 requirements with sophisticated size mana
 - Encryption: Secrets and sensitive fields are encrypted at rest and in transit; TLS enforced for database connections
 - Auditability: Operations emit structured logs and metrics for compliance and monitoring
 - Fail-Open Security: When primary backend fails, service falls back to in-memory storage with warning logs and metrics
+- **Enhanced**: Centralized credential protection through prose redaction module ensures consistent masking across all text projections
 - **Enhanced**: Title integrity protection ensures server-minted titles cannot be tampered with through normal session operations
 - **Enhanced**: Evidence data inherits redaction from tool-gateway choke point, preventing credential leakage
+- **Enhanced**: Scope-separated redaction functions prevent accidental masking of assistant responses
 
 **Section sources**
-- [session_store.py:564-572](file://products/agent-platform/src/agent_service/services/session_store.py#L564-572)
-- [session_store.py:604-610](file://products/agent-platform/src/agent_service/services/session_store.py#L604-610)
+- [session_store.py:564-572](file://products/agent-platform/src/agent_service/services/session_store.py#L564-L572)
+- [session_store.py:604-610](file://products/agent-platform/src/agent_service/services/session_store.py#L604-L610)
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
 - [evidence_store.py:46-70](file://products/agent-platform/src/agent_service/services/evidence_store.py#L46-L70)
 
 ### Examples of Operations
@@ -358,16 +417,18 @@ The evidence store implements SPEC-025 requirements with sophisticated size mana
 - Retrieve session: GET by ID; returns full session state or not found
 - Update session: PATCH with allowed fields; returns updated state
 - Append message: POST to append a turn; enforces ordering and size limits
-- **Enhanced**: Title management: First user turn mints a server-side title with atomic set-once semantics using Redis NX operations
+- **Enhanced**: Title management: First user turn mints a server-side title with atomic set-once semantics using Redis NX operations, with centralized credential protection applied via `redact_user_text`
 - **Enhanced**: Evidence persistence: Tool calls and results captured during streaming turns and persisted best-effort
 - Cleanup: TTL-based expiration; Postgres backend includes automatic sweep mechanism
 - **Workspace Bookkeeping**: Touch operations update last active timestamps without affecting title integrity
 - **Enhanced**: Cascading deletion: Session deletion removes session, agent state, and evidence data
+- **Enhanced**: Transcript extraction: Returns masked conversation history with credential protection applied to both user and assistant text
 
 **Section sources**
 - [routes.py:1-200](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1-L200)
-- [session_service.py:1-130](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L130)
-- [runtime_kernel.py:662-773](file://products/agent-platform/src/agent_service/runtime_kernel.py#L662-L773)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
+- [runtime_kernel.py:959-1158](file://products/agent-platform/src/agent_service/runtime_kernel.py#L959-L1158)
+- [session_transcript.py:37-72](file://products/agent-platform/src/agent_service/services/session_transcript.py#L37-L72)
 
 ### Performance Considerations for Large Conversations
 - Chunked storage: Split large conversation histories into separate keys to avoid oversized values
@@ -379,11 +440,14 @@ The evidence store implements SPEC-025 requirements with sophisticated size mana
 - **Enhanced**: Separate title storage reduces session blob size and improves cache efficiency
 - **Enhanced**: Evidence size bounds prevent unbounded growth with automatic eviction of oldest payloads
 - **Enhanced**: Best-effort evidence persistence ensures streaming performance is not impacted by storage failures
+- **Enhanced**: Centralized prose redaction optimizes credential masking with shared patterns and efficient regex processing
+- **Enhanced**: Streaming prose redactor holds minimal tail for real-time credential protection without blocking stream performance
 
 **Section sources**
 - [session_store.py:73-150](file://products/agent-platform/src/agent_service/services/session_store.py#L73-L150)
 - [session_store.py:157-270](file://products/agent-platform/src/agent_service/services/session_store.py#L157-L270)
 - [session_store.py:349-495](file://products/agent-platform/src/agent_service/services/session_store.py#L349-L495)
+- [prose_redaction.py:392-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L392-L510)
 - [evidence_store.py:150-164](file://products/agent-platform/src/agent_service/services/evidence_store.py#L150-L164)
 
 ### Migration Between Storage Backends
@@ -405,6 +469,7 @@ The evidence store implements SPEC-025 requirements with sophisticated size mana
 - Failover: Multi-region Postgres clusters with replication; route traffic to healthy nodes
 - Health monitoring: Backend readiness checks with automatic fallback to in-memory storage
 - **Enhanced**: Evidence data backup and restore follows same patterns as session data
+- **Enhanced**: Centralized prose redaction ensures consistent credential protection during backup/restore operations
 
 **Section sources**
 - [create-sessions-db.sql:1-6](file://shared/platform-ops/gitops/dev-k8s/base/infra/create-sessions-db.sql#L1-L6)
@@ -416,7 +481,9 @@ SessionService depends on:
 - Metrics and observability for telemetry
 - RuntimeDependencies for configuration
 - SessionStore protocol for persistence abstraction
+- **Enhanced**: Centralized prose redaction module for consistent credential protection
 - **Enhanced**: EvidenceStore for cascading cleanup operations
+- **Enhanced**: SecretParams and SkillDraft modules for shared credential patterns
 
 EvidenceStore depends on:
 - RuntimeSettings for size configuration
@@ -438,6 +505,13 @@ class SessionService {
 +cleanup_expired()
 +mark_session_turn(session_id, message)
 +delete_session(session_id, user_id) bool
+}
+class ProseRedaction {
+<<interface>>
++redact_user_text(text) str
++redact_assistant_text(text, literals) str
++redact_transcript(turns) list
++StreamingProseRedactor
 }
 class EvidenceStore {
 <<interface>>
@@ -487,8 +561,11 @@ class Observability {
 +trace_request(operation)
 +log_event(level, message)
 }
+SessionService --> ProseRedaction : "uses for credential protection"
 SessionService --> SessionStore : "uses"
 SessionService --> EvidenceStore : "uses for cleanup"
+SessionService --> SecretParams : "credential patterns"
+SessionService --> SkillDraft : "pattern reuse"
 EvidenceStore <|.. InMemoryEvidenceStore
 EvidenceStore <|.. PostgresEvidenceStore
 SessionStore <|.. InMemorySessionStore
@@ -500,11 +577,13 @@ SessionService --> Observability : "traces/logs"
 
 **Diagram sources**
 - [session_store.py:47-66](file://products/agent-platform/src/agent_service/services/session_store.py#L47-L66)
+- [prose_redaction.py:197-334](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L197-L334)
 - [evidence_store.py:87-106](file://products/agent-platform/src/agent_service/services/evidence_store.py#L87-L106)
-- [session_service.py:105-130](file://products/agent-platform/src/agent_service/services/session_service.py#L105-L130)
+- [session_service.py:129-149](file://products/agent-platform/src/agent_service/services/session_service.py#L129-L149)
 
 **Section sources**
-- [session_service.py:1-130](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L130)
+- [session_service.py:1-230](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L230)
+- [prose_redaction.py:1-510](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L1-L510)
 - [session_store.py:47-770](file://products/agent-platform/src/agent_service/services/session_store.py#L47-L770)
 - [evidence_store.py:87-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L87-L551)
 
@@ -515,9 +594,11 @@ SessionService --> Observability : "traces/logs"
 - Monitoring: Track latency percentiles, error rates, and backend utilization
 - Scaling: Horizontal scaling of application instances behind a load balancer; choose appropriate backend for workload
 - Backend Selection: Use Postgres for production workloads, Redis for high-throughput scenarios, in-memory for development
+- **Enhanced**: Centralized prose redaction optimizes credential masking with shared patterns and efficient regex processing
 - **Enhanced**: Separate title storage improves cache hit ratios and reduces session blob sizes
 - **Enhanced**: Evidence size bounds prevent performance degradation from unbounded growth
 - **Enhanced**: Best-effort evidence persistence ensures streaming performance is maintained even when storage fails
+- **Enhanced**: Streaming prose redactor minimizes overhead with intelligent hold-back mechanisms for real-time applications
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -529,6 +610,8 @@ Common issues and resolutions:
 - Postgres-specific issues: Check database connectivity, table existence, and index health
 - **Enhanced**: Title consistency issues: Verify atomic title minting and overlay behavior in Redis backend, check for orphaned title keys
 - **Enhanced**: Evidence persistence issues: Check evidence store backend availability, review size configuration, monitor truncation metrics
+- **New**: Centralized redaction issues: Verify prose redaction module is properly imported and configured, check for false positives/negatives in credential masking
+- **New**: Transcript masking issues: Ensure `extract_transcript` applies consistent masking to both user and assistant text
 
 Operational checks:
 - Health endpoints for all backends and session service
@@ -537,17 +620,20 @@ Operational checks:
 - Backend selection verification through startup logs
 - **New**: Evidence store health checks and size monitoring
 - **New**: Title key validation: Ensure `session:title:*` keys are properly created and deleted
+- **New**: Centralized redaction validation: Monitor for consistent credential masking across all text projections
+- **New**: Streaming redactor health: Verify held-back tails are properly flushed at stream boundaries
 
 **Section sources**
 - [test_postgres_session_store.py:206-227](file://products/agent-platform/tests/test_postgres_session_store.py#L206-L227)
 - [test_redis_session_store.py:1-274](file://products/agent-platform/tests/test_redis_session_store.py#L1-L274)
+- [test_prose_redaction.py:1-758](file://products/agent-platform/tests/test_prose_redaction.py#L1-L758)
 - [test_evidence_store.py:1-386](file://products/agent-platform/tests/test_evidence_store.py#L1-L386)
-- [session_store.py:564-572](file://products/agent-platform/src/agent_service/services/session_store.py#L564-572)
+- [session_store.py:564-572](file://products/agent-platform/src/agent_service/services/session_store.py#L564-L572)
 
 ## Conclusion
-The session management system now provides robust, multi-backend support with fail-open resilience, enabling flexible deployment strategies across development, staging, and production environments. The unified interface abstracts storage complexity while maintaining performance and reliability guarantees. By adhering to shared schemas, implementing clear lifecycle operations, and following performance and disaster recovery best practices, the platform ensures reliable session handling across diverse workloads and storage backends.
+The session management system now provides robust, multi-backend support with fail-open resilience, centralized credential protection, and comprehensive evidence persistence, enabling flexible deployment strategies across development, staging, and production environments. The unified interface abstracts storage complexity while maintaining performance and reliability guarantees. By adhering to shared schemas, implementing clear lifecycle operations, following performance and disaster recovery best practices, and leveraging centralized prose redaction for consistent credential protection, the platform ensures reliable session handling across diverse workloads and storage backends.
 
-**Updated** The enhanced system now includes comprehensive evidence persistence that captures tool calls and reasoning frames for complete conversation replay, ensuring that reopened sessions can reconstruct the exact same evidence cards that were rendered during live streaming. This provides operators with full audit trails and debugging capabilities while maintaining performance through size-bounded storage and best-effort persistence patterns.
+**Updated** The refactored system now centralizes all credential masking through the `prose_redaction` module, eliminating duplicate title-masking logic and ensuring consistent protection across session titles, transcripts, and live streams. The enhanced system includes comprehensive evidence persistence that captures tool calls and reasoning frames for complete conversation replay, ensuring that reopened sessions can reconstruct the exact same evidence cards that were rendered during live streaming. This provides operators with full audit trails and debugging capabilities while maintaining performance through size-bounded storage, best-effort persistence patterns, and optimized centralized credential masking that prevents partial secret exposure.
 
 ## Appendices
 
@@ -588,9 +674,14 @@ The session management system now provides robust, multi-backend support with fa
 - Performance benchmarking across different backends
 - **Enhanced**: Evidence store tests validating size bounds, eviction behavior, and backend selection
 - **Enhanced**: Integration tests for cascading cleanup and evidence persistence during streaming
+- **New**: Centralized prose redaction tests covering all four layers of credential protection
+- **New**: Transcript masking tests ensuring consistent protection across user and assistant text
+- **New**: Streaming redactor tests validating real-time credential protection without blocking stream performance
 
 **Section sources**
 - [test_postgres_session_store.py:1-286](file://products/agent-platform/tests/test_postgres_session_store.py#L1-L286)
 - [test_redis_session_store.py:1-274](file://products/agent-platform/tests/test_redis_session_store.py#L1-L274)
 - [test_session_workspace.py:284-311](file://products/agent-platform/tests/test_session_workspace.py#L284-L311)
+- [test_prose_redaction.py:1-758](file://products/agent-platform/tests/test_prose_redaction.py#L1-L758)
 - [test_evidence_store.py:1-386](file://products/agent-platform/tests/test_evidence_store.py#L1-L386)
+- [test_session_workspace.py:466-559](file://products/agent-platform/tests/test_session_workspace.py#L466-L559)

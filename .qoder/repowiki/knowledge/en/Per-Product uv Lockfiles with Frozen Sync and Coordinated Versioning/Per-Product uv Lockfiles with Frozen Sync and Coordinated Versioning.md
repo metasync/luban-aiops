@@ -50,7 +50,7 @@ Runtime dependencies use **upper-bound caps** (e.g. `fastapi>=0.115,<1.0`, `pyda
 - `uv.lock` records `revision = 3` and `requires-python = ">=3.11"`, plus platform markers for Windows vs Linux and Python 3.12/3.13/3.14, ensuring cross-platform determinism.
 
 ### Coordinated versioning
-All products share a single semantic version (`0.33.0` in their `pyproject.toml`), synchronized against the root `VERSION` file. The root `Makefile` target `validate-version` invokes `shared/shared-contracts/scripts/validate_version.py` to enforce this lockstep. Image tags are computed once from `PLATFORM_VERSION` and reused across all services via `.images.env`.
+All products share a single semantic version (`0.36.1` in their `pyproject.toml`), synchronized against the root `VERSION` file. The root `Makefile` target `validate-version` invokes `shared/shared-contracts/scripts/validate_version.py` to enforce this lockstep. Image tags are computed once from `PLATFORM_VERSION` and reused across all services via `.images.env`.
 
 ### Private registries / vendor strategy
 No private PyPI registry or vendoring is configured. All packages resolve from `https://pypi.org/simple` as recorded in the lockfiles. If a private registry is needed, it would be supplied via uv configuration outside the repo (the base image carries uv but no project-scoped config).

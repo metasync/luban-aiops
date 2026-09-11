@@ -250,7 +250,7 @@ Key constraints:
 ### Portal Documents Support
 The operator portal augments the existing Documents view:
 - Creation dialog offers a type choice; selecting incident report swaps the session picker for an incident picker backed by the incidents list surface.
-- Drawer renders tabs for Incident, Triage, Dispatches, Session, plus Generated narrative and Digest data.
+- Drawer renders digest tabs for Incident, Triage, Dispatches, Session, and Digest data; the AI-generated narrative is not a tab — it renders below them under a Prose heading as a collapsible panel.
 - List rows keep envelope-only posture with counts-only summaries and a type badge distinguishing incident reports.
 
 **Updated** Added comprehensive implementation details showing actual React components and rendering logic for incident report tabs, including severity/status color coding, label display, and session coverage markers.

@@ -30,7 +30,7 @@ The repository uses a **GNU Make-based monorepo build system** layered over Dock
   - `mk/python.mk` — shared `sync`/`test` targets that run `uv sync --frozen` then `uv run pytest` with OTel exporters disabled to keep test output clean.
 - Per-product entry points: each product directory under `products/<name>/` has a tiny `Makefile` that sets `IMAGE_NAME` and includes both `../../mk/image.mk` and `../../mk/python.mk`.
 - Base image: `shared/base-images/base-uv/Dockerfile` built by `make base-images` using pinned `BASE_UV_PYTHON_VERSION=3.12` and `BASE_UV_UV_VERSION=0.12.1`.
-- Versioning: root `VERSION` file (`0.36.0`) is the single source of truth; `validate-version` enforces lockstep across products and the portal.
+- Versioning: root `VERSION` file (`0.36.1`) is the single source of truth; `validate-version` enforces lockstep across products and the portal.
 - Policy bundle: canonical `shared/shared-contracts/policies/policy-default.yaml` is copied into `tool-gateway`, `platform-gateway`, and the dev overlay via `make sync-policy`.
 - Deployment: `shared/platform-ops/gitops/dev-k8s/deploy.sh` applies overlays and sequentially provisions secrets (delegation, audit, execution signing/handoff, skills, incidents, browser credentials, sessions DB, OTel) before reconciling the Keycloak realm and portal OIDC client.
 

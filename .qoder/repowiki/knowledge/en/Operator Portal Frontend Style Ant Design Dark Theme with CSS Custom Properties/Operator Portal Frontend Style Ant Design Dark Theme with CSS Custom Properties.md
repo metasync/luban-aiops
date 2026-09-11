@@ -8,68 +8,40 @@ source_files:
     - products/operator-portal/web-ui/app/package.json
     - products/operator-portal/web-ui/app/src/theme/tokens.ts
     - products/operator-portal/web-ui/app/src/theme/global.css
+    - products/operator-portal/web-ui/app/vite.config.ts
     - products/operator-portal/web-ui/app/src/main.tsx
     - products/operator-portal/web-ui/app/src/App.tsx
-    - products/operator-portal/web-ui/app/vite.config.ts
 ---
 
 ## What system/approach is used
 
-The operator portal (`products/operator-portal/web-ui`) is a React 19 + TypeScript SPA built with Vite. Styling is centered on **Ant Design v6** using its `ConfigProvider` theme API, combined with a hand-authored dark theme and a shared set of CSS custom properties that act as the single source of truth for colors, spacing, and typography.
-
-There is no CSS-in-JS library, Tailwind, or SCSS pipeline — styling is plain CSS imported once in `src/main.tsx`, plus inline styles only where component props require it (e.g. antd `Layout.Sider` border). The build target is a static bundle served by nginx from `dist/`.
+The operator portal (`products/operator-portal/web-ui`) is a React + TypeScript SPA built with **Vite** and styled primarily via the **Ant Design (antd v6)** component library. The visual identity is a **dark-only theme** driven by `antd`'s `ThemeConfig` plus a parallel set of CSS custom properties that bespoke styles consume. There is no Tailwind, SCSS, Sass, or CSS-in-JS library in use — styling is plain CSS modules / global CSS layered over antd's default dark algorithm.
 
 ## Key files and packages
 
 - `app/package.json` — declares `antd ^6.6.2`, `@ant-design/icons ^6.0.0`, `@ant-design/x ^2.9.0`, React 19, Vite, Vitest.
-- `app/src/theme/tokens.ts` — defines the `palette` object and `portalTheme: ThemeConfig` fed into antd's `darkAlgorithm`. Colors are ported verbatim from the legacy portal's `:root` tokens (see comment referencing SPEC-023 R-1).
-- `app/src/theme/global.css` — defines `:root` CSS custom properties mirroring `tokens.ts` exactly, plus all bespoke layout/component styles (chat transcript, session panel, approvals inbox, markdown rendering, evidence cards, sticky request banner, HITL confirmation cards, bounded panes, responsive breakpoints).
-- `app/src/main.tsx` — root entry that wraps the app in `<ConfigProvider theme={portalTheme}>` and imports `global.css`.
-- `app/vite.config.ts` — injects `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` at build time; outputs to `../dist`; proxies `/api` to `http://localhost:8080` in dev.
-- `app/src/App.tsx` — antd `Layout` shell with `Sider` (width 230, collapsedWidth 64, breakpoint `lg`), drawer-based navigation on narrow viewports, and role-gated menu sections.
+- `app/src/theme/tokens.ts` — single source of truth for colors, radii, and fonts; exports a `palette` object and an `antd` `ThemeConfig` (`portalTheme`) using `antdTheme.darkAlgorithm`.
+- `app/src/theme/global.css` — defines `:root` CSS custom properties (`--bg`, `--surface`, `--accent`, etc.) that mirror `tokens.ts` verbatim; contains all bespoke layout, chat transcript, evidence cards, HITL confirmation cards, markdown rendering, and responsive rules.
+- `app/vite.config.ts` — injects `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` at build time; outputs to `../dist`; proxies `/api` to `localhost:8080` in dev.
+- `app/src/main.tsx` — wraps the app in Antd's `ConfigProvider` with `portalTheme` so every antd component inherits the dark palette.
+- `app/src/App.tsx` — composes the sidebar/layout shell using antd `Layout`, `Menu`, `Drawer`, `Tooltip`, `Typography`, `Tag`, `Modal`, `Space`, `Button`, `Divider`, `Badge`, `Avatar`, `Dropdown`, `Select`, `Input`, `Form`, `Table`, `Tabs`, `Collapse`, `Alert`, `Spin`, `Statistic`, `Col`, `Row`.
 
 ## Architecture and conventions
 
-### Single token source, two consumers
-`tokens.ts` and `global.css` share an identical palette (`bg`, `surface`, `surfaceAlt`, `border`, `text`, `textMuted`, `accent`, `success`, `error`, `warning`, `codeBg`, `radius`). Ant Design components consume the values via the `ThemeConfig` token map; bespoke CSS classes consume them via CSS variables (`var(--accent)`, `var(--surface)`, etc.). This dual consumption keeps third-party antd components and hand-written styles visually consistent without coupling them.
-
-### Dark-only theme
-`:root { color-scheme: dark; }` forces the browser's native UI (scrollbars, selection) into dark mode. There is no light-mode toggle — the entire portal ships dark.
-
-### Typography
-Font families are declared in both places:
-- antd `ThemeConfig.token.fontFamily` / `fontFamilyCode` in `tokens.ts`
-- `body` font-family and `.md-content code` / `.tool-name` monospace rules in `global.css`
-Both use Inter/system fonts for prose and JetBrains Mono/Fira Code for code.
-
-### Layout model
-A fixed-width left `Layout.Sider` (230px, collapses to a 64px icon rail) plus a scrollable content area. On narrow viewports (`max-width: 991px`, matching antd's `lg` breakpoint), the sidebar becomes a left-placed `Drawer` while the 64px rail stays pinned via a floating `.mobile-menu-button` button. Session list panels use a fixed width (260px, shrinking to 200px below 860px) with a full-height chat column beside them.
-
-### Component-scoped CSS
-Bespoke styles live in one file under semantic class names (`session-panel`, `chat-view`, `turn-group`, `confirm-card`, `approvals-entry`, `evidence-card`, `view-container`, `view-toolbar`, `digest-bounded`, `prose-bounded`). There is no per-component stylesheet; the convention is to scope each visual region with a BEM-like prefix so the global file remains navigable.
-
-### Responsive strategy
-Breakpoints are ad-hoc media queries rather than a design-token-driven system:
-- `991px` drives the Sider collapse / drawer switch.
-- `860px` shrinks the session panel.
-- `prefers-reduced-motion: reduce` disables the 4-second turn-arrival flash animation.
-No fluid typography or container queries are used.
-
-### Accessibility signals
-- `:focus-visible` gets a 2px accent outline with offset.
-- ARIA labels are attached to the mobile menu button and login/logout buttons.
-- Keyboard focus visibility is explicitly preserved on custom controls.
-
-### Build-time versioning
-`vite.config.ts` reads the repo root `VERSION` and the lockfile to define `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` constants, which surface in the Settings view's platform inventory table.
+1. **Single design-token source**: `tokens.ts` owns the color palette, border radius, and font families. The comment explicitly states the CSS custom properties in `global.css` are "ported verbatim from the legacy portal's :root design tokens" so bespoke styles and antd components share one vocabulary (SPEC-023 R-1 dark theme).
+2. **Dark-only runtime**: `color-scheme: dark` is set on `:root`; no light-mode toggle exists. All custom properties resolve to dark values.
+3. **Component vs. bespoke split**: Layout chrome (sidebar, header, drawer) uses antd primitives; domain-specific UI (chat transcript rows, session list items, approval cards, evidence panels, markdown content, sticky request banners, bounded panes) is implemented as plain CSS classes in `global.css` and composed inside React components via `className`.
+4. **Responsive strategy**: Handled entirely in CSS media queries in `global.css`. The chat view collapses its session panel below 860px; the mobile menu button appears when the antd `Sider` auto-collapses below `lg` (992px), opening an off-canvas drawer instead of inline navigation.
+5. **Accessibility baseline**: A global `:focus-visible` rule draws a 2px accent outline with offset; `prefers-reduced-motion` disables the turn-arrival flash animation while keeping a static tint.
+6. **Build-time versioning**: `vite.config.ts` reads the root `VERSION` file and the lockfile to inject `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` constants consumed by the Settings view's tech-stack table.
+7. **No CSS framework beyond antd**: No Tailwind config, no Sass/SCSS, no styled-components/emotion, no MUI — confirmed by grep across the web-ui source.
 
 ## Conventions and constraints
 
-- **Colors must come from the shared palette.** New hues should be added to both `tokens.ts` and `global.css` `:root` before being consumed anywhere else.
-- **All antd components must be wrapped in the root `ConfigProvider` with `portalTheme`.** Inline overrides are discouraged; antd's `theme` token map is the intended customization point.
-- **Custom CSS uses CSS variables, not hard-coded hex literals.** Bespoke selectors reference `var(--accent)`, `var(--surface)`, `var(--border)`, `var(--radius)` to stay in sync with the theme.
-- **Dark mode is mandatory.** No light-theme branch exists; `color-scheme: dark` is enforced at the root.
-- **Responsive behavior follows antd's `lg` breakpoint (992px)** for switching between inline sidebar and off-canvas drawer, as documented in `App.tsx` comments.
-- **Bounded panes** (documents digest tabs, prose collapse bodies) use a CSS variable `--bounded-pane-max-height` set on the wrapper element, with max-height applied via `.digest-bounded .ant-tabs-body-holder` and `.prose-bounded .ant-collapse-body`.
-- **Animations respect reduced motion.** The turn-arrival flash animation is disabled when `prefers-reduced-motion: reduce` matches.
-- **Build artifacts go to `web-ui/dist`**, hashed for immutable caching, served by nginx from `/` per the config comments.
+- **All antd theming goes through `ConfigProvider` with `portalTheme`** in `main.tsx`; individual components do not override antd tokens locally.
+- **Bespoke styles must reference CSS custom properties** (`var(--bg)`, `var(--surface)`, `var(--accent)`, `var(--border)`, `var(--radius)`) rather than hard-coded hex values, keeping them in sync with the antd theme.
+- **Design tokens live only in `src/theme/tokens.ts`**; `global.css` mirrors them but is treated as the CSS surface layer, not the source of truth for JS-side theme decisions.
+- **Spec-driven style changes**: Comments in `global.css` tie visual behavior to spec requirements (e.g., SPEC-023 R-1 dark theme, SPEC-019 R-1 collapsed sidebar grouping, SPEC-011 R-4 parity for tool evidence, SPEC-020 R-4 HITL cards, SPEC-034/SPEC-035 arrival highlights, SPEC-037 R-6 signed-execution receipts, SPEC-039 R-8 session ID display, SPEC-041 R-3 bounded panes). New UI features should be referenced similarly.
+- **Chat transcript layout is fixed-width and scroll-bounded**: Session panel is 260px wide (200px under 860px); code blocks and evidence previews are capped at `max-height: 280px` with their own scrollbars so expanding content does not push messages out of view.
+- **Markdown rendering uses a dedicated `.md-content` scope** with accent-colored headings, muted blockquotes, bordered tables, and monospace code blocks — ensuring rendered skill/incident content matches the portal palette.
+- **Production output**: Vite builds to `web-ui/dist/` with content-hashed filenames for immutable caching; `nginx.conf` serves `dist/` at `/`.

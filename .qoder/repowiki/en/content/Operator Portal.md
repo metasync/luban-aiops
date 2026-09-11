@@ -30,17 +30,18 @@
 - [markdown.test.ts](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts)
 - [SkillContentViewer.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx)
 - [SkillsView.test.tsx](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx)
+- [transport.ts](file://products/operator-portal/web-ui/app/src/stream/transport.ts)
+- [useChatStream.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts)
+- [transport.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/transport.test.ts)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced markdown rendering system with improved CommonMark compliance for skill body content
-- Added sophisticated list region detection to handle wrapped list items and blank-separated ordered lists
-- Implemented new renderParagraphs function for proper paragraph rendering and soft-wrapping
-- Enhanced renderLists function with continuation line folding for better list structure preservation
-- Updated Skills inventory view with lazy loading capabilities and read-only content viewer
-- Added comprehensive testing coverage for markdown rendering edge cases and security validation
+- Enhanced stream handler to properly handle confirmation expiration scenarios by setting both turn.completed = true and turn.confirmationPending = false for 410 Gone responses
+- Improved 409 Conflict race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases
+- Updated confirmation card lifecycle management to prevent permanent UI spinners and ensure proper state transitions
+- Enhanced error handling for confirmation expiration and race conditions with comprehensive test coverage
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -550,6 +551,55 @@ Status --> |No| Unavailable["Display unavailable"]
 **Section sources**
 - [SettingsView.tsx:1-200](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L200)
 
+### Enhanced Stream Handler with Confirmation Expiration and Race Condition Handling
+**Updated** The stream handler has been significantly enhanced to properly handle confirmation expiration scenarios and race conditions, addressing critical UI bugs where expired cards left operators staring at permanent spinners and improving race condition handling for concurrent confirmation decisions.
+
+#### Confirmation Expiration Handling (410 Gone)
+- **Complete Turn Settlement**: When receiving a 410 Gone response indicating confirmation expiration, the handler now sets both `turn.completed = true` and `turn.confirmationPending = false` to prevent permanent UI spinners
+- **Card State Management**: Expired confirmation cards are locked with "expired" status and appropriate messaging
+- **UI State Synchronization**: Ensures the assistant bubble stops loading and displays proper completion state
+- **Prevention of Hanging UI**: Eliminates the scenario where expired cards appeared exactly like hung agents even though the backend had already resolved the park
+
+#### Race Condition Handling (409 Conflict)
+- **Already Resolved Detection**: Enhanced handling of 409 Conflict responses that indicate another approver decided first
+- **Winner Attribution**: For race losers, the card flips to the winner's outcome with attribution including decider user ID and decision timestamp
+- **Parked State Maintenance**: For retryable cases (non-already-resolved 409), the card stays pending and the turn remains parked, allowing operators to retry
+- **Turn Settlement Logic**: Properly settles turns for losing operators while maintaining parked state for retryable cases
+
+#### Stream Transport Enhancements
+- **Structured Error Parsing**: The `alreadyResolvedDetail` function extracts structured conflict information from FastAPI error envelopes
+- **Error Type Safety**: `StreamOpenError` class carries status, message, and structured detail for better error handling
+- **Race Condition Detection**: Specific parsing logic identifies `reason: "already_resolved"` to distinguish race conditions from other conflicts
+
+```mermaid
+flowchart TD
+ConfirmRequest["Confirmation Request"] --> Response{"Response Status"}
+Response --> |410 Gone| Expired["Set turn.completed = true<br/>Set confirmationPending = false<br/>Lock card as 'expired'"]
+Response --> |409 Conflict| RaceCheck{"Already Resolved?"}
+RaceCheck --> |Yes| Winner["Flip to winner's outcome<br/>Add attribution info<br/>Set turn.completed = true<br/>Set confirmationPending = false"]
+RaceCheck --> |No| Retryable["Keep card pending<br/>Set note with error<br/>Maintain parked state"]
+Response --> |Other| Error["Handle as general error"]
+Expired --> UIUpdate["Update UI state<br/>Stop spinner<br/>Show expired message"]
+Winner --> UIUpdate
+Retryable --> UIUpdate
+Error --> UIUpdate
+```
+
+**Diagram sources**
+- [useChatStream.ts:392-451](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L392-L451)
+- [transport.ts:35-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L35-L48)
+
+#### Testing Coverage
+- **Expiration Scenarios**: Tests verify that 410 Gone responses properly settle turns and prevent permanent spinners
+- **Race Condition Scenarios**: Tests ensure 409 Conflict responses are properly handled for both already-resolved and retryable cases
+- **State Consistency**: Tests confirm that turn completion and confirmation pending flags are correctly managed
+- **Error Messaging**: Tests validate appropriate error messages for different failure scenarios
+
+**Section sources**
+- [useChatStream.ts:330-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L330-L454)
+- [transport.ts:8-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L8-L48)
+- [useChatStream.test.ts:420-524](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L420-L524)
+
 ### Deployment and Runtime Configuration
 - Multi-stage build compiles SPA and copies dist into nginx image.
 - Nginx serves immutable cached assets and SPA fallback; proxies /api/ and /health/ to gateway.
@@ -619,6 +669,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **Skills View Performance**: Lazy loading of skill details reduces initial page load time and network usage; only fetches full skill records when users explicitly click View.
 - **Markdown Rendering Efficiency**: Escape-first markdown rendering optimizes security without sacrificing performance; code blocks and inline code are protected from transformation overhead.
 - **CommonMark Compliance Optimization**: Enhanced list region detection and paragraph processing improve rendering efficiency while maintaining proper document structure.
+- **Stream Handler Performance**: Confirmation expiration and race condition handling prevents unnecessary UI updates and maintains optimal performance during error scenarios.
 
 [No sources needed since this section provides general guidance]
 
@@ -644,6 +695,9 @@ Nginx --> Gateway["Platform Gateway"]
 - **Markdown Security Issues**: If skill content appears broken or unsafe, verify that the escape-first renderer is properly sanitizing HTML; check that hostile content like script tags are being escaped correctly.
 - **Lazy Loading Performance**: If skills view feels slow, verify that skill details are only being fetched when View is clicked; check for excessive API calls; ensure loading states are displayed appropriately.
 - **CommonMark Rendering Issues**: If skill body content shows incorrect list formatting or paragraph structure, verify that the enhanced markdown renderer is properly handling wrapped continuation lines and blank-separated ordered lists; check that list regions are being detected correctly and continuation lines are being folded into their parent items.
+- **Confirmation Expiration Issues**: If confirmation cards show permanent spinners after expiration, verify that 410 Gone responses are properly handled and that both turn.completed and turn.confirmationPending are set to their correct values.
+- **Race Condition Issues**: If confirmation cards get stuck in pending state after race conditions, verify that 409 Conflict responses are properly parsed and that already-resolved vs retryable cases are correctly distinguished.
+- **Stream Handler Issues**: If confirmation decisions don't properly settle turns, check that the stream handler is correctly managing turn completion state and confirmation pending flags for all error scenarios.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -655,9 +709,11 @@ Nginx --> Gateway["Platform Gateway"]
 - [SkillsView.test.tsx:94-107](file://products/operator-portal/web-ui/app/src/views/control/__tests__/SkillsView.test.tsx#L94-L107)
 - [SkillContentViewer.test.tsx:65-77](file://products/operator-portal/web-ui/app/src/chat/__tests__/SkillContentViewer.test.tsx#L65-L77)
 - [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
+- [useChatStream.ts:392-451](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L392-L451)
+- [transport.ts:35-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L35-L48)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.**
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.** **The enhanced stream handler with confirmation expiration and race condition handling addresses critical UI bugs where expired cards left operators staring at permanent spinners, while also improving race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases, ensuring robust and reliable confirmation workflows.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -695,6 +751,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Enhanced Confirmation Cards**: Browser flow context provides meaningful workflow descriptions with visual styling including background highlighting, origin tags, and risk classification indicators; parsed element labels display human-readable descriptions instead of raw technical details; technical implementation details are hidden behind collapsible expanders for cleaner presentation; accessible semantic HTML structure with appropriate heading levels and descriptive text; responsive design adapts to different screen sizes while maintaining readability.
 - **Enhanced Skills Interface**: Lazy loading provides better performance and user experience; read-only content viewer ensures safe inspection of skill contents; Rendered/Raw toggle offers flexibility for different use cases; comprehensive accessibility support with ARIA labels and keyboard navigation; responsive modal design adapts to different screen sizes.
 - **Enhanced Markdown Rendering**: Improved CommonMark compliance ensures proper list structure and paragraph formatting; sophisticated list region detection handles complex skill body content; escape-first rendering maintains security while providing accurate content display; comprehensive testing coverage validates edge cases and security requirements.
+- **Enhanced Stream Handler**: Robust confirmation expiration handling prevents permanent UI spinners; improved race condition handling ensures proper turn settlement; comprehensive error handling provides clear feedback to operators; reliable state management maintains consistency across all confirmation scenarios.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -703,6 +760,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [SkillsView.tsx:121-175](file://products/operator-portal/web-ui/app/src/views/control/SkillsView.tsx#L121-L175)
 - [SkillContentViewer.tsx:45-131](file://products/operator-portal/web-ui/app/src/chat/SkillContentViewer.tsx#L45-L131)
 - [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
+- [useChatStream.ts:392-451](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L392-L451)
 
 ### Browser Compatibility
 - Uses modern browser APIs such as Web Speech API for voice input and standard fetch/SSE patterns.
@@ -867,3 +925,34 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 **Section sources**
 - [markdown.ts:1-301](file://products/operator-portal/web-ui/app/src/chat/markdown.ts#L1-L301)
 - [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
+
+### Enhanced Stream Handler with Confirmation Expiration and Race Condition Handling
+**Updated** The stream handler has been significantly enhanced to properly handle confirmation expiration scenarios and race conditions, addressing critical UI bugs where expired cards left operators staring at permanent spinners and improving race condition handling for concurrent confirmation decisions.
+
+#### Confirmation Expiration Handling (410 Gone)
+- **Complete Turn Settlement**: When receiving a 410 Gone response indicating confirmation expiration, the handler now sets both `turn.completed = true` and `turn.confirmationPending = false` to prevent permanent UI spinners
+- **Card State Management**: Expired confirmation cards are locked with "expired" status and appropriate messaging
+- **UI State Synchronization**: Ensures the assistant bubble stops loading and displays proper completion state
+- **Prevention of Hanging UI**: Eliminates the scenario where expired cards appeared exactly like hung agents even though the backend had already resolved the park
+
+#### Race Condition Handling (409 Conflict)
+- **Already Resolved Detection**: Enhanced handling of 409 Conflict responses that indicate another approver decided first
+- **Winner Attribution**: For race losers, the card flips to the winner's outcome with attribution including decider user ID and decision timestamp
+- **Parked State Maintenance**: For retryable cases (non-already-resolved 409), the card stays pending and the turn remains parked, allowing operators to retry
+- **Turn Settlement Logic**: Properly settles turns for losing operators while maintaining parked state for retryable cases
+
+#### Stream Transport Enhancements
+- **Structured Error Parsing**: The `alreadyResolvedDetail` function extracts structured conflict information from FastAPI error envelopes
+- **Error Type Safety**: `StreamOpenError` class carries status, message, and structured detail for better error handling
+- **Race Condition Detection**: Specific parsing logic identifies `reason: "already_resolved"` to distinguish race conditions from other conflicts
+
+#### Testing Coverage
+- **Expiration Scenarios**: Tests verify that 410 Gone responses properly settle turns and prevent permanent spinners
+- **Race Condition Scenarios**: Tests ensure 409 Conflict responses are properly handled for both already-resolved and retryable cases
+- **State Consistency**: Tests confirm that turn completion and confirmation pending flags are correctly managed
+- **Error Messaging**: Tests validate appropriate error messages for different failure scenarios
+
+**Section sources**
+- [useChatStream.ts:330-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L330-L454)
+- [transport.ts:8-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L8-L48)
+- [useChatStream.test.ts:420-524](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L420-L524)

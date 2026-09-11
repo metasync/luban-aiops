@@ -1,6 +1,6 @@
-- Each product follows a uniform layout of `src/<package>/api/`, `core/`, `services/`, `schemas/`, `policies/`, `tools/`, plus `app.py`, `main.py`, and `metadata.py`, with a parallel `tests/` tree mirroring source modules.
-- Services expose a `create_app()` factory in `app.py` that configures logging, includes routers, sets up metrics and telemetry, and returns a FastAPI instance, enabling testable app construction without side effects.
-- Cross-product wire formats are defined exclusively as JSON Schema files under `shared/shared-contracts/schemas/` and referenced by name rather than duplicated in product code.
-- Policy enforcement is driven by the canonical `policy-default.yaml` bundle in `shared/shared-contracts/policies/`, which is copied into each consuming gateway and validated against scenario expectations via `validate_policy_scenarios.py`.
-- Observability is standardized through OpenTelemetry OTLP export gated by `OTEL_ENABLED`, with Prometheus `/metrics` always exposed and correlation bridged via the `x-request-id` header mapped to `trace_id`.
-- Versioning is centralized: the root `VERSION` file is the single source of truth, enforced at build time so every product image tag and deployed artifact stays lockstep with the platform release.
+- Each product follows a uniform layout of `src/<service_name>/api`, `core`, `schemas`, `services`, optional `policies`/`tools`, plus a sibling `tests/` directory, `Dockerfile`, `Makefile`, `pyproject.toml`, and `uv.lock`.
+- Cross-service contracts are declared as JSON Schema files under `shared/shared-contracts/schemas` and consumed by multiple products instead of being duplicated.
+- Policy bundles are authored once as the canonical file in `shared/shared-contracts/policies/policy-default.yaml` and copied to consumers via the `make sync-policy` target rather than edited per product.
+- Product versions are kept in lockstep with the root `VERSION` file, enforced by `make validate-version` which checks every product's declared version.
+- Secret literals across agent-platform, tool-gateway, and skills-hub are validated against a shared vocabulary via `make validate-secret-vocabulary` to prevent ad-hoc secrets.
+- Per-product Makefiles delegate to shared fragments in `mk/` (defaults.mk, image.mk, python.mk) so build, lint, and image targets are consistent across products.

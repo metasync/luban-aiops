@@ -12,6 +12,7 @@
 - [confirmation-race-and-restart-sweep-patch.md](file://docs/agentic-aiops-platform/release-notes/2026-08-25-confirmation-race-and-restart-sweep-patch.md)
 - [post-live-check-confirmation-card-flow-headline.md](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md)
 - [action-approval-and-change-request-card.md](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md)
+- [post-live-test-credential-masking-and-hitl-hardening.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md)
 - [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [confirmation_records.py](file://products/agent-platform/src/agent_service/services/confirmation_records.py)
@@ -34,19 +35,18 @@
 - [models.ts](file://products/operator-portal/web-ui/app/src/stream/models.ts)
 - [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 - [transcript.ts](file://products/operator-portal/web-ui/app/src/chat/transcript.ts)
+- [useChatStream.ts](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive secret parameter masking capabilities with fail-closed security posture
-- Implemented pre-redaction integration points in runtime kernel for pending calls before streaming and persistence
-- Enhanced action-type confirmations with structured change request projections and secret masking
-- Updated durable confirmation records to store redacted parameters alongside change request projections
-- Integrated secret vocabulary validation between agent platform and tool gateway components
-- Enhanced operator portal rendering to display masked values and change request layouts
-- Improved security posture by ensuring secrets never leak through any confirmation surface
+- Updated kernel-side HITL expiry handling to properly interrupt agents when confirmation cards expire, preventing transcript wedging issues
+- Enhanced expired confirmation handling with model pinning consistency to ensure interrupts reach the correct agent instance
+- Fixed frontend stream management for 410 Gone responses to properly settle confirmation cards and prevent stuck UI states
+- Added comprehensive testing coverage for expired confirmation scenarios including pinned model resolution
+- Updated documentation to reflect the fix for orphaned turns where parked calls never receive their interrupted result
 
 ## Table of Contents
 1. Introduction
@@ -84,6 +84,7 @@ Key outcomes:
 - **Durable card-message parity**: Card confirmation messages persist on durable records so approver inbox and owner transcripts render the same message as live operator cards.
 - **Improved headline leak prevention**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines.
 - **Secret parameter masking**: Fail-closed security posture ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface.
+- **Enhanced expired confirmation handling**: Model pinning consistency ensures expired confirmation interrupts reach the correct agent instance with proper model resolution, preventing orphaned turns and transcript wedging.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
@@ -93,6 +94,7 @@ Key outcomes:
 - [approval-inbox-persistent-confirmation.md:6-51](file://docs/agentic-aiops-platform/release-notes/2026-08-25-approval-inbox-persistent-confirmation.md#L6-L51)
 - [post-live-check-confirmation-card-flow-headline.md:1-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L1-L56)
 - [action-approval-and-change-request-card.md:1-147](file://docs/agentic-aiops-platform/release-notes/2026-09-07-action-approval-and-change-request-card.md#L1-L147)
+- [post-live-test-credential-masking-and-hitl-hardening.md:54-169](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md#L54-L169)
 - [SPEC-053 spec.md:19-51](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L19-L51)
 - [SPEC-054 spec.md:32-105](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L32-L105)
 - [SPEC-055 plan.md:331-347](file://docs/specs/SPEC-055-develop-as-you-go-skill-graduation/plan.md#L331-L347)
@@ -100,12 +102,12 @@ Key outcomes:
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, **SPEC-055 secret masking hardening**, v0.23.1 canonical name resolution, and v0.33.1 flow summary propagation:
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, **SPEC-055 secret masking hardening**, v0.23.1 canonical name resolution, v0.33.1 flow summary propagation, and **enhanced expired confirmation handling with model pinning consistency**:
 - Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, durable confirmation records store, and **secret parameter masking with fail-closed security posture**.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement, and browser flow binding with intent propagation.
 - Skills hub: skill envelope validation, ingestion pipeline, and storage backend with flow_intent support.
-- Operator portal: confirmation card rendering with tier badges, confirm handler, approvals view, authored intent display, and **change request layout with secret masking**.
+- Operator portal: confirmation card rendering with tier badges, confirm handler, approvals view, authored intent display, **change request layout with secret masking**, and **enhanced 410 Gone response handling**.
 - Shared contracts: stream event schema growth with risk_level, confirm request schema, policy rule with approval tiers, session schema with flow_summary support, and skill schema with flow_intent field.
 
 ```mermaid
@@ -141,6 +143,7 @@ DT["stream/decoder.ts"]
 MD["stream/models.ts"]
 ST["api/sessions.ts"]
 TR["chat/transcript.ts"]
+UCS["stream/useChatStream.ts"]
 end
 PG["PostgreSQL"]
 SC["shared/shared-contracts/schemas/*"]
@@ -159,6 +162,7 @@ CV -.-> SC
 DT -.-> SC
 ST -.-> SC
 TR -.-> SC
+UCS -.-> SC
 TG -.-> TC
 AI -.-> AI
 ```
@@ -183,6 +187,7 @@ AI -.-> AI
 - [models.ts:70-92](file://products/operator-portal/web-ui/app/src/stream/models.ts#L70-L92)
 - [sessions.ts:58-85](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L58-L85)
 - [transcript.ts:116-133](file://products/operator-portal/web-ui/app/src/chat/transcript.ts#L116-L133)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 **Section sources**
 - [plan.md:3-6](file://docs/specs/SPEC-020-hitl-confirmation-bridging/plan.md#L3-L6)
@@ -191,9 +196,9 @@ AI -.-> AI
 ## Core Components
 - **Enhanced Confirmation Registry**: In-memory per-process store keyed by session_id with risk tracking and canonical name mapping; supports register, claim, resolve, expiry, and parked checks with risk tier awareness. Single pending confirmation per session with optional risk metadata and gateway name mapping.
 - **Durable Confirmation Records Store**: Postgres-backed persistence layer that survives pod restarts and maintains consistency across replicas. Implements bounded storage (50 records per session, 30-day inbox history) with automatic cleanup and stale record handling. Now includes flow_summary JSONB column for browser-flow headline preservation and **approval_kind/change_request/message fields for action-level approvals**.
-- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records. **Updated**: Integrates pre-redaction of pending calls before streaming and persistence to prevent secret leakage.
+- **Runtime kernel bridge**: Translates RequireUserConfirmEvent into confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, ends stream without message_end, and resumes via UserConfirmResultEvent on decision. Now persists confirmation lifecycle to durable store before streaming and includes flow_summary in parked records. **Updated**: Integrates pre-redaction of pending calls before streaming and persistence to prevent secret leakage. **Enhanced**: Uses consistent model pinning for expired confirmation interrupts to ensure they reach the correct agent instance.
 - **Flow Context Management**: Tracks browser flow state including skill_id, origin, title, description, risk_class, and now flow_intent for authored intent display. Provides summary() method that emits complete flow context including the new flow_intent field for card rendering.
-- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience. **New**: Includes flow_summary coercion for schema compliance.
+- **Confirm route (agent platform)**: POST /api/v2/chat/confirm validates ownership, claims entry, handles expired/unknown states, streams resumed reply with confirmation_result first. **Updated**: Now uses degraded model resolution to prevent UnknownModelError exceptions and removed session ownership assertion for tier_2 approvers. **Enhanced**: Persists decision outcomes immediately at claim time for race resilience. **New**: Includes flow_summary coercion for schema compliance. **Critical Enhancement**: When handling expired confirmations (410 Gone), passes the session's pinned model to expire_confirmation to ensure the interrupt reaches the correct agent instance.
 - **Pending confirmation endpoint**: GET /api/v2/chat/pending-confirmation provides authoritative parked batch metadata including owner_user_id, derived policy action, and pending_calls with risk levels for gateway tier enforcement.
 - **Confirm proxy (platform gateway)**: POST /api/v1/chat/confirm enforces chat:confirm action, obtains delegated token, proxies to agent platform, emits confirmation_decided audit when kernel applies decision. **Enhanced**: Enforces tier-based approval requirements against decided_by_roles using pending confirmation data. **Updated**: Passes through structured 409 responses with detailed resolution information.
 - **Approvals inbox API**: GET /api/v1/approvals/inbox provides cross-session discovery for designated approvers with metadata-only items preserving owner scoping.
@@ -207,7 +212,7 @@ AI -.-> AI
 - **Change request projection**: Secret-masked display projection of decision-relevant parameters for action approvals, promoting them from collapsed technical details to readable change requests.
 - **Card message persistence**: Confirmation card messages persist on durable records ensuring parity between live operator cards and replayed surfaces.
 - **Secret parameter masking**: **Fail-closed security posture** ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe. Uses curated formatters for specific tools and generic fallback masking for unknown parameters. **Updated**: Pre-redaction occurs in runtime kernel before streaming and persistence to prevent any secret leakage.
-- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking.
+- **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking. **Enhanced**: Properly handles 410 Gone responses by settling confirmation cards and preventing stuck UI states.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
@@ -229,9 +234,10 @@ AI -.-> AI
 - [skill.py:15-43](file://products/skills-hub/src/skills_hub/schemas/skill.py#L15-L43)
 - [ingestion.py:199-213](file://products/skills-hub/src/skills_hub/services/ingestion.py#L199-L213)
 - [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, **action-level approval discrimination**, and **fail-closed secret masking**:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, **action-level approval discrimination**, **fail-closed secret masking**, and **enhanced expired confirmation handling with model pinning consistency**:
 
 ```mermaid
 sequenceDiagram
@@ -268,7 +274,11 @@ else tier_1 or approved tier_2
 GW->>AP : POST /api/v2/chat/confirm (delegated token)
 AP->>Reg : claim(session, confirm_id, timeout)
 alt Expired
-AP-->>Portal : 410 Gone
+AP->>AP : _resolve_model(None, session.model) - get pinned model
+AP->>RK : expire_confirmation(session, confirm_id, pinned_model)
+RK->>RK : ensure_agent(session, None, pinned_model) - use same model
+RK-->>AP : UserInterruptEvent to correct agent instance
+AP-->>Portal : 410 Gone (properly settled)
 else Unknown/Resolved
 AP->>Store : load_record(session, confirm_id)
 alt Already resolved
@@ -298,15 +308,18 @@ end
 - [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
+- [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 - [confirmation_records.py:407-455](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L407-455)
 - [routes.py:156-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L156-L227)
 - [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-409)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 ## Detailed Component Analysis
 
@@ -444,7 +457,7 @@ EmitFrame --> CardRender["Portal renders authored intent"]
 - [flow_approvals.py:54-97](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L54-L97)
 - [flow_approvals.py:112-131](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L112-L131)
 
-### Runtime Kernel Bridge (Park and Resume with Risk Mapping, Canonical Name Resolution, Flow Summary Propagation, and Pre-Redaction)
+### Runtime Kernel Bridge (Park and Resume with Risk Mapping, Canonical Name Resolution, Flow Summary Propagation, Pre-Redaction, and Enhanced Expired Handling)
 Behavior:
 - On RequireUserConfirmEvent, builds confirmation_request frame with risk_level payload, registers pending calls with risk mapping and canonical name resolution, yields frame, and ends stream without message_end.
 - **Enhanced**: Persists confirmation lifecycle to durable store before streaming confirmation_request frame to client.
@@ -459,6 +472,7 @@ Behavior:
 - Handles chained parks: resumed turns can trigger another ASK, emitting a fresh confirmation_request.
 - Filters mutating tools when HITL bridging is disabled to maintain honest posture.
 - **v0.23.1 Enhancement**: Captures gateway_tool_name mapping from toolkit to ensure canonical names flow through signed execution envelopes.
+- **Critical Enhancement**: expire_confirmation now accepts model_id parameter to ensure interrupts reach the correct agent instance with proper model pinning, preventing orphaned turns where parked calls never receive their interrupted result.
 
 ```mermaid
 flowchart TD
@@ -487,6 +501,9 @@ RecordResolution --> ContinueStream["Stream resumed events"]
 ContinueStream --> ChainedASK{"Another ASK?"}
 ChainedASK -- Yes --> BuildFrame
 ChainedASK -- No --> Complete["Complete turn"]
+ExpiredPath["expire_confirmation(session, confirm_id, model_id)"] --> EnsureAgent["ensure_agent(session, None, model_id) - use pinned model"]
+EnsureAgent --> Interrupt["Send UserInterruptEvent to correct agent"]
+Interrupt --> CleanUp["Clean up parked reply"]
 ```
 
 **Diagram sources**
@@ -494,12 +511,14 @@ ChainedASK -- No --> Complete["Complete turn"]
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+- [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 - [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
 
 **Section sources**
 - [runtime_kernel.py:657-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L657-L794)
 - [runtime_kernel.py:1090-1125](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1090-L1125)
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
+- [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 
 ### Secret Parameter Masking (Fail-Closed Security Posture)
 Responsibilities:
@@ -647,6 +666,7 @@ Responsibilities:
 - **Updated**: Uses degraded model resolution to handle evicted session pins gracefully and removed session ownership assertion for tier_2 approvers.
 - **Enhanced**: Returns structured 409 already_resolved response with winner's outcome for concurrent approver races.
 - **Critical Enhancement**: Persists decision outcomes immediately at claim time, ensuring racing approvers receive structured 409 responses with detailed resolution information while the winning approver's stream continues uninterrupted.
+- **Critical Enhancement**: When handling expired confirmations (410 Gone), passes the session's pinned model to expire_confirmation to ensure the interrupt reaches the correct agent instance, preventing orphaned turns.
 
 ```mermaid
 sequenceDiagram
@@ -660,8 +680,11 @@ Route->>Route : get_session(owner check relaxed for tier_2)
 Route->>Route : _resolve_model(None, session.model) - degrades stale pins
 Route->>Reg : claim(session_id, confirm_id, timeout)
 alt Expired
-Route->>Kernel : expire_confirmation
-Route-->>Client : 410 Gone
+Route->>Route : _resolve_model(None, session.model) - get pinned model
+Route->>Kernel : expire_confirmation(session, confirm_id, pinned_model)
+Kernel->>Kernel : ensure_agent(session, None, pinned_model) - use same model
+Kernel-->>Route : UserInterruptEvent to correct agent
+Route-->>Client : 410 Gone (properly settled)
 else Unknown/Resolved
 Route->>Store : load_record(session, confirm_id)
 alt Already resolved
@@ -679,11 +702,14 @@ end
 **Diagram sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
 - [runtime_kernel.py:708-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L708-L794)
+- [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 
 **Section sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
 
 ### Platform Gateway Confirm Proxy and Tier Enforcement
 Responsibilities:
@@ -789,6 +815,7 @@ Responsibilities:
 - **New**: Display authored intent as prominent decision line when flow_intent is present, showing skill intent above technical details.
 - **New**: Approvals view for designated approvers with pending/history listing, badge count, and decision panel.
 - **New**: Render change request layout for action approvals with secret masking.
+- **Enhanced**: Properly handles 410 Gone responses by settling confirmation cards and preventing stuck UI states.
 
 Flow summary rendering:
 - `toFlowSummary` function parses card-level browser-flow headline from stream frames.
@@ -821,15 +848,19 @@ Stream --> Append["Append to current message stream"]
 Type -- No --> Normal["Handle normal events"]
 Append --> Done(["Done"])
 Normal --> Done
+Error410["410 Gone Response"] --> LockCard["Lock card as expired<br/>Set completed=true<br/>Clear confirmationPending"]
+LockCard --> Settled(["Settled Turn"])
 ```
 
 **Diagram sources**
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [ChatView.tsx:370-569](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L370-L569)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 **Section sources**
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [ChatView.tsx:370-569](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L370-L569)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 ## Dependency Analysis
 - Contracts:
@@ -878,6 +909,7 @@ SKILLSHUB --> BROWSERCONN["browser_connector.py"]
 BROWSERCONN --> FLOWCTX["flow_approvals.py"]
 FLOWCTX --> KERNEL
 SECRET -.-> VALIDATE["validate_secret_vocabulary.py"]
+USESTREAM["useChatStream.ts"] -.-> PORTAL
 ```
 
 **Diagram sources**
@@ -898,6 +930,7 @@ SECRET -.-> VALIDATE["validate_secret_vocabulary.py"]
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
 - [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 **Section sources**
 - [agent-stream-event.schema.json:1-160](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L160)
@@ -932,6 +965,7 @@ SECRET -.-> VALIDATE["validate_secret_vocabulary.py"]
 - **SPEC-055 Enhancement**: Fail-closed masking is optimized with allow-list checking and substring matching, minimizing computational overhead while providing strong security guarantees.
 - **SPEC-055 Enhancement**: Pre-redaction occurs once per confirmation park, avoiding redundant masking operations during streaming and persistence.
 - **SPEC-055 Enhancement**: Vocabulary validation runs at build time, not runtime, preventing performance impact during confirmation processing.
+- **Enhanced Expired Handling**: Model pinning consistency in expired confirmation handling prevents costly agent rebuilds and ensures interrupts reach the correct agent instance efficiently.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -975,6 +1009,11 @@ Common issues and resolutions:
   - **Vocabulary validation failures**: Check that agent platform and tool gateway masking vocabularies are synchronized; run make verify to validate.
   - **Pre-redaction not occurring**: Verify runtime kernel is calling redact_pending_calls before streaming and persistence.
   - **Durable records containing secrets**: Check that post-redaction storage is capturing redacted parameters, not original values.
+- **Enhanced Expired Confirmation Issues**:
+  - **Orphaned turns**: When approval cards expire, ensure the system properly interrupts the specific agent instance that created the parked reply using the correct pinned model to prevent orphaned turns where parked calls never receive their interrupted result.
+  - **Model pinning inconsistency**: Verify that expired confirmation handling passes the session's pinned model to expire_confirmation to ensure interrupts reach the correct agent instance.
+  - **Frontend stuck states**: Check that 410 Gone responses are properly handled in the frontend to settle confirmation cards and prevent stuck UI states.
+  - **Agent rebuild issues**: Ensure that expired confirmation interrupts use the same model resolution ladder (request > pinned > default) as resume paths to prevent agent rebuilds that lose parked replies.
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -998,6 +1037,8 @@ Operational checks:
 - **SPEC-053 Verification**: Verify that skills with flow_intent declarations validate successfully and that browser flow cards display the authored intent line prominently above technical details.
 - **SPEC-054 Verification**: Verify that ad-hoc browser writes on allowlisted origins park for per-action approval instead of being hard-denied, and that change request cards display secret-masked parameters appropriately.
 - **SPEC-055 Verification**: Verify that all secret-bearing parameters are masked in confirmation cards, durable records, and stream frames; check that fail-closed masking prevents plaintext secrets from appearing anywhere in the confirmation pipeline.
+- **Enhanced Expired Confirmation Verification**: Verify that expired confirmation handling properly passes model pins to ensure interrupts reach the correct agent instance and prevent orphaned turns.
+- **Frontend 410 Handling Verification**: Verify that 410 Gone responses properly settle confirmation cards and clear stuck UI states.
 - **Vocabulary Synchronization**: Run `make verify` to ensure agent platform and tool gateway masking vocabularies remain synchronized; address any validation failures immediately.
 
 **Section sources**
@@ -1006,6 +1047,7 @@ Operational checks:
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
 - [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
@@ -1018,11 +1060,14 @@ Operational checks:
 - [routes.py:370-410](file://products/agent-platform/src/agent_service/api/v2/routes.py#L370-L410)
 - [mutating-tool-name-regression.md:18-58](file://docs/agentic-aiops-platform/release-notes/2026-08-28-mutating-tool-name-regression.md#L18-L58)
 - [post-live-check-confirmation-card-flow-headline.md:12-56](file://docs/agentic-aiops-platform/release-notes/2026-09-05-post-live-check-confirmation-card-flow-headline.md#L12-L56)
+- [post-live-test-credential-masking-and-hitl-hardening.md:54-169](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-live-test-credential-masking-and-hitl-hardening.md#L54-L169)
 - [SPEC-053 spec.md:83-108](file://docs/specs/SPEC-053-skill-declared-step-intent/spec.md#L83-L108)
 - [SPEC-053 plan.md:34-58](file://docs/specs/SPEC-053-skill-declared-step-intent/plan.md#L34-L58)
 - [SPEC-054 spec.md:117-143](file://docs/specs/SPEC-054-action-approval-and-change-request-card/spec.md#L117-L143)
 - [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
 - [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
+- [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
+- [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 ## Conclusion
 SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, **SPEC-054's action-level approval with change request cards**, and **SPEC-055's secret parameter masking hardening**. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
@@ -1040,6 +1085,12 @@ The integration provides a seven-layer security model: deny-by-default policy bu
 **Critical Enhancement**: Startup sweep logic now uses configurable TTL scoping via AGENT_HITL_CONFIRM_TIMEOUT for precise identification of stale pending records. This ensures that only records that have genuinely exceeded their confirmation timeout are marked as expired, preventing premature closure of active confirmations while cleaning up truly orphaned records.
 
 **Critical Enhancement**: Immediate outcome persistence at claim time provides better durability guarantees. The winning approver's decision is persisted to the durable store before the resumed stream begins, ensuring that racing approvers receive structured 409 responses with complete resolution details while the winner's stream continues uninterrupted.
+
+**Critical Enhancement**: **Enhanced expired confirmation handling with model pinning consistency** ensures that when approval cards expire, the system properly interrupts the specific agent instance that created the parked reply using the correct pinned model. This prevents orphaned turns where parked calls never receive their interrupted result. The fix implements consistent model resolution (request > pinned > default) for expired confirmation interrupts, ensuring they reach the correct agent instance rather than rebuilding on provider defaults.
+
+**Critical Enhancement**: **Improved kernel interrupt routing for parked replies** ensures that expired confirmation interrupts use the same model pinning logic as resume paths, preventing agent rebuilds that would lose parked replies. The runtime kernel's expire_confirmation method now accepts model_id parameter to maintain consistency with the ensure_agent resolution ladder.
+
+**Critical Enhancement**: **Frontend stream management fixes for 410 Gone responses** properly settle confirmation cards when expired, clearing stuck UI states and preventing infinite loading loops. The frontend now recognizes 410 Gone responses and settles the turn appropriately, ensuring operators see clear feedback about expired confirmations.
 
 **v0.23.1 Critical Enhancement**: The canonical tool name resolution fix resolves TOOL_NOT_FOUND errors for approved mutating tool invocations by implementing a gateway_names mapping between sanitized model-visible names (e.g., `k8s_delete_pod`) and canonical dotted names (e.g., `k8s.delete_pod`) required by the gateway registry. This ensures that the signed execution envelope carries the correct tool name that the gateway registry can resolve, fixing the regression where approved mutating calls would fail at the final invocation step despite passing all previous approval and verification gates.
 
@@ -1076,5 +1127,9 @@ The integration provides a seven-layer security model: deny-by-default policy bu
 **New Capability**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines, structurally eliminating the headline leak class of defects rather than merely gating them.
 
 **New Capability**: Fail-closed secret masking provides comprehensive protection against secret leakage across all confirmation surfaces, ensuring that plaintext secrets never appear in live streams, durable records, operator portals, or audit trails.
+
+**New Capability**: Enhanced expired confirmation handling with model pinning consistency prevents orphaned turns by ensuring expired confirmation interrupts reach the correct agent instance with proper model resolution, maintaining system reliability and preventing stuck sessions.
+
+**New Capability**: Improved frontend stream management for 410 Gone responses provides better user experience by properly settling expired confirmation cards and preventing stuck UI states, giving operators clear feedback about confirmation status.
 
 [No sources needed since this section summarizes without analyzing specific files]

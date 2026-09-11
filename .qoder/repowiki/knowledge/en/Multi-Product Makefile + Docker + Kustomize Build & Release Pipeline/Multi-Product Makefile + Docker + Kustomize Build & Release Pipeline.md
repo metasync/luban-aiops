@@ -40,7 +40,7 @@ Deployment uses **Kustomize overlays** under `shared/platform-ops/gitops/` (`dev
 - `shared/base-images/base-uv/Dockerfile` — pinned Amazon Linux 2023 minimal base with pinned `uv` (0.12.1) and Python 3.12, running as non-root user `app` (uid 1000).
 - `products/*/Makefile` — thin wrappers setting `IMAGE_NAME` and including `../../mk/image.mk` and `../../mk/python.mk`.
 - `products/*/Dockerfile` — copy `.python-version`, `pyproject.toml`, `uv.lock`, `src`; run `uv sync --frozen --no-dev`.
-- `VERSION` — single source of truth for platform semver (currently `0.34.1`).
+- `VERSION` — single source of truth for platform semver (currently `0.36.1`).
 - `shared/shared-contracts/scripts/validate_version.py` — validates that every product's `pyproject.toml` version, `metadata.SERVICE_VERSION`, package `__version__`, and portal Vite wiring all match `VERSION`.
 - `shared/platform-ops/gitops/dev-k8s/deploy.sh` — applies Kustomize overlay and provisions secrets via `sync-*` scripts.
 - `shared/platform-ops/gitops/dev-k8s/*.yaml` — per-service deployment/service manifests plus `kustomization.yaml`.

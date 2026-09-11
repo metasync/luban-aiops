@@ -48,7 +48,7 @@ Each product under `products/<name>/` has a tiny Makefile that just declares `IM
 - Images are tagged locally as `luban-aiops/<name>:<IMAGE_TAG>` and optionally re-tagged/pushed to `$(REGISTRY)/luban-aiops/<name>:<IMAGE_TAG>`.
 
 ### Versioning strategy
-- **Single source of truth**: `VERSION` at the repo root (currently `0.36.0`).
+- **Single source of truth**: `VERSION` at the repo root (currently `0.36.1`).
 - `make validate-version` runs `shared/shared-contracts/scripts/validate_version.py` to enforce lockstep between the root `VERSION`, each product's declared version, and the portal.
 - The coordinated image tag embeds the platform version, optional profile suffix, git short SHA, and a dirty timestamp marker.
 
