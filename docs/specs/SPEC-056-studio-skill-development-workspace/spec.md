@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-09-12
+- approved: 2026-09-12
 - release slice: R5 — Hardening and External Consumption (eighteenth R5
   slice, targeting v0.37.0)
 - related ADRs: **ADR-0009** (graduate troubleshooting sessions into
@@ -109,9 +110,10 @@ Acceptance criteria:
   session's type is a birth property, not a projection of later state. (The
   Chat→Studio bridge an earlier draft contemplated is deferred to SPEC-057 as
   a *spawn* of a new session, never a mutation of this field — see R-3.)
-- Legacy sessions (created before this field existed) are backfilled per
-  OQ-2; the backfill is a one-time migration and never leaves a session with
-  a null `session_type`.
+- Legacy sessions (created before this field existed) are backfilled by a
+  one-time migration that **infers** `development` for a session already
+  holding a declared authoring-trace target and `operation` otherwise (resolved
+  OQ-2), and never leaves a session with a null `session_type`.
 
 ### R-2: Studio as a distinct, role-gated entry over one shared core
 
@@ -134,7 +136,8 @@ Acceptance criteria:
   it narrows what a later graduation may emit and grants nothing).
 - Each entry lists **its own** sessions: Chat lists `operation`, Studio lists
   `development`, via an additive `session_type` filter on `session:list`
-  (ownership-scoped exactly as today; anti-enumeration preserved). See OQ-3.
+  (ownership-scoped exactly as today; anti-enumeration preserved) — each entry
+  scoped to its own type (resolved OQ-3).
 - The Chat entry's role gating is **unchanged** (broad, as today); only Studio
   is narrowed.
 
@@ -231,8 +234,8 @@ Acceptance criteria:
   `session:skill_graduate` action (a route-level dual-gate beside
   `session:create`, the SPEC-043/045 `documents:create`+`incident:read`
   precedent) rather than a new action — a session whose only distinguishing
-  power is graduation should require the graduation grant to open (OQ-1). The
-  gateway re-enforces this on every request; the client nav gate is
+  power is graduation should require the graduation grant to open (resolved
+  OQ-1). The gateway re-enforces this on every request; the client nav gate is
   convenience, not the boundary.
 - **No new policy action and no new audit event type.** Draft, declare-target,
   and graduate keep their SPEC-044/045/055 actions and events verbatim. There
@@ -276,9 +279,9 @@ Acceptance criteria:
 - **No change to the graduation/replay trust model.** Blast-radius
   re-validation, one-gate replay, per-write signing, credential-set
   references, and secret masking are untouched.
-- **No new policy action or audit event type** (R-6); if OQ-1 resolves to a
-  dedicated entry action instead of the dual-gate, that is the single
-  exception and is recorded in the changelog at approval.
+- **No new policy action or audit event type** (R-6). OQ-1 resolved to the
+  route-level dual-gate on the existing `session:skill_graduate`, so there is
+  no dedicated entry action and no policy-bundle change.
 - **No rename or removal of the `developer` role.** It is kept and documented;
   the role-vocabulary reconciliation is a separate, already-landed docs patch.
 - **No change to Chat's existing role gating** — only Studio is narrowed.
@@ -308,8 +311,8 @@ Acceptance criteria:
 - samples / shared touched: `shared/shared-contracts/schemas/` (the session
   schema gains the additive `session_type` enum); optionally a `samples/`
   walkthrough showing the Chat/Studio split. **No** `policy-default.yaml`
-  action change and **no** `audit-event.schema.json` change under the R-6
-  recommendation (OQ-1 could add one action).
+  action change and **no** `audit-event.schema.json` change (OQ-1 resolved to
+  the dual-gate, not a dedicated action).
 - contracts touched: the session JSON schema (additive `session_type`) and its
   Pydantic/TS/DDL mirrors, in lockstep behind a drift guard. No stream-schema
   bump is expected (`session_type` rides the session record, not a stream
@@ -329,8 +332,10 @@ Acceptance criteria:
 
 ## Open Questions
 
-Unresolved points that block `approved` status; must be empty before approval.
-Each carries a recommendation so the decision stays auditable.
+All three were resolved at approval on 2026-09-12, adopting the recommendation
+recorded in the draft in every case. The original options are retained so the
+decision stays auditable; from here a requirement changes only by agreement,
+recorded in the changelog (the `approved`-spec rule).
 
 - **OQ-1 (Studio-entry gating mechanism):** how is development-session
   *creation* restricted to the authoring roles? Options: (a) a route-level
@@ -343,6 +348,11 @@ Each carries a recommendation so the decision stays auditable.
   distinguishing power is graduation should require the graduation grant to
   open. (b) adds a bundle version bump + scenarios + four byte-identical
   copies for no extra safety; (c) leaves the mapping client-only.
+  **Resolved:** adopt the recommendation — (a) the route-level dual-gate on the
+  existing `session:skill_graduate` beside `session:create`, no new policy
+  vocabulary. A dedicated action (b) was rejected as a bundle version bump plus
+  scenarios plus four byte-identical copies for no extra safety, and no server
+  gate (c) was rejected for leaving the mapping client-only.
 - **OQ-2 (legacy backfill):** what `session_type` do pre-existing sessions get?
   Options: default every legacy session to `operation`, or **infer**
   `development` for a session that already holds a declared authoring-trace
@@ -350,12 +360,21 @@ Each carries a recommendation so the decision stays auditable.
   session with a declared target is development work already, and defaulting
   it to `operation` would mis-file it into the shift-summary picker this spec
   exists to protect. The inference is a one-time migration.
+  **Resolved:** adopt the recommendation — infer `development` for a legacy
+  session that already holds a declared authoring-trace target and `operation`
+  otherwise, as a one-time migration. Defaulting every legacy session to
+  `operation` was rejected because it would mis-file existing development work
+  into the shift-summary picker.
 - **OQ-3 (per-entry list scoping):** should Chat and Studio each list only
   their own `session_type`, or should Studio list all sessions? Recommendation:
   **scope each entry to its own type** (an additive `session_type` filter on
   `session:list`) — it keeps the two mental models separate and makes the
   SPEC-057 spawn bridge read as a re-home when it lands. Ownership scoping is
   unchanged.
+  **Resolved:** adopt the recommendation — scope each entry to its own
+  `session_type` via an additive filter on `session:list`; ownership scoping is
+  unchanged. Letting Studio list all sessions was rejected because it would blur
+  the two mental models the split exists to separate.
 
 ## Changelog
 
@@ -388,3 +407,15 @@ Each carries a recommendation so the decision stays auditable.
   runbook-of-skills** construct, and **assisted trace-extraction** are deferred
   to a new **SPEC-057**, recorded on the delivery-roadmap exploration backlog
   behind a composition-trust-model ADR + spike. Still no new ADR for SPEC-056.
+- 2026-09-12: **approved** by the operator. Slice fixed as the eighteenth R5
+  slice, targeting v0.37.0. OQ-1..OQ-3 resolved on the draft's own recorded
+  recommendations in every case: OQ-1 the route-level dual-gate on the existing
+  `session:skill_graduate` (no new policy action, no bundle change), OQ-2 infer
+  the legacy backfill from a declared authoring-trace target, and OQ-3 scope
+  each entry's list to its own `session_type`. The resolutions are folded into
+  R-1/R-2/R-6, Non-Goals, and Impact; no requirement IDs renumbered (stable once
+  `approved`). Bookkeeping: `docs/specs/README.md` row `draft` → `approved` and
+  the `delivery-roadmap.md` SPEC-056 row → `approved`. Implementation
+  (`plan.md`/`tasks.md`) is authored next, not at approval; the multi-target
+  follow-on (spawn bridge + composition + assisted trace-extraction) stays
+  deferred to SPEC-057.
