@@ -180,7 +180,7 @@ Examples of upstream sources:
 Recommended initial platform roles:
 
 - `operator`
-- `senior-operator`
+- `developer`
 - `approver`
 - `platform-admin`
 - `auditor`

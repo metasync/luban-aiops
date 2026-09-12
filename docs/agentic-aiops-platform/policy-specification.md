@@ -327,7 +327,7 @@ rules:
   priority: 100
   enabled: true
   match:
-    roles_any: ["read-only-observer", "operator", "senior-operator", "approver", "auditor", "platform-admin"]
+    roles_any: ["read-only-observer", "operator", "developer", "approver", "auditor", "platform-admin"]
     actions_any: ["read-status", "read-logs", "read-metrics"]
     environments_any: ["dev", "test", "staging", "prod"]
     risk_tiers_any: ["tier_0"]
@@ -344,7 +344,7 @@ rules:
   priority: 300
   enabled: true
   match:
-    roles_any: ["operator", "senior-operator", "approver", "platform-admin"]
+    roles_any: ["operator", "approver", "platform-admin"]
     actions_any: ["restart-service"]
     environments_any: ["prod"]
     risk_tiers_any: ["tier_2"]

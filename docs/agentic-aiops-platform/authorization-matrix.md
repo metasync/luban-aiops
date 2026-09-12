@@ -19,7 +19,7 @@ This matrix covers the initial platform roles defined in the identity design:
 
 - `read-only-observer`
 - `operator`
-- `senior-operator`
+- `developer`
 - `approver`
 - `auditor`
 - `platform-admin`
@@ -85,16 +85,36 @@ Restrictions:
 - cannot approve production high-risk actions
 - cannot manage policy or platform-wide authorization mappings
 
-### senior-operator
+### developer
+
+The platform's read-mostly technical identity — a system integrator, QA
+engineer, or service account that builds and tests against the platform. It
+is **not** a skill-authoring persona: authoring (drafting and graduating
+skills, creating documents) stays an operational power held by `operator`,
+`approver`, and `platform-admin`. `developer` is also the platform's non-SSO
+identity: the synthetic dev identity platform-gateway mints when auth is
+disabled (`subject="dev"`, tagged `authenticated=false`) and the default role
+of the identity-broker dev token.
 
 Primary use:
 
-- handle more advanced operational actions
-- request broader actions across assigned environments
+- sign in, chat, and query services
+- view incidents and act as first responder (`incident:triage`,
+  `incident:act`)
+- invoke read-class tools (`tools:invoke`), read the policy matrix
+  (`policy:read`), and confirm low-risk `tier_1` tool cards in-session
+  (`chat:confirm`)
 
 Restrictions:
 
-- should still not self-approve high-risk production actions
+- denied every mutating and governance action: `tools:mutate`,
+  `documents:*`, `session:skill_draft`, `incident:skill_draft`,
+  `session:skill_graduate`, and `audit:read`
+- not a `tier_2` designated approver (`approvals:list` denied)
+
+Example group mapping:
+
+- `ops-developers` -> `developer`
 
 ### approver
 
@@ -134,16 +154,16 @@ Restrictions:
 
 ## Feature Access Matrix
 
-| Feature | read-only-observer | operator | senior-operator | approver | auditor | platform-admin |
+| Feature | read-only-observer | operator | developer | approver | auditor | platform-admin |
 |---|---|---|---|---|---|---|
 | Portal login | allow | allow | allow | allow | allow | allow |
 | Chat and service query | allow | allow | allow | allow | allow | allow |
 | Incident view | allow | allow | allow | allow | allow | allow |
 | Evidence and tool result view | allow | allow | allow | allow | allow | allow |
-| Approval queue view | deny | allow | allow | allow | allow | allow |
+| Approval queue view | deny | allow | deny | allow | allow | allow |
 | Approval action buttons | deny | deny | deny | allow | deny | allow by policy only |
-| Audit history view | deny | limited | limited | limited | allow | allow |
-| Skill management UI | deny | limited | limited | limited | deny | allow |
+| Audit history view | deny | limited | deny | limited | allow | allow |
+| Skill management UI | deny | limited | deny | limited | deny | allow |
 | Policy admin UI | deny | deny | deny | deny | deny | allow |
 | Identity mapping admin UI | deny | deny | deny | deny | deny | allow |
 
@@ -155,7 +175,7 @@ This matrix shows default environment eligibility. Actual access still depends o
 |---|---|---|---|---|
 | read-only-observer | allow | allow | allow | allow |
 | operator | allow | allow | allow | request-only |
-| senior-operator | allow | allow | allow | request-only |
+| developer | allow | allow | allow | allow |
 | approver | allow | allow | allow | approve-only |
 | auditor | allow | allow | allow | allow |
 | platform-admin | allow | allow | allow | allow |
@@ -178,15 +198,15 @@ Initial action categories for the platform:
 
 ### Default Role vs Action Matrix
 
-| Action | Tier | read-only-observer | operator | senior-operator | approver | auditor | platform-admin |
+| Action | Tier | read-only-observer | operator | developer | approver | auditor | platform-admin |
 |---|---|---|---|---|---|---|---|
 | read-status | tier 0 | allow | allow | allow | allow | allow | allow |
 | read-logs | tier 0 | allow | allow | allow | allow | allow | allow |
 | read-metrics | tier 0 | allow | allow | allow | allow | allow | allow |
-| collect-diagnostics | tier 1 | deny | request-only | request-only | request-only | deny | request-only |
-| ticket-update | tier 1 | deny | request-only | request-only | request-only | deny | request-only |
-| restart-service | tier 1 or 2 | deny | request-only | request-only | request-only | deny | request-only |
-| scale-service | tier 2 or 3 | deny | deny | request-only | request-only | deny | request-only |
+| collect-diagnostics | tier 1 | deny | request-only | deny | request-only | deny | request-only |
+| ticket-update | tier 1 | deny | request-only | deny | request-only | deny | request-only |
+| restart-service | tier 1 or 2 | deny | request-only | deny | request-only | deny | request-only |
+| scale-service | tier 2 or 3 | deny | deny | deny | request-only | deny | request-only |
 | change-configuration | tier 3 | deny | deny | deny | request-only | deny | request-only |
 | delete-or-destructive | tier 3 | deny | deny | deny | deny | deny | deny by default |
 
@@ -194,29 +214,29 @@ Initial action categories for the platform:
 
 ### dev and test
 
-| Action Tier | operator | senior-operator | approver | platform-admin |
+| Action Tier | operator | developer | approver | platform-admin |
 |---|---|---|---|---|
 | tier 0 | allow | allow | allow | allow |
-| tier 1 | request-and-approve if policy allows | request-and-approve if policy allows | request-and-approve | request-and-approve by policy only |
-| tier 2 | request-only | request-only | approve-only | request-and-approve by policy only |
+| tier 1 | request-and-approve if policy allows | deny | request-and-approve | request-and-approve by policy only |
+| tier 2 | request-only | deny | approve-only | request-and-approve by policy only |
 | tier 3 | deny | deny | approve-only if explicitly enabled | deny by default |
 
 ### staging
 
-| Action Tier | operator | senior-operator | approver | platform-admin |
+| Action Tier | operator | developer | approver | platform-admin |
 |---|---|---|---|---|
 | tier 0 | allow | allow | allow | allow |
-| tier 1 | request-only | request-only | approve-only | request-and-approve by policy only |
-| tier 2 | request-only | request-only | approve-only | request-and-approve by policy only |
+| tier 1 | request-only | deny | approve-only | request-and-approve by policy only |
+| tier 2 | request-only | deny | approve-only | request-and-approve by policy only |
 | tier 3 | deny | deny | approve-only if explicitly enabled | deny by default |
 
 ### prod
 
-| Action Tier | operator | senior-operator | approver | platform-admin |
+| Action Tier | operator | developer | approver | platform-admin |
 |---|---|---|---|---|
 | tier 0 | allow | allow | allow | allow |
-| tier 1 | request-only | request-only | approve-only | request-only unless separately authorized |
-| tier 2 | deny | request-only | approve-only | request-only unless separately authorized |
+| tier 1 | request-only | deny | approve-only | request-only unless separately authorized |
+| tier 2 | deny | deny | approve-only | request-only unless separately authorized |
 | tier 3 | deny | deny | approve-only with strong controls | deny by default |
 
 ## Approval Matrix
@@ -227,7 +247,7 @@ Initial action categories for the platform:
 |---|---|---|---|---|
 | read-only-observer | allow | deny | deny | deny |
 | operator | allow | allow | allow in assigned scope | deny |
-| senior-operator | allow | allow | allow in assigned scope | request-only in exceptional cases |
+| developer | allow | deny | deny | deny |
 | approver | allow | allow | allow | allow if policy permits |
 | auditor | allow | deny | deny | deny |
 | platform-admin | allow | allow by policy | allow by policy | request-only in exceptional cases |
@@ -238,7 +258,7 @@ Initial action categories for the platform:
 |---|---|---|---|---|---|
 | read-only-observer | deny | deny | deny | deny | deny |
 | operator | optional if self-approval is enabled | deny | deny | deny | deny |
-| senior-operator | optional if self-approval is enabled | deny | deny | deny | deny |
+| developer | deny | deny | deny | deny | deny |
 | approver | allow | allow | allow | allow | allow only if explicitly enabled |
 | auditor | deny | deny | deny | deny | deny |
 | platform-admin | allow by policy only | allow by policy only | allow by policy only | allow by policy only | deny by default |
