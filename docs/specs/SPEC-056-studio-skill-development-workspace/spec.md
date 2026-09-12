@@ -36,7 +36,8 @@ semantics — share one undifferentiated surface. This spec splits that entry
 in two: **Chat** for *operation* sessions and a new **Studio** for
 *development* sessions, over **one shared chat core** parameterized by a
 `mode`, and backs the split with an additive `session_type` discriminator on
-the session contract that is **fixed at birth** and promoted **one way**.
+the session contract that is **fixed at birth** and **immutable** — never
+changed afterwards, with no in-place conversion between the two entries.
 
 The payoff is the four goals the operator asked for: (1) two distinct entries
 so the mental model is explicit; (2) a clean role mapping — Studio is an
@@ -81,11 +82,11 @@ forked.
 Each requirement is stable once the spec is `approved` and carries testable
 acceptance criteria.
 
-### R-1: An additive `session_type` discriminator, fixed at birth
+### R-1: An additive `session_type` discriminator, fixed at birth and immutable
 
 The session contract gains an additive `session_type` field with two values,
-`operation` and `development`, set at session creation from the entry point
-and changed only by R-3's one-way promotion.
+`operation` and `development`, set once at session creation from the entry
+point and **never changed afterwards**.
 
 Acceptance criteria:
 
@@ -102,9 +103,12 @@ Acceptance criteria:
 - A session created from **Chat** is `operation`; a session created from
   **Studio** is `development`. The value is written once at creation and is
   never inferred from ambient state afterwards.
-- `session_type` is a **single-writer projection**: the only mutation after
-  birth is R-3's one-way "Move to Studio" promotion. There is no demotion
-  (`development → operation`) and no other code path writes the field.
+- `session_type` is **immutable**: it is written exactly once at creation and
+  no code path changes it afterwards — there is no promotion, no demotion
+  (`development → operation`), and no in-place conversion between entries. A
+  session's type is a birth property, not a projection of later state. (The
+  Chat→Studio bridge an earlier draft contemplated is deferred to SPEC-057 as
+  a *spawn* of a new session, never a mutation of this field — see R-3.)
 - Legacy sessions (created before this field existed) are backfilled per
   OQ-2; the backfill is a one-time migration and never leaves a session with
   a null `session_type`.
@@ -130,40 +134,49 @@ Acceptance criteria:
   it narrows what a later graduation may emit and grants nothing).
 - Each entry lists **its own** sessions: Chat lists `operation`, Studio lists
   `development`, via an additive `session_type` filter on `session:list`
-  (ownership-scoped exactly as today; anti-enumeration preserved). See OQ-4.
+  (ownership-scoped exactly as today; anti-enumeration preserved). See OQ-3.
 - The Chat entry's role gating is **unchanged** (broad, as today); only Studio
   is narrowed.
 
-### R-3: Control placement split and one-way "Move to Studio"
+### R-3: Control placement split, no in-place conversion
 
 The authoring controls land where they belong: knowledge-drafting stays in
-Chat, target-declaration and graduation move to Studio, and an operation
-session can be promoted — one way — into Studio.
+Chat, and target-declaration and graduation live only in Studio. There is
+**no in-place conversion** between the two entries — a session's type is fixed
+at birth (R-1).
 
 Acceptance criteria:
 
 - **Chat (`operation` mode) keeps "Draft as skill"** (`session:skill_draft`,
-  and `incident:skill_draft` on the incident surface). Drafting is an
-  operational knowledge export on the `documents:create` posture — it needs no
-  target and no authoring trace, so it belongs to operations, not Studio.
+  and `incident:skill_draft` on the incident surface). Drafting emits
+  **read-only grounded-guidance knowledge** on the `documents:create` posture
+  — it needs no declared target and no authoring trace, and it may summarize a
+  session that touched **many** targets (a runbook for a multi-target
+  troubleshooting session). This is the natural reusable artifact of an
+  operation session, and it belongs to operations, not Studio.
 - **Studio (`development` mode) holds "Declare a target" and "Graduate as
-  skill"** (`session:skill_graduate`). The mid-session **Declare target**
-  control is **removed from Chat** — it exists only in Studio, so an operation
-  session can no longer silently become a development one in place.
-- Chat gains a one-way **"Move to Studio"** promotion for an operation session
-  the operator realizes is really development work. Promotion (a) declares a
-  target, (b) flips `session_type` to `development`, and (c) re-homes the
-  session out of Chat's list and into Studio's. It is gated by
-  `session:skill_graduate` (so only an authoring role may promote) and there
-  is **no** move-back.
-- Promotion is technically sound on an existing session because the authoring
-  trace is captured as a by-product of each approved+signed mutation
-  **regardless of any declared target** (SPEC-055 R-2); the declared target is
-  what graduation later corroborates against, not what capture needs. A
-  promoted session graduates exactly as a born-development one does.
-- The single writer of a post-birth `session_type` change is the existing
-  declare-target route extended to flip the field — **no new endpoint**
-  (OQ-3).
+  skill"** (`session:skill_graduate`). Graduation emits a **replayable
+  single-target executable flow**. The mid-session **Declare target** control
+  is **removed from Chat** — it exists only in Studio, so an operation session
+  can no longer silently become a development one in place.
+- **No "Move to Studio" conversion — and the reason is a trust invariant, not
+  convenience.** SPEC-055 R-4 re-validates *every observed origin against the
+  one declared target*, and that target must be named *before* mutating (an
+  authorization scope, "not a claim fitted to the trace afterwards"). An
+  operation session is inherently multi-target (query A, health-check B,
+  diagnose C), so its authoring trace spans multiple origins; declaring a
+  single target after the fact would make graduation **deterministically
+  refuse** (SPEC-055 R-4). Converting an operation session into a development
+  one is therefore semantically unsound, not merely awkward, and this spec
+  does not offer it. A development session is **born** in Studio with its
+  target declared up front and stays single-target.
+- **Deferred to SPEC-057 (not delivered here):** the ergonomic Chat→Studio
+  bridge — a **"Continue in Studio"** action that *spawns a fresh* development
+  session carrying context from the operation session (never mutates this
+  session's `session_type`) — and the **composition / runbook-of-skills**
+  construct that sequences single-target skills into a multi-target workflow,
+  plus assisted trace-extraction. In SPEC-056 an operator who wants a
+  replayable skill simply opens Studio directly and authors it single-target.
 
 ### R-4: Document generation filters by `session_type`
 
@@ -222,10 +235,10 @@ Acceptance criteria:
   gateway re-enforces this on every request; the client nav gate is
   convenience, not the boundary.
 - **No new policy action and no new audit event type.** Draft, declare-target,
-  and graduate keep their SPEC-044/045/055 actions and events verbatim; the
-  `session_type` flip rides the existing (deliberately unaudited)
-  declare-target posture — a declaration is a scope, not an operational act
-  (OQ-5).
+  and graduate keep their SPEC-044/045/055 actions and events verbatim. There
+  is no `session_type` mutation to audit (the field is immutable, R-1);
+  declaring a target keeps SPEC-055's deliberately-unaudited posture — a
+  declaration is a scope, not an operational act.
 - The `developer` role itself is unchanged: kept and documented (the companion
   docs reconciliation), read-mostly, denied Studio.
 
@@ -237,11 +250,11 @@ Acceptance criteria:
 
 - Every R-1..R-6 acceptance criterion maps to at least one automated test
   recorded in `tasks.md` — the `session_type` contract-drift guard across all
-  mirrors; fixed-at-birth + single-writer (no demotion) invariants; Studio nav
+  mirrors; the fixed-at-birth + **immutability** invariants (no code path
+  promotes, demotes, or converts a session's type post-birth); Studio nav
   gating per role; the shared-core both-modes-identical regression; the
-  shift-summary `operation`-only filter (server-side); the development-session
-  dual-gate denial for a non-authoring role; and the one-way promotion
-  (declare + flip + re-home) round-trip.
+  shift-summary `operation`-only filter (server-side); and the
+  development-session dual-gate denial for a non-authoring role.
 - Any shipped `samples/` demo is exercised by its own script in the
   verification path (ADR-0008 exercised-sample rule).
 - `docs/specs/README.md` and `CONTRIBUTING.md` carry the ADR-0008
@@ -254,9 +267,12 @@ Acceptance criteria:
 - **No new skill-authoring capability.** Draft, declare-target, and graduate
   already exist (SPEC-044/045/055); this spec **re-homes** them and changes
   neither their behavior nor their trust model.
-- **No demotion and no cross-type session merging.** Promotion is one way
-  (`operation → development`); there is no move-back and no composing two
-  sessions' traces (SPEC-055's one-session-one-candidate non-goal stands).
+- **No in-place conversion between entries.** `session_type` is immutable
+  (R-1): there is no "Move to Studio", no promotion, no demotion, and no
+  merging of two sessions' traces. The Chat→Studio *spawn* bridge, the
+  composition / runbook-of-skills construct, and assisted trace-extraction are
+  all deferred to **SPEC-057** (SPEC-055's one-session-one-candidate non-goal
+  stands meanwhile).
 - **No change to the graduation/replay trust model.** Blast-radius
   re-validation, one-gate replay, per-write signing, credential-set
   references, and secret masking are untouched.
@@ -273,8 +289,8 @@ Acceptance criteria:
   - `products/operator-portal` — `web-ui/app/src/App.tsx` (`ViewId` union +
     nav gating), `roles.ts` (`STUDIO_ROLES`), `chat/ChatView.tsx` (`mode`
     parameterization: drop declare-target/graduate from `operation`, keep
-    draft, add "Move to Studio"; add declare-target/graduate to
-    `development`), `sessions/useSessionWorkspace.ts`
+    draft; add declare-target/graduate to `development`; **no** conversion
+    control), `sessions/useSessionWorkspace.ts`
     (`createDevelopmentSession`, per-mode list scoping),
     `api/sessions.ts` (`session_type` on the interfaces, `createSession`,
     the list filter), and `views/workspace/DocumentsView.tsx` (shift-summary
@@ -282,12 +298,13 @@ Acceptance criteria:
   - `products/agent-platform` — `schemas/api.py` (`SessionRecord`) and
     `schemas/v2.py` (additive `session_type`), `services/session_store.py`
     (Postgres DDL + mappers + backfill), the session-create handler (set
-    `session_type`; the development dual-gate), the declare-target route (flip
-    `session_type` — the single writer), and the `session:list` filter.
+    `session_type` once; the development dual-gate), and the `session:list`
+    filter. The declare-target route is unchanged from SPEC-055 — it names a
+    target but never writes `session_type`.
   - `products/platform-gateway` — `schemas/api.py` (the `extra="forbid"`
-    session mirror gains `session_type`) and the session create/list/
-    declare-target pass-through routes (dual-gate composition + filter
-    forwarding).
+    session mirror gains `session_type`) and the session create/list
+    pass-through routes (dual-gate composition + filter forwarding); the
+    declare-target pass-through is unchanged.
 - samples / shared touched: `shared/shared-contracts/schemas/` (the session
   schema gains the additive `session_type` enum); optionally a `samples/`
   walkthrough showing the Chat/Studio split. **No** `policy-default.yaml`
@@ -333,26 +350,12 @@ Each carries a recommendation so the decision stays auditable.
   session with a declared target is development work already, and defaulting
   it to `operation` would mis-file it into the shift-summary picker this spec
   exists to protect. The inference is a one-time migration.
-- **OQ-3 ("Move to Studio" mechanics):** does promotion need a new endpoint?
-  Options: extend the existing declare-target route to also flip
-  `session_type` (single writer), or add a dedicated promotion endpoint.
-  Recommendation: **extend the declare-target route** — it is already
-  `session:skill_graduate`-gated and already the moment a target is named, so
-  making it the sole post-birth writer of `session_type` keeps one writer and
-  no new surface. The portal "Move to Studio" button calls it.
-- **OQ-4 (per-entry list scoping):** should Chat and Studio each list only
+- **OQ-3 (per-entry list scoping):** should Chat and Studio each list only
   their own `session_type`, or should Studio list all sessions? Recommendation:
   **scope each entry to its own type** (an additive `session_type` filter on
-  `session:list`) — that is what makes "Move to Studio" read as a re-home, and
-  it keeps the two mental models separate. Ownership scoping is unchanged.
-- **OQ-5 (audit of the type flip):** does a `session_type` promotion warrant an
-  audit event? Options: emit one, or ride the existing deliberately-unaudited
-  declare-target posture. Recommendation: **ride the existing posture** — no
-  new audit event type. SPEC-055 established that declaring a target is a
-  scope, not an operational act (the declare-target route is unaudited at the
-  gateway and `session_created` records only a boolean
-  `skill_target_declared`); a promotion is the same kind of scope change, and
-  the graduation it enables is already audited as `skill_graduated`.
+  `session:list`) — it keeps the two mental models separate and makes the
+  SPEC-057 spawn bridge read as a re-home when it lands. Ownership scoping is
+  unchanged.
 
 ## Changelog
 
@@ -370,3 +373,18 @@ Each carries a recommendation so the decision stays auditable.
   The companion role-vocabulary reconciliation (retire `senior-operator`,
   document `developer`) is intentionally out of scope — it landed as a
   docs-only patch on the 0.36.3 line.
+- 2026-09-12 (revised): killed the in-place **"Move to Studio"** promotion and
+  made `session_type` strictly **immutable** (R-1). Review against SPEC-055 R-4
+  showed a multi-target operation session's trace spans multiple origins, so a
+  post-hoc single-target declaration would make graduation **deterministically
+  refuse** — conversion is semantically unsound, not merely awkward. Reframed
+  R-3 around the two authoring artifacts (a read-only, multi-target-friendly
+  **draft** in Chat vs a single-target replayable **graduate** in Studio) and
+  confirmed skills stay **single-target** (a multi-target *workflow* is a
+  composition of single-target skills, not a multi-target skill). Dropped OQ-3
+  (promotion mechanics) and OQ-5 (flip audit); renumbered OQ-4 → OQ-3, leaving
+  OQ-1 (entry gating), OQ-2 (backfill), OQ-3 (list scoping). The Chat→Studio
+  **spawn** bridge ("Continue in Studio"), the **composition /
+  runbook-of-skills** construct, and **assisted trace-extraction** are deferred
+  to a new **SPEC-057**, recorded on the delivery-roadmap exploration backlog
+  behind a composition-trust-model ADR + spike. Still no new ADR for SPEC-056.
