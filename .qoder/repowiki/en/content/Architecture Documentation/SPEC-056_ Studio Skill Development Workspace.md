@@ -3,25 +3,27 @@
 <cite>
 **Referenced Files in This Document**
 - [spec.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md)
+- [plan.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/plan.md)
+- [tasks.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/tasks.md)
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [roles.ts](file://products/operator-portal/web-ui/app/src/roles.ts)
 - [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 - [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
-- [sessions.ts](file://products/operator-portal/web-ui/app/src/api/sessions.ts)
 - [api.py](file://products/agent-platform/src/agent_service/schemas/api.py)
-- [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
-- [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
-- [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
+- [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
+- [2026-09-13-studio-skill-development-workspace.md](file://docs/agentic-aiops-platform/release-notes/2026-09-13-studio-skill-development-workspace.md)
+- [Makefile](file://Makefile)
+- [image.mk](file://mk/image.mk)
+- [defaults.mk](file://mk/defaults.mk)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated status from draft to approved based on formal approval on 2026-09-12
-- Resolved all three open questions (OQ-1, OQ-2, OQ-3) with final architectural decisions
-- Updated implementation guidance to reflect immutable session_type discriminator at birth
-- Clarified role-based Studio access through route-level dual-gate mechanism
-- Enhanced legacy backfill inference strategy for existing sessions
-- Refined per-entry session type scoping for Chat vs Studio separation
+- Updated delivery verification section to include clean-image rebuild and redeploy evidence
+- Added detailed documentation of the build system's image tagging mechanism resolution
+- Enhanced deployment verification with evidence of all nine Luban services deployed with zero restarts
+- Expanded OQ-2 database migration verification with idempotency confirmation against live dev-k8s cluster
+- Updated conclusion with comprehensive delivery status including build system improvements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,15 +31,16 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Delivery Verification](#delivery-verification)
+7. [Build System and Image Management](#build-system-and-image-management)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 SPEC-056 introduces a dedicated Studio workspace for skill development alongside the existing Chat workspace for operations. It splits one undifferentiated surface into two mode-parameterized views over a shared chat core, and adds an additive session contract discriminator to distinguish operation vs development sessions. **The spec enforces strict immutability of session_type at birth — there is no promotion or conversion between session types.** The spec enforces role-based visibility (authoring roles access Studio), filters operational document generation to operation sessions only, and preserves blast-radius by keeping security-critical paths shared and identical across modes.
 
-**Status**: Approved (2026-09-12) - All open questions resolved with final architectural decisions implemented.
+**Status**: **Delivered** (2026-09-13, v0.37.0) - All seven requirements shipped with comprehensive implementation and verification.
 
 Key outcomes:
 - Two distinct entries: Chat (operation) and Studio (development).
@@ -49,8 +52,8 @@ Key outcomes:
 
 **Section sources**
 - [spec.md:3-10](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L3-L10)
-- [spec.md:31-51](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L31-L51)
-- [spec.md:86-116](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L86-L116)
+- [spec.md:32-52](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L32-L52)
+- [spec.md:87-117](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L87-L117)
 
 ## Project Structure
 The Studio split touches three layers:
@@ -73,7 +76,7 @@ G["schemas/v2.py<br/>models"]
 H["services/session_store.py<br/>backends + DDL"]
 end
 subgraph "Shared Contracts"
-I["session.schema.json<br/>canonical schema"]
+I["agent-session.schema.json<br/>canonical schema"]
 end
 A --> C
 B --> A
@@ -85,24 +88,20 @@ I --> F
 ```
 
 **Diagram sources**
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:135-158](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L135-L158)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session.schema.json:1-25](file://shared/shared-contracts/schemas/session.schema.json#L1-L25)
+- [App.tsx:53-63](file://products/operator-portal/web-ui/app/src/App.tsx#L53-L63)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
+- [api.py:9-20](file://products/agent-platform/src/agent_service/schemas/api.py#L9-L20)
+- [agent-session.schema.json:25-30](file://shared/shared-contracts/schemas/agent-session.schema.json#L25-L30)
 
 **Section sources**
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:135-158](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L135-L158)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session.schema.json:1-25](file://shared/shared-contracts/schemas/session.schema.json#L1-L25)
+- [App.tsx:53-63](file://products/operator-portal/web-ui/app/src/App.tsx#L53-L63)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
+- [api.py:9-20](file://products/agent-platform/src/agent_service/schemas/api.py#L9-L20)
+- [agent-session.schema.json:25-30](file://shared/shared-contracts/schemas/agent-session.schema.json#L25-L30)
 
 ## Core Components
 - ViewId union and sidebar: Adds a Studio entry gated by authoring roles; Chat remains broad.
@@ -113,31 +112,23 @@ I --> F
 - Session schema and models: Additive session_type discriminator on SessionRecord and mirrors; default operation.
 - Storage backends: Postgres DDL and mappers updated to include session_type; backfill strategy per OQ-2.
 
-**Updated** All open questions resolved with final implementation decisions:
-- **OQ-1**: Route-level dual-gate using existing `session:skill_graduate` action for Studio entry gating
-- **OQ-2**: Legacy backfill infers `development` for sessions with declared authoring-trace targets
-- **OQ-3**: Per-entry session type scoping - each entry lists only its own session_type
-
-Acceptance criteria highlights:
-- R-1: session_type is additive, **strictly immutable at birth**, no promotion or conversion.
-- R-2: Studio entry exists, role-gated, one shared ChatView with mode.
-- R-3: Controls split; **no "Move to Studio"** - development sessions are created directly in Studio.
-- R-4: Shift-summary picker filters to operation sessions server-side.
-- R-5: Security-critical core is shared and identical across modes.
-- R-6: No new policy action or audit event type; dual-gate on session:create for development.
+**Updated** All requirements delivered with comprehensive implementation:
+- **R-1**: Additive `session_type` discriminator, fixed at birth and immutable
+- **R-2**: Studio as distinct, role-gated entry over shared core
+- **R-3**: Control placement split, no in-place conversion
+- **R-4**: Document generation filters by `session_type`
+- **R-5**: Shared-core invariant (blast-radius control)
+- **R-6**: Authorization posture — Option A, no new policy vocabulary
+- **R-7**: Delivery traceability per ADR-0008
 
 **Section sources**
-- [spec.md:86-116](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L86-L116)
-- [spec.md:118-143](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L118-L143)
-- [spec.md:144-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L144-L183)
-- [spec.md:333-377](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L333-L377)
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:135-158](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L135-L158)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
+- [spec.md:87-117](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L87-L117)
+- [spec.md:119-143](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L119-L143)
+- [spec.md:145-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L145-L183)
+- [spec.md:185-202](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L185-L202)
+- [spec.md:204-221](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L204-L221)
+- [spec.md:223-247](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L223-L247)
+- [spec.md:249-265](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L249-L265)
 
 ## Architecture Overview
 Studio and Chat share the same chat core; differences are limited to:
@@ -169,11 +160,9 @@ GW-->>P : List
 ```
 
 **Diagram sources**
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:193-204](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L193-L204)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:595-626](file://products/agent-platform/src/agent_service/services/session_store.py#L595-L626)
-- [session_store.py:655-684](file://products/agent-platform/src/agent_service/services/session_store.py#L655-L684)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
+- [api.py:9-20](file://products/agent-platform/src/agent_service/schemas/api.py#L9-L20)
+- [agent-session.schema.json:25-30](file://shared/shared-contracts/schemas/agent-session.schema.json#L25-L30)
 
 ## Detailed Component Analysis
 
@@ -192,12 +181,12 @@ HideStudio --> RenderChatOp["Render ChatView(mode='operation')"]
 ```
 
 **Diagram sources**
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
 
 **Section sources**
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
 
 ### ChatView Mode Parameterization
 - One ChatView renders both entries; mode selects controls and list scope.
@@ -223,14 +212,12 @@ API-->>V : Sessions
 ```
 
 **Diagram sources**
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:193-204](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L193-L204)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
 
 **Section sources**
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:193-204](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L193-L204)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
 
 ### Session Contract and Storage
 - Additive session_type field on SessionRecord and mirrors.
@@ -259,16 +246,12 @@ SessionRecord <.. PostgresSessionStore : "persists"
 ```
 
 **Diagram sources**
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session_store.py:595-626](file://products/agent-platform/src/agent_service/services/session_store.py#L595-L626)
-- [session_store.py:655-684](file://products/agent-platform/src/agent_service/services/session_store.py#L655-L684)
+- [api.py:9-20](file://products/agent-platform/src/agent_service/schemas/api.py#L9-L20)
+- [agent-session.schema.json:25-30](file://shared/shared-contracts/schemas/agent-session.schema.json#L25-L30)
 
 **Section sources**
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session_store.py:595-626](file://products/agent-platform/src/agent_service/services/session_store.py#L595-L626)
-- [session_store.py:655-684](file://products/agent-platform/src/agent_service/services/session_store.py#L655-L684)
+- [api.py:9-20](file://products/agent-platform/src/agent_service/schemas/api.py#L9-L20)
+- [agent-session.schema.json:25-30](file://shared/shared-contracts/schemas/agent-session.schema.json#L25-L30)
 
 ### Session Lifecycle: Immutable at Birth
 - **No promotion mechanism exists** - sessions are created with their final type.
@@ -297,13 +280,12 @@ Note over U,V : No "Move to Studio" option available
 ```
 
 **Diagram sources**
-- [sessions.ts:193-204](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L193-L204)
-- [spec.md:144-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L144-L183)
-- [session_store.py:595-626](file://products/agent-platform/src/agent_service/services/session_store.py#L595-L626)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
+- [spec.md:145-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L145-L183)
 
 **Section sources**
-- [sessions.ts:193-204](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L193-L204)
-- [spec.md:144-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L144-L183)
+- [useSessionWorkspace.ts:151-175](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L151-L175)
+- [spec.md:145-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L145-L183)
 
 ### Operational Document Filtering
 - Shift-summary picker lists only operation sessions.
@@ -321,55 +303,94 @@ Exclude --> Render
 ```
 
 **Diagram sources**
-- [spec.md:184-201](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L184-L201)
-- [sessions.ts:164-169](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L164-L169)
+- [spec.md:185-202](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L185-L202)
 
 **Section sources**
-- [spec.md:184-201](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L184-L201)
-- [sessions.ts:164-169](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L164-L169)
+- [spec.md:185-202](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L185-L202)
 
-## Dependency Analysis
-- Portal depends on role sets for visibility and on useSessionWorkspace for session lifecycle.
-- useSessionWorkspace depends on sessions.ts API client for create/list/rename/delete.
-- sessions.ts types depend on agent-platform schemas and shared JSON schema.
-- Agent platform schemas depend on shared JSON schema; storage backends implement persistence with consistent mappers.
+## Delivery Verification
+**Comprehensive verification completed for all seven requirements:**
 
-```mermaid
-graph LR
-Roles["roles.ts"] --> App["App.tsx"]
-App --> ChatView["ChatView.tsx"]
-ChatView --> WS["useSessionWorkspace.ts"]
-WS --> API["sessions.ts"]
-API --> Schema["schemas/api.py"]
-Schema --> Store["session_store.py"]
-Schema --> SharedSchema["session.schema.json"]
-```
+### R-1: Additive `session_type` discriminator
+- ✅ Schema validation against both `agent-session.schema.json` and `agent-session-list.schema.json`
+- ✅ Enum-value parity drift guard prevents vocabulary divergence
+- ✅ Round-trips on all three backends (memory, Redis, Postgres)
+- ✅ Immutability enforced - no setter exists on store protocol
+- ✅ Legacy backfill infers development for sessions with declared targets
 
-**Diagram sources**
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:135-158](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L135-L158)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session.schema.json:1-25](file://shared/shared-contracts/schemas/session.schema.json#L1-L25)
+### R-2: Studio as distinct, role-gated entry
+- ✅ Studio nav item visible only to `platform-admin`, `approver`, `operator`
+- ✅ Chat remains broadly accessible to all signed-in roles
+- ✅ Each entry lists only its own session type via server-side filtering
+- ✅ Namespaced active-session keys prevent conflicts between modes
+
+### R-3: Control placement split
+- ✅ Chat shows only "Draft as skill"
+- ✅ Studio shows "Declare target" + "Graduate as skill"
+- ✅ No conversion controls exist in either mode
+- ✅ Develop-as-you-go opener moved exclusively to Studio
+
+### R-4: Document generation filtering
+- ✅ Shift-summary picker lists only operation sessions
+- ✅ Create-path guard rejects development sessions in coverage lists
+- ✅ Incident-report path remains unaffected
+
+### R-5: Shared-core invariant
+- ✅ Byte-for-byte identical rendering of transcript surface in both modes
+- ✅ SSE stream, secret masking, and HITL confirmation paths unchanged
+- ✅ Regression test ensures no divergence between modes
+
+### R-6: Authorization posture
+- ✅ Route-level dual-gate using existing `session:skill_graduate` action
+- ✅ No new policy actions or audit event types
+- ✅ Zero policy bundle changes confirmed by `make policy-diff`
+
+### R-7: Delivery traceability
+- ✅ All acceptance criteria mapped to automated tests
+- ✅ Real Postgres 16.14 backfill verification completed
+- ✅ Browser live check confirmed on deployed 0.37.0
 
 **Section sources**
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [App.tsx:51-60](file://products/operator-portal/web-ui/app/src/App.tsx#L51-L60)
-- [ChatView.tsx:1572-1609](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1572-L1609)
-- [useSessionWorkspace.ts:127-151](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L127-L151)
-- [sessions.ts:135-158](file://products/operator-portal/web-ui/app/src/api/sessions.ts#L135-L158)
-- [api.py:8-22](file://products/agent-platform/src/agent_service/schemas/api.py#L8-L22)
-- [session_store.py:443-463](file://products/agent-platform/src/agent_service/services/session_store.py#L443-L463)
-- [session.schema.json:1-25](file://shared/shared-contracts/schemas/session.schema.json#L1-L25)
+- [tasks.md:110-161](file://docs/specs/SPEC-056-studio-skill-development-workspace/tasks.md#L110-L161)
+- [2026-09-13-studio-skill-development-workspace.md:263-303](file://docs/agentic-aiops-platform/release-notes/2026-09-13-studio-skill-development-workspace.md#L263-L303)
+
+## Build System and Image Management
+**Enhanced build system verification with clean-image rebuild and redeploy process:**
+
+### Image Tagging Mechanism Resolution
+- **Coordinated tag system**: The build system uses a coordinated tag format `<semver>-<prefix>[-<profile>]-<gitsha>[-dirty-<timestamp>]` derived from the root VERSION file and git state
+- **Dirty tree detection**: When `git status --porcelain` returns non-empty output, images are tagged with `-dirty-<timestamp>` suffix to indicate uncommitted changes
+- **Clean rebuild success**: After committing delivery changes, the build produced clean images under coordinated tag `0.37.0-dev-k8s-19b25b7` without dirty suffix
+
+### Deployment Verification
+- **All nine Luban services deployed successfully**: agent-service, audit-service, execution-runtime, identity-service, incident-service, platform-gateway, skills-hub, tool-gateway (2/2 with browser sidecar), web-ui
+- **Zero restarts achieved**: Every service reached `1/1 READY` state with `RESTARTS=0`
+- **Image coordination**: All nine images built under single coordinated tag and written to `shared/platform-ops/gitops/dev-k8s/.images.env`
+
+### OQ-2 Database Migration Idempotency
+- **Real Postgres 16.14 verification**: Migration executed against actual legacy database with genuine pre-SPEC-056 schema (seven columns, no `session_type`)
+- **Idempotent behavior confirmed**: Second run of migration resulted in `UPDATE 0` (no rows processed), proving true idempotency
+- **Legacy data classification verified**: Both real legacy rows classified correctly - session with declared target → `development`, session without → `operation`
+- **Production driver path tested**: Same DDL driven through production psycopg path with `DRIVER_CHECK=OK`, validating nested dollar-quoting in PL/pgSQL blocks
+
+### Live Cluster Validation
+- **Agent-service bootstrap**: Successfully bootstrapped shipped DDL against real legacy `sessions` database across six rollouts with zero errors
+- **No relation reference failures**: The `to_regclass` guard fix prevented `relation "authoring_trace_target" does not exist` errors during schema bootstrap
+- **Post-deployment state**: Live table carried `session_type text` nullable with five rows classified (one `development`, four `operation`) and none NULL
+
+**Section sources**
+- [Makefile:48-64](file://Makefile#L48-L64)
+- [image.mk:24-29](file://mk/image.mk#L24-L29)
+- [defaults.mk:27-34](file://mk/defaults.mk#L27-L34)
+- [tasks.md:135-139](file://docs/specs/SPEC-056-studio-skill-development-workspace/tasks.md#L135-L139)
 
 ## Performance Considerations
 - Session listing uses bounded queries and TTL-aware reads; avoid unnecessary re-fetches by leveraging workspace refresh sequence.
 - Postgres backend sweeps expired rows opportunistically on writes to keep lists lean.
 - Keep mode-specific control rendering minimal to avoid extra state churn in ChatView.
 - **Immutable session_type eliminates runtime type-checking overhead** since type is known at creation time.
+- **Dual workspace instances** reduce polling overhead by only activating development workspace for authorized users.
+- **Clean image builds** ensure consistent deployment artifacts without dirty-state contamination.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -379,21 +400,29 @@ Common issues and resolutions:
 - **Cannot promote existing session**: No promotion mechanism exists - create a new development session in Studio instead.
 - Shift-summary includes development sessions: validate server-side filter on session:list; ensure client does not bypass filter.
 - **Legacy sessions misclassified**: Backfill migration should infer development for sessions with declared authoring-trace targets.
+- **Development session creation denied**: Verify user has `session:skill_graduate` permission; gateway dual-gate requires this action for development sessions.
+- **Image build shows dirty tag**: Check `git status --porcelain` for uncommitted changes; commit changes before building clean images.
+- **Deployment restarts occur**: Verify image tags match coordinated tag in `.images.env`; check for configuration drift between deployments.
 
 **Section sources**
-- [roles.ts:70-81](file://products/operator-portal/web-ui/app/src/roles.ts#L70-L81)
-- [spec.md:144-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L144-L183)
-- [spec.md:184-201](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L184-L201)
-- [spec.md:356-367](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L356-L367)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
+- [spec.md:145-183](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L145-L183)
+- [spec.md:185-202](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L185-L202)
+- [spec.md:223-247](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L223-L247)
 
 ## Conclusion
 SPEC-056 cleanly separates operational and development workflows while preserving a single secure chat core. **The strict immutability of session_type at birth ensures clear mental models and safer blast radius** - there is no ambiguity about whether a session can be promoted or converted. The role-gated Studio entry, server-side filtering, and single-target skill model provide a clean separation between operation and development concerns. The removal of promotion mechanisms simplifies the trust model and eliminates potential security vulnerabilities from in-place session type changes.
 
-**Approved Status**: The spec was formally approved on 2026-09-12 with all open questions resolved:
-- **OQ-1**: Route-level dual-gate using existing `session:skill_graduate` action for Studio entry gating
-- **OQ-2**: Legacy backfill infers `development` for sessions with declared authoring-trace targets  
-- **OQ-3**: Per-entry session type scoping - each entry lists only its own session_type
+**Delivered Status**: Successfully delivered on 2026-09-13 as v0.37.0 with comprehensive verification:
+- **All seven requirements** fully implemented and tested
+- **Real Postgres 16.14 backfill** verified with actual legacy data classification
+- **Zero policy bundle changes** confirmed through `make policy-diff`
+- **Browser live check** validated on deployed environment
+- **2616 product tests** passed with green verification status
+- **Clean-image rebuild** completed successfully with coordinated tagging mechanism
+- **All nine Luban services** deployed with zero restarts
+- **OQ-2 migration idempotency** verified against live dev-k8s cluster
 
-**Deferred Features**: The Chat→Studio spawn bridge ("Continue in Studio"), composition/runbook-of-skills construct, and assisted trace-extraction are deferred to SPEC-057, allowing SPEC-056 to focus on the fundamental separation of concerns without additional complexity.
+**Deferred Features**: The Chat→Studio spawn bridge ("Continue in Studio"), composition/runbook-of-skills construct, and assisted trace-extraction remain deferred to SPEC-057, allowing SPEC-056 to focus on the fundamental separation of concerns without additional complexity.
 
 [No sources needed since this section summarizes without analyzing specific files]

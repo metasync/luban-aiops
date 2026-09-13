@@ -34,14 +34,20 @@
 - [useChatStream.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts)
 - [transport.test.ts](file://products/operator-portal/web-ui/app/src/stream/__tests__/transport.test.ts)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
+- [roles.ts](file://products/operator-portal/web-ui/app/src/roles.ts)
+- [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
+- [App.studio.test.tsx](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx)
+- [ChatView.mode.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced stream handler to properly handle confirmation expiration scenarios by setting both turn.completed = true and turn.confirmationPending = false for 410 Gone responses
-- Improved 409 Conflict race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases
-- Updated confirmation card lifecycle management to prevent permanent UI spinners and ensure proper state transitions
-- Enhanced error handling for confirmation expiration and race conditions with comprehensive test coverage
+- Added dual workspace architecture with separate Chat (operation) and Studio (development) workspaces
+- Implemented mode-aware ChatView component that serves both operation and development modes
+- Added role-based Studio entry gating using STUDIO_ROLES constant
+- Updated navigation to include Studio menu item for authorized roles only
+- Enhanced session management with mode-scoped instances and namespaced active session keys
+- Added development session creation capabilities exclusive to Studio workspace
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -59,6 +65,7 @@
 The Operator Portal is the operator-facing web application for platform administration and monitoring. It provides a modern SPA shell with role-based navigation, chat-driven interactions, incident triage, approval workflows, enhanced audit trail viewing with tabbed interface, permissions inspection, workspace resource browsing, and **enhanced skills inventory with lazy loading and read-only content inspection**. The portal authenticates via OIDC through the identity broker, proxies API calls to the platform gateway, and serves a static bundle via nginx with immutable asset caching and SPA fallback.
 
 Key capabilities include:
+- **Dual workspace architecture**: Separate Chat (operation) and Studio (development) workspaces with distinct session types and authoring controls
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling and flow headline rendering, plus parsed element labels as human-readable prose**
 - Incident management with triage reports and live runs
@@ -100,25 +107,27 @@ Nginx --> Dist
 - Application shell and routing: React app root, theme provider, auth provider, and view router with sidebar sections and responsive drawer.
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
-- Chat workspace: Session list, message composer, model selector, voice input, streaming SSE transport, tool evidence rendering, and **enhanced HITL confirmation cards with browser flow context, parsed element labels as prose, and metadata visualization**.
+- **Dual workspace architecture**: Operation workspace (Chat) for regular sessions and development workspace (Studio) for skill development sessions, each with separate session lists and active session management.
+- Mode-aware ChatView: Single component serving both operation and development modes with conditional authoring controls based on workspace mode.
 - Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface, critical hook ordering stability, and automatic recovery from stale session transitions**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and **enhanced skills inventory with lazy loading and read-only content viewer**.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
 **Section sources**
-- [App.tsx:1-422](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L422)
+- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
 - [AuthContext.tsx:1-110](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L1-L110)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
-- [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
+- [ChatView.tsx:1-1854](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L1854)
 - [SettingsView.tsx:1-200](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L200)
 - [AuditView.tsx:1-484](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L1-L484)
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Architecture Overview
-The portal follows a thin-client architecture:
+The portal follows a thin-client architecture with dual workspace support:
 - Frontend: React SPA built with Vite, served by nginx with immutable asset caching and SPA fallback.
 - Auth: OIDC via identity broker; access tokens are attached to requests.
 - Backend integration: All API calls go through nginx proxy to the platform gateway, which enforces policies and delegates to agent-platform, policy-center, and other services.
+- **Dual workspace model**: App owns two separate workspace instances - one for operation sessions (Chat) and one for development sessions (Studio), each with independent session lists and active session management.
 
 ```mermaid
 sequenceDiagram
@@ -134,7 +143,7 @@ I-->>U : Redirect back with code
 U->>N : POST /api/v1/auth/refresh
 N->>G : Proxy /api/*
 G-->>U : Access token + identity
-U->>G : GET /api/v1/models, sessions, etc.
+U->>G : GET /api/v1/sessions?session_type=operation|development
 G->>A : Forward authenticated requests
 A-->>G : Responses
 G-->>U : JSON responses
@@ -151,14 +160,20 @@ G-->>U : JSON responses
 - Two-column layout with collapsible sidebar and off-canvas drawer on narrow screens.
 - Role-based menu items grouped under Control and Workspace sections; section headers hide when all entries are hidden.
 - User card shows initials, username, roles, sign-in/sign-out buttons, and platform version chip.
+- **Dual workspace navigation**: Chat entry available to all signed-in users, Studio entry gated to roles holding session:skill_graduate permission.
 
 ```mermaid
 flowchart TD
 Start(["App mount"]) --> Boot{"Booting?"}
 Boot --> |Yes| Spinner["Show spinner"]
 Boot --> |No| Sidebar["Render sidebar with role-gated items"]
-Sidebar --> View{"Active view?"}
-View --> |chat| Chat["ChatView"]
+Sidebar --> StudioCheck{"Has STUDIO_ROLES?"}
+StudioCheck --> |Yes| AddStudio["Add Studio menu item"]
+StudioCheck --> |No| SkipStudio["Skip Studio menu item"]
+AddStudio --> View{"Active view?"}
+SkipStudio --> View
+View --> |chat| Chat["ChatView (operation mode)"]
+View --> |studio| Studio["ChatView (development mode)"]
 View --> |incidents| Incidents["IncidentsView"]
 View --> |approvals| Approvals["ApprovalsView"]
 View --> |audit| Audit["AuditView"]
@@ -169,10 +184,55 @@ View --> |settings| Settings["SettingsView"]
 ```
 
 **Diagram sources**
-- [App.tsx:287-422](file://products/operator-portal/web-ui/app/src/App.tsx#L287-L422)
+- [App.tsx:287-451](file://products/operator-portal/web-ui/app/src/App.tsx#L287-L451)
 
 **Section sources**
-- [App.tsx:1-422](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L422)
+- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
+
+### Dual Workspace Architecture
+**Updated** The portal now implements a dual workspace architecture that separates operational sessions from development sessions, providing distinct user experiences and security postures for different use cases.
+
+#### Operation Workspace (Chat)
+- **Purpose**: Regular operational sessions for incident response, troubleshooting, and day-to-day operations
+- **Session Type**: `operation` sessions created via standard session creation
+- **Authoring Controls**: Draft-as-skill button for converting operational sessions to skills
+- **Access**: Available to all signed-in users regardless of role
+- **Session Management**: Independent session list and active session pointer
+
+#### Development Workspace (Studio)
+- **Purpose**: Skill development sessions for creating, testing, and refining automated workflows
+- **Session Type**: `development` sessions created via specialized development session creation
+- **Authoring Controls**: Declare-target and graduate-as-skill buttons for skill development workflow
+- **Access**: Restricted to roles holding session:skill_graduate permission (platform-admin, approver, operator)
+- **Session Management**: Independent session list and active session pointer
+
+#### Implementation Details
+- **Mode Parameter**: ChatView component accepts a `mode` parameter ("operation" or "development") that controls visible authoring controls
+- **Workspace Instances**: App component creates two separate workspace instances using `useSessionWorkspace`, one for each mode
+- **Namespaced Storage**: Active session IDs are stored separately for each mode using namespaced sessionStorage keys
+- **Role-Based Gating**: Studio menu item only appears for users with appropriate roles
+- **Development Session Creation**: Specialized dialog for creating development sessions with optional target declaration
+
+```mermaid
+flowchart TD
+AppMount["App Component Mount"] --> CreateWorkspaces["Create Two Workspace Instances"]
+CreateWorkspaces --> OperationWS["Operation Workspace<br/>useSessionWorkspace(true, 'operation')"]
+CreateWorkspaces --> DevelopmentWS["Development Workspace<br/>useSessionWorkspace(authenticated && hasAnyRole(roles, STUDIO_ROLES), 'development')"]
+OperationWS --> ChatViewOp["ChatView with mode='operation'"]
+DevelopmentWS --> ChatViewDev["ChatView with mode='development'"]
+ChatViewOp --> OperationControls["Draft-as-skill controls"]
+ChatViewDev --> DevelopmentControls["Declare-target + Graduate-as-skill controls"]
+```
+
+**Diagram sources**
+- [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [ChatView.tsx:1210-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1210-L1216)
+
+**Section sources**
+- [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
+- [useSessionWorkspace.ts:15-26](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L15-L26)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
 
 ### Authentication and Session Management
 - OIDC login initiated from UI; callback completed at startup; existing sessions restored from storage.
@@ -224,35 +284,42 @@ Ok --> |Yes| Json["Parse JSON and return"]
 **Section sources**
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 
-### Chat Workspace and Streaming
-- Session workspace manages multiple sessions, titles, last-active timestamps, and pinned incident sessions.
-- Model selector integrates with /api/v1/models; selection persists per session.
-- Voice input uses Web Speech API with language preference persisted locally.
-- Tool evidence rendered as collapsible cards with status badges and optional full output expander.
-- **Enhanced inline HITL confirmation cards with browser flow context, parsed element labels as human-readable prose, and metadata visualization including background highlighting and tags**.
+### Mode-Aware Chat Workspace
+**Updated** The ChatView component now serves both operation and development modes through a single implementation, with mode-specific authoring controls while maintaining identical trust paths for streaming, secret masking, and HITL confirmations.
+
+#### Mode-Specific Authoring Controls
+- **Operation Mode**: Shows "Draft as skill" button for converting operational sessions to skills
+- **Development Mode**: Shows "Declare target" and "Graduate as skill" buttons for skill development workflow
+- **Security Boundary**: Mode selection affects only visible controls, not the core streaming or confirmation logic
+
+#### Session Management Integration
+- **Separate Workspaces**: Each mode uses its own workspace instance with independent session lists
+- **Namespaced Active Sessions**: Active session IDs stored separately for operation and development modes
+- **Development Session Creation**: Specialized dialog for creating development sessions with optional target declaration
+
+#### Trust Path Isolation
+- **Shared Core**: Streaming adapter, secret masking renderer, and HITL confirmation path remain identical across modes
+- **Blast Radius Control**: Mode parameter only affects visible controls and session type, not security-critical components
+- **Type Safety**: TypeScript interfaces ensure mode-specific behavior is properly constrained
 
 ```mermaid
-sequenceDiagram
-participant U as "User"
-participant CV as "ChatView"
-participant ST as "Stream Adapter"
-participant GW as "Gateway"
-U->>CV : Send prompt
-CV->>ST : Open SSE stream
-ST->>GW : POST /api/v1/chat (with model, session)
-GW-->>ST : Stream events (tool_call, tool_result, text)
-ST-->>CV : Update transcript, render evidence, show confirmation cards
-U->>CV : Approve/Deny (HITL)
-CV->>GW : POST /api/v1/chat/confirm
-GW-->>CV : Resume stream with decision
+flowchart TD
+ChatView["ChatView Component"] --> ModeCheck{"Mode Check"}
+ModeCheck --> |operation| OperationControls["Operation Controls<br/>Draft-as-skill"]
+ModeCheck --> |development| DevelopmentControls["Development Controls<br/>Declare-target + Graduate"]
+OperationControls --> SharedCore["Shared Core<br/>Streaming, Secret Masking, HITL"]
+DevelopmentControls --> SharedCore
+SharedCore --> TrustPath["Trust Path<br/>Identical Across Modes"]
 ```
 
 **Diagram sources**
-- [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
+- [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
 
 **Section sources**
-- [ChatView.tsx:1-200](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L200)
-- [README.md:43-126](file://products/operator-portal/README.md#L43-L126)
+- [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
+- [ChatView.tsx:1641-1651](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1641-L1651)
+- [ChatView.mode.test.tsx:1-438](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx#L1-L438)
 
 ### Enhanced Confirmation Cards with Browser Flow Context and Parsed Element Labels
 **Updated** The confirmation card system has been significantly enhanced with AgentStreamEvent schema v9 support for flow_summary fields and parsed element labels, enabling consistent workflow framing across both live and durable confirmation views while hiding technical details behind expanders for improved operator readability.
@@ -629,11 +696,15 @@ Nginx --> GW["platform-gateway:8000"]
 - App shell composes AuthProvider and theme provider around the root component.
 - Views depend on API client for data fetching; roles determine visibility and actions.
 - Nginx routes static assets and proxies API traffic to the gateway.
+- **Dual workspace dependencies**: App component manages two separate workspace instances with mode-specific session management.
 
 ```mermaid
 graph TB
 Main["main.tsx"] --> App["App.tsx"]
 App --> Auth["AuthContext.tsx"]
+App --> Workspaces["Dual Workspace Management"]
+Workspaces --> OpWS["Operation Workspace"]
+Workspaces --> DevWS["Development Workspace"]
 App --> Views["Views (Chat, Incidents, Approvals, Audit, Permissions, Tools, Skills, Settings)"]
 Views --> API["client.ts"]
 API --> Nginx["nginx.conf proxy"]
@@ -642,13 +713,13 @@ Nginx --> Gateway["Platform Gateway"]
 
 **Diagram sources**
 - [main.tsx:1-18](file://products/operator-portal/web-ui/app/src/main.tsx#L1-L18)
-- [App.tsx:1-422](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L422)
+- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [nginx.conf:1-43](file://products/operator-portal/nginx.conf#L1-L43)
 
 **Section sources**
 - [main.tsx:1-18](file://products/operator-portal/web-ui/app/src/main.tsx#L1-L18)
-- [App.tsx:1-422](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L422)
+- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [nginx.conf:1-43](file://products/operator-portal/nginx.conf#L1-L43)
 
@@ -657,6 +728,7 @@ Nginx --> Gateway["Platform Gateway"]
 - SPA fallback: index.html is served with no-store to ensure immediate rollout without stale shell issues.
 - Streaming: Long-lived SSE connections use proxy_read_timeout configured to support extended operations.
 - Client-side state: Session workspace minimizes redundant network calls by maintaining local session lists and pinning incident sessions.
+- **Dual Workspace Efficiency**: Separate workspace instances prevent cross-mode interference and optimize polling for each workspace independently.
 - **Lazy Loading**: Summary tab data is fetched only when the tab is activated, reducing initial page load time.
 - **Efficient Filtering**: Shared filter state prevents redundant API calls when switching between tabs.
 - **Optimized Rendering**: Collapsible sections reduce initial DOM complexity while providing rich interactivity.
@@ -670,6 +742,7 @@ Nginx --> Gateway["Platform Gateway"]
 - **Markdown Rendering Efficiency**: Escape-first markdown rendering optimizes security without sacrificing performance; code blocks and inline code are protected from transformation overhead.
 - **CommonMark Compliance Optimization**: Enhanced list region detection and paragraph processing improve rendering efficiency while maintaining proper document structure.
 - **Stream Handler Performance**: Confirmation expiration and race condition handling prevents unnecessary UI updates and maintains optimal performance during error scenarios.
+- **Mode-Specific Optimizations**: ChatView renders only mode-appropriate controls, reducing unnecessary DOM operations for inactive workspace modes.
 
 [No sources needed since this section provides general guidance]
 
@@ -698,6 +771,9 @@ Nginx --> Gateway["Platform Gateway"]
 - **Confirmation Expiration Issues**: If confirmation cards show permanent spinners after expiration, verify that 410 Gone responses are properly handled and that both turn.completed and turn.confirmationPending are set to their correct values.
 - **Race Condition Issues**: If confirmation cards get stuck in pending state after race conditions, verify that 409 Conflict responses are properly parsed and that already-resolved vs retryable cases are correctly distinguished.
 - **Stream Handler Issues**: If confirmation decisions don't properly settle turns, check that the stream handler is correctly managing turn completion state and confirmation pending flags for all error scenarios.
+- **Dual Workspace Issues**: If Studio menu item doesn't appear, verify user has appropriate roles (platform-admin, approver, operator); check that development workspace polling is properly gated on roles.
+- **Session Management Issues**: If sessions don't persist correctly between modes, verify that namespaced sessionStorage keys are working properly for operation and development modes.
+- **Mode-Specific Controls Issues**: If authoring controls don't appear correctly, verify that ChatView is receiving the correct mode parameter and that workspace instances are properly initialized for each mode.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -711,9 +787,11 @@ Nginx --> Gateway["Platform Gateway"]
 - [markdown.test.ts:160-228](file://products/operator-portal/web-ui/app/src/chat/__tests__/markdown.test.ts#L160-L228)
 - [useChatStream.ts:392-451](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L392-L451)
 - [transport.ts:35-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L35-L48)
+- [App.studio.test.tsx:155-218](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L155-L218)
+- [ChatView.mode.test.tsx:227-248](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx#L227-L248)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.** **The enhanced stream handler with confirmation expiration and race condition handling addresses critical UI bugs where expired cards left operators staring at permanent spinners, while also improving race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases, ensuring robust and reliable confirmation workflows.**
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.** **The enhanced stream handler with confirmation expiration and race condition handling addresses critical UI bugs where expired cards left operators staring at permanent spinners, while also improving race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases, ensuring robust and reliable confirmation workflows.** **The dual workspace architecture provides clear separation between operational and development workflows, with Chat serving regular operations and Studio enabling skill development through specialized authoring controls, while maintaining identical trust paths for streaming, secret masking, and HITL confirmations across both modes.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -752,6 +830,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Enhanced Skills Interface**: Lazy loading provides better performance and user experience; read-only content viewer ensures safe inspection of skill contents; Rendered/Raw toggle offers flexibility for different use cases; comprehensive accessibility support with ARIA labels and keyboard navigation; responsive modal design adapts to different screen sizes.
 - **Enhanced Markdown Rendering**: Improved CommonMark compliance ensures proper list structure and paragraph formatting; sophisticated list region detection handles complex skill body content; escape-first rendering maintains security while providing accurate content display; comprehensive testing coverage validates edge cases and security requirements.
 - **Enhanced Stream Handler**: Robust confirmation expiration handling prevents permanent UI spinners; improved race condition handling ensures proper turn settlement; comprehensive error handling provides clear feedback to operators; reliable state management maintains consistency across all confirmation scenarios.
+- **Dual Workspace Accessibility**: Clear visual distinction between Chat and Studio workspaces; role-based menu items follow accessibility best practices; mode-specific controls maintain consistent keyboard navigation patterns; workspace switching preserves focus and accessibility context.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -956,3 +1035,39 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [useChatStream.ts:330-454](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L330-L454)
 - [transport.ts:8-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L8-L48)
 - [useChatStream.test.ts:420-524](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L420-L524)
+
+### Dual Workspace Architecture Implementation
+**New** The dual workspace architecture provides clear separation between operational and development workflows while maintaining shared trust paths and consistent user experience patterns.
+
+#### Workspace Instance Management
+- **Separate Instances**: App component creates two independent workspace instances using `useSessionWorkspace` hook with different modes
+- **Operation Workspace**: Used by Chat view for regular operational sessions
+- **Development Workspace**: Used by Studio view for skill development sessions
+- **Independent State**: Each workspace maintains its own session list, active session, and polling state
+
+#### Role-Based Access Control
+- **Studio Gating**: Studio menu item only appears for users with roles holding session:skill_graduate permission
+- **Development Session Creation**: Development workspace polling is gated on authenticated users with appropriate roles
+- **Chat Availability**: Chat workspace remains available to all signed-in users regardless of role
+- **Role Sets**: STUDIO_ROLES constant mirrors SKILL_GRADUATE_ROLES to prevent authorization drift
+
+#### Mode-Aware Component Behavior
+- **Single ChatView**: One ChatView component serves both modes through mode parameter
+- **Conditional Controls**: Mode determines which authoring controls are visible (draft-as-skill vs declare-target/graduate)
+- **Shared Trust Path**: Streaming, secret masking, and HITL confirmation logic remain identical across modes
+- **Type Safety**: TypeScript interfaces ensure mode-specific behavior is properly constrained
+
+#### Session Management Enhancements
+- **Namespaced Storage**: Active session IDs stored separately for operation and development modes using sessionStorage keys
+- **Mode-Specific Lists**: Each workspace polls for sessions of its specific type (operation vs development)
+- **Development Session Creation**: Specialized dialog for creating development sessions with optional target declaration
+- **Session Type Immutability**: Session type is fixed at birth and cannot be changed afterwards
+
+**Section sources**
+- [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
+- [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
+- [useSessionWorkspace.ts:15-26](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L15-L26)
+- [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
+- [App.studio.test.tsx:155-218](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L155-L218)
+- [ChatView.mode.test.tsx:227-248](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx#L227-L248)

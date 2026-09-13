@@ -12,16 +12,20 @@
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 - [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
+- [test_session_type.py](file://products/agent-platform/tests/test_session_type.py)
+- [test_session_workspace.py](file://products/agent-platform/tests/test_session_workspace.py)
+- [spec.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md)
+- [plan.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/plan.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for new v2 session management endpoints (GET/DELETE /api/v2/sessions)
-- Updated session data models to include multi-session capabilities with title, last_active_at, and pending_confirmation fields
-- Documented transcript reconstruction functionality for session history viewing
-- Added policy actions session:list and session:delete with authorization matrix updates
-- Enhanced authentication flow documentation for v2 endpoints using X-User-ID headers
-- Updated session lifecycle management to include workspace features and HITL confirmation integration
+- Added comprehensive documentation for the new `session_type` discriminator field with immutable "operation" and "development" values
+- Updated session creation endpoints to support dual authorization requirements for development sessions (both `session:create` and `session:skill_graduate` permissions)
+- Documented server-side filtering by session type in list operations with bounded enum validation
+- Enhanced session data models to include the additive `session_type` field across all storage backends
+- Updated authorization matrix to reflect new skill graduation permissions for development workflows
+- Added documentation for workspace mode separation between operation and development sessions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,11 +47,11 @@
 
 ## Introduction
 
-The Session Management API provides comprehensive REST endpoints for managing agent sessions across the AI platform. The system has been enhanced with v2 endpoints that offer multi-session capabilities, including session listing, deletion, and transcript reconstruction. Sessions represent the stateful context of agent interactions, enabling conversation continuity, tool execution tracking, and distributed state synchronization. The system supports both local and Redis-backed persistence, automatic timeout handling, secure access control through the identity broker service, and Human-in-the-Loop (HITL) confirmation workflows.
+The Session Management API provides comprehensive REST endpoints for managing agent sessions across the AI platform with enhanced workspace capabilities. The system now supports a dual-mode architecture through the introduction of the `session_type` discriminator field, which distinguishes between operational sessions (`operation`) and development sessions (`development`). Sessions represent the stateful context of agent interactions, enabling conversation continuity, tool execution tracking, and distributed state synchronization. The system supports both local and Redis-backed persistence, automatic timeout handling, secure access control through the identity broker service, and Human-in-the-Loop (HITL) confirmation workflows. Development sessions require dual authorization for skill graduation workflows, while operational sessions follow standard permission patterns.
 
 ## Project Structure
 
-The session management functionality is distributed across multiple services with clear separation between v1 and v2 APIs:
+The session management functionality is distributed across multiple services with clear separation between v1 and v2 APIs, now enhanced with workspace mode separation:
 
 ```mermaid
 graph TB
@@ -71,6 +75,10 @@ REDIS[(Redis)]
 LOCAL[Local Storage]
 POSTGRES[(PostgreSQL)]
 end
+subgraph "Workspace Modes"
+OP_MODE[Operation Mode]
+DEV_MODE[Development Mode]
+end
 AP_V2_ROUTES --> AP_SVC
 AP_V2_ROUTES --> AP_STORE
 AP_V2_ROUTES --> AP_TRANSCRIPT
@@ -80,6 +88,8 @@ AP_STORE --> REDIS
 AP_STORE --> LOCAL
 AP_STORE --> POSTGRES
 GW_POLICY --> AP_V2_ROUTES
+OP_MODE --> AP_V2_ROUTES
+DEV_MODE --> AP_V2_ROUTES
 ```
 
 **Diagram sources**
@@ -94,10 +104,10 @@ GW_POLICY --> AP_V2_ROUTES
 ## Core Components
 
 ### Session Service
-The Session Service orchestrates session operations including creation, updates, retrieval, deletion, and listing. It handles business logic, validation, workspace features like title minting and activity tracking, and coordination between different storage backends.
+The Session Service orchestrates session operations including creation, updates, retrieval, deletion, and listing with enhanced workspace mode support. It handles business logic, validation, workspace features like title minting and activity tracking, and coordination between different storage backends. The service now enforces session type immutability and dual authorization requirements for development sessions.
 
 ### Session Store
-The Session Store provides abstraction over different persistence mechanisms, supporting both local memory storage, Redis for distributed environments, and PostgreSQL for production deployments.
+The Session Store provides abstraction over different persistence mechanisms, supporting both local memory storage, Redis for distributed environments, and PostgreSQL for production deployments. Enhanced with `session_type` field support across all backends and server-side filtering capabilities.
 
 ### Transcript Reconstruction
 A specialized component that extracts conversation history from kernel state snapshots, providing best-effort transcript reconstruction for session viewing without requiring live stream replay.
@@ -106,7 +116,7 @@ A specialized component that extracts conversation history from kernel state sna
 An in-memory registry that manages Human-in-the-Loop confirmations, tracking parked tool calls and their resolution status to prevent orphaned approval workflows.
 
 ### Policy Engine
-The Platform Gateway enforces authorization policies for session operations, ensuring proper access control through role-based permissions.
+The Platform Gateway enforces authorization policies for session operations with enhanced dual authorization support for development session graduation workflows.
 
 **Section sources**
 - [session_service.py:1-123](file://products/agent-platform/src/agent_service/services/session_service.py#L1-L123)
@@ -116,7 +126,7 @@ The Platform Gateway enforces authorization policies for session operations, ens
 
 ## Architecture Overview
 
-The session management follows a layered architecture pattern with clear separation of concerns between v1 and v2 APIs:
+The session management follows a layered architecture pattern with clear separation of concerns between v1 and v2 APIs, now enhanced with workspace mode separation and dual authorization:
 
 ```mermaid
 sequenceDiagram
@@ -127,19 +137,19 @@ participant SessionSvc as "Session Service"
 participant Store as "Session Store"
 participant Registry as "HITL Registry"
 participant Redis as "Redis Backend"
-Client->>Gateway : GET /api/v2/sessions
-Gateway->>V2Routes : Route Request
+Client->>Gateway : GET /api/v2/sessions?session_type=development
+Gateway->>V2Routes : Route Request with Dual Auth Check
 V2Routes->>Registry : Check Pending Confirmations
 Registry-->>V2Routes : Has Pending?
-V2Routes->>SessionSvc : List User Sessions
-SessionSvc->>Store : Query Sessions
+V2Routes->>SessionSvc : List User Sessions (filtered by type)
+SessionSvc->>Store : Query Sessions with Type Filter
 Store->>Redis : Fetch Session Data
 Redis-->>Store : Return Sessions
 Store-->>SessionSvc : Session Records
 SessionSvc-->>V2Routes : Formatted Sessions
 V2Routes-->>Gateway : Response with Metadata
 Gateway-->>Client : 200 OK + Session List
-Note over Client,Redis : Multi-session workspace with HITL support
+Note over Client,Redis : Workspace mode filtering with dual auth support
 ```
 
 **Diagram sources**
@@ -149,21 +159,22 @@ Note over Client,Redis : Multi-session workspace with HITL support
 
 ## Detailed Component Analysis
 
-### V2 Session Service Implementation
+### Enhanced Session Service with Workspace Modes
 
-The enhanced Session Service implements comprehensive workspace features:
+The enhanced Session Service implements comprehensive workspace features with session type discrimination:
 
 ```mermaid
 classDiagram
 class SessionService {
-+create_session(user_id) SessionRecord
-+create_named_session(session_id, user_id) SessionRecord
++create_session(user_id, session_type="operation") SessionRecord
++create_named_session(session_id, user_id, session_type="operation") SessionRecord
 +ensure_session(session_id, user_id) SessionRecord
 +get_session(session_id, user_id) SessionRecord
-+list_sessions(user_id) SessionRecord[]
++list_sessions(user_id, session_type=None) SessionRecord[]
 +mark_session_turn(session_id, message) void
 +delete_session(session_id, user_id) bool
 -_assert_session_owner(session, user_id) void
+-_validate_development_auth(user_id, session_type) void
 }
 class SessionStore {
 +save(session) bool
@@ -172,7 +183,7 @@ class SessionStore {
 +exists(session_id) bool
 +update(session_id, data) bool
 +cleanup() int
-+list_sessions_by_user(user_id) SessionRecord[]
++list_sessions_by_user(user_id, session_type=None) SessionRecord[]
 +set_session_title(session_id, title) bool
 +touch_session(session_id) bool
 }
@@ -188,7 +199,7 @@ class HITLRegistry {
 +resolve(session_id, confirm_id) void
 +expire_confirmation(session_id, confirm_id) void
 }
-SessionService --> SessionStore : "uses"
+SessionService --> SessionStore : "uses with type filtering"
 SessionService --> TranscriptExtractor : "for transcripts"
 SessionService --> HITLRegistry : "for HITL checks"
 ```
@@ -198,9 +209,9 @@ SessionService --> HITLRegistry : "for HITL checks"
 - [session_transcript.py:30-83](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L83)
 - [hitl_confirmations.py:93-229](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L229)
 
-### V2 API Route Handlers
+### Enhanced V2 API Route Handlers
 
-The enhanced v2 routes provide comprehensive session management:
+The enhanced v2 routes provide comprehensive session management with workspace mode support:
 
 ```mermaid
 flowchart TD
@@ -213,8 +224,16 @@ Operation --> |Create| HandleCreate["Handle Create Session"]
 Operation --> |List| HandleList["Handle List Sessions"]
 Operation --> |Get| HandleGet["Handle Get Session"]
 Operation --> |Delete| HandleDelete["Handle Delete Session"]
-HandleCreate --> CallService["Call Session Service"]
-HandleList --> CallService
+HandleCreate --> CheckType{"session_type = development?"}
+CheckType --> |Yes| DualAuth["Require session:create + session:skill_graduate"]
+CheckType --> |No| SingleAuth["Require session:create only"]
+DualAuth --> CallService["Call Session Service"]
+SingleAuth --> CallService
+HandleList --> FilterType{"session_type filter?"}
+FilterType --> |Yes| ApplyFilter["Apply Server-Side Filter"]
+FilterType --> |No| ListAll["List All Sessions"]
+ApplyFilter --> CallService
+ListAll --> CallService
 HandleGet --> CallService
 HandleDelete --> CallService
 CallService --> Success{"Success?"}
@@ -235,24 +254,27 @@ Return500 --> End
 
 ## API Endpoints Reference
 
-### V2 Session Management Endpoints
+### Enhanced V2 Session Management Endpoints
 
 #### Create Session
 - **Endpoint**: `POST /api/v2/sessions`
-- **Description**: Creates a new agent session with optional named session support
+- **Description**: Creates a new agent session with optional named session support and workspace mode
 - **Authentication**: Required (X-User-ID header)
-- **Authorization**: Requires `session:create` permission
-- **Request Body**: Optional `AgentSessionCreateRequest` with optional `session_id` for named sessions
-- **Response**: `AgentSession` object with session metadata
-- **Special Features**: Supports dedicated named sessions for incident triage scenarios
+- **Authorization**: 
+  - For `operation` sessions: Requires `session:create` permission
+  - For `development` sessions: Requires both `session:create` AND `session:skill_graduate` permissions (dual authorization)
+- **Request Body**: Optional `AgentSessionCreateRequest` with optional `session_id` for named sessions and `session_type` parameter
+- **Response**: `AgentSession` object with session metadata including `session_type`
+- **Special Features**: Supports dedicated named sessions for incident triage scenarios and workspace mode separation
 
 #### List Sessions
 - **Endpoint**: `GET /api/v2/sessions`
-- **Description**: Lists all sessions for authenticated user, most-recently-active first
+- **Description**: Lists all sessions for authenticated user with optional workspace mode filtering, most-recently-active first
 - **Authentication**: Required (X-User-ID header)
 - **Authorization**: Requires `session:list` permission
+- **Query Parameters**: Optional `session_type` filter with bounded enum validation ("operation" | "development")
 - **Response**: `AgentSessionList` containing up to 50 sessions with summary information
-- **Features**: Includes `pending_confirmation` flag for each session based on HITL registry
+- **Features**: Includes `pending_confirmation` flag for each session based on HITL registry and server-side filtering by session type
 
 #### Get Session
 - **Endpoint**: `GET /api/v2/sessions/{session_id}`
@@ -278,8 +300,9 @@ Return500 --> End
 
 ## Session Data Models
 
-### Enhanced Session Schema
-The v2 session objects follow an enhanced schema with workspace features:
+### Enhanced Session Schema with Session Type Discriminator
+
+The v2 session objects follow an enhanced schema with workspace features and immutable session type discrimination:
 
 ```mermaid
 erDiagram
@@ -293,6 +316,7 @@ string title
 boolean pending_confirmation
 boolean transcript_available
 json transcript
+string session_type ENUM
 }
 USER {
 uuid id PK
@@ -315,7 +339,7 @@ SESSION ||--o{ SESSION_EVENT : generates
 - [v2.py:124-165](file://products/agent-platform/src/agent_service/schemas/v2.py#L124-L165)
 - [session.schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 
-### Enhanced Session Fields
+### Enhanced Session Fields with Session Type Support
 - `session_id`: Unique session identifier (UUID)
 - `user_id`: Owner user identifier
 - `status`: Current session state (`active`, `expired`)
@@ -325,9 +349,10 @@ SESSION ||--o{ SESSION_EVENT : generates
 - `pending_confirmation`: Boolean indicating unresolved HITL confirmation
 - `transcript_available`: Boolean indicating if transcript can be reconstructed
 - `transcript`: Array of conversation turns when available
+- `session_type`: Immutable discriminator field with values "operation" or "development", default "operation"
 
-### Session States
-Sessions transition through several states during their lifecycle:
+### Session States and Types
+Sessions transition through several states during their lifecycle with fixed session types:
 
 | State | Description | Transitions |
 |-------|-------------|-------------|
@@ -335,14 +360,20 @@ Sessions transition through several states during their lifecycle:
 | `expired` | Session TTL exceeded | → `deleted` |
 | `deleted` | Session permanently removed | → *terminal* |
 
+| Session Type | Description | Creation Context |
+|--------------|-------------|------------------|
+| `operation` | Standard operational sessions | Created from Chat interface |
+| `development` | Skill development sessions | Created from Studio interface |
+
 **Section sources**
 - [v2.py:124-165](file://products/agent-platform/src/agent_service/schemas/v2.py#L124-L165)
 - [session_schema.json](file://shared/shared-contracts/schemas/session.schema.json)
 
 ## Authentication & Authorization
 
-### V2 Authentication Flow
-The v2 API uses a simplified authentication model with header-based identity:
+### Enhanced V2 Authentication Flow with Dual Authorization
+
+The v2 API uses a simplified authentication model with header-based identity and enhanced authorization for development sessions:
 
 ```mermaid
 sequenceDiagram
@@ -355,34 +386,42 @@ Gateway->>V2Routes : Forward with Identity
 V2Routes->>Identity : Extract User ID
 Identity-->>V2Routes : Validated User Context
 V2Routes->>V2Routes : Check Permissions
+alt Development Session Creation
+V2Routes->>V2Routes : Verify session : create + session : skill_graduate
+else Operation Session Creation
+V2Routes->>V2Routes : Verify session : create
+end
 V2Routes-->>Client : Process Request
-Note over Client,V2Routes : All v2 endpoints require X-User-ID header
+Note over Client,V2Routes : Dual authorization for development sessions
 ```
 
 **Diagram sources**
 - [routes.py:55-68](file://products/agent-platform/src/agent_service/api/v2/routes.py#L55-L68)
 
-### Enhanced Authorization Matrix
-Access control includes new session management permissions:
+### Enhanced Authorization Matrix with Session Type Support
+
+Access control includes new session management permissions with dual authorization for development workflows:
 
 | Permission | Description | Required For |
 |------------|-------------|--------------|
-| `session:create` | Create new sessions | POST /api/v2/sessions |
+| `session:create` | Create new sessions | POST /api/v2/sessions (operation sessions) |
+| `session:skill_graduate` | Graduate development sessions | POST /api/v2/sessions (development sessions) |
 | `session:read` | Read session data | GET /api/v2/sessions/{id} |
 | `session:list` | List user sessions | GET /api/v2/sessions |
 | `session:delete` | Delete sessions | DELETE /api/v2/sessions/{id} |
 | `chat` | Chat operations | POST /api/v2/chat |
 | `chat:confirm` | Answer parked confirmations | POST /api/v2/chat/confirm |
 
-### Policy Configuration Updates
-The policy engine has been updated to support new session management actions:
+### Policy Configuration Updates with Session Type Support
+
+The policy engine has been updated to support new session management actions with dual authorization:
 
 ```yaml
 rules:
   - id: allow-operators-chat
     match:
       roles_any: ["platform-admin", "approver", "operator", "developer"]
-      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete"]
+      actions_any: ["chat", "session:create", "session:read", "session:list", "session:delete", "session:skill_graduate"]
     decision:
       outcome: allow
 
@@ -400,13 +439,23 @@ rules:
 
 ## Session Lifecycle Management
 
-### Enhanced Creation Process
-Session initialization now includes workspace features:
+### Enhanced Creation Process with Session Type Discrimination
+
+Session initialization now includes workspace features and immutable session type assignment:
 
 ```mermaid
 flowchart TD
 Start([Session Creation Request]) --> Validate["Validate Request Data"]
-Validate --> NamedCheck{"Named Session?"}
+Validate --> CheckType{"session_type specified?"}
+CheckType --> |No| SetDefault["Set session_type = 'operation'"]
+CheckType --> |Yes| ValidateType["Validate session_type enum"]
+ValidateType --> SetType["Set session_type"]
+SetDefault --> AuthCheck{"Development session?"}
+SetType --> AuthCheck
+AuthCheck --> |Yes| DualAuth["Require session:create + session:skill_graduate"]
+AuthCheck --> |No| SingleAuth["Require session:create"]
+DualAuth --> NamedCheck{"Named Session?"}
+SingleAuth --> NamedCheck
 NamedCheck --> |Yes| CreateNamed["Create Named Session"]
 NamedCheck --> |No| CreateAuto["Create Auto-assigned Session"]
 CreateNamed --> SetDefaults["Set Default Values"]
@@ -424,21 +473,26 @@ ReturnError --> End
 **Diagram sources**
 - [session_service.py:26-62](file://products/agent-platform/src/agent_service/services/session_service.py#L26-L62)
 
-### Workspace Features
-Enhanced session management includes workspace capabilities:
+### Enhanced Workspace Features with Session Type Support
+
+Enhanced session management includes workspace capabilities with session type discrimination:
 
 - **Title Minting**: Automatic title generation from first user message (80-char cap)
 - **Activity Tracking**: `last_active_at` timestamp updated on each interaction
 - **Session Limiting**: Maximum 50 sessions per user in list responses
 - **Ownership Validation**: Anti-enumeration prevents cross-user session access
+- **Session Type Immutability**: `session_type` field set once at creation and never changed
+- **Server-Side Filtering**: Bounded enum validation for session type queries
 
-### Cleanup Procedures
+### Cleanup Procedures with Enhanced Safety
+
 Automated cleanup processes manage session lifecycle with enhanced safety:
 
 1. **HITL Safety Checks**: Sessions with pending confirmations cannot be deleted
 2. **Resource Cleanup**: Associated temporary files and agent state removed
 3. **Audit Logging**: Comprehensive logging of cleanup activities
 4. **Graceful Degradation**: Failures in cleanup don't prevent session deletion
+5. **Session Type Preservation**: Cleanup maintains session type integrity
 
 **Section sources**
 - [session_service.py:86-123](file://products/agent-platform/src/agent_service/services/session_service.py#L86-L123)
@@ -446,29 +500,36 @@ Automated cleanup processes manage session lifecycle with enhanced safety:
 
 ## Multi-Session Workspace Features
 
-### Session Listing Enhancement
-The v2 API provides comprehensive session listing with workspace context:
+### Enhanced Session Listing with Workspace Mode Support
+
+The v2 API provides comprehensive session listing with workspace context and session type filtering:
 
 - **Recent Activity Ordering**: Sessions sorted by `last_active_at` or `created_at`
 - **Summary Information**: Compact view with essential session metadata
 - **HITL Status Indicators**: `pending_confirmation` flag for UI badges
 - **Pagination Support**: Capped at 50 sessions to prevent performance issues
+- **Server-Side Filtering**: Bounded enum validation for session_type parameter
+- **Workspace Mode Separation**: Operation and development sessions managed independently
 
-### Title Management
-Automatic title generation enhances user experience:
+### Title Management with Session Type Awareness
+
+Automatic title generation enhances user experience across workspace modes:
 
 - **First Message Extraction**: Title derived from initial user message
 - **Character Limiting**: 80-character maximum to ensure consistent display
 - **Server-Side Generation**: Never model-supplied to prevent injection
 - **Immutable After Creation**: Title set once and never rewritten
+- **Session Type Context**: Titles work consistently across operation and development modes
 
-### Activity Tracking
-Comprehensive activity monitoring enables better session management:
+### Activity Tracking with Workspace Mode Support
+
+Comprehensive activity monitoring enables better session management across workspace modes:
 
 - **Last Active Timestamp**: Updated on every chat turn
 - **Creation Timestamp**: Immutable session creation time
 - **Sorting Support**: Enables "most recently active" ordering
 - **Cleanup Triggers**: Expired sessions identified by activity patterns
+- **Session Type Isolation**: Activity tracking respects session type boundaries
 
 **Section sources**
 - [session_service.py:72-102](file://products/agent-platform/src/agent_service/services/session_service.py#L72-L102)
@@ -476,8 +537,9 @@ Comprehensive activity monitoring enables better session management:
 
 ## HITL Confirmation Integration
 
-### Confirmation Registry
-The HITL confirmation system manages human-in-the-loop workflows:
+### Enhanced Confirmation Registry with Session Type Support
+
+The HITL confirmation system manages human-in-the-loop workflows with session type awareness:
 
 ```mermaid
 stateDiagram-v2
@@ -492,21 +554,25 @@ Resolved --> [*]
 **Diagram sources**
 - [hitl_confirmations.py:34-57](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L57)
 
-### Pending Confirmation Handling
-Enhanced session operations integrate HITL confirmation status:
+### Enhanced Pending Confirmation Handling
+
+Enhanced session operations integrate HITL confirmation status with session type support:
 
 - **Prevention of New Turns**: Sessions with parked confirmations reject new messages (409)
 - **Deletion Protection**: Sessions with pending confirmations cannot be deleted (409)
 - **Status Exposure**: `pending_confirmation` field indicates HITL state
 - **TTL Management**: Automatic expiration handling with proper cleanup
+- **Session Type Isolation**: HITL confirmations respect session type boundaries
 
-### Confirmation Resolution
-Robust confirmation lifecycle management:
+### Enhanced Confirmation Resolution
+
+Robust confirmation lifecycle management with workspace mode support:
 
 - **Single Flight Guarantees**: Prevents duplicate confirmations
 - **Owner Validation**: Only session owners can resolve confirmations
 - **Timeout Handling**: Proper expiry with user notification
 - **State Consistency**: Ensures confirmation state matches actual workflow
+- **Session Type Context**: Confirmations work consistently across operation and development modes
 
 **Section sources**
 - [hitl_confirmations.py:93-229](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L93-L229)
@@ -514,8 +580,9 @@ Robust confirmation lifecycle management:
 
 ## Transcript Reconstruction
 
-### Best-Effort Transcript Extraction
-The transcript reconstruction system provides conversation history:
+### Enhanced Best-Effort Transcript Extraction
+
+The transcript reconstruction system provides conversation history with session type awareness:
 
 ```mermaid
 flowchart TD
@@ -535,21 +602,25 @@ ReturnEmpty --> End([No Transcript])
 **Diagram sources**
 - [session_transcript.py:30-65](file://products/agent-platform/src/agent_service/services/session_transcript.py#L30-L65)
 
-### Transcript Format
-Reconstructed transcripts follow a standardized format:
+### Enhanced Transcript Format
+
+Reconstructed transcripts follow a standardized format with session type context:
 
 - **Role-Based Structure**: Each turn contains `role` and `content` fields
 - **Content Flattening**: Complex message structures flattened to text
 - **Timestamp Inclusion**: Optional `created_at` timestamps when available
 - **Quality Indicators**: `transcript_available` flag indicates reconstruction success
+- **Session Type Context**: Transcripts work consistently across operation and development modes
 
-### Limitations and Fallbacks
-Robust error handling ensures reliability:
+### Enhanced Limitations and Fallbacks
+
+Robust error handling ensures reliability across workspace modes:
 
 - **Missing State**: Returns empty transcript when state unavailable
 - **Corrupt Data**: Gracefully handles malformed JSON or unexpected formats
 - **Unknown Shapes**: Skips unrecognized message structures
 - **Tool/Event Filtering**: Excludes non-conversation content from transcripts
+- **Session Type Isolation**: Transcript extraction respects session type boundaries
 
 **Section sources**
 - [session_transcript.py:1-83](file://products/agent-platform/src/agent_service/services/session_transcript.py#L1-L83)
@@ -557,8 +628,9 @@ Robust error handling ensures reliability:
 
 ## Redis Backend Configuration
 
-### Connection Setup
-Redis backend configuration supports multiple deployment scenarios with enhanced workspace features:
+### Enhanced Connection Setup with Session Type Support
+
+Redis backend configuration supports multiple deployment scenarios with enhanced workspace features and session type discrimination:
 
 ```mermaid
 graph TB
@@ -571,6 +643,7 @@ subgraph "Application"
 App[Session Store]
 Cache[Connection Pool]
 Workspace[Workspace Cache]
+TypeFilter[Session Type Filter]
 end
 subgraph "Configuration"
 Config[Config File]
@@ -583,55 +656,68 @@ Cache --> R1
 Cache --> R2
 Cache --> R3
 Workspace --> Cache
+TypeFilter --> Cache
 ```
 
 **Diagram sources**
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 
-### Enhanced Key Naming Convention
-Redis keys now include workspace metadata:
+### Enhanced Key Naming Convention with Session Type
 
-- `session:{user_id}:{session_id}` - Main session data with workspace info
-- `session:metadata:{session_id}` - Session metadata including title and activity
+Redis keys now include workspace metadata and session type information:
+
+- `session:{user_id}:{session_id}` - Main session data with workspace info and session type
+- `session:metadata:{session_id}` - Session metadata including title, activity, and session type
 - `session:events:{session_id}` - Session event log
-- `session:index:user:{user_id}` - User session index with activity sorting
+- `session:index:user:{user_id}` - User session index with activity sorting and session type
 - `session:lock:{session_id}` - Distributed locking for workspace operations
+- `session:type:{session_id}` - Session type cache for fast filtering
 
-### Performance Optimization
-Redis backend includes workspace-specific optimizations:
+### Enhanced Performance Optimization
+
+Redis backend includes workspace-specific optimizations with session type support:
 
 - **Connection Pooling**: Reuses connections for better throughput
 - **Pipeline Operations**: Batch operations reduce network overhead
 - **Serialization**: Efficient JSON serialization with compression
 - **Caching**: Local caching layer for frequently accessed workspace data
 - **Monitoring**: Health checks and metrics collection for workspace operations
+- **Session Type Indexing**: Optimized indexing for session type filtering
+- **Type-Aware Queries**: Efficient server-side filtering by session type
 
 **Section sources**
 - [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
 
 ## Performance Considerations
 
-### Scalability Patterns
-The enhanced session management system supports horizontal scaling:
+### Enhanced Scalability Patterns
+
+The enhanced session management system supports horizontal scaling with workspace mode separation:
 
 - **Stateless API Layer**: Multiple gateway instances behind load balancer
 - **Distributed Storage**: Redis cluster for consistent state across nodes
 - **Connection Pooling**: Optimized database and cache connections
 - **Async Processing**: Non-blocking operations for better throughput
 - **Workspace Caching**: Local caching for frequently accessed session metadata
+- **Session Type Indexing**: Optimized indexing for fast session type filtering
+- **Dual Authorization Caching**: Cached permission checks for development sessions
 
-### Monitoring & Metrics
-Key performance indicators include workspace-specific metrics:
+### Enhanced Monitoring & Metrics
 
-- **Session Creation Time**: Average time to create new sessions
-- **List Performance**: Time complexity for session listing operations
+Key performance indicators include workspace-specific metrics with session type support:
+
+- **Session Creation Time**: Average time to create new sessions (by type)
+- **List Performance**: Time complexity for session listing operations (with filters)
 - **Transcript Reconstruction**: Performance of conversation history extraction
 - **HITL Registry Size**: Memory usage for pending confirmations
 - **Memory Usage**: Redis memory consumption trends
 - **Error Rates**: Failure rates for session operations
-- **Throughput**: Sessions created/updated per second
+- **Throughput**: Sessions created/updated per second (by type)
+- **Authorization Latency**: Time for dual authorization checks
+- **Filter Performance**: Query performance for session type filtering
 
-### Optimization Recommendations
+### Enhanced Optimization Recommendations
+
 - Use connection pooling for Redis connections
 - Implement request batching for bulk operations
 - Enable compression for large session payloads
@@ -639,10 +725,13 @@ Key performance indicators include workspace-specific metrics:
 - Monitor and tune Redis memory limits
 - Optimize transcript extraction for large conversation histories
 - Cache workspace metadata to reduce database queries
+- Implement session type-specific indexes for faster filtering
+- Cache dual authorization results for development sessions
+- Optimize query patterns for session type filtering
 
 ## Troubleshooting Guide
 
-### Common Issues
+### Enhanced Common Issues with Session Type Support
 
 #### Connection Problems
 - **Symptoms**: Timeout errors, connection refused
@@ -659,6 +748,16 @@ Key performance indicators include workspace-specific metrics:
 - **Causes**: Incorrect session ID, deleted sessions, wrong user context
 - **Solutions**: Verify session ID format, check session existence, validate user ownership
 
+#### Session Type Filtering Issues
+- **Symptoms**: 422 Unprocessable Entity errors, incorrect session filtering
+- **Causes**: Invalid session_type parameter, unknown session type values
+- **Solutions**: Validate session_type enum values ("operation" | "development"), check query parameters
+
+#### Dual Authorization Problems
+- **Symptoms**: 403 Forbidden errors for development session creation
+- **Causes**: Missing session:skill_graduate permission for development sessions
+- **Solutions**: Verify both session:create and session:skill_graduate permissions for development sessions
+
 #### HITL Confirmation Issues
 - **Symptoms**: 409 Conflict errors, stuck confirmations
 - **Causes**: Pending confirmations blocking operations, expired confirmations
@@ -667,14 +766,17 @@ Key performance indicators include workspace-specific metrics:
 #### Performance Issues
 - **Symptoms**: Slow response times, high memory usage
 - **Causes**: Large session payloads, inefficient queries, resource exhaustion
-- **Solutions**: Optimize payload size, review query patterns, scale resources
+- **Solutions**: Optimize payload size, review query patterns, scale resources, optimize session type filtering
 
-### Debugging Tools
+### Enhanced Debugging Tools
+
 - **Health Check Endpoints**: `/api/v2/health` for service status
 - **Metrics Export**: Prometheus-compatible metrics endpoint
 - **Structured Logging**: JSON-formatted logs with correlation IDs
 - **Trace Collection**: Distributed tracing for request flow analysis
 - **HITL Registry Inspection**: Tools to inspect pending confirmations
+- **Session Type Audit Logs**: Logs showing session type assignments and filtering
+- **Authorization Audit Logs**: Logs showing dual authorization checks for development sessions
 
 **Section sources**
 - [routes.py:425-457](file://products/agent-platform/src/agent_service/api/v2/routes.py#L425-L457)
@@ -682,14 +784,17 @@ Key performance indicators include workspace-specific metrics:
 
 ## Conclusion
 
-The enhanced Session Management API provides a robust, scalable foundation for managing agent sessions in distributed AI applications with comprehensive multi-session workspace capabilities. The v2 endpoints introduce significant improvements including session listing, deletion, transcript reconstruction, and integrated HITL confirmation workflows. With comprehensive authentication, flexible storage backends, automated lifecycle management, and workspace features, it enables reliable session state persistence across diverse deployment scenarios.
+The enhanced Session Management API provides a robust, scalable foundation for managing agent sessions in distributed AI applications with comprehensive multi-session workspace capabilities and session type discrimination. The v2 endpoints introduce significant improvements including session listing, deletion, transcript reconstruction, integrated HITL confirmation workflows, and dual authorization support for development sessions. With comprehensive authentication, flexible storage backends, automated lifecycle management, workspace features, and session type isolation, it enables reliable session state persistence across diverse deployment scenarios.
 
 Key enhancements include:
+- **Session Type Discrimination**: Immutable `session_type` field distinguishing operation and development sessions
+- **Dual Authorization**: Enhanced security requiring both `session:create` and `session:skill_graduate` for development sessions
+- **Server-Side Filtering**: Bounded enum validation for efficient session type filtering
 - **Multi-Session Workspace**: Complete session lifecycle management with listing and deletion
 - **HITL Integration**: Robust human-in-the-loop confirmation workflows with safety guarantees
 - **Transcript Reconstruction**: Best-effort conversation history extraction for session viewing
 - **Enhanced Security**: Improved authorization with new session management permissions
-- **Workspace Features**: Title management, activity tracking, and session organization
+- **Workspace Features**: Title management, activity tracking, and session organization with type isolation
 - **Scalability**: Horizontal scaling with Redis backend and optimized caching
 
-The system is designed to support both simple single-instance deployments and complex distributed architectures, making it suitable for a wide range of AI application requirements while maintaining strong security, performance, and reliability characteristics.
+The system is designed to support both simple single-instance deployments and complex distributed architectures, making it suitable for a wide range of AI application requirements while maintaining strong security, performance, and reliability characteristics with enhanced workspace mode separation and dual authorization support.
