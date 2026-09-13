@@ -7,6 +7,37 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-13-post-release-review-studio-panel-refresh.md`
+  - patch (v0.37.1) closing the in-depth **code and documentation review** of
+    the v0.37.0 Studio split. All six of SPEC-056's load-bearing invariants were
+    re-derived from shipped source rather than from the delivery's own claims
+    and every one holds — birth-fixed `session_type` with no setter, the list
+    scope enforced in the SQL `WHERE` clause, the create route dual-gating on the
+    pre-existing `session:skill_graduate` with no policy or bundle drift, `mode`
+    never reaching the stream, masking or HITL paths, the OQ-2 backfill deferring
+    its relation reference inside the PL/pgSQL `EXECUTE`, and development
+    sessions excluded from shift material by both the picker scope and a
+    structural 400. One behavioural regression the split introduced is fixed:
+    SPEC-034 R-2's inbox decision callback still refreshed only the *operation*
+    workspace, so a decision on a development session left the Studio panel's
+    **awaiting approval** tag stale until the next 30s poll. The path is
+    reachable rather than theoretical — `APPROVAL_DECIDER_ROLES` is a subset of
+    `STUDIO_ROLES`, and `effective_self_approval` defaults to *permitting*
+    self-approval at `tier_1` while forbidding it at `tier_2`, so a decider can
+    resolve a `tier_1` card on a development session of their own; browser
+    mutations are `tier_2` and were never affected, so the blast radius is one
+    amber tag living up to 30s too long, cosmetic and self-healing. Both
+    instances now refresh, the second call being inert whenever the development
+    instance was never enabled, and a regression test written first fails
+    against the previous form. Also retires two surviving copies of the
+    in-place-promotion wording v0.37.0 had corrected only in the walkthrough
+    (`declare_skill_target`'s route docstring and `test_skill_graduation.py`'s
+    module docstring, both docstring-only) and corrects three `studio-guide.md`
+    claims that had drifted from the shipped portal — what the mode actually
+    fixes, two workspace instances rather than five, and a missing **Studio**
+    entry also meaning signed-out. No contract, policy, schema, audit, migration
+    or knob change: the stream contract stays at v11 and Skill at v2, and the
+    other seven products move on version lockstep only.
 - `2026-09-13-studio-skill-development-workspace.md`
   - release train (v0.37.0) delivering SPEC-056, the eighteenth R5 slice: the
     portal's one **Chat** entry splits into **Chat** (*operation* sessions) and a

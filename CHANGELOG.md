@@ -11,6 +11,79 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.37.1 — 2026-09-13
+
+Patch closing the in-depth **code and documentation review** that followed the
+0.37.0 delivery. The review re-derived all six of SPEC-056's load-bearing
+invariants from shipped source rather than from the delivery's own claims and
+found every one holding — `session_type` is still written exactly once at birth
+with no setter on any store protocol, the list scope is still enforced in the
+SQL `WHERE` clause, the gateway still dual-gates on the pre-existing
+`session:skill_graduate` with no policy or bundle drift, `mode` still never
+reaches the stream, masking or HITL paths, and the OQ-2 backfill still defers
+its `authoring_trace_target` reference inside the PL/pgSQL `EXECUTE`. It
+surfaced one behavioural regression the split introduced in the portal, plus
+three documentation defects of the same class that 0.37.0's own docs pass had
+only partially retired. No credential leak, and no contract, policy, schema or
+audit change: the stream contract stays at v11 and Skill at v2.
+
+### Fixed
+
+- **An approvals-inbox decision now refreshes the Studio session panel as well
+  as Chat's** — SPEC-034 R-2 wired the inbox's decision callback so a decision
+  refreshes the session panel immediately instead of at the next 30s poll tick.
+  It was written when App owned **one** workspace covering every session;
+  SPEC-056 split that into two mode-scoped instances and left the callback
+  refreshing only the operation one, so a decision on a *development* session no
+  longer cleared the Studio panel's amber **awaiting approval** tag until the
+  next poll. The path is reachable, not theoretical: the tag derives from the
+  session list's `pending_confirmation` flag, `APPROVAL_DECIDER_ROLES`
+  (`approver`, `platform-admin`) is a subset of `STUDIO_ROLES` so every decider
+  can own a development session, and `policy_engine.effective_self_approval`
+  defaults to *permitting* self-approval at **tier_1** while forbidding it at
+  tier_2 — so a decider resolving a tier_1 card on a development session of
+  their own fires `onDecisionApplied` in their own browser. Browser mutations
+  are tier_2 and were never affected, so the blast radius was one amber tag
+  living up to 30s too long: cosmetic and self-healing, with no effect on the
+  trust path. Both instances now refresh; `developmentWorkspace.refresh()` is
+  inert outside the Studio roles and while signed out, because `refresh()`
+  clears its list and returns before fetching when the instance was never
+  enabled. A regression test captures the callback App hands
+  `useApprovalsInbox` and asserts both stubs' `refresh` fire exactly once per
+  decider role, and fails against the previous form.
+
+### Documented
+
+- **The removed in-place promotion no longer survives in code docstrings** —
+  0.37.0 corrected the wording in the graduation walkthrough but left two
+  copies standing in the agent-platform. `declare_skill_target`'s route
+  docstring called itself "the path for a session that *becomes* a development
+  session after it was opened", which is exactly the capability R-1 removed; it
+  now agrees with the sibling `create_session` docstring that 0.37.0 had
+  already corrected — the endpoint serves a *development* session opened
+  unscoped, and "declare a target" is not "become a development session".
+  `tests/test_skill_graduation.py`'s module docstring repeated the claim. Both
+  are docstring-only, and the route has never written `session_type`, which is
+  why the wording was harmless enough to survive a delivery review and why it
+  was worth removing before someone reads it as a guarantee the code does not
+  make. A repo-wide sweep for the phrasing now returns only negated uses.
+- **Three `studio-guide.md` claims corrected against the shipped portal** — the
+  guide landed in 0.37.0 and three of its statements had drifted from what it
+  documents. It claimed the two entries "differ in exactly three things: the
+  type of session they create, the session list they show, and the authoring
+  controls they offer", taking its "exactly three" from `useSessionWorkspace.ts`
+  while naming the wrong third item: the mode fixes the birth `session_type`,
+  the list scope and the *active-session key namespace*, whereas the
+  authoring-control split is a separate conditional in `ChatView` and the
+  namespace was missing entirely — and "exactly" contradicted the guide's own
+  seven-row comparison table. It described Chat, Studio, Incidents, Documents
+  and Settings as each keeping "their own view of the world", implying five
+  workspaces where App creates two and the operation instance is *reused* by
+  the other three. And it attributed a missing **Studio** entry solely to a
+  missing `session:skill_graduate` grant, missing that `studioVisible` is
+  `signedIn && hasAnyRole(...)`, so being signed out hides it too — corrected in
+  the prose and in the matching troubleshooting row.
+
 ## 0.37.0 — 2026-09-13
 
 Release train delivering **SPEC-056 — Studio, a dedicated skill-development
