@@ -14,10 +14,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { type ViewId } from "../App";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
 
-const { mockUseAuth, mockUseSessionWorkspace } = vi.hoisted(() => ({
-  mockUseAuth: vi.fn(),
-  mockUseSessionWorkspace: vi.fn(),
-}));
+const { mockUseAuth, mockUseSessionWorkspace, inboxCallback } = vi.hoisted(
+  () => ({
+    mockUseAuth: vi.fn(),
+    mockUseSessionWorkspace: vi.fn(),
+    // SPEC-034 R-2's callback: App owns it, and it is what must refresh the
+    // session panel the moment a decision lands. Captured here so the wiring
+    // test can invoke it without rendering the real inbox.
+    inboxCallback: { current: undefined as (() => void) | undefined },
+  }),
+);
 
 vi.mock("../auth/AuthContext", () => ({ useAuth: mockUseAuth }));
 
@@ -27,8 +33,12 @@ vi.mock("../sessions/useSessionWorkspace", () => ({
 
 vi.mock("../views/control/ApprovalsView", () => ({
   default: () => <div data-testid="approvals-view" />,
-  // The inbox poll is App-owned; stub the count so the badge is inert.
-  useApprovalsInbox: () => ({ pendingCount: 0 }),
+  // The inbox poll is App-owned; stub the count so the badge is inert and keep
+  // the decision callback for the refresh-wiring test.
+  useApprovalsInbox: (_enabled: boolean, onDecisionApplied?: () => void) => {
+    inboxCallback.current = onDecisionApplied;
+    return { pendingCount: 0 };
+  },
 }));
 
 vi.mock("../chat/ChatView", () => ({
@@ -141,6 +151,7 @@ async function navigateTo(label: string) {
 beforeEach(() => {
   mockUseAuth.mockReset();
   mockUseSessionWorkspace.mockReset();
+  inboxCallback.current = undefined;
   mockUseSessionWorkspace.mockImplementation(
     (_authenticated: boolean, mode?: string) =>
       mode === "development" ? developmentStub : operationStub,
@@ -223,6 +234,35 @@ describe("App workspaces — two mode-scoped instances (SPEC-056 R-2, plan §7)"
     expect(mockUseSessionWorkspace).toHaveBeenCalledWith(false, "operation");
     expect(mockUseSessionWorkspace).toHaveBeenCalledWith(false, "development");
   });
+});
+
+// SPEC-034 R-2 predates the split, when one workspace covered every session.
+// Since SPEC-056 there are two, so "refresh the session panel immediately" has
+// to name both — otherwise a decision on a development session leaves the
+// Studio panel's "awaiting approval" tag stale until the next 30s poll. The
+// decider roles are exactly a subset of the Studio roles, and tier_1 permits
+// self-approval (tier_2 forbids it), so an approver can resolve a card on a
+// development session of their own: the path is reachable, not theoretical.
+describe("App inbox wiring — a decision refreshes BOTH workspaces (SPEC-034 R-2)", () => {
+  it.each(["approver", "platform-admin"])(
+    "refreshes the operation and the development workspace for %s",
+    (role) => {
+      signIn([role]);
+      render(<App />);
+      expect(inboxCallback.current).toBeTypeOf("function");
+      // The stubs are module-level, so clear whatever earlier renders left on
+      // them and assert on this invocation alone.
+      vi.mocked(operationStub.refresh).mockClear();
+      vi.mocked(developmentStub.refresh).mockClear();
+
+      act(() => {
+        inboxCallback.current?.();
+      });
+
+      expect(operationStub.refresh).toHaveBeenCalledTimes(1);
+      expect(developmentStub.refresh).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe("App view wiring (SPEC-056 R-2 / R-4 / R-5)", () => {

@@ -324,10 +324,20 @@ export default function App() {
   );
   // SPEC-031 R-5: one inbox poll per signed-in decider; the sidebar badge
   // and the Approvals view share this state. SPEC-034 R-2: a decision
-  // applied from the inbox refreshes the session panel immediately.
+  // applied from the inbox refreshes the session panel immediately — which
+  // since SPEC-056 means *both* panels. The decider roles are a subset of
+  // the Studio roles and tier_1 permits self-approval (tier_2 forbids it),
+  // so a decider can resolve a card on a development session of their own;
+  // refreshing only the operation instance would leave the Studio panel's
+  // "awaiting approval" tag stale until the next 30s poll.
   const approvals = useApprovalsInbox(
     Boolean(username) && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
-    () => void operationWorkspace.refresh(),
+    () => {
+      void operationWorkspace.refresh();
+      // Safe for a non-Studio or signed-out state: refresh() clears its list
+      // and returns before fetching when the instance was never enabled.
+      void developmentWorkspace.refresh();
+    },
   );
 
   const navigate = (view: ViewId) => {
