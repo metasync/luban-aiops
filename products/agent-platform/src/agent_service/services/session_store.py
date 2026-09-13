@@ -45,18 +45,41 @@ _USER_SESSIONS_KEY_PREFIX = "user_sessions:"
 
 @runtime_checkable
 class SessionStore(Protocol):
-    """Public interface for session storage backends."""
+    """Public interface for session storage backends.
+
+    SPEC-056 R-1: ``session_type`` is a **birth property** — the create path is
+    its only writer, so the Protocol deliberately exposes no setter for it. A
+    session's type is never promoted, demoted or converted in place, and the
+    SPEC-055 declare-target path (the one place an operator re-scopes a live
+    session) writes the authoring-trace target row and never this field.
+    """
 
     @property
     def backend_name(self) -> str: ...
 
     def create_session(
-        self, user_id: str | None, session_id: str | None = None
+        self,
+        user_id: str | None,
+        session_id: str | None = None,
+        session_type: str = "operation",
     ) -> SessionRecord: ...
 
     def get_session(self, session_id: str) -> SessionRecord | None: ...
 
-    def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]: ...
+    def list_sessions_by_user(
+        self, user_id: str, session_type: str | None = None
+    ) -> list[SessionRecord]:
+        """The caller's sessions, optionally scoped to one ``session_type``.
+
+        SPEC-056 R-2/R-4: the filter is **additive and optional** — omitted
+        returns every row exactly as before, so a caller that does not send it
+        sees legacy behavior. Ownership scoping is unchanged, which is what
+        keeps the anti-enumeration posture intact. The Postgres backend
+        additionally takes a server-side ``limit`` (its own cap), applied there
+        rather than here so the other backends keep returning everything and
+        let the service layer sort before capping.
+        """
+        ...
 
     def delete_session(self, session_id: str) -> bool: ...
 
@@ -138,7 +161,10 @@ class InMemorySessionStore:
             self._last_accessed.pop(oldest_id, None)
 
     def create_session(
-        self, user_id: str | None, session_id: str | None = None
+        self,
+        user_id: str | None,
+        session_id: str | None = None,
+        session_type: str = "operation",
     ) -> SessionRecord:
         now = time.monotonic()
         self._purge_expired(now)
@@ -147,6 +173,7 @@ class InMemorySessionStore:
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
             last_active_at=datetime.now(timezone.utc),
+            session_type=session_type,
         )
         self._sessions[record.session_id] = record
         self._last_accessed[record.session_id] = now
@@ -161,13 +188,16 @@ class InMemorySessionStore:
             self._last_accessed[session_id] = now
         return record
 
-    def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]:
+    def list_sessions_by_user(
+        self, user_id: str, session_type: str | None = None
+    ) -> list[SessionRecord]:
         now = time.monotonic()
         self._purge_expired(now)
         return [
             record
             for record in self._sessions.values()
             if record.user_id == user_id
+            and (session_type is None or record.session_type == session_type)
         ]
 
     def delete_session(self, session_id: str) -> bool:
@@ -253,13 +283,17 @@ class RedisSessionStore:
             return None
 
     def create_session(
-        self, user_id: str | None, session_id: str | None = None
+        self,
+        user_id: str | None,
+        session_id: str | None = None,
+        session_type: str = "operation",
     ) -> SessionRecord:
         record = SessionRecord(
             session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
             last_active_at=datetime.now(timezone.utc),
+            session_type=session_type,
         )
         key = self._session_key(record.session_id)
         try:
@@ -305,7 +339,9 @@ class RedisSessionStore:
         )
         self._client.expire(title_key, self.ttl_seconds)
 
-    def list_sessions_by_user(self, user_id: str) -> list[SessionRecord]:
+    def list_sessions_by_user(
+        self, user_id: str, session_type: str | None = None
+    ) -> list[SessionRecord]:
         try:
             session_ids = self._client.zrangebyscore(
                 self._user_key(user_id), "-inf", "+inf"
@@ -314,8 +350,14 @@ class RedisSessionStore:
             for sid_bytes in session_ids:
                 sid = sid_bytes if isinstance(sid_bytes, str) else sid_bytes.decode()
                 record = self.get_session(sid)
-                if record is not None:
-                    results.append(record)
+                if record is None:
+                    continue
+                # SPEC-056 R-2: the scope is applied on the deserialized record,
+                # so a blob written before the field existed reads back as the
+                # Pydantic default (``operation``) and is never dropped.
+                if session_type is not None and record.session_type != session_type:
+                    continue
+                results.append(record)
             return results
         except Exception:
             record_session_store_error("list")
@@ -448,7 +490,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     last_accessed_at TIMESTAMPTZ NOT NULL,
     title            TEXT,
     last_active_at   TIMESTAMPTZ,
-    model            TEXT
+    model            TEXT,
+    session_type     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user
     ON sessions (user_id);
@@ -460,6 +503,43 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
 -- SPEC-024 R-3: pinned model id per session (Q-4 affinity home).
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS model TEXT;
+-- SPEC-056 R-1: the birth-entry discriminator (Chat = operation, Studio =
+-- development). Nullable and additive exactly like title/last_active_at/model
+-- above: the default is carried by the Pydantic model, not by the DB, and
+-- leaving legacy rows NULL is what gives the OQ-2 inference below an
+-- idempotency handle. New rows are never NULL — the INSERT sets the column.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_type TEXT;
+-- SPEC-056 OQ-2: classify every legacy row once. A session that already holds
+-- a declared authoring-trace target is development work (defaulting it to
+-- operation would mis-file it into the shift-summary picker R-4 exists to
+-- protect); everything else is operational. NULL-keyed, so a re-run finds no
+-- row to touch. Ordering: the authoring-trace store is built before this one
+-- (session_service imports it first), so in practice the table is present and
+-- the inference is exact rather than conservative.
+--
+-- The guard is a DO block with dynamic EXECUTE, and the indirection is
+-- load-bearing rather than stylistic: ``to_regclass('authoring_trace_target')``
+-- sitting in a plain UPDATE's WHERE clause does **not** protect the statement,
+-- because PostgreSQL resolves the relation inside the ``IN (SELECT ... FROM
+-- authoring_trace_target)`` subquery at parse-analysis time, before any
+-- predicate is evaluated. A cluster whose SPEC-055 authoring-trace DDL had not
+-- run would therefore abort the whole schema bootstrap with "relation
+-- authoring_trace_target does not exist" instead of skipping the inference --
+-- a hard startup failure in exactly the situation the guard exists for.
+-- Deferring the text into EXECUTE moves that resolution inside the IF, which is
+-- what makes the guard real.
+DO $$
+BEGIN
+    IF to_regclass('authoring_trace_target') IS NOT NULL THEN
+        EXECUTE $q$
+            UPDATE sessions SET session_type = 'development'
+             WHERE session_type IS NULL
+               AND session_id IN (SELECT session_id FROM authoring_trace_target)
+        $q$;
+    END IF;
+END
+$$;
+UPDATE sessions SET session_type = 'operation' WHERE session_type IS NULL;
 """
 
 _NOT_EXPIRED = (
@@ -470,13 +550,24 @@ _NOT_EXPIRED = (
 # been swept yet, and no-op against a live conflicting row. The no-op case
 # keeps create_named_session's post-create re-read authoritative (foreign
 # owner surfaces as 404 instead of a UniqueViolation 500).
+#
+# SPEC-056 R-1 / plan §6: ``session_type = EXCLUDED.session_type`` belongs in
+# the reclaim branch because reclaiming an *expired* row is a fresh creation —
+# the old session is gone — so it is born with the new caller's type. A **live**
+# conflicting row (the SPEC-015 R-3 idempotent re-triage of a named session)
+# keeps its birth type, because the WHERE guard makes the whole DO UPDATE a
+# no-op. That guard is the immutability boundary: no code path rewrites the type
+# of a session that still exists.
 _INSERT_SESSION = """
-INSERT INTO sessions (session_id, user_id, created_at, last_accessed_at)
-VALUES (%(session_id)s, %(user_id)s, %(created_at)s, %(created_at)s)
+INSERT INTO sessions (session_id, user_id, created_at, last_accessed_at,
+                      session_type)
+VALUES (%(session_id)s, %(user_id)s, %(created_at)s, %(created_at)s,
+        %(session_type)s)
 ON CONFLICT (session_id) DO UPDATE
    SET user_id = EXCLUDED.user_id,
        created_at = EXCLUDED.created_at,
-       last_accessed_at = EXCLUDED.last_accessed_at
+       last_accessed_at = EXCLUDED.last_accessed_at,
+       session_type = EXCLUDED.session_type
  WHERE sessions.last_accessed_at <= now() - make_interval(secs => %(ttl_seconds)s)
 """
 
@@ -485,13 +576,24 @@ _GET_SESSION = f"""
 UPDATE sessions
    SET last_accessed_at = now()
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
-RETURNING session_id, user_id, created_at, title, last_active_at, model
+RETURNING session_id, user_id, created_at, title, last_active_at, model,
+          session_type
 """
 
+# SPEC-056 R-2/R-4: the optional ``session_type`` scope rides the same query as
+# a NULL-tolerant predicate, so an omitted filter is byte-for-byte the legacy
+# behavior and a supplied one narrows server-side — which is what makes the
+# shift-summary picker's scope uncoercible from the client. COALESCE means a
+# NULL row (impossible after the OQ-2 backfill, but harmless if one appeared)
+# reads as ``operation``, matching the row mappers, so pre-SPEC-056 work is
+# never falsely excluded from operational listings.
 _LIST_USER_SESSIONS = f"""
-SELECT session_id, user_id, created_at, title, last_active_at, model
+SELECT session_id, user_id, created_at, title, last_active_at, model,
+       session_type
   FROM sessions
  WHERE user_id = %(user_id)s AND {_NOT_EXPIRED}
+   AND (%(session_type)s::text IS NULL
+        OR COALESCE(session_type, 'operation') = %(session_type)s::text)
  ORDER BY COALESCE(last_active_at, created_at) DESC
  LIMIT %(limit)s
 """
@@ -593,12 +695,16 @@ class PostgresSessionStore:
             conn.commit()
 
     def create_session(
-        self, user_id: str | None, session_id: str | None = None
+        self,
+        user_id: str | None,
+        session_id: str | None = None,
+        session_type: str = "operation",
     ) -> SessionRecord:
         record = SessionRecord(
             session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
+            session_type=session_type,
         )
         try:
             with self._connect() as conn:
@@ -609,6 +715,7 @@ class PostgresSessionStore:
                             "session_id": record.session_id,
                             "user_id": record.user_id,
                             "created_at": record.created_at,
+                            "session_type": record.session_type,
                             **self._ttl_params(),
                         },
                     )
@@ -650,10 +757,14 @@ class PostgresSessionStore:
             title=row[3],
             last_active_at=row[4],
             model=row[5],
+            # SPEC-056 R-1: defensive default so a NULL read — impossible once
+            # the OQ-2 backfill has run, but harmless if one ever appeared —
+            # degrades to ``operation`` rather than erroring.
+            session_type=row[6] or "operation",
         )
 
     def list_sessions_by_user(
-        self, user_id: str, limit: int = 50
+        self, user_id: str, limit: int = 50, session_type: str | None = None
     ) -> list[SessionRecord]:
         try:
             with self._connect() as conn:
@@ -663,6 +774,7 @@ class PostgresSessionStore:
                         {
                             "user_id": user_id,
                             "limit": limit,
+                            "session_type": session_type,
                             **self._ttl_params(),
                         },
                     )
@@ -679,6 +791,8 @@ class PostgresSessionStore:
                 title=row[3],
                 last_active_at=row[4],
                 model=row[5],
+                # Same defensive default as the single-row mapper above.
+                session_type=row[6] or "operation",
             )
             for row in rows
         ]

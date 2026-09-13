@@ -1,7 +1,8 @@
 // Documents view tests (SPEC-039 R-6, Workspace placement per SPEC-040
 // R-3): Mine/Published split with state badges, cross-owner attribution,
 // draft publish affordance, the create dialog (both document types per
-// SPEC-043 R-6), and the Markdown export (SPEC-040 R-4). The API module
+// SPEC-043 R-6), the shift-summary picker's operation scope (SPEC-056 R-4),
+// and the Markdown export (SPEC-040 R-4). The API module
 // is mocked; the gateway re-enforces the role matrix server-side
 // regardless of these client gates.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -23,12 +24,14 @@ const {
   mockGetDocument,
   mockCreateDocument,
   mockListIncidents,
+  mockListSessions,
   mockCurrentUser,
 } = vi.hoisted(() => ({
   mockListDocuments: vi.fn(),
   mockGetDocument: vi.fn(),
   mockCreateDocument: vi.fn(),
   mockListIncidents: vi.fn(),
+  mockListSessions: vi.fn(),
   mockCurrentUser: vi.fn(),
 }));
 
@@ -42,6 +45,13 @@ vi.mock("../../../api/documents", () => ({
 
 vi.mock("../../../api/incidents", () => ({
   listIncidents: mockListIncidents,
+}));
+
+// SPEC-056 R-4: mocked so the picker test can assert this view never fetches
+// a session list of its own — an unscoped `listSessions()` here would be
+// exactly the client-only filter R-4 rejects.
+vi.mock("../../../api/sessions", () => ({
+  listSessions: mockListSessions,
 }));
 
 vi.mock("../../../api/client", () => ({
@@ -402,6 +412,7 @@ const workspaceStub = {
       created_at: new Date().toISOString(),
       last_active_at: null,
       pending_confirmation: false,
+      session_type: "operation",
     },
   ],
   loading: false,
@@ -422,6 +433,8 @@ beforeEach(() => {
   mockCreateDocument.mockReset();
   mockListIncidents.mockReset();
   mockListIncidents.mockResolvedValue({ incidents: [], total: 0 });
+  mockListSessions.mockReset();
+  mockListSessions.mockResolvedValue([]);
   // The drawer fetches the full document through the audited single
   // read (list rows are envelope-only); default resolves the owner draft.
   mockGetDocument.mockImplementation(async (id: string) =>
@@ -581,6 +594,99 @@ describe("DocumentsView list (SPEC-039 R-6)", () => {
     expect(screen.getByText("Handover")).toBeTruthy();
     expect(screen.getByText("Digest data")).toBeTruthy();
     expect(screen.getAllByText(/Quiet shift/).length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("DocumentsView shift-summary picker scope (SPEC-056 R-4)", () => {
+  // What the operation-scoped workspace carries: the rows
+  // `GET /api/v1/sessions?session_type=operation` returned. A Studio session is
+  // absent because the *server* never returned it — not because this view
+  // filtered an unscoped list client-side, which is the posture R-4 rejects.
+  const operationScopedWorkspace = {
+    ...workspaceStub,
+    sessions: [
+      {
+        session_id: "ses-op-1",
+        title: "check the pods",
+        created_at: new Date().toISOString(),
+        last_active_at: null,
+        pending_confirmation: false,
+        session_type: "operation",
+      },
+      {
+        session_id: "ses-op-2",
+        title: "queue backlog triage",
+        created_at: new Date().toISOString(),
+        last_active_at: null,
+        pending_confirmation: true,
+        session_type: "operation",
+      },
+    ],
+  } as unknown as SessionWorkspace;
+
+  async function openPicker() {
+    mockListDocuments.mockResolvedValue([]);
+    render(<DocumentsView workspace={operationScopedWorkspace} />);
+    await flush();
+    fireEvent.click(screen.getByText("New document"));
+    // Shift summary is the default document type, so the session picker leads.
+    expect(screen.getByText("Your sessions")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    await flush();
+  }
+
+  it("offers exactly the operation sessions the workspace carries", async () => {
+    await openPicker();
+    expect(screen.getByText(/check the pods \(ses-op-1\)/)).toBeTruthy();
+    expect(screen.getByText(/queue backlog triage \(ses-op-2\)/)).toBeTruthy();
+    // A Studio session is never an option, and nothing else is offered either:
+    // the picker's source is the scoped list, verbatim.
+    expect(screen.queryByText(/ses-dev-1/)).toBeNull();
+    const options = document.querySelectorAll(".ant-select-item-option");
+    expect(options).toHaveLength(2);
+  });
+
+  it("never fetches a session list of its own", async () => {
+    await openPicker();
+    // The scope is enforced server-side by the workspace's list query; an
+    // unscoped fetch here would put development sessions back in reach of the
+    // picker (and R-4's create-path guard would then be the only door shut).
+    expect(mockListSessions).not.toHaveBeenCalled();
+  });
+
+  it("tells the operator a development session is not shift material", async () => {
+    mockListDocuments.mockResolvedValue([]);
+    render(<DocumentsView workspace={operationScopedWorkspace} />);
+    await flush();
+    fireEvent.click(screen.getByText("New document"));
+    expect(screen.getByText(/never shift material/)).toBeTruthy();
+  });
+
+  it("leaves the incident-report path anchored to incident_id", async () => {
+    mockListDocuments.mockResolvedValue([]);
+    mockListIncidents.mockResolvedValue({
+      incidents: [
+        {
+          incident_id: "inc-abc123",
+          title: "Payment API latency",
+          severity: "critical",
+          status: "triaged",
+          source: "webhook",
+          created_at: new Date().toISOString(),
+        },
+      ],
+      total: 1,
+    });
+    render(<DocumentsView workspace={operationScopedWorkspace} />);
+    await flush();
+    fireEvent.click(screen.getByText("New document"));
+    fireEvent.click(screen.getByText("Incident report"));
+    await flush();
+    // SPEC-043's anchor is untouched by R-4: no session picker, no session
+    // list, and the incident picker feeds from the incidents surface.
+    expect(screen.queryByText("Your sessions")).toBeNull();
+    expect(mockListSessions).not.toHaveBeenCalled();
+    expect(mockListIncidents).toHaveBeenCalled();
   });
 });
 

@@ -2,12 +2,13 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-12
 - approved: 2026-09-12
+- delivered: 2026-09-13 (v0.37.0)
 - release slice: R5 — Hardening and External Consumption (eighteenth R5
-  slice, targeting v0.37.0)
+  slice, v0.37.0)
 - related ADRs: **ADR-0009** (graduate troubleshooting sessions into
   replayable executable skills — Studio becomes the authoring home of the
   declare-target + graduate controls, whose behavior and trust model are
@@ -419,3 +420,108 @@ recorded in the changelog (the `approved`-spec rule).
   (`plan.md`/`tasks.md`) is authored next, not at approval; the multi-target
   follow-on (spawn bridge + composition + assisted trace-extraction) stays
   deferred to SPEC-057.
+- 2026-09-13: **delivered** (v0.37.0, eighteenth R5 slice). All seven
+  requirements shipped across the seven-stage plan; no requirement text
+  changed. **R-1** — the additive `session_type` enum (`operation` |
+  `development`, default `operation`) landed on `agent-session.schema.json`
+  **and** `agent-session-list.schema.json` and on every mirror atomically
+  (both agent Pydantic models, both gateway mirrors, the portal's session
+  interfaces and create body, the Postgres DDL), with a new **enum-value
+  parity** drift guard beside the existing property-set-equality ones; the
+  legacy unbound `session.schema.json` is untouched and there is no
+  stream-schema bump. The value is written once at birth — no setter exists on
+  any store protocol, the declare-target route never writes it,
+  `touch`/title/model updates never change it, and the Postgres upsert re-types
+  only in its expired-reclaim branch (a reclaim is a new session wearing an old
+  id, not a conversion). OQ-2 shipped as resolved: a nullable `ADD COLUMN IF
+  NOT EXISTS` plus an idempotent NULL-keyed inference from
+  `authoring_trace_target`, Postgres-only, run after the authoring-trace DDL.
+  **R-2** — each entry lists only its own type, scoped in the SQL `WHERE`
+  clause (`COALESCE(session_type, 'operation')`) so a client cannot coerce it,
+  over two mode-scoped `useSessionWorkspace` instances with per-mode
+  namespaced active-session keys and development polling gated on
+  `STUDIO_ROLES` (= `SKILL_GRADUATE_ROLES`). **R-3** — Design B placement:
+  Draft-as-skill stays in Chat, Declare-target + Graduate-as-skill move to
+  Studio, whose create dialog takes an *optional* target; no conversion in
+  either direction. **R-4** — the picker reads the operation-scoped workspace
+  and `build_digest` additionally rejects a `development` id with a new
+  structural `DevelopmentSessionRejected` → 400 through `create_document`,
+  raised after the foreign gate and before any fact is read; the incident-report
+  path is untouched and an `operation` session carrying a declared target is
+  still accepted. **R-5** — one `ChatView`; `mode` selects visible controls,
+  birth type and list scope, and is never threaded into the SSE stream, secret
+  masking or HITL path, pinned by rendering one fixed transcript in both modes
+  and comparing the surface byte-for-byte (with a companion asserting the
+  header *does* differ). **R-6** — the gateway create route dual-gates
+  `session:create` plus the existing `session:skill_graduate` for a development
+  session: no new policy action, no `policy-default.yaml`/`policy-scenarios.yaml`
+  change, no bundle content-hash bump, no new audit event type, and
+  `make policy-diff` reports zero transitions across all 138 (role, action)
+  pairs on both engines. **R-7** — no `samples/` demo ships (operator decision
+  at plan review: the split adds no backend capability or trust path that the
+  vitest + pytest + real-Postgres + live checks leave unexercised, so ADR-0008
+  rule 2 does not bind); the operator documentation is a new `## Studio` section
+  in `docs/guides/portal-user-guide.md` beside `## Chat`, plus the nav and
+  Documents-picker updates.
+  The delivery gate found **one real defect, in this spec's own migration, and
+  fixed it**: as first written the OQ-2 `to_regclass` guard was *decorative*.
+  It sat in the inference's own `WHERE` clause, and PostgreSQL resolves the
+  relation inside `IN (SELECT … FROM authoring_trace_target)` at
+  **parse-analysis time**, before any predicate is evaluated — so a cluster
+  whose SPEC-055 authoring-trace DDL had not run would have aborted the whole
+  schema bootstrap with `relation "authoring_trace_target" does not exist`
+  instead of skipping the inference: a hard pod-startup failure in exactly the
+  situation the guard existed for. The real-Postgres-16.14 check (the SPEC-055
+  `.sqlcheck` precedent, extracting the migration **verbatim** from
+  `session_store._SESSIONS_DDL` and running it inside one rolled-back
+  transaction) reproduced it at step 5. The inference now runs inside a
+  PL/pgSQL `DO` block with dynamic `EXECUTE`, so the reference resolves *inside*
+  the `IF`; the same DDL was then driven through the production psycopg path
+  (`DRIVER_CHECK=OK`), and `test_backfill_is_to_regclass_guarded` became
+  `test_backfill_guard_defers_the_relation_reference` — a structural assertion
+  that passes against the fixed form and fails against the pre-fix one. Neither
+  a fake driver (which never parses SQL) nor the original text match could see
+  this, which is the reason the gate item is a real-Postgres run rather than a
+  box-tick.
+  Shipped with `make verify` green (`VERIFY_EXIT=0`, **2616** product tests,
+  `OK: all product and portal versions match VERSION=0.37.0`), the portal suite
+  green (**400** tests / 32 files) with `npm run build` clean, and the deployed
+  0.37.0 confirmed live on dev-k8s: all nine products `1/1 READY` at `0`
+  restarts, `agent-service` bootstrapping the shipped DDL against the **real**
+  legacy `sessions` database six times over, with both real legacy rows
+  classified exactly as OQ-2 prescribes (declared target → `development`, none →
+  `operation`) and no row left NULL. The browser live check confirmed the nav
+  split per role (Studio present for `luban-operator`, absent for
+  `luban-developer` with Chat intact), the verbatim control split in each entry,
+  one-click Chat create vs Studio's target-optional dialog, the `403` naming
+  `session:skill_graduate` for a hand-crafted development create as a developer,
+  the operation-only picker, `400` for a development-session shift summary
+  against `201` for an operation one carrying a declared target, and live
+  immutability under declare-target. Because that pass could not drive the
+  composer (and was watching for a POST where the chat surface is an SSE GET),
+  R-5's shared core was compared at the protocol level instead — the stronger
+  form, since it compares the frames the portal renders from rather than pixels:
+  the same message and model streamed into a fresh `operation` and a fresh
+  `development` session emitted an **identical** frame vocabulary in both
+  (`message_delta`, `tool_call`, `tool_result`; 4 tool frames; 0 confirmation
+  frames — correct, read-tier tools park no card). Both existing web-check demos
+  kept their deterministic legs green (`GRADUATION_EXIT=0`,
+  `PASSWORD_RESET_EXIT=0`) and the graduation chat acts 1–3 passed live; act 4
+  (replay) failed on the deployment's default `qwen3:1.7b` model's tool
+  selection rather than on anything this spec touched — its session create
+  answered 200 born `operation` from an empty `{}` body, its stream answered 200
+  OK, no policy denial was logged on that path and agent-service logged zero
+  errors, and act 1 had exercised the identical stream/masking/HITL machinery on
+  an identical `operation` session minutes earlier on the same deployment.
+  Bookkeeping: the `docs/specs/README.md` row and the `delivery-roadmap.md` row
+  → `delivered`; `docs/adr/` untouched (no new ADR, ADR-0009 stays `accepted`,
+  Studio being the authoring home its declare-target + graduate controls now
+  live in); `docs/guides/configuration-reference.md` verified unchanged (no new
+  knob). RepoWiki pages were **skipped by operator decision** at the gate — the
+  cache is IDE-regenerated and hand-edits revert (the v0.36.3 known limitation).
+  The build box's clean-image half is deliberately deferred to a post-commit
+  rebuild + redeploy, because `IMAGE_TAG` derives `-dirty-<timestamp>` from a
+  non-empty `git status --porcelain` and so a clean tag is only reachable after
+  the delivery commit. The multi-target follow-on (Chat→Studio spawn bridge +
+  composition / runbook-of-skills + assisted trace-extraction) stays deferred to
+  SPEC-057 behind its composition-trust-model ADR + spike.

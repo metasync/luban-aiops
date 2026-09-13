@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
@@ -8,6 +8,7 @@ from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.schemas.api import (
     CreateSessionRequest,
     SessionTitleUpdateRequest,
+    SessionType,
     SkillTargetDeclareRequest,
 )
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
@@ -47,12 +48,26 @@ async def create_session_route(
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, ACTION_SESSION_CREATE, request_id)
+    if body.session_type == "development":
+        # SPEC-056 R-6 / OQ-1: opening a *development* session additionally
+        # requires the graduation grant — the SPEC-043/045 route-level
+        # dual-gate, on the **existing** ``session:skill_graduate`` action (no
+        # new policy vocabulary, no bundle change, no new audit event type). A
+        # non-authoring role (developer / read-only-observer / auditor) holds
+        # ``session:create`` but not ``session:skill_graduate``, so it can no
+        # longer open a dead-end Studio session it could never graduate. The
+        # gate lives here, at the policy boundary, because the agent v2 API
+        # holds no role information (identity is ``X-User-ID``).
+        enforce_policy(
+            settings, identity, ACTION_SESSION_SKILL_GRADUATE, request_id
+        )
     user_id = identity.username  # type: ignore[union-attr]
     response = await create_session(
         settings,
         request_id,
         user_id,
         body.skill_target,
+        body.session_type,
     )
     log_event(
         LOGGER,
@@ -64,6 +79,9 @@ async def create_session_route(
         # flag, never the target: a declared URL may carry a query string and
         # the gateway holds no normalization to strip it with.
         skill_target_declared=body.skill_target is not None,
+        # SPEC-056 R-1: the birth entry (``operation`` Chat / ``development``
+        # Studio). A discriminator, never a secret, so it rides the log.
+        session_type=body.session_type,
         authenticated=identity.subject != "dev",  # type: ignore[union-attr]
         roles=identity.roles,  # type: ignore[union-attr]
     )
@@ -87,14 +105,23 @@ async def create_session_route(
 async def list_sessions_route(
     request: Request,
     x_request_id: str | None = Header(default=None),
+    session_type: SessionType | None = Query(default=None),
     settings: PlatformGatewaySettings = Depends(get_settings),
 ) -> dict:
-    """The caller's workspace session list (SPEC-022 R-1)."""
+    """The caller's workspace session list (SPEC-022 R-1).
+
+    SPEC-056 R-2/R-4: ``session_type`` is an **optional** additive scope,
+    forwarded upstream verbatim — Chat lists ``operation``, Studio lists
+    ``development``, and the shift-summary picker consumes the ``operation``
+    scope. Omitted returns every session exactly as before (backward
+    compatible); the filter is applied server-side by the agent, so a client
+    cannot coerce the list into surfacing a development session.
+    """
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, ACTION_SESSION_LIST, request_id)
     user_id = identity.username  # type: ignore[union-attr]
-    response = await list_sessions(settings, request_id, user_id)
+    response = await list_sessions(settings, request_id, user_id, session_type)
     log_event(
         LOGGER,
         "sessions_listed",

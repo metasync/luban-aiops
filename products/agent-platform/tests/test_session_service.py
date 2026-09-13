@@ -169,8 +169,10 @@ def test_create_named_session_lost_race_surfaces_as_404(monkeypatch):
     store = InMemorySessionStore()
     real_create = store.create_session
 
-    def racing_create(user_id, session_id=None):
-        record = real_create(user_id, session_id=session_id)
+    def racing_create(user_id, session_id=None, session_type="operation"):
+        record = real_create(
+            user_id, session_id=session_id, session_type=session_type
+        )
         if session_id == "incident-inc-race01":
             real_create("other-user", session_id=session_id)
         return record

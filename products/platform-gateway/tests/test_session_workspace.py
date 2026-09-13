@@ -26,6 +26,14 @@ LIST_PATCH = "platform_gateway.services.gateway_service.agent_client.list_sessio
 GET_PATCH = "platform_gateway.services.gateway_service.agent_client.get_session"
 DELETE_PATCH = "platform_gateway.services.gateway_service.agent_client.delete_session"
 CHAT_PATCH = "platform_gateway.services.gateway_service.agent_client.chat"
+CREATE_PATCH = (
+    "platform_gateway.services.gateway_service.agent_client.create_session"
+)
+CREATE_PAYLOAD = {
+    "session_id": "ses-1",
+    "user_id": "operator.user",
+    "session_type": "operation",
+}
 
 LIST_PAYLOAD = {
     "sessions": [
@@ -437,6 +445,229 @@ class VoiceReadinessInvariantTests(SessionWorkspaceProxyBase):
             )
         self.assertEqual(response.status_code, 422)
         upstream.assert_not_called()
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int = 200, payload=None) -> None:
+        self.status_code = status_code
+        self._payload = payload if payload is not None else {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class _FakeHttpxClient:
+    """Captures the actual upstream request shape (body / query params).
+
+    Stands in for ``httpx.AsyncClient`` inside ``agent_client`` so a test can
+    assert what really crosses the wire — the create body and the list query
+    param — rather than only the args handed to the client function.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.calls: list[dict] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args) -> bool:
+        return False
+
+    async def post(self, url, headers=None, json=None):
+        self.calls.append({"url": url, "headers": headers, "json": json})
+        return _FakeResponse(
+            200, {"session_id": "ses-1", "user_id": "operator.user"}
+        )
+
+    async def get(self, url, headers=None, params=None):
+        self.calls.append({"url": url, "headers": headers, "params": params})
+        return _FakeResponse(200, {"sessions": []})
+
+
+class SessionTypeDualGateTests(SessionWorkspaceProxyBase):
+    """SPEC-056 R-6/OQ-1: the development-session create dual-gate.
+
+    Opening a ``development`` session requires ``session:create`` **plus** the
+    existing ``session:skill_graduate``; an ``operation`` create needs only
+    ``session:create``. No new policy action — the gate reuses the SPEC-055
+    graduation grant, so a non-authoring role can no longer open a dead-end
+    Studio session it could never graduate.
+    """
+
+    def test_operation_create_allowed_for_every_create_role(self) -> None:
+        for role in (
+            "platform-admin",
+            "approver",
+            "operator",
+            "developer",
+            "read-only-observer",
+        ):
+            upstream = AsyncMock(return_value=CREATE_PAYLOAD)
+            with self._patch_identity(role), patch(CREATE_PATCH, upstream):
+                response = self.client.post(SESSIONS_PATH, json={})
+            self.assertEqual(response.status_code, 200, role)
+            upstream.assert_called_once()
+
+    def test_development_create_allowed_for_graduate_roles(self) -> None:
+        payload = {**CREATE_PAYLOAD, "session_type": "development"}
+        for role in ("platform-admin", "approver", "operator"):
+            upstream = AsyncMock(return_value=payload)
+            with self._patch_identity(role), patch(CREATE_PATCH, upstream):
+                response = self.client.post(
+                    SESSIONS_PATH, json={"session_type": "development"}
+                )
+            self.assertEqual(response.status_code, 200, role)
+            upstream.assert_called_once()
+
+    def test_development_create_denied_for_create_only_roles(self) -> None:
+        # developer + read-only-observer hold session:create but not
+        # session:skill_graduate: the second gate denies, upstream untouched.
+        for role in ("developer", "read-only-observer"):
+            upstream = AsyncMock(return_value=CREATE_PAYLOAD)
+            with self._patch_identity(role), patch(CREATE_PATCH, upstream):
+                response = self.client.post(
+                    SESSIONS_PATH, json={"session_type": "development"}
+                )
+            self.assertEqual(response.status_code, 403, role)
+            self.assertEqual(
+                response.json()["detail"]["action"],
+                "session:skill_graduate",
+                role,
+            )
+            upstream.assert_not_called()
+
+    def test_development_create_denied_for_auditor_on_first_gate(self) -> None:
+        # auditor holds neither action: denied on session:create (the first
+        # gate), never reaching the graduate gate.
+        upstream = AsyncMock(return_value=CREATE_PAYLOAD)
+        with self._patch_identity("auditor"), patch(CREATE_PATCH, upstream):
+            response = self.client.post(
+                SESSIONS_PATH, json={"session_type": "development"}
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], "session:create")
+        upstream.assert_not_called()
+
+    def test_route_forwards_session_type_to_client(self) -> None:
+        payload = {**CREATE_PAYLOAD, "session_type": "development"}
+        upstream = AsyncMock(return_value=payload)
+        with self._patch_identity("operator"), patch(CREATE_PATCH, upstream):
+            self.client.post(SESSIONS_PATH, json={"session_type": "development"})
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[4], "development")
+
+    def test_route_forwards_operation_default_to_client(self) -> None:
+        upstream = AsyncMock(return_value=CREATE_PAYLOAD)
+        with self._patch_identity("operator"), patch(CREATE_PATCH, upstream):
+            self.client.post(SESSIONS_PATH, json={})
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[4], "operation")
+
+    def test_list_forwards_session_type_to_client(self) -> None:
+        upstream = AsyncMock(return_value=LIST_PAYLOAD)
+        with self._patch_identity("operator"), patch(LIST_PATCH, upstream):
+            response = self.client.get(
+                SESSIONS_PATH, params={"session_type": "development"}
+            )
+        self.assertEqual(response.status_code, 200)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertEqual(args[3], "development")
+
+    def test_list_omits_session_type_when_absent(self) -> None:
+        upstream = AsyncMock(return_value=LIST_PAYLOAD)
+        with self._patch_identity("operator"), patch(LIST_PATCH, upstream):
+            self.client.get(SESSIONS_PATH)
+        _, args, _ = upstream.mock_calls[0]
+        self.assertIsNone(args[3])
+
+    def test_list_rejects_unknown_session_type_before_upstream(self) -> None:
+        upstream = AsyncMock(return_value=LIST_PAYLOAD)
+        with self._patch_identity("operator"), patch(LIST_PATCH, upstream):
+            response = self.client.get(
+                SESSIONS_PATH, params={"session_type": "staging"}
+            )
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
+
+
+class SessionTypeUpstreamBodyTests(SessionWorkspaceProxyBase):
+    """SPEC-056 R-1/R-2: what actually crosses the wire to the agent.
+
+    The create body carries ``session_type`` only for a ``development`` birth
+    (the historical no-body ``operation`` shape is preserved exactly, just as
+    ``skill_target`` is omitted when absent); the list forwards ``session_type``
+    as an upstream query param, omitted when unscoped.
+    """
+
+    def _fake_httpx(self):
+        fake = _FakeHttpxClient()
+        return fake, patch(
+            "platform_gateway.services.agent_client.httpx.AsyncClient",
+            return_value=fake,
+        )
+
+    def test_development_create_body_carries_session_type(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.post(
+                SESSIONS_PATH, json={"session_type": "development"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake.calls[0]["json"], {"session_type": "development"})
+
+    def test_operation_create_omits_body_entirely(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.post(SESSIONS_PATH, json={})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(fake.calls[0]["json"])
+
+    def test_explicit_operation_create_omits_session_type(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.post(
+                SESSIONS_PATH, json={"session_type": "operation"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(fake.calls[0]["json"])
+
+    def test_target_and_development_type_share_one_body(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.post(
+                SESSIONS_PATH,
+                json={
+                    "skill_target": "https://admin.internal/login",
+                    "session_type": "development",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            fake.calls[0]["json"],
+            {
+                "skill_target": "https://admin.internal/login",
+                "session_type": "development",
+            },
+        )
+
+    def test_list_forwards_session_type_as_query_param(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.get(
+                SESSIONS_PATH, params={"session_type": "development"}
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(fake.calls[0]["params"], {"session_type": "development"})
+
+    def test_list_omits_query_param_when_unscoped(self) -> None:
+        fake, httpx_patch = self._fake_httpx()
+        with self._patch_identity("operator"), httpx_patch:
+            response = self.client.get(SESSIONS_PATH)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(fake.calls[0]["params"])
 
 
 if __name__ == "__main__":

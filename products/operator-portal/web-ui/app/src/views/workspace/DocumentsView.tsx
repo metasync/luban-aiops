@@ -1179,6 +1179,12 @@ function BoundedDigestTabs({
 
 interface CreateDialogProps {
   open: boolean;
+  // SPEC-056 R-4: always the *operation*-scoped workspace. The shift-summary
+  // picker below consumes `workspace.sessions`, and App hands this view the
+  // operation instance (whose list query is filtered `session_type=operation`
+  // server-side), so a Studio session cannot be picked into shift material. The
+  // scoping is the server's, not a client filter of an unscoped list; the
+  // create path independently rejects a hand-crafted `development` id.
   workspace: SessionWorkspace;
   onClose: () => void;
   onCreated: () => void;
@@ -1387,6 +1393,8 @@ function CreateDocumentDialog({
         <>
           <div style={{ marginBottom: 12 }}>
             <Typography.Text strong>Your sessions</Typography.Text>
+            {/* SPEC-056 R-4: operation sessions only — the source list is
+                scoped server-side by the workspace's mode. */}
             <Select
               mode="multiple"
               style={{ width: "100%" }}
@@ -1410,7 +1418,9 @@ function CreateDocumentDialog({
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               Other operators' sessions are covered only for designated
-              approvers and contribute metadata only.
+              approvers and contribute metadata only. Skill-development
+              sessions are never shift material: the server rejects a
+              coverage list that names one.
             </Typography.Text>
           </div>
         </>

@@ -12,8 +12,22 @@ import {
   type SessionSummary,
 } from "../api/sessions";
 
-const ACTIVE_SESSION_KEY = "luban.portal.activeSessionId";
+// SPEC-056 R-2: the active-session pointer is namespaced per mode so Chat
+// (operation) and Studio (development) never fight over one key — each entry
+// restores its own last-open session on reload.
+const ACTIVE_SESSION_KEY_PREFIX = "luban.portal.activeSessionId";
 const POLL_INTERVAL_MS = 30_000;
+
+// SPEC-056 R-2: which entry a workspace instance serves. `operation` is Chat
+// (and Incidents/Documents/Settings, which all deal in operation sessions);
+// `development` is Studio. The mode fixes exactly three things — the birth
+// `session_type`, the list scope, and the active-session key namespace — and
+// nothing in the trust path (R-5).
+export type SessionMode = "operation" | "development";
+
+function activeSessionKey(mode: SessionMode): string {
+  return `${ACTIVE_SESSION_KEY_PREFIX}.${mode}`;
+}
 
 export interface DeleteOutcome {
   ok: boolean;
@@ -56,25 +70,32 @@ export interface SessionWorkspace {
   pinIncidentSession: (incidentId: string, sessionId?: string) => string;
 }
 
-function loadActiveSessionId(): string | null {
-  return window.sessionStorage.getItem(ACTIVE_SESSION_KEY);
+function loadActiveSessionId(mode: SessionMode): string | null {
+  return window.sessionStorage.getItem(activeSessionKey(mode));
 }
 
-function saveActiveSessionId(sessionId: string | null): void {
+function saveActiveSessionId(
+  mode: SessionMode,
+  sessionId: string | null,
+): void {
+  const key = activeSessionKey(mode);
   if (sessionId) {
-    window.sessionStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+    window.sessionStorage.setItem(key, sessionId);
   } else {
-    window.sessionStorage.removeItem(ACTIVE_SESSION_KEY);
+    window.sessionStorage.removeItem(key);
   }
 }
 
-export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
+export function useSessionWorkspace(
+  authenticated: boolean,
+  mode: SessionMode = "operation",
+): SessionWorkspace {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [pinned, setPinned] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(
-    loadActiveSessionId(),
+    loadActiveSessionId(mode),
   );
   const aliveRef = useRef(true);
   // SPEC-035 R-5: monotonic refresh sequence. A decision can trigger a
@@ -91,7 +112,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     refreshSeqRef.current += 1;
     const seq = refreshSeqRef.current;
     try {
-      const result = await listSessions();
+      const result = await listSessions(undefined, mode);
       if (!aliveRef.current || seq !== refreshSeqRef.current) return;
       setSessions(result);
       setError(null);
@@ -99,7 +120,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
       if (!aliveRef.current || seq !== refreshSeqRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [authenticated]);
+  }, [authenticated, mode]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -114,10 +135,13 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
     };
   }, [refresh]);
 
-  const setActiveSessionId = useCallback((sessionId: string | null) => {
-    setActiveSessionIdState(sessionId);
-    saveActiveSessionId(sessionId);
-  }, []);
+  const setActiveSessionId = useCallback(
+    (sessionId: string | null) => {
+      setActiveSessionIdState(sessionId);
+      saveActiveSessionId(mode, sessionId);
+    },
+    [mode],
+  );
 
   // One implementation, two contracts: the one-click panel path wants the id
   // (or null), the develop-as-you-go dialog wants a message it can show
@@ -127,7 +151,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
   const createDevelopmentSession = useCallback(
     async (skillTarget?: string): Promise<CreateOutcome> => {
       try {
-        const detail = await createSession(undefined, skillTarget);
+        const detail = await createSession(undefined, skillTarget, mode);
         setActiveSessionId(detail.session_id);
         await refresh();
         return { ok: true, sessionId: detail.session_id };
@@ -147,7 +171,7 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
         return { ok: false, sessionId: null, message: text };
       }
     },
-    [refresh, setActiveSessionId],
+    [refresh, setActiveSessionId, mode],
   );
 
   const createAndOpen = useCallback(async (): Promise<string | null> => {
@@ -229,6 +253,9 @@ export function useSessionWorkspace(authenticated: boolean): SessionWorkspace {
                 created_at: new Date().toISOString(),
                 last_active_at: null,
                 pending_confirmation: false,
+                // SPEC-056 R-1: an incident triage session is operational
+                // work, so the synthetic pinned entry is typed `operation`.
+                session_type: "operation",
               },
             ],
       );

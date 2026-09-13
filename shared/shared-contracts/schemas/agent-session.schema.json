@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session.schema.json",
   "title": "Agent Session (v2)",
-  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards. SPEC-037 R-4 adds the additive executions array under each confirmation card carrying signed execution request/receipt rows. SPEC-051 R-6 adds the additive flow_summary on each confirmation card carrying the bound browser-flow headline so durable cards render the same workflow framing as the live operator card.",
+  "description": "Session record returned by POST /api/v2/sessions and GET /api/v2/sessions/{id}. SPEC-022 R-1 adds workspace fields: server-minted title, last_active_at, parked-confirmation flag, and a best-effort transcript reconstructed from the kernel state snapshot. SPEC-025 R-2 adds the additive evidence_turns field carrying persisted tool evidence grouped by assistant turn. SPEC-024 R-3 adds the additive model field carrying the session's pinned model id. SPEC-031 R-2 adds the additive confirmations field carrying durable confirmation lifecycle cards. SPEC-037 R-4 adds the additive executions array under each confirmation card carrying signed execution request/receipt rows. SPEC-051 R-6 adds the additive flow_summary on each confirmation card carrying the bound browser-flow headline so durable cards render the same workflow framing as the live operator card. SPEC-056 R-1 adds the additive session_type discriminator naming the entry the session was born in.",
   "type": "object",
   "additionalProperties": false,
   "required": ["session_id", "user_id", "created_at", "status"],
@@ -21,6 +21,12 @@
       "type": "string",
       "enum": ["active", "expired"],
       "default": "active"
+    },
+    "session_type": {
+      "type": "string",
+      "enum": ["operation", "development"],
+      "default": "operation",
+      "description": "SPEC-056 R-1: which portal entry the session was born in — \"operation\" for Chat, \"development\" for Studio. A birth property written exactly once at creation from the create body and immutable thereafter: no promotion, no demotion, and no in-place conversion between entries (the Chat-to-Studio bridge is a spawn of a new session, deferred to SPEC-057). Decoupled from skill_target — declaring a target never sets it, and a development session may carry none. Defaults to \"operation\", so a create body omitting the field behaves exactly as it did before SPEC-056."
     },
     "title": {
       "type": ["string", "null"],

@@ -21,6 +21,7 @@ __all__ = [
     "AgentSessionSummary",
     "AgentSessionList",
     "AgentSessionCreateRequest",
+    "SessionType",
     "AgentModelInfo",
     "AgentModelCatalog",
     "AgentRuntimeMetadata",
@@ -187,6 +188,14 @@ class AgentStreamEvent(BaseModel):
 
 # --- Sessions ---
 
+# SPEC-056 R-1: the session's birth entry — ``operation`` for Chat,
+# ``development`` for Studio. A named alias rather than three inline
+# ``Literal``s so the contract enum-parity drift guard has one symbol to read
+# the vocabulary off (the audit-service ``EventType`` precedent): a property-name
+# parity test cannot see an enum value drifting, and that gap is exactly what
+# rejected a new audit ``event_type`` at ingest once already.
+SessionType = Literal["operation", "development"]
+
 
 class EvidenceTurn(BaseModel):
     """Persisted tool-evidence group for one assistant turn (SPEC-025 R-2).
@@ -276,6 +285,10 @@ class AgentSession(BaseModel):
     user_id: str
     created_at: datetime
     status: Literal["active", "expired"] = "active"
+    # SPEC-056 R-1: the entry the session was born in, written once at
+    # creation and immutable thereafter — never inferred from ``skill_target``
+    # or any later state, and never converted in place between entries.
+    session_type: SessionType = "operation"
     # SPEC-022 R-1 workspace fields: server-minted title (null for
     # pre-existing sessions), last activity marker, parked-confirmation
     # badge, and the best-effort transcript reconstructed from the kernel
@@ -302,6 +315,10 @@ class AgentSessionSummary(BaseModel):
     """Compact list-view row for ``GET /api/v2/sessions`` (SPEC-022 R-1)."""
 
     session_id: str
+    # SPEC-056 R-2/R-4: the row carries its birth type so each portal entry
+    # can list its own scope and the shift-summary picker can be scoped
+    # server-side to operational work.
+    session_type: SessionType = "operation"
     title: str | None = None
     created_at: datetime
     last_active_at: datetime | None = None
@@ -330,10 +347,19 @@ class AgentSessionCreateRequest(BaseModel):
     credentials dropped — since both paths go through one validator.
     Bounded by the skill contract's own ``web_target`` maxLength, so
     anything accepted here can always be emitted into a graduated draft.
+
+    ``session_type`` (SPEC-056 R-1) names the entry the session is born
+    in, and is deliberately **decoupled** from ``skill_target``: a
+    ``development`` session may name no target yet (the operator declares
+    it mid-session in Studio), and declaring a target never sets the type.
+    Inferring it from ``skill_target`` would re-couple a birth property to
+    an inert declaration. The store writes it exactly once; nothing
+    mutates it afterwards.
     """
 
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     skill_target: str | None = Field(default=None, min_length=1, max_length=2048)
+    session_type: SessionType = "operation"
 
 
 # --- Skill graduation (SPEC-055 R-4) ---

@@ -34,18 +34,27 @@ async def create_session(
     request_id: str,
     user_id: str,
     skill_target: str | None = None,
+    session_type: str = "operation",
 ) -> dict:
     """Create a session, optionally declaring its skill target (SPEC-055 R-4).
 
     No body at all unless there is something to declare: the agent route's
     body is optional, and posting an empty object would only make the
-    historical call shape a special case for no benefit.
+    historical call shape a special case for no benefit. ``session_type``
+    (SPEC-056 R-1) rides the body only when it is not the ``operation``
+    default, so a body-less Chat create keeps its historical shape exactly
+    while a Studio ``development`` create carries the discriminator.
     """
+    payload: dict[str, str] = {}
+    if skill_target:
+        payload["skill_target"] = skill_target
+    if session_type and session_type != "operation":
+        payload["session_type"] = session_type
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/sessions",
             headers=_headers(request_id, user_id),
-            json={"skill_target": skill_target} if skill_target else None,
+            json=payload or None,
         )
     response.raise_for_status()
     return response.json()
@@ -70,12 +79,19 @@ async def list_sessions(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    session_type: str | None = None,
 ) -> dict:
-    """The caller's workspace session list (SPEC-022 R-1)."""
+    """The caller's workspace session list (SPEC-022 R-1).
+
+    ``session_type`` (SPEC-056 R-2) is forwarded verbatim as an optional
+    upstream query param; omitted, the agent returns every session exactly as
+    before, so the historical no-filter call shape is preserved.
+    """
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(
             f"{settings.agent_service_url}/api/v2/sessions",
             headers=_headers(request_id, user_id),
+            params={"session_type": session_type} if session_type else None,
         )
     response.raise_for_status()
     return response.json()

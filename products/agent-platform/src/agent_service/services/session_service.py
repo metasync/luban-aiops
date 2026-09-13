@@ -49,12 +49,23 @@ def _assert_session_owner(session: SessionRecord, user_id: str | None) -> None:
         raise HTTPException(status_code=404, detail="session not found")
 
 
-def create_session(user_id: str | None) -> SessionRecord:
+def create_session(
+    user_id: str | None, session_type: str = "operation"
+) -> SessionRecord:
+    """Create a session, writing its birth ``session_type`` exactly once.
+
+    SPEC-056 R-1: the type is threaded to the store's create path and never
+    reassigned afterwards — this function is the only place a fresh session's
+    type is decided, and it defaults to ``operation`` so the historical
+    one-click path is unchanged.
+    """
     record_session_created()
-    return SESSION_STORE.create_session(user_id)
+    return SESSION_STORE.create_session(user_id, session_type=session_type)
 
 
-def create_named_session(session_id: str, user_id: str | None) -> SessionRecord:
+def create_named_session(
+    session_id: str, user_id: str | None, session_type: str = "operation"
+) -> SessionRecord:
     """Get-or-create a caller-supplied dedicated session (SPEC-015 R-3).
 
     Idempotent for the owning user so re-triage of an incident reuses the
@@ -62,13 +73,20 @@ def create_named_session(session_id: str, user_id: str | None) -> SessionRecord:
     The post-create re-read resolves the check-then-create race (Redis
     last-writer-wins) by surfacing a lost race as 404 instead of letting
     two owners share one session.
+
+    SPEC-056 R-1: ``session_type`` is written only on the create branch; an
+    already-existing session is returned verbatim, so re-triage never
+    re-types a live session (immutability). Incident-triage named sessions
+    are operational work and default to ``operation``.
     """
     existing = SESSION_STORE.get_session(session_id)
     if existing is not None:
         _assert_session_owner(existing, user_id)
         return existing
     record_session_created()
-    record = SESSION_STORE.create_session(user_id, session_id=session_id)
+    record = SESSION_STORE.create_session(
+        user_id, session_id=session_id, session_type=session_type
+    )
     stored = SESSION_STORE.get_session(session_id)
     if stored is None:
         return record
@@ -76,10 +94,18 @@ def create_named_session(session_id: str, user_id: str | None) -> SessionRecord:
     return stored
 
 
-def ensure_session(session_id: str | None, user_id: str | None) -> SessionRecord:
+def ensure_session(
+    session_id: str | None, user_id: str | None, session_type: str = "operation"
+) -> SessionRecord:
+    """Resolve a session for a chat turn, creating one only when id is None.
+
+    SPEC-056 R-1: the create branch writes ``session_type`` once; the
+    existing-session branch returns the stored record untouched, so a turn
+    against a live session can never re-type it (immutability).
+    """
     if session_id is None:
         record_session_created()
-        return SESSION_STORE.create_session(user_id)
+        return SESSION_STORE.create_session(user_id, session_type=session_type)
     session = SESSION_STORE.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -112,13 +138,22 @@ def rename_session_title(
     return updated if updated is not None else session
 
 
-def list_sessions(user_id: str) -> list[SessionRecord]:
+def list_sessions(
+    user_id: str, session_type: str | None = None
+) -> list[SessionRecord]:
     """The caller's sessions, most-recently-active first (SPEC-022 R-1).
 
     Backends that cannot order server-side (memory, Redis) are sorted here;
     the Postgres backend already returns the capped, ordered window.
+
+    SPEC-056 R-2/R-4: ``session_type`` is an **optional** scope — omitted
+    returns every row exactly as before (legacy behavior), a value narrows to
+    that birth type. Ownership scoping is unchanged, so the anti-enumeration
+    posture holds; the filter is passed by keyword so all three backends'
+    differing signatures (Postgres also takes a server-side ``limit``) accept
+    it uniformly.
     """
-    records = SESSION_STORE.list_sessions_by_user(user_id)
+    records = SESSION_STORE.list_sessions_by_user(user_id, session_type=session_type)
     records.sort(
         key=lambda record: record.last_active_at or record.created_at,
         reverse=True,

@@ -25,6 +25,7 @@ from agent_service.services.session_store import InMemorySessionStore
 from agent_service.services.shift_summary import (
     MAX_SESSION_IDS,
     UNAVAILABLE,
+    DevelopmentSessionRejected,
     DigestInputError,
     ForeignSessionDenied,
     UnknownSessionError,
@@ -125,6 +126,83 @@ def _seed_foreign_session(stores) -> str:
         )
     )
     return record.session_id
+
+
+def _seed_development_session(stores, *, user_id="alice", session_id="ses-dev") -> str:
+    """A Studio-born development session (SPEC-056 R-4)."""
+    record = stores["sessions"].create_session(
+        user_id=user_id, session_id=session_id, session_type="development"
+    )
+    stores["sessions"].set_session_title(record.session_id, "authoring a skill")
+    return record.session_id
+
+
+class TestDevelopmentSessionGuard:
+    """SPEC-056 R-4: a development session is never shift-summary material.
+
+    The create-path guard beside the scoped list query: a hand-crafted
+    ``session_ids`` list naming a development session is rejected whole (not
+    silently dropped), before any fact is read, matching the unknown / foreign
+    posture. Shift-summary only — the incident-report path is untouched.
+    """
+
+    def test_development_id_rejected(self, stores) -> None:
+        dev_id = _seed_development_session(stores)
+        with pytest.raises(DevelopmentSessionRejected) as exc:
+            build_digest("alice", [dev_id], can_view_foreign=False)
+        assert exc.value.session_ids == [dev_id]
+
+    def test_mixed_operation_and_development_rejects_whole_request(self, stores) -> None:
+        # Never silently dropped: one development id rejects the entire
+        # coverage list, so a caller mistake surfaces rather than vanishing.
+        own_id = _seed_owner_session(stores)
+        dev_id = _seed_development_session(stores)
+        with pytest.raises(DevelopmentSessionRejected) as exc:
+            build_digest("alice", [own_id, dev_id], can_view_foreign=False)
+        assert exc.value.session_ids == [dev_id]
+
+    def test_all_operation_set_accepted(self, stores) -> None:
+        own_id = _seed_owner_session(stores)
+        quiet = stores["sessions"].create_session(
+            user_id="alice", session_id="ses-quiet", session_type="operation"
+        )
+        digest, _ = build_digest(
+            "alice", [own_id, quiet.session_id], can_view_foreign=False
+        )
+        assert digest["session_count"] == 2
+
+    def test_legacy_operation_session_not_falsely_rejected(self, stores) -> None:
+        # A pre-SPEC-056 session reads back ``operation`` (the store mapper
+        # default for a NULL row), so it is never falsely rejected here.
+        record = stores["sessions"].create_session(user_id="alice", session_id="ses-legacy")
+        assert record.session_type == "operation"
+        digest, _ = build_digest("alice", [record.session_id], can_view_foreign=False)
+        assert digest["session_count"] == 1
+
+    def test_rejected_before_any_fact_is_read(self, stores, monkeypatch) -> None:
+        dev_id = _seed_development_session(stores)
+
+        def _explode(*args, **kwargs):
+            raise AssertionError("coverage facts must never be read for a rejected id")
+
+        monkeypatch.setattr(stores["confirmations"], "load_for_session", _explode)
+        monkeypatch.setattr(stores["executions"], "load_for_session", _explode)
+        with pytest.raises(DevelopmentSessionRejected):
+            build_digest("alice", [dev_id], can_view_foreign=False)
+
+    def test_foreign_gate_runs_before_type_leak(self, stores) -> None:
+        # A foreign development session the caller cannot view is denied as
+        # foreign (403 posture) first, so its type is never leaked to a caller
+        # with no business seeing it.
+        foreign_dev = _seed_development_session(
+            stores, user_id="carol", session_id="ses-carol-dev"
+        )
+        with pytest.raises(ForeignSessionDenied):
+            build_digest("alice", [foreign_dev], can_view_foreign=False)
+        # With approvals:list the caller may view foreign coverage, but a
+        # development session is still not operational shift material.
+        with pytest.raises(DevelopmentSessionRejected):
+            build_digest("alice", [foreign_dev], can_view_foreign=True)
 
 
 class TestInputValidation:

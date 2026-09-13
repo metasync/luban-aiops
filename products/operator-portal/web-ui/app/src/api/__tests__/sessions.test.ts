@@ -9,6 +9,7 @@ import {
   createSession,
   declareSkillTarget,
   graduateSessionSkill,
+  listSessions,
 } from "../sessions";
 
 interface FetchCall {
@@ -178,5 +179,81 @@ describe("declareSkillTarget (SPEC-055 R-4 mid-session path)", () => {
     // The agent scopes it and answers with the effective value, never an echo.
     expect(result.target).toBe("https://admin.internal/login");
     expect(result.already_declared).toBe(false);
+  });
+});
+
+describe("createSession session_type (SPEC-056 R-1 birth discriminator)", () => {
+  it("sends session_type=development for a Studio-born session", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-dev-1", session_type: "development" }, calls);
+    await createSession(undefined, undefined, "development");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      session_type: "development",
+    });
+  });
+
+  it("sends session_type=operation for a Chat-born session", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-op-1", session_type: "operation" }, calls);
+    await createSession(undefined, undefined, "operation");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      session_type: "operation",
+    });
+  });
+
+  it("carries the type alongside a named id and a birth target", async () => {
+    // Decoupled from skill_target: a development session may name a target,
+    // but the two fields ride independently and neither implies the other.
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-dev-2", session_type: "development" }, calls);
+    await createSession(
+      "ses-dev-2",
+      "https://admin.internal/login",
+      "development",
+    );
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      session_id: "ses-dev-2",
+      skill_target: "https://admin.internal/login",
+      session_type: "development",
+    });
+  });
+
+  it("omits session_type when the caller does not name one", async () => {
+    // Backward compatible: the historical one-click shape stays an empty
+    // body, defaulting to operation server-side.
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-1", session_type: "operation" }, calls);
+    await createSession();
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({});
+  });
+});
+
+describe("listSessions session_type scope (SPEC-056 R-2 / R-4)", () => {
+  it("omits the query param when no scope is given (legacy: all sessions)", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ sessions: [] }, calls);
+    await listSessions();
+    expect(pathOf(calls[0].url)).toBe("/api/v1/sessions");
+  });
+
+  it("scopes to ?session_type=operation for the Chat/picker list", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ sessions: [] }, calls);
+    await listSessions(undefined, "operation");
+    expect(pathOf(calls[0].url)).toBe("/api/v1/sessions?session_type=operation");
+  });
+
+  it("scopes to ?session_type=development for the Studio list", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ sessions: [] }, calls);
+    await listSessions(undefined, "development");
+    expect(pathOf(calls[0].url)).toBe(
+      "/api/v1/sessions?session_type=development",
+    );
+  });
+
+  it("returns the sessions array, defaulting to empty when absent", async () => {
+    stubFetch({}, []);
+    await expect(listSessions(undefined, "operation")).resolves.toEqual([]);
   });
 });

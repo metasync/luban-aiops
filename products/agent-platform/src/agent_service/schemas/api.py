@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,6 +11,13 @@ class SessionRecord(BaseModel):
     user_id: str | None = None
     created_at: datetime
     status: str = "active"
+    # SPEC-056 R-1: the birth entry the session belongs to — ``operation``
+    # (Chat) or ``development`` (Studio). Written exactly once by the store's
+    # create path and never reassigned: immutability has no API surface, so
+    # this model is the only carrier of the value and the Pydantic default is
+    # what keeps the ephemeral backends and pre-SPEC-056 rows correct with no
+    # migration.
+    session_type: Literal["operation", "development"] = "operation"
     # SPEC-022 R-1: server-minted title (first user turn, 80-char cap) and
     # last activity marker for workspace ordering; both stay optional so
     # pre-existing sessions and lightweight backends keep working.

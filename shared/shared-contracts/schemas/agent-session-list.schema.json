@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-session-list.schema.json",
   "title": "Agent Session List (v2)",
-  "description": "Envelope returned by GET /api/v2/sessions (SPEC-022 R-1): the caller's sessions, most-recently-active first, capped server-side.",
+  "description": "Envelope returned by GET /api/v2/sessions (SPEC-022 R-1): the caller's sessions, most-recently-active first, capped server-side. SPEC-056 R-1/R-2 add the additive session_type discriminator on each row, which is also the additive query filter that scopes each portal entry to its own type.",
   "type": "object",
   "additionalProperties": false,
   "required": ["sessions"],
@@ -16,6 +16,12 @@
         "properties": {
           "session_id": {
             "type": "string"
+          },
+          "session_type": {
+            "type": "string",
+            "enum": ["operation", "development"],
+            "default": "operation",
+            "description": "SPEC-056 R-1: the session's birth type, immutable thereafter. Carried on the list row so Chat lists only 'operation' sessions and Studio only 'development' ones (R-2/OQ-3), and so the shift-summary picker can be scoped server-side to operational work (R-4)."
           },
           "title": {
             "type": ["string", "null"],

@@ -5,6 +5,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# SPEC-056 R-1: the session's birth entry, mirrored verbatim from
+# ``agent-session.schema.json``. A named alias so the contract enum-parity
+# drift guard reads the vocabulary off one symbol on each side (the
+# audit-service ``EventType`` precedent) — the property-set-equality guard
+# cannot see an enum value drifting between a schema and a model.
+SessionType = Literal["operation", "development"]
+
 
 class ChatRequest(BaseModel):
     """Mirror of `shared-contracts/schemas/chat-request.schema.json`."""
@@ -59,12 +66,21 @@ class CreateSessionRequest(BaseModel):
     since it owns ``origin_of_url`` and the store the target is corroborated
     against — it refuses a target with no normalizable origin, and keeps
     origin and path while dropping any query or embedded credentials.
+
+    ``session_type`` (SPEC-056 R-1) names the entry the session is born in —
+    ``operation`` for Chat, ``development`` for Studio — and is the field the
+    create route's dual-gate reads (R-6/OQ-1): opening a ``development``
+    session additionally requires ``session:skill_graduate``. It is **not**
+    inferred from ``skill_target`` (a development session may name no target
+    yet, and a declaration is inert), and the agent layer writes it exactly
+    once at creation and never mutates it.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str | None = None
     skill_target: str | None = Field(default=None, min_length=1, max_length=2048)
+    session_type: SessionType = "operation"
 
 
 class SessionTitleUpdateRequest(BaseModel):
@@ -155,6 +171,10 @@ class SessionRecord(BaseModel):
     user_id: str
     created_at: datetime
     status: Literal["active", "expired"] = "active"
+    # SPEC-056 R-1: the birth entry the session belongs to, fixed once at
+    # creation and never changed afterwards (no promotion/demotion/conversion).
+    # Relayed verbatim from agent-service; the default carries legacy sessions.
+    session_type: SessionType = "operation"
     # SPEC-022 R-1 workspace fields; null/empty for pre-SPEC-022 sessions.
     title: str | None = None
     last_active_at: datetime | None = None

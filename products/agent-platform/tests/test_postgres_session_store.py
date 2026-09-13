@@ -127,7 +127,15 @@ class TestPostgresSessionStore:
 
     def test_get_session_refreshes_ttl_and_maps_row(self):
         calls: list[dict] = []
-        row = ("ses-1", "alice", NOW, "kill the web-ui pod", NOW, "deepseek")
+        row = (
+            "ses-1",
+            "alice",
+            NOW,
+            "kill the web-ui pod",
+            NOW,
+            "deepseek",
+            "development",
+        )
         store = PostgresSessionStore(
             "postgresql://fake", ttl_seconds=600,
             connect=_fake_connect(calls, rows=[row]),
@@ -142,6 +150,8 @@ class TestPostgresSessionStore:
         assert fetched.last_active_at == NOW
         # SPEC-024 R-3: the pinned model rides the same read.
         assert fetched.model == "deepseek"
+        # SPEC-056 R-1: the birth type rides the same read.
+        assert fetched.session_type == "development"
 
         sql = calls[0]["sql"]
         assert "UPDATE sessions" in sql
@@ -149,6 +159,8 @@ class TestPostgresSessionStore:
             "RETURNING session_id, user_id, created_at, title, last_active_at"
             in sql
         )
+        # SPEC-056 R-1: the session_type column is in the RETURNING list.
+        assert "session_type" in sql
         # Idle-TTL predicate folded into the read.
         assert "last_accessed_at > now() - make_interval" in sql
         assert calls[0]["params"]["ttl_seconds"] == 600
@@ -163,8 +175,8 @@ class TestPostgresSessionStore:
     def test_list_sessions_by_user(self):
         calls: list[dict] = []
         rows = [
-            ("ses-2", "alice", NOW, "second", NOW, None),
-            ("ses-1", "alice", NOW, None, None, None),
+            ("ses-2", "alice", NOW, "second", NOW, None, "development"),
+            ("ses-1", "alice", NOW, None, None, None, "operation"),
         ]
         store = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(calls, rows=rows)
@@ -173,6 +185,9 @@ class TestPostgresSessionStore:
         assert [s.session_id for s in sessions] == ["ses-2", "ses-1"]
         assert sessions[0].title == "second"
         assert sessions[1].title is None
+        # SPEC-056 R-1: each row carries its birth type.
+        assert sessions[0].session_type == "development"
+        assert sessions[1].session_type == "operation"
         sql = calls[0]["sql"]
         assert "user_id = %(user_id)s" in sql
         # SPEC-022 R-1: workspace ordering is most-recently-active first,
@@ -180,6 +195,9 @@ class TestPostgresSessionStore:
         assert "ORDER BY COALESCE(last_active_at, created_at) DESC" in sql
         assert "LIMIT %(limit)s" in sql
         assert calls[0]["params"]["limit"] == 50
+        # SPEC-056 R-2/R-4: an omitted filter passes NULL upstream (the
+        # additive, backward-compatible "return everything" shape).
+        assert calls[0]["params"]["session_type"] is None
 
     def test_touch_session_updates_last_active(self):
         calls: list[dict] = []

@@ -97,6 +97,7 @@ from agent_service.services.session_store import SESSION_STORE
 from agent_service.services.session_transcript import extract_transcript
 from agent_service.services.shift_summary import (
     MAX_LABEL_LENGTH,
+    DevelopmentSessionRejected,
     DigestInputError,
     ForeignSessionDenied,
     UnknownSessionError,
@@ -797,22 +798,39 @@ async def create_session(
     the *birth* declaration, and being at birth is the whole point: nothing can
     have been captured yet, so the target is structurally an authorization
     scope the operator set before acting rather than a claim fitted to a trace
-    afterwards. ``POST /sessions/{id}/skill-target`` remains for a session that
-    becomes a development session later.
+    afterwards. ``POST /sessions/{id}/skill-target`` remains for a
+    *development* session opened unscoped — SPEC-056 R-2/R-3 make the birth
+    target optional, so declaring it mid-session from Studio is a first-class
+    path — and it never re-types anything: ``session_type`` is fixed at birth
+    (R-1), so "declare a target" is not "become a development session".
 
-    Deliberately **not** dual-gated with ``session:skill_graduate`` the way
-    SPEC-045 dual-gates its skill-draft route. Declaring a scope is inert — it
-    grants nothing and only narrows what a later graduation may emit — while
-    dual-gating here would refuse *session creation itself* over an inert
-    field, which is a worse outcome than an observer being able to scope their
-    own session. Graduation, the consequential act, stays behind
-    ``session:skill_graduate``.
+    The ``skill_target`` declaration stays inert and is deliberately **not**
+    dual-gated with ``session:skill_graduate`` the way SPEC-045 dual-gates its
+    skill-draft route: declaring a scope grants nothing and only narrows what a
+    later graduation may emit, so refusing *session creation itself* over an
+    inert field would be a worse outcome than an observer scoping their own
+    session. **Opening a ``development`` session is a different matter** and is
+    now gated at the **platform-gateway** boundary (SPEC-056 R-6 / plan §4):
+    the gateway's create route dual-gates ``session:create`` plus
+    ``session:skill_graduate`` when ``session_type == "development"``, because a
+    session whose only distinguishing power is graduation should require the
+    graduation grant to open. The gate lives at the gateway, not here, because
+    the agent v2 API holds no role information (identity is ``X-User-ID``;
+    roles are resolved and enforced at the boundary). Graduation, the
+    consequential act, stays behind ``session:skill_graduate``.
 
-    First declaration wins, so an idempotent re-create of a named session
-    carrying a different target cannot move a scope already in force.
+    ``session_type`` (SPEC-056 R-1) is written exactly once here, at birth, and
+    is **decoupled** from ``skill_target``: a development session may name no
+    target yet, and declaring one never sets the type. First declaration wins,
+    so an idempotent re-create of a named session carrying a different target
+    cannot move a scope already in force — and cannot re-type it either (the
+    stored record's birth type is returned, never the requested one).
     """
     user_id = _user_id(x_user_id)
     requested_id = body.session_id.strip() if body and body.session_id else ""
+    # SPEC-056 R-1: the birth entry, defaulting to ``operation`` so a body-less
+    # create (the historical one-click Chat path) behaves exactly as before.
+    session_type = body.session_type if body else "operation"
     # Shape-checked before the session exists: a refused target must not leave
     # a half-created session behind, and the 422 should read as being about the
     # target rather than about a create that already happened.
@@ -823,9 +841,9 @@ async def create_session(
     )
     if requested_id:
         # Dedicated named session (SPEC-015 R-3): idempotent for the owner.
-        session = create_named_session(requested_id, user_id)
+        session = create_named_session(requested_id, user_id, session_type)
     else:
-        session = ensure_session(None, user_id)
+        session = ensure_session(None, user_id, session_type)
     if skill_target:
         AUTHORING_TRACE_STORE.declare_target(session.session_id, skill_target)
     return AgentSession(
@@ -833,26 +851,38 @@ async def create_session(
         user_id=session.user_id or user_id,
         created_at=session.created_at,
         status=session.status,  # type: ignore[arg-type]
+        session_type=session.session_type,
     )
 
 
 @router.get("/sessions", response_model=AgentSessionList)
 async def list_sessions_route(
     x_user_id: str | None = Header(None),
+    session_type: Literal["operation", "development"] | None = Query(None),
 ) -> AgentSessionList:
-    """The caller's sessions, most-recently-active first, capped (SPEC-022 R-1)."""
+    """The caller's sessions, most-recently-active first, capped (SPEC-022 R-1).
+
+    SPEC-056 R-2/R-4: ``session_type`` is an **optional** additive scope — each
+    portal entry lists its own type (Chat ``operation``, Studio ``development``)
+    and the shift-summary picker consumes the ``operation`` scope. Omitted
+    returns every session exactly as before (backward compatible). The filter is
+    applied server-side in the store query, so the picker cannot be coerced into
+    listing a development session; ownership scoping is unchanged, preserving the
+    anti-enumeration posture.
+    """
     user_id = _user_id(x_user_id)
     registry = get_confirmation_registry()
     return AgentSessionList(
         sessions=[
             AgentSessionSummary(
                 session_id=record.session_id,
+                session_type=record.session_type,
                 title=record.title,
                 created_at=record.created_at,
                 last_active_at=record.last_active_at,
                 pending_confirmation=registry.has_pending(record.session_id),
             )
-            for record in list_sessions(user_id)
+            for record in list_sessions(user_id, session_type)
         ]
     )
 
@@ -870,6 +900,7 @@ async def read_session(
         user_id=session.user_id or user_id,
         created_at=session.created_at,
         status=session.status,  # type: ignore[arg-type]
+        session_type=session.session_type,
         title=session.title,
         last_active_at=session.last_active_at,
         model=session.model,
@@ -941,6 +972,7 @@ async def rename_session_route(
         user_id=session.user_id or user_id,
         created_at=session.created_at,
         status=session.status,  # type: ignore[arg-type]
+        session_type=session.session_type,
         title=session.title,
         last_active_at=session.last_active_at,
         model=session.model,
@@ -1476,6 +1508,18 @@ async def create_document(
                 detail=(
                     "foreign session coverage requires the approvals:list "
                     f"capability: {exc.session_ids}"
+                ),
+            ) from None
+        except DevelopmentSessionRejected as exc:
+            # SPEC-056 R-4: a development session is Studio authoring work,
+            # never operational shift material. A structural 400 beside the
+            # unknown-session rejection — it names the offending ids and
+            # reveals nothing about ownership (the caller supplied them).
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "development sessions are not shift-summary material: "
+                    f"{exc.session_ids}"
                 ),
             ) from None
         except DigestInputError as exc:

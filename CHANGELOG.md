@@ -11,6 +11,212 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.37.0 — 2026-09-13
+
+Release train delivering **SPEC-056 — Studio, a dedicated skill-development
+workspace** (the eighteenth R5 slice). The portal's one **Chat** entry splits
+into **Chat** for *operation* sessions and a new **Studio** for *development*
+sessions over **one shared chat core** parameterized by a `mode`, backed by an
+additive `session_type` discriminator on the session contract that is **fixed at
+birth and immutable**. The split closes a live defect — the shift-summary picker
+listed every session the caller owned, so skill-authoring work could be
+mis-filed into an operational handover — and re-homes SPEC-055's authoring
+controls: **Draft as skill** stays in Chat, while **Declare target** and
+**Graduate as skill** move to Studio. There is **no** new policy action, **no**
+policy-bundle or content-hash change, **no** new audit event type, and **no** new
+configuration knob; the stream contract stays at v11 and Skill at v2. Shared
+contracts, agent-platform, platform-gateway and the portal are touched — the
+other six products (audit-service, execution-runtime, identity-broker,
+incident-service, skills-hub, tool-gateway) move on version lockstep only.
+**No `samples/` demo ships**: the split adds no new backend capability and no new
+trust path, so every criterion is already pinned by the vitest
+nav/control/shared-core suite, the agent and gateway pytest, and the
+real-Postgres OQ-2 check, and ADR-0008 rule 2 does not bind (R-7). Operator
+documentation lands in the portal user guide instead.
+
+### Added
+
+- **The `session_type` birth discriminator (SPEC-056 R-1)** — an additive
+  `session_type` enum (`operation | development`, default `operation`) on **both**
+  authoritative session contracts, `agent-session.schema.json` and
+  `agent-session-list.schema.json`, and on every mirror atomically: the
+  agent-platform `SessionRecord` and its three store backends (InMemory, Redis,
+  Postgres — including the Postgres DDL), the agent v2 API request/response
+  models, the platform-gateway `SessionRecord` / `CreateSessionRequest`, and the
+  portal's `SessionSummary` / `SessionDetail` TypeScript interfaces. Both Python
+  sides declare the vocabulary once as a named `SessionType` alias rather than as
+  three inline `Literal`s (the audit-service `EventType` precedent), so a drift
+  guard has one symbol to read per side. The legacy `session.schema.json` is
+  deliberately **untouched** — it is the unbound v1 surface and widening it would
+  have implied a v1 behaviour change. Omitting the field behaves exactly as
+  before, so no existing caller breaks.
+- **An enum-value parity drift guard (R-1)** — the property-set-equality
+  assertions both contract suites already carried catch a *missing* field but not
+  a *diverged vocabulary*: one side could add a third value and every existing
+  test would stay green. Each suite now also reads the enum out of the schema and
+  compares it to the values its models accept, and a companion test proves the
+  guard **fires** by re-validating a doctored schema against a narrowed model —
+  the same gap that once let a new audit `event_type` reach ingest unaccepted.
+- **The OQ-2 legacy-row backfill (R-1)** — a Postgres-only, nullable
+  `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_type TEXT` followed by an
+  idempotent inference that classifies every pre-existing row exactly once: a
+  session that already holds a declared `authoring_trace_target` row becomes
+  `development` (defaulting it to `operation` would mis-file it into the very
+  picker R-4 exists to protect), and everything else becomes `operation`. The
+  inference is **NULL-keyed**, so a re-run finds no row to touch, and it runs
+  inside a PL/pgSQL `DO` block with dynamic `EXECUTE` so its
+  `to_regclass('authoring_trace_target')` guard is **real** rather than
+  decorative: PostgreSQL resolves the relation inside the inference's
+  `IN (SELECT … FROM authoring_trace_target)` subquery at parse-analysis time,
+  before any predicate is evaluated, so the same guard written as a plain `WHERE`
+  clause would have aborted the whole schema bootstrap with `relation … does not
+  exist` on a cluster whose SPEC-055 authoring-trace DDL had not run — a hard
+  pod-startup failure in exactly the situation the guard exists for. Deferring the
+  text into `EXECUTE` moves that resolution inside the `IF`. The real-Postgres-16
+  gate check is what caught it: a fake driver never parses SQL, and a text
+  assertion on the DDL cannot tell a guard that runs from one that only appears in
+  the string, so the unit test is now structural (with `--` commentary stripped,
+  the relation name appears only inside the deferred `EXECUTE` text). The
+  `operation` fallback stays a plain statement — it references no conditional
+  relation and must still leave no row NULL when the inference is skipped. The
+  default lives on the Pydantic model, not on the column, which is what leaves
+  legacy rows NULL long enough to be inferred; Memory and Redis are ephemeral and
+  need no migration. Both row mappers read `session_type or "operation"`
+  defensively, so a NULL that somehow survived degrades to operational rather than
+  erroring.
+- **Studio: a role-gated nav entry over two mode-scoped workspaces (R-2)** —
+  `ViewId` gains `studio`, rendered beside **Chat** for
+  `platform-admin`/`approver`/`operator` and hidden from
+  `developer`/`read-only-observer`/`auditor`, with **Chat** itself unchanged for
+  every signed-in role. `STUDIO_ROLES` is defined *equal to* the existing
+  `SKILL_GRADUATE_ROLES` rather than as a re-typed literal, so the client nav gate
+  and the gateway's dual-gate set cannot drift. App owns **two**
+  `useSessionWorkspace` instances — `operation` and `development` — and the
+  development instance's polling is gated on `STUDIO_ROLES`, so a non-authoring
+  role never issues a development list request at all. The active-session pointer
+  is **namespaced per mode** (`…activeSessionId.operation` / `.development`), so
+  each entry restores its own last-open session across reloads and a detour from
+  Studio into Chat and back loses neither place. Incidents, Documents and
+  Settings all stay on the operation workspace, and the synthetic pinned incident
+  triage entry is typed `operation`.
+- **Server-side `session_type` list scoping (R-2 / R-4)** — an optional
+  `session_type` query parameter on the agent v2 list route, forwarded verbatim by
+  the gateway and applied **in the SQL `WHERE` clause** as a NULL-tolerant
+  predicate (`%(session_type)s::text IS NULL OR COALESCE(session_type,
+  'operation') = …`), so an omitted filter is byte-for-byte the legacy query and a
+  supplied one narrows server-side. That placement is the point: Chat lists only
+  `operation` sessions, Studio only `development` ones, and the shift-summary
+  picker — which reads the operation workspace — can never be coerced by a client
+  into surfacing authoring work. Ownership scoping is unchanged, so the
+  anti-enumeration posture holds.
+- **The shift-summary create-path guard (R-4, in scope by plan §9)** — a list
+  filter alone leaves the create path open to a hand-crafted request, so
+  `shift_summary.build_digest` now raises a new structural
+  `DevelopmentSessionRejected` when a coverage list names a `development` session,
+  which `create_document` maps to a **400** naming the offending ids — the same
+  posture as the existing `UnknownSessionError` / `ForeignSessionDenied`
+  rejections. It is checked **after** the foreign gate (so a session the caller
+  cannot view is denied as foreign first and its type never leaks) and **before**
+  any fact is read (so a request about to be rejected reads nothing). Rejected
+  whole rather than silently dropped, which would hide a caller mistake. Shift
+  summary only: the incident-report path anchors to an `incident_id`, never takes
+  `session_ids`, and is untouched. The comparison is an explicit
+  `== "development"`, so a legacy NULL row reading back `operation` is never
+  falsely rejected.
+- **A route-level dual-gate on opening a development session (R-6 / OQ-1)** — the
+  gateway's `create_session_route` still enforces `session:create` on every
+  request and **additionally** enforces the existing `session:skill_graduate` when
+  the body's `session_type` is `development`, following the SPEC-043/045
+  route-level dual-gate precedent. The gate lives at the gateway because that is
+  the only place holding roles — the agent v2 API sees an `X-User-ID` and nothing
+  else. A non-authoring role holds `session:create` but not
+  `session:skill_graduate`, so it can no longer open a dead-end Studio session it
+  could never graduate. This adds **no** new policy vocabulary, **no**
+  `policy-default.yaml` / `policy-scenarios.yaml` change, **no** bundle
+  content-hash bump and **no** new audit event type — `make policy-diff` reports
+  **zero** new grants, pinned by a test that fails if the action set or the
+  role→action mapping moves. The birth type rides the existing `session_created`
+  log line as a discriminator, never a secret.
+
+### Changed
+
+- **One ChatView, parameterized by `mode` (R-5)** — Studio is **not** a second
+  chat surface. `ChatView` gains a `mode` prop that selects exactly three things:
+  which authoring controls are visible, the birth `session_type`, and the list
+  scope — and the last two are properties of the workspace instance App hands in,
+  not of anything the component computes. `mode` is deliberately **not** threaded
+  into the SSE stream adapter, the secret-masking renderer, the change-request
+  projection, or the HITL confirmation path, so there is no code path on which the
+  two entries could disagree about what an operator is approving. A regression
+  test renders a fixed transcript — a markdown reply, a `tool_call`/`tool_result`
+  pair, and a pending change-request card carrying a masked secret — in **both**
+  modes and asserts the transcript surface's `innerHTML` is **byte-identical**,
+  with a companion test asserting the session header *does* differ so the
+  comparison cannot pass vacuously. A divergence fails the suite.
+- **The authoring controls move to their right homes (R-3, Design B)** — an
+  `operation` session shows **Draft as skill** and neither Declare-target nor
+  Graduate; a `development` session shows **Declare target** + **Graduate as
+  skill** and not Draft. There is **no** "Move to Studio" and no conversion in
+  either direction, in the UI or in the store: `session_type` is written exactly
+  once, at creation, and the `SessionStore` protocol deliberately exposes **no
+  setter** for it — the Postgres upsert's `session_type = EXCLUDED.session_type`
+  sits in the *expired-reclaim* branch only, where reclaiming a dead row is a
+  fresh creation, and the live-row `WHERE` guard makes the whole `DO UPDATE` a
+  no-op, which is the immutability boundary. The SPEC-055 declare-target route —
+  the one place an operator re-scopes a live session — writes the authoring-trace
+  target row and never this field, so declaring a target on an operation session
+  cannot make it a development one. `session_type` is likewise **decoupled** from
+  `skill_target` and never inferred from it: a development session may carry no
+  target at all, and inferring the type from a declaration would re-couple a birth
+  property to an inert field.
+- **Chat's create affordance is now one-click; Studio's is the target dialog
+  (R-3)** — the develop-as-you-go opener leaves Chat's session panel entirely and
+  becomes Studio's, and its dialog's target is now **optional** (per R-2's "may
+  name a `skill_target` at birth"): open the session unscoped and use **Declare
+  target** later, and graduation reports that declaration as *fitted to the trace*
+  rather than as the scope the session acted under. The dialog's OK button is no
+  longer disabled on an empty target.
+- **The Documents shift-summary picker reads the operation-scoped workspace
+  (R-4)** — `CreateDialogProps.workspace` is now always the operation instance, so
+  the picker's options are the server-scoped list rather than a client filter of an
+  unscoped one, and its help copy says plainly that Studio sessions are never shift
+  material and a hand-crafted request naming one is rejected. A test asserts the
+  picker never calls `listSessions` itself — the scoping is the workspace's, not
+  the dialog's.
+- **antd v6 `Spin tip` → `description` (drive-by)** — the new `ChatView` suite is
+  the first test to render the whole component, and the portal's zero-tolerance
+  antd deprecation guard (SPEC-042 R-2) failed the file on `Warning: [antd: Spin]
+  tip is deprecated`. Two pre-existing call sites — the app's startup spinner and
+  the transcript loader — now use `description`, which antd 6.6.2 documents as the
+  replacement. Rendering is unchanged; the guard had simply never been reached.
+
+### Documented
+
+- **A Studio section in the portal user guide (R-7)** —
+  `docs/guides/portal-user-guide.md` gains a `## Studio` section beside `## Chat`
+  carrying the Chat-vs-Studio mental model as a table (session type, session list,
+  create affordance, session-header actions, whether it feeds a shift summary),
+  plus the birth-fixed / no-conversion rule, the optional target-at-birth dialog
+  and its declare-later path, the refusal-as-modal graduation outcome, per-entry
+  last-open session memory, and the dual-gate. `## Finding Your Way Around` now
+  names the role-gated Studio item (and Documents, which the Workspace bullet had
+  been omitting), `## Sessions` records that the panel lists only its own entry's
+  type *enforced server-side rather than filtered in your browser*, the
+  Draft-as-skill bullet is scoped to Chat, `## Documents (Workspace)` gains a
+  "Studio sessions are never shift material" bullet, and the "What your roles
+  unlock" table gains a **Studio** column.
+- **The authorization matrix records the Studio gate (R-6)** —
+  `docs/agentic-aiops-platform/authorization-matrix.md` names the split, the
+  additive immutable discriminator, and the development-session dual-gate on the
+  existing `session:skill_graduate` action, stating explicitly that it adds no new
+  policy action, no bundle change and no new audit event type.
+- **No new ADR, no configuration change** — `docs/adr/README.md` is unchanged:
+  ADR-0009 stays `accepted` (Studio re-homes its declare-target and graduate
+  controls with the behaviour and trust model unchanged) and the ADR-0008
+  requirement-to-test gate is satisfied by this delivery's task mapping.
+  `docs/guides/configuration-reference.md` is likewise verified **unchanged**
+  rather than edited: the split introduces no new knob.
+
 ## 0.36.3 — 2026-09-11
 
 Patch closing the in-depth *documentation* review that followed the 0.36.2

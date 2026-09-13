@@ -80,6 +80,15 @@ export const SKILL_GRADUATE_ROLES = new Set([
   "operator",
 ]);
 
+// SPEC-056 R-2/R-6: Studio is exactly the authoring power — the roles that
+// hold session:skill_graduate. Defined *equal to* SKILL_GRADUATE_ROLES (not a
+// re-typed literal) so the two sets cannot drift: the gateway dual-gates
+// opening a `development` session on session:skill_graduate beside
+// session:create (R-6), and this client nav gate mirrors that exact set.
+// developer / read-only-observer / auditor hold session:create but not
+// session:skill_graduate, so they keep Chat only and never see Studio.
+export const STUDIO_ROLES = SKILL_GRADUATE_ROLES;
+
 export function hasAnyRole(roles: string[], allowed: Set<string>): boolean {
   return roles.some((role) => allowed.has(role));
 }

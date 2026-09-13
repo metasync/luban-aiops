@@ -70,6 +70,26 @@ class ForeignSessionDenied(Exception):
         self.session_ids = session_ids
 
 
+class DevelopmentSessionRejected(Exception):
+    """A ``development`` session named in shift-summary coverage (SPEC-056 R-4).
+
+    A development session is Studio authoring work, not operational shift
+    material, so it is never digestible into a shift summary — the mis-filing
+    R-4 exists to prevent. Rejected whole (never silently dropped, which would
+    hide a caller mistake) and **before any fact is read**, matching the
+    ``UnknownSessionError`` / ``ForeignSessionDenied`` posture. Shift-summary
+    only: the incident-report path anchors to an ``incident_id`` and is
+    untouched. A legacy ``NULL``-type row reads back ``operation`` (the store
+    mapper default), so pre-SPEC-056 work is never falsely rejected.
+    """
+
+    def __init__(self, session_ids: list[str]) -> None:
+        super().__init__(
+            f"development sessions are not shift-summary material: {session_ids}"
+        )
+        self.session_ids = session_ids
+
+
 def _utc_now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -373,9 +393,10 @@ def build_digest(
 
     Returns ``(digest, provenance)``. Raises ``DigestInputError`` for
     bounded-input violations, ``UnknownSessionError`` for ids that do
-    not exist, and ``ForeignSessionDenied`` when foreign coverage is
-    requested without ``approvals:list`` — all rejected before any
-    foreign fact is read.
+    not exist, ``ForeignSessionDenied`` when foreign coverage is
+    requested without ``approvals:list``, and ``DevelopmentSessionRejected``
+    when a ``development`` session is named (SPEC-056 R-4) — all rejected
+    before any foreign or coverage fact is read.
     """
     ids = validate_session_ids(session_ids)
 
@@ -397,6 +418,20 @@ def build_digest(
     ]
     if foreign and not can_view_foreign:
         raise ForeignSessionDenied(foreign)
+
+    # SPEC-056 R-4: a development session is never operational shift material.
+    # Checked after the foreign gate (so a session the caller cannot view is
+    # denied as foreign first, never leaking its type) and before assembly (so
+    # no fact is read for a request that is about to be rejected). Explicit
+    # ``== "development"`` — a legacy NULL row reads back ``operation`` from the
+    # store mapper, so pre-SPEC-056 work is never falsely rejected.
+    development = [
+        session_id
+        for session_id in ids
+        if sessions[session_id].session_type == "development"
+    ]
+    if development:
+        raise DevelopmentSessionRejected(development)
 
     entries: list[dict[str, Any]] = []
     provenance_sessions: list[dict[str, Any]] = []

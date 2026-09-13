@@ -483,7 +483,33 @@ verdict — the declare-target route is deliberately unaudited at the gateway
 (a declaration is a scope, not an operational act) and `session_created`
 records only a boolean `skill_target_declared` flag rather than the URL, so
 that event is where a reviewer learns which origin a graduated flow is bound
-to. The full approval model —
+to. Since v0.37.0 (SPEC-056) the portal splits its one **Chat** entry into
+**Chat** (*operation* sessions) and a new **Studio** (*development* sessions)
+over one shared chat core, told apart by an additive `session_type`
+discriminator that is fixed at birth and immutable — and it adds **no** new
+policy action, **no** bundle change, and **no** new audit event type. Opening a
+`development` session dual-gates at the gateway create route: always
+`session:create`, **plus** the existing `session:skill_graduate` when
+`session_type == "development"` (the SPEC-043/045 route-level dual-gate
+pattern; a denial reports the first failing action in the standard structured
+shape). The rationale is the tightening R-6 names: a session whose only
+distinguishing power is graduation should require the graduation grant to open,
+so a non-authoring role (`developer`, `read-only-observer`, `auditor`) that
+holds `session:create` but not `session:skill_graduate` can no longer open a
+dead-end Studio session it could never graduate, while the graduation-capable
+roles (`platform-admin`, `approver`, `operator` — exactly the portal's
+`STUDIO_ROLES`, defined equal to its `SKILL_GRADUATE_ROLES` so the two cannot
+drift) may. An *operation* create still needs only `session:create` for every
+role that holds it, so Chat's broad gating is unchanged. The session list gains
+an optional server-side `session_type` scope (Chat lists `operation`, Studio
+lists `development`, and the shift-summary picker consumes the `operation`
+scope so a development session is never offered as shift material); the scope
+is enforced in the agent's list query, never a client hide. The SPEC-055
+declare-target and graduate pass-through routes are unchanged — declare-target
+still rides `session:skill_graduate`, still first-declaration-wins, still names
+a scope and never writes `session_type`. `make policy-diff` reports **zero**
+new grants, the assertion this no-new-vocabulary decision leaves behind. The
+full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).

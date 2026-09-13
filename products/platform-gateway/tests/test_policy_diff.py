@@ -100,3 +100,38 @@ class PolicyDiffTests(unittest.TestCase):
             self.assertIn("error", result.stderr)
         finally:
             candidate.unlink()
+
+
+class Spec056NoNewVocabularyTests(unittest.TestCase):
+    """SPEC-056 R-6/OQ-1: the development-session create dual-gate adds **no**
+    policy vocabulary.
+
+    Opening a ``development`` session reuses the existing
+    ``session:skill_graduate`` grant beside ``session:create``, so the shipped
+    bundle is unchanged and ``make policy-diff`` reports zero new grants. These
+    two assertions are what the decision leaves behind: the bundle diffs clean,
+    and the action the gate leans on is already granted to exactly the
+    operational authoring roles (the portal's ``STUDIO_ROLES``).
+    """
+
+    def test_shipped_bundle_reports_zero_new_grants(self) -> None:
+        result = _run_diff(SHARED_BUNDLE)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("no outcome transitions", result.stdout)
+
+    def test_development_gate_reuses_existing_skill_graduate_grant(self) -> None:
+        bundle = yaml.safe_load(SHARED_BUNDLE.read_text())
+        graduate_roles: set[str] = set()
+        for rule in bundle["rules"]:
+            match = rule.get("match", {})
+            if (
+                "session:skill_graduate" in match.get("actions_any", [])
+                and rule["decision"]["outcome"] == "allow"
+            ):
+                graduate_roles.update(match["roles_any"])
+        # Exactly the operational authoring roles — the dual-gate needs no
+        # action beyond this existing grant, and no role outside it may open a
+        # development session.
+        self.assertEqual(
+            graduate_roles, {"platform-admin", "approver", "operator"}
+        )

@@ -333,6 +333,7 @@ async def create_session(
     request_id: str,
     user_id: str,
     skill_target: str | None = None,
+    session_type: str = "operation",
 ) -> dict:
     """Proxy a session create, optionally declaring its skill target (R-4).
 
@@ -342,10 +343,14 @@ async def create_session(
     body contract cannot catch (a well-formed, in-bounds target with no
     normalizable origin), and letting that surface as an unhandled upstream
     error would answer the operator 500 for what is a 422 they can act on.
+
+    ``session_type`` (SPEC-056 R-1) is relayed to the agent create path; the
+    development-session dual-gate itself is enforced at the route, the policy
+    boundary, before this proxy is ever reached (R-6 / plan §4).
     """
     try:
         return await agent_client.create_session(
-            settings, request_id, user_id, skill_target
+            settings, request_id, user_id, skill_target, session_type
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
@@ -402,15 +407,19 @@ async def list_sessions(
     settings: PlatformGatewaySettings,
     request_id: str,
     user_id: str,
+    session_type: str | None = None,
 ) -> dict:
     """Proxy the caller's workspace session list (SPEC-022 R-1).
 
-
+    ``session_type`` (SPEC-056 R-2) is an optional additive scope forwarded
+    upstream verbatim; omitted, every session is returned exactly as before.
     Same posture as the get/delete proxies: upstream 4xx passes through
     unchanged; transport failures and upstream 5xx map to 502.
     """
     try:
-        return await agent_client.list_sessions(settings, request_id, user_id)
+        return await agent_client.list_sessions(
+            settings, request_id, user_id, session_type
+        )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if 400 <= status < 500:

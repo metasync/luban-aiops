@@ -73,6 +73,18 @@ def _session(client: TestClient, user: str) -> str:
     return response.json()["session_id"]
 
 
+def _development_session(client: TestClient, user: str) -> str:
+    """A Studio-born ``development`` session (SPEC-056 R-4)."""
+    response = client.post(
+        "/api/v2/sessions",
+        json={"session_type": "development"},
+        headers={"X-User-ID": user},
+    )
+    assert response.status_code == 201
+    assert response.json()["session_type"] == "development"
+    return response.json()["session_id"]
+
+
 def _create_draft(client: TestClient, user: str, session_ids: list[str], **extra):
     body = {
         "document_type": "shift_summary",
@@ -740,4 +752,58 @@ class TestIncidentReportDocument:
         # The contract pattern bounds the incident id shape.
         bad_pattern = _create_incident_report(app_client, "alice", "INC-BAD")
         assert bad_pattern.status_code == 422
+
+
+# --- SPEC-056 R-4: the shift-summary create-path guard -----------------------
+
+
+class TestDevelopmentSessionCreateGuard:
+    """The create-path guard beside the scoped list query.
+
+    A hand-crafted ``session_ids`` list naming a ``development`` session is
+    rejected whole at ``POST /api/v2/documents`` (shift_summary only), matching
+    the unknown-session (400) / foreign-denied (403) structural posture. The
+    incident-report path is untouched: it anchors to ``incident_id``, never a
+    session-ids coverage list, so a development session linked to an incident
+    still renders.
+    """
+
+    def test_shift_summary_rejects_development_session(self) -> None:
+        app_client = TestClient(create_app())
+        dev_id = _development_session(app_client, "alice")
+        response = _create_draft(app_client, "alice", [dev_id])
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "development sessions are not shift-summary material" in detail
+        assert dev_id in detail
+
+    def test_shift_summary_rejects_mixed_operation_and_development(self) -> None:
+        # Never silently dropped: one development id rejects the whole request.
+        app_client = TestClient(create_app())
+        op_id = _session(app_client, "alice")
+        dev_id = _development_session(app_client, "alice")
+        response = _create_draft(app_client, "alice", [op_id, dev_id])
+        assert response.status_code == 400
+        assert dev_id in response.json()["detail"]
+
+    def test_all_operation_shift_summary_still_accepted(self) -> None:
+        app_client = TestClient(create_app())
+        op_id = _session(app_client, "alice")
+        response = _create_draft(app_client, "alice", [op_id])
+        assert response.status_code == 201
+
+    def test_incident_report_path_unaffected(self, monkeypatch) -> None:
+        # The guard is shift_summary-only: an incident whose linked session is a
+        # development session still renders (owner coverage), because the
+        # incident path anchors to incident_id, never a session-ids list.
+        app_client = TestClient(create_app())
+        dev_id = _development_session(app_client, "alice")
+
+        async def _fetch(settings, request_id, incident_id):
+            return _bundle_with(dev_id)
+
+        monkeypatch.setattr(v2_routes, "fetch_incident_bundle", _fetch)
+        response = _create_incident_report(app_client, "alice")
+        assert response.status_code == 201
+        assert response.json()["digest"]["session"]["status"] == "owner"
 

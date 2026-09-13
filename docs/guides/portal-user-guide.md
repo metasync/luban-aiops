@@ -1,9 +1,10 @@
 # Portal User Guide
 
 Day-2 guide to the operator portal: signing in, chatting with the agent,
-managing sessions, selecting models, reading tool evidence, approving tool
-runs, and using the Control and Workspace views. Written for everyone who
-uses the portal — operators, approvers, developers, observers, auditors.
+developing skills in Studio, managing sessions, selecting models, reading
+tool evidence, approving tool runs, and using the Control and Workspace
+views. Written for everyone who uses the portal — operators, approvers,
+developers, observers, auditors.
 
 For getting the portal running in the first place, see
 [Getting Started](getting-started.md). For the approval model behind the
@@ -31,9 +32,11 @@ The portal is a two-column shell: a left sidebar with the function list and
 a main column showing one view at a time. View state is preserved when you
 switch — a half-typed chat draft survives a detour into the audit trail.
 
-- **Chat** stands alone at the top.
+- **Chat** stands alone at the top, with **Studio** beside it for the
+  authoring roles (`platform-admin`, `approver`, `operator`) — see
+  [Studio](#studio).
 - **Control** gathers Incidents, Audit trail, and Permissions.
-- **Workspace** gathers Tools, Skills, and Settings.
+- **Workspace** gathers Documents, Tools, Skills, and Settings.
 
 Entries you lack the role for are hidden, and a section header disappears
 when everything under it is hidden. On narrow screens the sidebar collapses
@@ -76,10 +79,61 @@ credentials and discovery knobs, and the
 [Luban-Hosted Small Model Guide](luban-llm-guide.md) for self-hosted
 entries.
 
+## Studio
+
+**Studio** (SPEC-056) is the skill-development workspace: the same chat
+surface as [Chat](#chat) — one shared component, one stream, one
+secret-masking and approval path — pointed at *development* sessions instead
+of operational ones. It appears beside Chat only for `platform-admin`,
+`approver`, and `operator`; `developer`, `read-only-observer`, and `auditor`
+keep Chat alone.
+
+The split is about **what a session is for**, and that is decided at birth:
+
+| | **Chat** | **Studio** |
+|---|---|---|
+| Session type | `operation` | `development` |
+| Session list | your operational sessions only | your development sessions only |
+| Create | one-click **New** | **New** opens a target-at-birth dialog |
+| Session-header actions | **Draft as skill** | **Declare target** + **Graduate as skill** |
+| Feeds a shift summary | yes | no — never shift material |
+
+- A session's type is **fixed when it is created and never changes**. There
+  is no *Move to Studio* and no conversion in either direction: an
+  operational session's steps were approved as incident remediation across
+  whatever targets the incident happened to touch, so graduating it as a
+  single-target replayable flow would always be refused. Start the work in
+  the right entry.
+- **Studio's create dialog** asks for the web target the session will work
+  against. Naming it up front is what makes it the *scope the session acted
+  under*: every approved browser mutation the session captures is then
+  corroborated against that origin at graduation, and a step that lands
+  elsewhere refuses the flow. The target is **optional** — open the session
+  unscoped and use **Declare target** later, and graduation reports that
+  declaration as *fitted to the trace* rather than as the scope the session
+  acted under. Only the origin and path are kept (any query, fragment, or
+  embedded credential is dropped), and the first declaration wins: it cannot
+  be widened afterwards.
+- **Graduate as skill** re-validates the session's captured trace against its
+  declared target and renders it as a Skill Format v1 `executable_flow`
+  draft. It either arrives validated, or you get a refusal naming every guard
+  the trace failed and the step positions responsible — that refusal *is* the
+  answer rather than a transient error, so it opens as a modal you can read.
+  The preview, the **Raw** toggle, and **Download .md** behave exactly as
+  Chat's draft preview does, and nothing is stored on the platform.
+- Each entry remembers its own last-open session across reloads, so a detour
+  from Studio into Chat and back does not lose your place in either.
+- Opening a development session needs the skill-graduation grant beside
+  ordinary session creation. The gateway enforces that on every request — no
+  new policy action, and no way to reach it from a role that lacks it.
+
 ## Sessions
 
 The session panel lists your operator–agent sessions with titles and
-relative last-active times.
+relative last-active times. It lists only the sessions belonging to the
+entry you are in — Chat shows your `operation` sessions, Studio your
+`development` sessions (see [Studio](#studio)) — and that scope is enforced
+server-side, not filtered in your browser.
 
 - **Switching** loads the transcript of the selected session and repoints
   the live stream; persisted tool evidence is re-attached to the matching
@@ -98,7 +152,7 @@ relative last-active times.
   check mark confirms the copy. The open session's header shows the same
   id + copy pair. This is how you hand a colleague a session id to cite
   in a shift summary (see below).
-- **Draft as skill** (SPEC-044, preview per SPEC-045): the open
+- **Draft as skill** (SPEC-044, preview per SPEC-045): **in Chat**, the open
   session's header carries a **Draft as skill** action for
   `platform-admin`, `approver`, and `operator`. It generates a Skill
   Format v1 Markdown draft from the session's durable record (the
@@ -112,7 +166,8 @@ relative last-active times.
   error instead of handing out an unvalidated draft. Nothing is stored
   on the platform — see the
   [Skills and Guidance Guide](skills-guide.md) for merging the draft
-  into a skill source.
+  into a skill source. Studio's header carries **Declare target** +
+  **Graduate as skill** instead — see [Studio](#studio).
 
 ## Reading Tool Evidence
 
@@ -204,14 +259,20 @@ grants.
   [Documents and Digest Reference](documents-digest-reference.md); the
   drawer's **Learn more** link opens the same page.
 - **New document** opens the creation dialog with a type choice
-  (SPEC-043): **Shift summary** picks your own sessions from a
-  selector (optionally plus foreign session ids copied from a
+  (SPEC-043): **Shift summary** picks your own **operation** sessions
+  from a selector (optionally plus foreign session ids copied from a
   colleague's session panel — see Sessions above); **Incident report**
   picks exactly one incident from a searchable picker. Both types take
   a label, and the AI narrative is generated by default — switch it
   off to ship a digest-only document. Shift summaries cover at most 20
   sessions; an incident report's coverage is the incident's own linked
   triage session, chosen server-side.
+- **Studio sessions are never shift material** (SPEC-056): the
+  shift-summary picker lists `operation` sessions only, because the list
+  it reads is scoped server-side — a `development` session is not hidden
+  by your browser, it is never returned. A hand-crafted request naming
+  one is rejected rather than silently dropped, so skill-authoring work
+  cannot be mis-filed into an operational handover.
 - **Coverage is two-tier**: your own sessions contribute full coverage;
   foreign sessions contribute metadata only — and only if your roles also
   hold the approvals inbox. The digest's provenance names every cited
@@ -264,7 +325,9 @@ deployment (503), or the incident facts unreachable right now (502).
 1. Open **Documents** in the Workspace section and click **New shift
    summary**.
 2. Enter a label that names the shift (e.g. *Night shift 2026-08-28*).
-3. Select your own sessions from the picker (up to 20). To fold in a
+3. Select your own sessions from the picker (up to 20 — operation
+   sessions only; Studio sessions are not offered and are not shift
+   material). To fold in a
    colleague's session, ask them to copy its session id from their
    session panel (see Sessions above) and paste it into the foreign-id
    field — foreign sessions enter metadata-only, and only when your
@@ -422,14 +485,18 @@ from the gateway.
 
 ## What Your Roles Unlock
 
-| Role | Chat | Approve cards | Approvals inbox | Documents | Skill drafts | Mutating tools | Incidents | Audit trail |
-|---|---|---|---|---|---|---|---|---|
-| `platform-admin` | yes | yes | yes | yes | yes | yes | full | yes |
-| `operator` | yes | yes | no | yes | yes | yes | full | no |
-| `approver` | yes | yes | yes | yes | yes | no | full | no |
-| `developer` | yes | yes | no | no | no | no | full | no |
-| `read-only-observer` | yes (read-only tools) | no | no | no | no | no | read | no |
-| `auditor` | no | no | no | no | no | no | no | yes |
+| Role | Chat | Studio | Approve cards | Approvals inbox | Documents | Skill drafts | Mutating tools | Incidents | Audit trail |
+|---|---|---|---|---|---|---|---|---|---|
+| `platform-admin` | yes | yes | yes | yes | yes | yes | yes | full | yes |
+| `operator` | yes | yes | yes | no | yes | yes | yes | full | no |
+| `approver` | yes | yes | yes | yes | yes | yes | no | full | no |
+| `developer` | yes | no | yes | no | no | no | no | full | no |
+| `read-only-observer` | yes (read-only tools) | no | no | no | no | no | no | read | no |
+| `auditor` | no | no | no | no | no | no | no | no | yes |
+
+Studio is exactly the authoring power: it is offered to the roles that hold
+the skill-graduation grant and to nobody else, and opening a development
+session is refused at the gateway for any other role.
 
 The authoritative answer is always the Permissions view — it reflects the
 deployed bundle, including any local grants your administrators added. See

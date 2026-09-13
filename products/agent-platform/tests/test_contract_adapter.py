@@ -6,9 +6,18 @@ from pathlib import Path
 import jsonschema
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from agent_service.api.v2.routes import _FLOW_SUMMARY_FIELDS, _normalize_stream_event
 from agent_service.app import create_app
+from agent_service.schemas.api import SessionRecord
+from agent_service.schemas.v2 import (
+    AgentSession,
+    AgentSessionCreateRequest,
+    AgentSessionList,
+    AgentSessionSummary,
+    SessionType,
+)
 
 SCHEMAS_DIR = (
     Path(__file__).resolve().parents[3] / "shared" / "shared-contracts" / "schemas"
@@ -51,6 +60,143 @@ def test_session_read_conforms_to_contract() -> None:
     )
     assert response.status_code == 200
     jsonschema.validate(response.json(), load_schema("agent-session.schema.json"))
+
+
+# --- SPEC-056 R-1: the additive ``session_type`` discriminator ---
+#
+# ``additionalProperties:false`` on both live session schemas forces the field
+# *name* onto every emitting model the moment a response carries it. What no
+# property-name guard can see is enum *vocabulary* drift — the audit-service
+# ``event_type`` and model-catalog ``provider`` incidents, where parity passed
+# while a new value was rejected at runtime. The assertions below close that
+# gap for the session vocabulary.
+
+_SESSION_TYPE_CONSUMERS = (
+    AgentSession,
+    AgentSessionSummary,
+    AgentSessionCreateRequest,
+    SessionRecord,
+)
+
+
+def _session_type_enum(schema_name: str) -> set[str]:
+    contract = load_schema(schema_name)
+    properties = (
+        contract["properties"]
+        if schema_name == "agent-session.schema.json"
+        else contract["properties"]["sessions"]["items"]["properties"]
+    )
+    return set(properties["session_type"]["enum"])
+
+
+def test_session_type_enum_values_match_contract() -> None:
+    model_values = set(getattr(SessionType, "__args__", SessionType))
+    assert model_values == {"operation", "development"}
+    for schema_name in (
+        "agent-session.schema.json",
+        "agent-session-list.schema.json",
+    ):
+        assert _session_type_enum(schema_name) == model_values, schema_name
+    for model in _SESSION_TYPE_CONSUMERS:
+        annotation = model.model_fields["session_type"].annotation
+        assert set(getattr(annotation, "__args__", annotation)) == model_values, (
+            model.__name__
+        )
+        # Additive everywhere: the default carries a create body that omits the
+        # field, so an un-updated client behaves exactly as before SPEC-056.
+        assert model.model_fields["session_type"].default == "operation"
+
+
+def test_session_type_enum_parity_guard_fires_on_drift() -> None:
+    """Prove the parity assertion is sensitive rather than vacuously true."""
+    contract_values = _session_type_enum("agent-session.schema.json")
+    model_values = set(getattr(SessionType, "__args__", SessionType))
+    assert contract_values == model_values
+
+    # A schema that grew a value the models do not carry, and a model that
+    # dropped one the schema still accepts, are both drift the property-name
+    # guard is blind to.
+    assert contract_values | {"archived"} != model_values
+    assert contract_values - {"development"} != model_values
+
+    # The runtime consequence the guard exists to prevent: the widened value is
+    # refused at every consuming model boundary.
+    for model in _SESSION_TYPE_CONSUMERS:
+        with pytest.raises(ValidationError):
+            model.model_validate(_session_type_payload(model, "archived"))
+
+
+def _session_type_payload(model, session_type: str) -> dict:
+    """A minimal valid payload for ``model`` carrying ``session_type``."""
+    if model is AgentSessionCreateRequest:
+        return {"session_type": session_type}
+    if model is AgentSessionSummary:
+        return {
+            "session_id": "ses-1",
+            "created_at": "2026-09-12T00:00:00Z",
+            "session_type": session_type,
+        }
+    return {
+        "session_id": "ses-1",
+        "user_id": "alice",
+        "created_at": "2026-09-12T00:00:00Z",
+        "session_type": session_type,
+    }
+
+
+def test_session_record_with_session_type_conforms_to_both_contracts() -> None:
+    for session_type in ("operation", "development"):
+        detail = AgentSession(
+            session_id="ses-1",
+            user_id="alice",
+            created_at="2026-09-12T00:00:00Z",
+            session_type=session_type,
+        )
+        jsonschema.validate(
+            detail.model_dump(mode="json", exclude_none=True),
+            load_schema("agent-session.schema.json"),
+        )
+        listing = AgentSessionList(
+            sessions=[
+                AgentSessionSummary(
+                    session_id="ses-1",
+                    created_at="2026-09-12T00:00:00Z",
+                    session_type=session_type,
+                )
+            ]
+        )
+        jsonschema.validate(
+            listing.model_dump(mode="json", exclude_none=True),
+            load_schema("agent-session-list.schema.json"),
+        )
+        assert detail.model_dump(mode="json")["session_type"] == session_type
+
+
+def test_session_record_omitting_session_type_still_conforms() -> None:
+    # Additive and defaulted: both schemas accept a record that predates the
+    # field, and every model supplies ``operation``.
+    legacy_detail = {
+        "session_id": "ses-legacy",
+        "user_id": "alice",
+        "created_at": "2026-09-12T00:00:00Z",
+        "status": "active",
+    }
+    legacy_row = {
+        "session_id": "ses-legacy",
+        "created_at": "2026-09-12T00:00:00Z",
+        "pending_confirmation": False,
+    }
+    jsonschema.validate(legacy_detail, load_schema("agent-session.schema.json"))
+    jsonschema.validate(
+        {"sessions": [legacy_row]}, load_schema("agent-session-list.schema.json")
+    )
+    assert SessionRecord.model_validate(legacy_detail).session_type == "operation"
+    assert (
+        AgentSession.model_validate(legacy_detail).session_type == "operation"
+    )
+    assert (
+        AgentSessionSummary.model_validate(legacy_row).session_type == "operation"
+    )
 
 
 def test_chat_response_conforms_to_contract() -> None:

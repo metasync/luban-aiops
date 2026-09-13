@@ -138,6 +138,12 @@ export interface SessionSummary {
   created_at: string;
   last_active_at: string | null;
   pending_confirmation: boolean;
+  // SPEC-056 R-1: the birth discriminator, fixed once at creation and
+  // immutable (never inferred, never promoted/demoted). Chat lists
+  // `operation`, Studio lists `development`; the shift-summary picker is
+  // scoped to `operation` (R-4). The gateway always serializes it (its
+  // Pydantic mirror defaults to `operation`), so it is never absent here.
+  session_type: "operation" | "development";
 }
 
 export interface SessionDetail extends SessionSummary {
@@ -161,10 +167,22 @@ export interface SessionListResponse {
   sessions: SessionSummary[];
 }
 
-export async function listSessions(signal?: AbortSignal): Promise<SessionSummary[]> {
-  const response = await requestJson<SessionListResponse>("/api/v1/sessions", {
-    signal,
-  });
+export async function listSessions(
+  signal?: AbortSignal,
+  sessionType?: "operation" | "development",
+): Promise<SessionSummary[]> {
+  // SPEC-056 R-2: an optional, ownership-preserving scope. Omitted returns
+  // every session (the legacy behavior); a value scopes the list to that
+  // type server-side (`?session_type=<mode>`) — how Chat and Studio each
+  // list only their own kind, and how the shift-summary picker is confined
+  // to operation sessions (R-4) rather than hidden client-side.
+  const query = sessionType
+    ? `?session_type=${encodeURIComponent(sessionType)}`
+    : "";
+  const response = await requestJson<SessionListResponse>(
+    `/api/v1/sessions${query}`,
+    { signal },
+  );
   return response.sessions ?? [];
 }
 
@@ -193,10 +211,17 @@ export async function getSession(
 export async function createSession(
   sessionId?: string,
   skillTarget?: string,
+  sessionType?: "operation" | "development",
 ): Promise<SessionDetail> {
   const body: Record<string, string> = {};
   if (sessionId) body.session_id = sessionId;
   if (skillTarget) body.skill_target = skillTarget;
+  // SPEC-056 R-1: the birth type, sent per entry (Chat → operation, Studio →
+  // development) and written once at creation. Decoupled from skillTarget —
+  // a development session may omit a target, and declaring one never sets
+  // the type. Omitted (the historical one-click shape) defaults to
+  // `operation` server-side, so an un-updated caller is unaffected.
+  if (sessionType) body.session_type = sessionType;
   return requestJson<SessionDetail>("/api/v1/sessions", {
     method: "POST",
     body,

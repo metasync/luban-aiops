@@ -489,7 +489,7 @@ wheels = [
 
 [[package]]
 name = "identity-service"
-version = "0.36.3"
+version = "0.37.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

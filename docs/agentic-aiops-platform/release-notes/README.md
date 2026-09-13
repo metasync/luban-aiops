@@ -7,6 +7,44 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-13-studio-skill-development-workspace.md`
+  - release train (v0.37.0) delivering SPEC-056, the eighteenth R5 slice: the
+    portal's one **Chat** entry splits into **Chat** (*operation* sessions) and a
+    new **Studio** (*development* sessions) over **one shared chat core**
+    parameterized by a `mode`, backed by an additive `session_type` enum on both
+    agent-session schemas and every mirror that is **fixed at birth and
+    immutable** (no setter anywhere; the Postgres upsert re-types only in the
+    expired-reclaim branch, and the declare-target route never writes it), with a
+    new enum-value parity drift guard beside the existing property-set-equality
+    ones. Each entry lists only its own type, scoped **in the SQL `WHERE`
+    clause** so a client cannot coerce it, over two mode-scoped
+    `useSessionWorkspace` instances with per-mode namespaced active-session keys
+    and development polling gated on `STUDIO_ROLES` (= `SKILL_GRADUATE_ROLES`).
+    Authoring controls move to their right homes (**Design B** — Draft-as-skill
+    stays in Chat; Declare-target and Graduate-as-skill move to Studio, whose
+    create dialog now takes an *optional* target; no conversion in either
+    direction). The shift-summary picker reads the operation-scoped workspace and
+    `build_digest` additionally **rejects** a `development` id with a new
+    structural `DevelopmentSessionRejected` → 400 (plan §9), checked after the
+    foreign gate and before any fact is read. The gateway's create route
+    dual-gates `session:create` plus the existing `session:skill_graduate` for a
+    development session — **no** new policy action, bundle change, content-hash
+    bump or audit event type, `make policy-diff` zero transitions across all 138
+    pairs. R-5 is pinned by rendering one fixed transcript (markdown reply, tool
+    evidence, a masked-secret change request, a pending HITL card) in **both**
+    modes and comparing the transcript surface byte-for-byte, with a companion
+    asserting the header *does* differ. No `samples/` demo ships (nothing
+    otherwise-unexercised, so ADR-0008 rule 2 does not bind); the operator
+    documentation is a new `## Studio` section in the portal user guide. The
+    OQ-2 backfill was exercised against a **real Postgres 16.14** and found the
+    `to_regclass` guard was decorative — PostgreSQL resolves the relation in the
+    inference's `IN (SELECT …)` subquery at parse-analysis time, so a cluster
+    without the SPEC-055 authoring-trace DDL would have aborted the schema
+    bootstrap rather than skipped the inference; it now runs inside a `DO` block
+    with dynamic `EXECUTE`, pinned structurally and verified on the real server.
+    `make verify` green (2616 tests), portal 400/32 green, `npm run build` clean.
+    Also carries a drive-by antd v6 `Spin tip` → `description` migration at the
+    two pre-existing call sites the new ChatView suite first reached.
 - `2026-09-11-post-release-doc-review-and-redaction-cache.md`
   - patch release (v0.36.3) closing the in-depth *documentation* review that
     followed the v0.36.2 code review, plus two low-severity code-quality items

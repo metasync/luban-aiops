@@ -16,6 +16,7 @@ import {
   AuditOutlined,
   BulbOutlined,
   CheckSquareOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
   LoginOutlined,
   LogoutOutlined,
@@ -33,6 +34,7 @@ import {
   AUDIT_ROLES,
   DOCUMENT_ROLES,
   INCIDENT_VIEW_ROLES,
+  STUDIO_ROLES,
   hasAnyRole,
 } from "./roles";
 import { useSessionWorkspace } from "./sessions/useSessionWorkspace";
@@ -50,6 +52,7 @@ import { PLATFORM_VERSION } from "./version";
 
 export type ViewId =
   | "chat"
+  | "studio"
   | "incidents"
   | "approvals"
   | "documents"
@@ -99,6 +102,11 @@ function SidebarContent({
 }) {
   const { username, roles, session, login, logout, authError } = useAuth();
   const signedIn = Boolean(username);
+  // SPEC-056 R-2/R-6: Studio is the authoring power — visible exactly to the
+  // roles that hold session:skill_graduate (the gateway dual-gates opening a
+  // development session on it). developer / read-only-observer / auditor keep
+  // Chat only; Chat's own gating below is unchanged.
+  const studioVisible = signedIn && hasAnyRole(roles, STUDIO_ROLES);
 
   // Section wrappers (SPEC-019 R-1): a group header hides automatically
   // when every entry in its section is hidden.
@@ -124,6 +132,15 @@ function SidebarContent({
     const entries: MenuProps["items"] = [
       { key: "chat", icon: <MessageOutlined />, label: "Chat" },
     ];
+    // SPEC-056 R-2: Studio sits beside Chat as a peer top-level entry, gated
+    // to STUDIO_ROLES. It renders the same ChatView core in development mode.
+    if (studioVisible) {
+      entries.push({
+        key: "studio",
+        icon: <ExperimentOutlined />,
+        label: "Studio",
+      });
+    }
     const controlItems: NonNullable<MenuProps["items"]> = [];
     if (controlVisible.incidents) {
       controlItems.push({
@@ -292,15 +309,25 @@ export default function App() {
   const [siderCollapsed, setSiderCollapsed] = useState(false);
   const narrow = useNarrowViewport();
   const { booting, username, roles } = useAuth();
-  // The session workspace lives here so the incidents view can pin
-  // incident sessions into the chat panel (SPEC-023 R-3 deep links).
-  const workspace = useSessionWorkspace(Boolean(username));
+  // SPEC-056 R-2 / plan §7: App owns TWO mode-scoped workspace instances.
+  // The operation instance backs Chat and is reused by Incidents/Documents/
+  // Settings (all deal in operation sessions); the development instance backs
+  // Studio. Each namespaces its own active-session key, so the two entries
+  // never fight over the pointer. The development instance's polling is gated
+  // on a Studio role, so a non-authoring role never polls a list it could
+  // never populate (it also could never open a development session — the
+  // gateway dual-gates that on session:skill_graduate, R-6).
+  const operationWorkspace = useSessionWorkspace(Boolean(username), "operation");
+  const developmentWorkspace = useSessionWorkspace(
+    Boolean(username) && hasAnyRole(roles, STUDIO_ROLES),
+    "development",
+  );
   // SPEC-031 R-5: one inbox poll per signed-in decider; the sidebar badge
   // and the Approvals view share this state. SPEC-034 R-2: a decision
   // applied from the inbox refreshes the session panel immediately.
   const approvals = useApprovalsInbox(
     Boolean(username) && hasAnyRole(roles, APPROVAL_DECIDER_ROLES),
-    () => void workspace.refresh(),
+    () => void operationWorkspace.refresh(),
   );
 
   const navigate = (view: ViewId) => {
@@ -312,7 +339,7 @@ export default function App() {
     incident_id: string;
     session_id?: string | null;
   }) => {
-    workspace.pinIncidentSession(
+    operationWorkspace.pinIncidentSession(
       incident.incident_id,
       incident.session_id ?? undefined,
     );
@@ -329,7 +356,7 @@ export default function App() {
           justifyContent: "center",
         }}
       >
-        <Spin size="large" tip="Starting portal…" />
+        <Spin size="large" description="Starting portal…" />
       </div>
     );
   }
@@ -360,22 +387,24 @@ export default function App() {
       <Layout>
         <Layout.Content
           className={
-            active === "chat"
+            active === "chat" || active === "studio"
               ? "view-container view-container-flush"
               : "view-container"
           }
         >
           {active === "chat" ? (
-            <ChatView workspace={workspace} />
+            <ChatView workspace={operationWorkspace} mode="operation" />
+          ) : active === "studio" ? (
+            <ChatView workspace={developmentWorkspace} mode="development" />
           ) : active === "incidents" ? (
             <IncidentsView
               onOpenIncidentSession={openIncidentSession}
-              workspace={workspace}
+              workspace={operationWorkspace}
             />
           ) : active === "approvals" ? (
             <ApprovalsView inbox={approvals} />
           ) : active === "documents" ? (
-            <DocumentsView workspace={workspace} />
+            <DocumentsView workspace={operationWorkspace} />
           ) : active === "audit" ? (
             <AuditView />
           ) : active === "permissions" ? (
@@ -385,7 +414,7 @@ export default function App() {
           ) : active === "skills" ? (
             <SkillsView />
           ) : (
-            <SettingsView workspace={workspace} />
+            <SettingsView workspace={operationWorkspace} />
           )}
         </Layout.Content>
       </Layout>

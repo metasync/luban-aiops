@@ -51,7 +51,10 @@ import {
   SKILL_GRADUATE_ROLES,
   hasAnyRole,
 } from "../roles";
-import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
+import type {
+  SessionMode,
+  SessionWorkspace,
+} from "../sessions/useSessionWorkspace";
 import type { ExecutionReceipt, ToolResultFrame } from "../stream/models";
 import {
   useChatStream,
@@ -1028,6 +1031,7 @@ function SessionPanel({
   error,
   authenticated,
   localDecisionApplied,
+  mode,
   onSelect,
   onCreate,
   onCreateDevelopment,
@@ -1042,6 +1046,9 @@ function SessionPanel({
   // When true, the active session's local turn state shows all cards
   // decided — suppress the stale backend pending_confirmation tag.
   localDecisionApplied: boolean;
+  // SPEC-056 R-3: which create affordance the panel offers — exactly one per
+  // mode, so neither entry can mint the other's session type.
+  mode: SessionMode;
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   // SPEC-055 R-4: opens the develop-as-you-go dialog, which collects the
@@ -1057,44 +1064,53 @@ function SessionPanel({
         {/* Pre-login the workspace API cannot be called (401), so the
             affordance is disabled like the composer; the server-side 401
             path stays as the defence for mid-session token expiry. */}
-        {/* Both create affordances share one flex child: the header is
-            space-between, so a third direct child would centre itself. */}
+        {/* Whichever affordance the mode selects stays inside one flex child:
+            the header is space-between, so a second direct child would centre
+            itself. */}
         <div style={{ display: "flex", gap: 4 }}>
-          <Tooltip title={authenticated ? "" : "Sign in to create a session"}>
-            <Button
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={onCreate}
-              disabled={!authenticated}
-              aria-label="New session"
+          {mode === "operation" ? (
+            /* Chat keeps the one-click path only. The develop-as-you-go opener
+               moved to Studio (SPEC-056 R-3), so nothing in Chat can mint a
+               session that could later graduate a captured flow. */
+            <Tooltip title={authenticated ? "" : "Sign in to create a session"}>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={onCreate}
+                disabled={!authenticated}
+                aria-label="New session"
+              >
+                New
+              </Button>
+            </Tooltip>
+          ) : (
+            /* SPEC-055 R-4's opener, now Studio's only create path. It still
+               collects the target before the session exists to mutate
+               anything; the target is optional per SPEC-056 R-2. Not
+               role-gated: the target rides session:create, which every
+               authenticated role holds, because declaring a scope is inert (it
+               grants nothing and only narrows what a later graduation may
+               emit). Studio itself is gated on STUDIO_ROLES, and the gateway
+               dual-gates minting a development session on
+               session:skill_graduate regardless (R-6). */
+            <Tooltip
+              title={
+                authenticated
+                  ? "Open a skill-development session, optionally against a declared web target"
+                  : "Sign in to create a session"
+              }
             >
-              New
-            </Button>
-          </Tooltip>
-          {/* SPEC-055 R-4: the develop-as-you-go opener. Deliberately a second
-              button rather than a step added to "New" — the one-click path is
-              the common case and its muscle memory holds. Not role-gated: the
-              target rides session:create, which every authenticated role
-              holds, because declaring a scope is inert (it grants nothing and
-              only narrows what a later graduation may emit). Graduating stays
-              gated on session:skill_graduate. */}
-          <Tooltip
-            title={
-              authenticated
-                ? "Open a skill-development session against a declared web target"
-                : "Sign in to create a session"
-            }
-          >
-            <Button
-              size="small"
-              icon={<ExperimentOutlined />}
-              onClick={onCreateDevelopment}
-              disabled={!authenticated}
-              aria-label="New skill development session"
-            >
-              Skill
-            </Button>
-          </Tooltip>
+              <Button
+                size="small"
+                icon={<ExperimentOutlined />}
+                onClick={onCreateDevelopment}
+                disabled={!authenticated}
+                aria-label="New skill development session"
+              >
+                New
+              </Button>
+            </Tooltip>
+          )}
         </div>
       </div>
       {error ? (
@@ -1182,10 +1198,21 @@ function SessionPanel({
 
 // The session workspace is owned by App so the incidents view can pin
 // incident sessions into the panel (SPEC-023 R-3 deep links).
+//
+// SPEC-056 R-2 / R-5: ONE ChatView serves both Chat and Studio. `mode`
+// selects only three things — which authoring controls are visible, the birth
+// `session_type`, and the list scope — and the last two are properties of the
+// workspace instance App hands in, not of anything this component computes.
+// `mode` is deliberately NOT threaded into the SSE stream adapter, the
+// secret-masking renderer, or the HITL confirmation path: those are the trust
+// core, and a mode that could vary them would make the two entries two
+// products rather than one workspace with two scopes.
 export default function ChatView({
   workspace,
+  mode = "operation",
 }: {
   workspace: SessionWorkspace;
+  mode?: SessionMode;
 }) {
   const { username, roles } = useAuth();
   const authenticated = Boolean(username);
@@ -1519,15 +1546,17 @@ export default function ChatView({
     setRenaming(null);
   };
 
-  // SPEC-055 R-4: the develop-as-you-go opener. The target is collected
-  // *before* the session exists, which is what makes it an authorization
-  // scope rather than a claim fitted to the trace afterwards — no mutation
-  // can have been captured yet, so graduation can report the declaration
-  // `preceded` every step. Required, not optional: a session opened without a
-  // target can still capture browser mutations, but graduating them needs a
-  // target, and one declared after the fact is reported as fitted to the trace
-  // rather than as the scope the session acted under. The plain "New" button
-  // keeps the targetless path for ordinary chat.
+  // SPEC-055 R-4 / SPEC-056 R-2: the develop-as-you-go opener, now Studio's
+  // only create path. The target is still collected *before* the session
+  // exists, which is what makes it an authorization scope rather than a claim
+  // fitted to the trace afterwards — no mutation can have been captured yet,
+  // so graduation can report the declaration `preceded` every step. It is now
+  // OPTIONAL: an unscoped session can still capture browser mutations and be
+  // scoped mid-flight with "Declare target", at which point graduation reports
+  // that declaration as fitted to the trace rather than as the scope the
+  // session acted under. Either way the session is minted
+  // `session_type=development` — the type comes from the workspace's mode, and
+  // is never inferred from whether a target happened to be named.
   const [devOpen, setDevOpen] = useState(false);
   const [devTarget, setDevTarget] = useState("");
   const [devError, setDevError] = useState<string | null>(null);
@@ -1541,9 +1570,11 @@ export default function ChatView({
 
   const submitDevelopmentSession = async () => {
     const target = devTarget.trim();
-    if (!target || devBusy) return;
+    if (devBusy) return;
     setDevBusy(true);
-    const outcome = await workspace.createDevelopmentSession(target);
+    const outcome = await workspace.createDevelopmentSession(
+      target || undefined,
+    );
     setDevBusy(false);
     if (!outcome.ok) {
       setDevError(outcome.message ?? "Could not open the session.");
@@ -1580,6 +1611,7 @@ export default function ChatView({
         error={workspace.error}
         authenticated={authenticated}
         localDecisionApplied={localDecisionApplied}
+        mode={mode}
         onSelect={setActiveSessionId}
         onCreate={() => void workspace.createAndOpen()}
         onCreateDevelopment={openDevelopmentDialog}
@@ -1600,11 +1632,23 @@ export default function ChatView({
               {activeSummary.session_id}
             </code>
             <CopyIdButton id={activeSummary.session_id} />
-            <DraftAsSkillButton sessionId={activeSummary.session_id} />
-            {/* Order reads as the workflow: prose draft first, then the two
-                develop-as-you-go controls — scope the session, graduate it. */}
-            <DeclareSkillTargetButton sessionId={activeSummary.session_id} />
-            <GraduateAsSkillButton sessionId={activeSummary.session_id} />
+            {/* SPEC-056 R-3: the authoring controls split by mode, and neither
+                mode offers a conversion — there is no "Move to Studio". An
+                operation session's trace is multi-origin (its steps were
+                approved as incident remediation, not as one flow), so
+                graduating it would deterministically refuse; offering the
+                button would only manufacture a refusal. */}
+            {mode === "operation" ? (
+              <DraftAsSkillButton sessionId={activeSummary.session_id} />
+            ) : (
+              /* Order reads as the workflow: scope the session, graduate it. */
+              <>
+                <DeclareSkillTargetButton
+                  sessionId={activeSummary.session_id}
+                />
+                <GraduateAsSkillButton sessionId={activeSummary.session_id} />
+              </>
+            )}
           </div>
         ) : null}
         <div className="chat-messages" ref={scrollRef}>
@@ -1615,7 +1659,7 @@ export default function ChatView({
             </div>
           ) : historyLoading ? (
             <div className="chat-placeholder">
-              <Spin tip="Loading session transcript…" />
+              <Spin description="Loading session transcript…" />
             </div>
           ) : chat.turns.length === 0 ? (
             <div className="chat-placeholder">
@@ -1766,7 +1810,6 @@ export default function ChatView({
         title="New skill-development session"
         open={devOpen}
         okText="Open session"
-        okButtonProps={{ disabled: devTarget.trim().length === 0 }}
         confirmLoading={devBusy}
         onOk={() => void submitDevelopmentSession()}
         onCancel={() => setDevOpen(false)}
@@ -1793,12 +1836,16 @@ export default function ChatView({
           type="secondary"
           style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}
         >
-          Name the web target this session will work against. Declaring it
-          before the first mutation is what makes it the scope the session acts
-          under: every approved change it captures is then corroborated against
-          this origin at graduation, and a step that lands elsewhere refuses
-          the flow. Only the origin and path are kept — any query, fragment or
-          embedded credential is dropped. The first declaration wins.
+          Optionally name the web target this session will work against.
+          Declaring it here — before the first mutation — is what makes it the
+          scope the session acts under: every approved change it captures is
+          then corroborated against this origin at graduation, and a step that
+          lands elsewhere refuses the flow. Leave it blank to open the session
+          unscoped and declare a target later; graduation then reports that
+          declaration as fitted to the trace rather than as the scope the
+          session acted under. Only the origin and path are kept — any query,
+          fragment or embedded credential is dropped. The first declaration
+          wins.
         </Typography.Paragraph>
       </Modal>
     </div>

@@ -49,6 +49,7 @@ function detailOf(overrides: Partial<SessionDetail> = {}): SessionDetail {
     pending_confirmation: true,
     user_id: "luban-operator",
     status: "active",
+    session_type: "operation",
     transcript_available: true,
     transcript: [{ role: "user", content: "restart the pod" }],
     confirmations: [recordOf()],

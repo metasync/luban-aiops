@@ -593,3 +593,100 @@ def test_confirm_contract_rejects_modality_fields():
             },
             schema,
         )
+
+
+# --- SPEC-056 R-1/R-2: session_type birth, carry, and list scope ---
+
+
+def test_create_session_persists_development_type(workspace):
+    """A ``development`` body writes the birth type once and every read surface
+    (create return, stored record, ``read_session``) carries it (R-1)."""
+    session_store, _ = workspace
+    client = _client()
+    response = client.post(
+        "/api/v2/sessions",
+        json={"session_type": "development"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["session_type"] == "development"
+    assert session_store.get_session(body["session_id"]).session_type == "development"
+    detail = client.get(
+        f"/api/v2/sessions/{body['session_id']}", headers={"X-User-ID": "alice"}
+    )
+    assert detail.status_code == 200
+    assert detail.json()["session_type"] == "development"
+    jsonschema.validate(detail.json(), load_schema("agent-session.schema.json"))
+
+
+def test_create_session_defaults_to_operation_without_body(workspace):
+    """The historical one-click Chat path (no body) still births ``operation``."""
+    response = _client().post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    assert response.status_code == 201
+    assert response.json()["session_type"] == "operation"
+
+
+def test_create_session_operation_body_persists_operation(workspace):
+    response = _client().post(
+        "/api/v2/sessions",
+        json={"session_type": "operation"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 201
+    assert response.json()["session_type"] == "operation"
+
+
+def test_list_rows_carry_session_type(workspace):
+    session_store, _ = workspace
+    session_store.create_session("alice", session_type="operation")
+    session_store.create_session("alice", session_type="development")
+    response = _client().get("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    assert response.status_code == 200
+    assert {s["session_type"] for s in response.json()["sessions"]} == {
+        "operation",
+        "development",
+    }
+    jsonschema.validate(
+        response.json(), load_schema("agent-session-list.schema.json")
+    )
+
+
+def test_list_sessions_scopes_by_session_type(workspace):
+    """The optional ``session_type`` query param scopes the list server-side;
+    omitted returns every session exactly as before (R-2 / R-4)."""
+    session_store, _ = workspace
+    op = session_store.create_session("alice", session_type="operation")
+    dev = session_store.create_session("alice", session_type="development")
+    client = _client()
+
+    only_op = client.get(
+        "/api/v2/sessions",
+        params={"session_type": "operation"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert [s["session_id"] for s in only_op.json()["sessions"]] == [op.session_id]
+
+    only_dev = client.get(
+        "/api/v2/sessions",
+        params={"session_type": "development"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert [s["session_id"] for s in only_dev.json()["sessions"]] == [dev.session_id]
+
+    all_sessions = client.get("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    assert {s["session_id"] for s in all_sessions.json()["sessions"]} == {
+        op.session_id,
+        dev.session_id,
+    }
+
+
+def test_list_sessions_rejects_unknown_session_type(workspace):
+    """The query param is a bounded enum: an unknown value is a 422, never a
+    silent fall-through to "all"."""
+    response = _client().get(
+        "/api/v2/sessions",
+        params={"session_type": "staging"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 422
