@@ -38,16 +38,15 @@
 - [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
 - [App.studio.test.tsx](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx)
 - [ChatView.mode.test.tsx](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx)
+- [ApprovalsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added dual workspace architecture with separate Chat (operation) and Studio (development) workspaces
-- Implemented mode-aware ChatView component that serves both operation and development modes
-- Added role-based Studio entry gating using STUDIO_ROLES constant
-- Updated navigation to include Studio menu item for authorized roles only
-- Enhanced session management with mode-scoped instances and namespaced active session keys
-- Added development session creation capabilities exclusive to Studio workspace
+- Enhanced approval decision refresh functionality to update both operation and development workspaces immediately when decisions land
+- Fixed user experience issue where Studio panel would show stale 'awaiting approval' state when approvers resolved cards on their own development sessions
+- Updated dual-workspace architecture to address edge cases introduced by SPEC-056
+- Added comprehensive test coverage for cross-workspace refresh behavior
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,6 +65,7 @@ The Operator Portal is the operator-facing web application for platform administ
 
 Key capabilities include:
 - **Dual workspace architecture**: Separate Chat (operation) and Studio (development) workspaces with distinct session types and authoring controls
+- **Enhanced approval workflow**: Immediate refresh of both workspaces when approval decisions land, preventing stale 'awaiting approval' states in Studio panel
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling and flow headline rendering, plus parsed element labels as human-readable prose**
 - Incident management with triage reports and live runs
@@ -108,13 +108,14 @@ Nginx --> Dist
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - **Dual workspace architecture**: Operation workspace (Chat) for regular sessions and development workspace (Studio) for skill development sessions, each with separate session lists and active session management.
+- **Enhanced approval workflow**: Cross-workspace refresh mechanism that updates both operation and development workspaces immediately when approval decisions are made.
 - Mode-aware ChatView: Single component serving both operation and development modes with conditional authoring controls based on workspace mode.
 - Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface, critical hook ordering stability, and automatic recovery from stale session transitions**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and **enhanced skills inventory with lazy loading and read-only content viewer**.
 - Theme and accessibility: Dark theme tokens mirrored into CSS custom properties; ARIA labels and keyboard-friendly controls.
 
 **Section sources**
-- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
+- [App.tsx:1-461](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L461)
 - [AuthContext.tsx:1-110](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L1-L110)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [ChatView.tsx:1-1854](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1-L1854)
@@ -123,11 +124,12 @@ Nginx --> Dist
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
 
 ## Architecture Overview
-The portal follows a thin-client architecture with dual workspace support:
+The portal follows a thin-client architecture with dual workspace support and enhanced approval workflow coordination:
 - Frontend: React SPA built with Vite, served by nginx with immutable asset caching and SPA fallback.
 - Auth: OIDC via identity broker; access tokens are attached to requests.
 - Backend integration: All API calls go through nginx proxy to the platform gateway, which enforces policies and delegates to agent-platform, policy-center, and other services.
 - **Dual workspace model**: App owns two separate workspace instances - one for operation sessions (Chat) and one for development sessions (Studio), each with independent session lists and active session management.
+- **Enhanced approval coordination**: When approval decisions land, both workspaces are immediately refreshed to prevent stale UI states.
 
 ```mermaid
 sequenceDiagram
@@ -147,12 +149,14 @@ U->>G : GET /api/v1/sessions?session_type=operation|development
 G->>A : Forward authenticated requests
 A-->>G : Responses
 G-->>U : JSON responses
+Note over U,G : Approval decision triggers refresh of BOTH workspaces
 ```
 
 **Diagram sources**
 - [nginx.conf:8-28](file://products/operator-portal/nginx.conf#L8-L28)
 - [AuthContext.tsx:40-71](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L71)
 - [client.ts:65-92](file://products/operator-portal/web-ui/app/src/api/client.ts#L65-L92)
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
 
 ## Detailed Component Analysis
 
@@ -184,13 +188,13 @@ View --> |settings| Settings["SettingsView"]
 ```
 
 **Diagram sources**
-- [App.tsx:287-451](file://products/operator-portal/web-ui/app/src/App.tsx#L287-L451)
+- [App.tsx:287-461](file://products/operator-portal/web-ui/app/src/App.tsx#L287-L461)
 
 **Section sources**
-- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
+- [App.tsx:1-461](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L461)
 
 ### Dual Workspace Architecture
-**Updated** The portal now implements a dual workspace architecture that separates operational sessions from development sessions, providing distinct user experiences and security postures for different use cases.
+**Updated** The portal now implements a dual workspace architecture that separates operational sessions from development sessions, providing distinct user experiences and security postures for different use cases, with enhanced approval workflow coordination.
 
 #### Operation Workspace (Chat)
 - **Purpose**: Regular operational sessions for incident response, troubleshooting, and day-to-day operations
@@ -206,12 +210,13 @@ View --> |settings| Settings["SettingsView"]
 - **Access**: Restricted to roles holding session:skill_graduate permission (platform-admin, approver, operator)
 - **Session Management**: Independent session list and active session pointer
 
-#### Implementation Details
-- **Mode Parameter**: ChatView component accepts a `mode` parameter ("operation" or "development") that controls visible authoring controls
-- **Workspace Instances**: App component creates two separate workspace instances using `useSessionWorkspace`, one for each mode
-- **Namespaced Storage**: Active session IDs are stored separately for each mode using namespaced sessionStorage keys
-- **Role-Based Gating**: Studio menu item only appears for users with appropriate roles
-- **Development Session Creation**: Specialized dialog for creating development sessions with optional target declaration
+#### Enhanced Approval Workflow Coordination
+**New** The dual workspace architecture includes enhanced approval workflow coordination that ensures both workspaces stay synchronized when approval decisions are made.
+
+- **Cross-Workspace Refresh**: When an approval decision lands in the Approvals inbox, both operation and development workspaces are immediately refreshed
+- **Prevents Stale States**: Eliminates the scenario where Studio panel would show stale 'awaiting approval' tags after approvers resolve cards on their own development sessions
+- **Role-Based Coordination**: Since decider roles are a subset of Studio roles, approvers can resolve cards on development sessions of their own, requiring coordinated refresh
+- **Immediate UI Updates**: Both workspace session panels update instantly rather than waiting for the next 30-second poll cycle
 
 ```mermaid
 flowchart TD
@@ -222,17 +227,64 @@ OperationWS --> ChatViewOp["ChatView with mode='operation'"]
 DevelopmentWS --> ChatViewDev["ChatView with mode='development'"]
 ChatViewOp --> OperationControls["Draft-as-skill controls"]
 ChatViewDev --> DevelopmentControls["Declare-target + Graduate-as-skill controls"]
+ApprovalDecision["Approval Decision Applied"] --> RefreshBoth["Refresh Both Workspaces"]
+RefreshBoth --> OperationRefresh["operationWorkspace.refresh()"]
+RefreshBoth --> DevelopmentRefresh["developmentWorkspace.refresh()"]
+OperationRefresh --> OperationUIUpdate["Update Operation Session Panel"]
+DevelopmentRefresh --> DevelopmentUIUpdate["Update Development Session Panel"]
 ```
 
 **Diagram sources**
 - [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
 - [ChatView.tsx:1210-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1210-L1216)
 
 **Section sources**
 - [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
 - [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
 - [useSessionWorkspace.ts:15-26](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L15-L26)
 - [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
+
+### Enhanced Approval Workflow System
+**New** The approval workflow system has been enhanced to coordinate across both operation and development workspaces, ensuring consistent UI state when approval decisions are made.
+
+#### Cross-Workspace Refresh Mechanism
+- **Unified Callback**: The Approvals inbox passes a single callback that refreshes both workspaces when decisions are applied
+- **Safe Execution**: The development workspace refresh is safe even when the user doesn't have Studio access, as refresh() clears its list and returns before fetching when disabled
+- **Race Condition Handling**: Handles scenarios where approvers can resolve cards on their own development sessions (tier_1 permits self-approval)
+- **Test Coverage**: Comprehensive tests verify that both workspaces are refreshed for approver and platform-admin roles
+
+#### Implementation Details
+- **Inbox Integration**: The `useApprovalsInbox` hook accepts an optional `onDecisionApplied` callback parameter
+- **App-Level Coordination**: App component wires this callback to refresh both operation and development workspaces
+- **State Synchronization**: Ensures that 'awaiting approval' tags are removed from both session panels immediately
+- **Error Resilience**: Each workspace refresh operates independently, so failures in one don't affect the other
+
+```mermaid
+sequenceDiagram
+participant Inbox as "Approvals Inbox"
+participant App as "App Component"
+participant OpWS as "Operation Workspace"
+participant DevWS as "Development Workspace"
+Inbox->>App : onDecisionApplied()
+App->>OpWS : refresh()
+App->>DevWS : refresh()
+OpWS->>OpWS : Update session list
+DevWS->>DevWS : Update session list
+OpWS-->>App : Session panel updated
+DevWS-->>App : Session panel updated
+Note over Inbox,App : Both workspaces stay synchronized
+```
+
+**Diagram sources**
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
+- [ApprovalsView.tsx:193-196](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L193-L196)
+
+**Section sources**
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
+- [ApprovalsView.tsx:193-196](file://products/operator-portal/web-ui/app/src/views/control/ApprovalsView.tsx#L193-L196)
+- [App.studio.test.tsx:239-266](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L239-L266)
 
 ### Authentication and Session Management
 - OIDC login initiated from UI; callback completed at startup; existing sessions restored from storage.
@@ -696,7 +748,7 @@ Nginx --> GW["platform-gateway:8000"]
 - App shell composes AuthProvider and theme provider around the root component.
 - Views depend on API client for data fetching; roles determine visibility and actions.
 - Nginx routes static assets and proxies API traffic to the gateway.
-- **Dual workspace dependencies**: App component manages two separate workspace instances with mode-specific session management.
+- **Dual workspace dependencies**: App component manages two separate workspace instances with mode-specific session management and enhanced approval workflow coordination.
 
 ```mermaid
 graph TB
@@ -705,6 +757,8 @@ App --> Auth["AuthContext.tsx"]
 App --> Workspaces["Dual Workspace Management"]
 Workspaces --> OpWS["Operation Workspace"]
 Workspaces --> DevWS["Development Workspace"]
+App --> Approvals["Enhanced Approvals Workflow"]
+Approvals --> RefreshBoth["Refresh Both Workspaces"]
 App --> Views["Views (Chat, Incidents, Approvals, Audit, Permissions, Tools, Skills, Settings)"]
 Views --> API["client.ts"]
 API --> Nginx["nginx.conf proxy"]
@@ -713,13 +767,13 @@ Nginx --> Gateway["Platform Gateway"]
 
 **Diagram sources**
 - [main.tsx:1-18](file://products/operator-portal/web-ui/app/src/main.tsx#L1-L18)
-- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
+- [App.tsx:1-461](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L461)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [nginx.conf:1-43](file://products/operator-portal/nginx.conf#L1-L43)
 
 **Section sources**
 - [main.tsx:1-18](file://products/operator-portal/web-ui/app/src/main.tsx#L1-L18)
-- [App.tsx:1-451](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L451)
+- [App.tsx:1-461](file://products/operator-portal/web-ui/app/src/App.tsx#L1-L461)
 - [client.ts:1-101](file://products/operator-portal/web-ui/app/src/api/client.ts#L1-L101)
 - [nginx.conf:1-43](file://products/operator-portal/nginx.conf#L1-L43)
 
@@ -729,6 +783,7 @@ Nginx --> Gateway["Platform Gateway"]
 - Streaming: Long-lived SSE connections use proxy_read_timeout configured to support extended operations.
 - Client-side state: Session workspace minimizes redundant network calls by maintaining local session lists and pinning incident sessions.
 - **Dual Workspace Efficiency**: Separate workspace instances prevent cross-mode interference and optimize polling for each workspace independently.
+- **Enhanced Approval Workflow Performance**: Cross-workspace refresh mechanism ensures immediate UI updates without introducing additional polling overhead.
 - **Lazy Loading**: Summary tab data is fetched only when the tab is activated, reducing initial page load time.
 - **Efficient Filtering**: Shared filter state prevents redundant API calls when switching between tabs.
 - **Optimized Rendering**: Collapsible sections reduce initial DOM complexity while providing rich interactivity.
@@ -774,6 +829,8 @@ Nginx --> Gateway["Platform Gateway"]
 - **Dual Workspace Issues**: If Studio menu item doesn't appear, verify user has appropriate roles (platform-admin, approver, operator); check that development workspace polling is properly gated on roles.
 - **Session Management Issues**: If sessions don't persist correctly between modes, verify that namespaced sessionStorage keys are working properly for operation and development modes.
 - **Mode-Specific Controls Issues**: If authoring controls don't appear correctly, verify that ChatView is receiving the correct mode parameter and that workspace instances are properly initialized for each mode.
+- **Approval Workflow Issues**: If 'awaiting approval' tags don't update in Studio panel after approval decisions, verify that both workspaces are being refreshed when decisions are applied; check that the inbox callback is properly wired to refresh both operation and development workspaces.
+- **Cross-Workspace Sync Issues**: If approval decisions don't synchronize properly across workspaces, verify that the `onDecisionApplied` callback is being called and that both workspace refresh methods are executing successfully.
 
 **Section sources**
 - [AuthContext.tsx:40-85](file://products/operator-portal/web-ui/app/src/auth/AuthContext.tsx#L40-L85)
@@ -789,9 +846,10 @@ Nginx --> Gateway["Platform Gateway"]
 - [transport.ts:35-48](file://products/operator-portal/web-ui/app/src/stream/transport.ts#L35-L48)
 - [App.studio.test.tsx:155-218](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L155-L218)
 - [ChatView.mode.test.tsx:227-248](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx#L227-L248)
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
 
 ## Conclusion
-The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.** **The enhanced stream handler with confirmation expiration and race condition handling addresses critical UI bugs where expired cards left operators staring at permanent spinners, while also improving race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases, ensuring robust and reliable confirmation workflows.** **The dual workspace architecture provides clear separation between operational and development workflows, with Chat serving regular operations and Studio enabling skill development through specialized authoring controls, while maintaining identical trust paths for streaming, secret masking, and HITL confirmations across both modes.**
+The Operator Portal delivers a secure, role-aware admin interface with rich operational features including chat-driven troubleshooting, incident triage, approvals, **comprehensive audit trail with sophisticated tabbed interface, advanced analytics, and automatic recovery from stale session transitions**, and platform health diagnostics. Its deployment model combines a modern SPA with efficient nginx serving and robust proxying to backend services, enabling scalable and maintainable operator workflows. The recent complete redesign of the audit trail provides operators with powerful event inspection capabilities, interactive drill-down navigation, and comprehensive summary analytics for understanding system behavior and identifying patterns through collapsible sections, simplified proportion visualization, and decision-chain tracking. The v0.29.1 hardening further improves the user experience by removing progress bars from share columns and implementing fixed-width columns for more stable and readable table layouts. The v0.29.2 critical hook ordering fix ensures render stability during sign-out and token refresh scenarios, while enhanced type safety with DrilldownPatch provides compile-time enforcement of drill-down invariants. The v0.29.3 session lifecycle enhancement adds automatic recovery capabilities that prevent empty state rendering during stale session transitions, eliminating the need for manual refresh operations and providing a more resilient user experience. **The enhanced confirmation card system with browser flow context and parsed element labels provides operators with meaningful workflow descriptions, visual styling with background highlighting and tags, improved situational awareness when approving automated browser actions, and hidden technical details behind expanders for cleaner presentation.** The AgentStreamEvent schema v9 enhancement enables consistent flow summary support across both live streaming and durable record scenarios, ensuring operators see the same workflow context regardless of how they encounter confirmation requests. **The new Skills inventory enhancements with lazy loading and read-only content viewer provide operators with safe, performant access to skill documentation, enabling informed decisions about trusting skills to drive automated actions while maintaining security through escape-first markdown rendering and comprehensive testing coverage.** **The enhanced markdown rendering system with improved CommonMark compliance addresses SPEC-052 findings by providing sophisticated list region detection, enhanced renderLists function with continuation line folding, and new renderParagraphs function for proper paragraph rendering, ensuring skill body content displays correctly with proper list structure and paragraph formatting.** **The enhanced stream handler with confirmation expiration and race condition handling addresses critical UI bugs where expired cards left operators staring at permanent spinners, while also improving race condition handling to properly settle turns for losing operators while maintaining parked state for retryable cases, ensuring robust and reliable confirmation workflows.** **The dual workspace architecture provides clear separation between operational and development workflows, with Chat serving regular operations and Studio enabling skill development through specialized authoring controls, while maintaining identical trust paths for streaming, secret masking, and HITL confirmations across both modes.** **The enhanced approval workflow system ensures that both operation and development workspaces stay synchronized when approval decisions are made, preventing stale 'awaiting approval' states in the Studio panel and providing a seamless user experience across both workspace types.**
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -831,6 +889,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Enhanced Markdown Rendering**: Improved CommonMark compliance ensures proper list structure and paragraph formatting; sophisticated list region detection handles complex skill body content; escape-first rendering maintains security while providing accurate content display; comprehensive testing coverage validates edge cases and security requirements.
 - **Enhanced Stream Handler**: Robust confirmation expiration handling prevents permanent UI spinners; improved race condition handling ensures proper turn settlement; comprehensive error handling provides clear feedback to operators; reliable state management maintains consistency across all confirmation scenarios.
 - **Dual Workspace Accessibility**: Clear visual distinction between Chat and Studio workspaces; role-based menu items follow accessibility best practices; mode-specific controls maintain consistent keyboard navigation patterns; workspace switching preserves focus and accessibility context.
+- **Enhanced Approval Workflow Accessibility**: Cross-workspace refresh mechanism maintains accessibility standards while providing immediate UI updates; approval decisions trigger accessible notifications across both workspaces; role-based access controls ensure appropriate permissions for approval workflows.
 
 **Section sources**
 - [tokens.ts:1-43](file://products/operator-portal/web-ui/app/src/theme/tokens.ts#L1-L43)
@@ -1037,7 +1096,7 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - [useChatStream.test.ts:420-524](file://products/operator-portal/web-ui/app/src/stream/__tests__/useChatStream.test.ts#L420-L524)
 
 ### Dual Workspace Architecture Implementation
-**New** The dual workspace architecture provides clear separation between operational and development workflows while maintaining shared trust paths and consistent user experience patterns.
+**New** The dual workspace architecture provides clear separation between operational and development workflows while maintaining shared trust paths and consistent user experience patterns, with enhanced approval workflow coordination.
 
 #### Workspace Instance Management
 - **Separate Instances**: App component creates two independent workspace instances using `useSessionWorkspace` hook with different modes
@@ -1057,6 +1116,14 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 - **Shared Trust Path**: Streaming, secret masking, and HITL confirmation logic remain identical across modes
 - **Type Safety**: TypeScript interfaces ensure mode-specific behavior is properly constrained
 
+#### Enhanced Approval Workflow Coordination
+**New** The dual workspace architecture includes enhanced approval workflow coordination that ensures both workspaces stay synchronized when approval decisions are made.
+
+- **Cross-Workspace Refresh**: When approval decisions land, both operation and development workspaces are immediately refreshed
+- **Prevents Stale States**: Eliminates scenarios where Studio panel shows stale 'awaiting approval' tags after approvers resolve cards on their own development sessions
+- **Role-Based Coordination**: Since decider roles are a subset of Studio roles, approvers can resolve cards on development sessions of their own, requiring coordinated refresh
+- **Test Coverage**: Comprehensive tests verify that both workspaces are refreshed for approver and platform-admin roles
+
 #### Session Management Enhancements
 - **Namespaced Storage**: Active session IDs stored separately for operation and development modes using sessionStorage keys
 - **Mode-Specific Lists**: Each workspace polls for sessions of its specific type (operation vs development)
@@ -1065,9 +1132,11 @@ The Operator Portal delivers a secure, role-aware admin interface with rich oper
 
 **Section sources**
 - [App.tsx:320-324](file://products/operator-portal/web-ui/app/src/App.tsx#L320-L324)
+- [App.tsx:333-341](file://products/operator-portal/web-ui/app/src/App.tsx#L333-L341)
 - [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
 - [ChatView.tsx:1202-1216](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L1202-L1216)
 - [useSessionWorkspace.ts:15-26](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts#L15-L26)
 - [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
 - [App.studio.test.tsx:155-218](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L155-L218)
 - [ChatView.mode.test.tsx:227-248](file://products/operator-portal/web-ui/app/src/chat/__tests__/ChatView.mode.test.tsx#L227-L248)
+- [App.studio.test.tsx:239-266](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L239-L266)
