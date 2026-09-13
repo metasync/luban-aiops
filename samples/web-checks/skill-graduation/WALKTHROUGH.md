@@ -6,6 +6,14 @@ per-action card, **graduate** the approved mutations into an executable-flow
 skill, **merge** it by hand, then **replay** the same work behind a single
 HITL gate.
 
+> **Since v0.37.0 (SPEC-056)** the portal has two peer chat entries — **Chat**
+> for operational sessions and **Studio** for skill development — and a
+> session's type is fixed when it is created, with no conversion in either
+> direction. Steps 3 to 6 below happen in **Studio**; step 8's replay happens in
+> **Chat**. For the entries themselves — what each is for, and why the authoring
+> controls live where they do — see the
+> [Studio Guide](../../../docs/guides/studio-guide.md).
+
 It is the third of three walkthroughs on the same admin panel. The other two
 show the two approval models with a *hand-written* skill:
 [`web-checks/password-reset/WALKTHROUGH.md`](../password-reset/WALKTHROUGH.md)
@@ -28,6 +36,7 @@ Everything is already running in your cluster:
 | `skills-samples` ConfigMap | ✅ present (created by `make deploy-samples`) — the merge target in step 7 |
 | Authoring-trace capture | ✅ SPEC-055 R-2, on by default for approved write-tier executions |
 | Graduation authorized | ✅ `session:skill_graduate` granted to `operator`, `approver`, `platform-admin` (not `read-only-observer`) |
+| **Studio** entry visible | ✅ SPEC-056: the sidebar shows **Studio** to exactly those same three roles — steps 3 to 6 happen there |
 
 > **Note:** there is no runbook to install for this sample — it ships no
 > `skill/` directory, because the skill is what you are about to produce. You
@@ -69,14 +78,25 @@ two samples use: a login form, a user table with "Reset password" links, and a
 reset page that pre-fills from URL parameters and waits for a "Confirm reset"
 click.
 
-## Step 3: Open a Skill-Development Session
+## Step 3: Open a Skill-Development Session in Studio
 
-In **Chat**, the session panel header has two buttons: **New** and, beside it,
-**Skill** (a flask icon — "Open a skill-development session against a declared
-web target"). Click **Skill**.
+Click **Studio** in the sidebar. It is the skill-development workspace, and it
+is visible only to `operator`, `approver` and `platform-admin` — the same three
+roles that hold `session:skill_graduate`.
 
-The dialog is titled **New skill-development session** and asks for one thing
-before the session exists: the web target it will work against. Enter:
+Studio's session panel header has one **New** button, carrying a flask icon and
+the tooltip "Open a skill-development session, optionally against a declared web
+target". Its session list holds only your *development* sessions. Click **New**.
+
+> **Chat's New cannot substitute for this.** Chat mints `operation` sessions
+> only: the develop-as-you-go opener moved to Studio so that nothing in Chat can
+> create a session that could later graduate a captured flow, and Chat's session
+> header offers **Draft as skill** where Studio's offers **Declare target** and
+> **Graduate as skill**.
+
+The dialog is titled **New skill-development session**. Its one field — the web
+target the session will work against — is **optional**, but declare it here for
+this walkthrough:
 
 ```
 http://browser-check-target:8080/admin/
@@ -95,10 +115,17 @@ first declaration wins for the life of the session.
 
 Declaring at birth is what makes the target an **authorization scope** rather
 than a claim fitted to the trace afterwards: nothing has been captured yet, so
-graduation can report the declaration as `preceded` every step. (If a session
-*becomes* a development session later, the chat header's **Declare target**
-button does the same job — but the ordering verdict then reads `postdated`,
-and the preview says so in as many words.)
+graduation can report the declaration as `preceded` every step. You *can* leave
+the field blank and use **Declare target** in Studio's session header once the
+session exists — same job, but the ordering verdict then reads `postdated`, and
+the preview says so in as many words. Declaring at birth is the better
+demonstration.
+
+A session's type is fixed when it is created, and the portal offers no *Move to
+Studio* and no conversion in either direction. An operational session's steps
+were approved as incident remediation across whatever targets the incident
+happened to touch, so graduating it as a single-target replayable flow would
+deterministically refuse — start the work in the right entry.
 
 Give the session a title with the pencil icon on its row — e.g. **Batch
 Password Reset (Graduation Demo)**. The title becomes the graduated skill's
@@ -181,10 +208,10 @@ captured — the trace is a record of mutations a human authorized.
 
 ## Step 6: Graduate the Session
 
-Click **Graduate as skill** (a bolt icon) in the chat header. The platform
-re-validates the trace against the declared target and renders the draft. No
-model is involved, so the answer is either the artifact or a refusal naming
-every guard the trace failed.
+Click **Graduate as skill** (a bolt icon) in Studio's session header, beside
+**Declare target**. The platform re-validates the trace against the declared
+target and renders the draft. No model is involved, so the answer is either the
+artifact or a refusal naming every guard the trace failed.
 
 The preview that opens is titled **Executable-flow draft preview**:
 
@@ -299,8 +326,9 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ## Step 8: Replay Under One Gate
 
-Open a fresh session with the plain **New** button — no target needed now; the
-skill declares one. Ask for the same work by skill id:
+Replay is operational work rather than authoring, so go back to **Chat** and open
+a fresh session with its plain **New** button (a plus icon, no dialog) — no
+target needed now; the skill declares one. Ask for the same work by skill id:
 
 ```
 Use skill samples/skill-graduation-batch-password-reset-graduation-demo to
@@ -455,9 +483,10 @@ merged ConfigMap key on exit; set `KEEP_GRADUATED_SKILL=true` to keep it.
 | Symptom | Fix |
 |---|---|
 | The portal tab stays signed out after an OIDC round-trip | You opened it on a localhost port-forward. The broker starts every login at `OIDC_REDIRECT_URI`, so sign-in only round-trips on `https://aiops.luban.metasync.cc` (step 1) |
-| **Graduate as skill** button missing | Your role lacks `session:skill_graduate` — sign in as an operator, approver or platform-admin |
-| "step(s) landed outside the declared target's origin" | You declared `localhost:9090` instead of the connector's `http://browser-check-target:8080/admin/`; the declaration is first-wins, so open a new skill-development session |
-| "step(s) … have no observed origin" | A captured write **failed** — most often the model clicked "Sign in" after two `web.fill_credential` calls and hit the auto-login's already-replaced form (step 4). An unverified step is never treated as a corroborated one, so re-author in a fresh session and let the page redirect itself |
+| **Graduate as skill** button missing | Two causes. You are in **Chat**, whose session header offers only **Draft as skill** — the authoring controls live in **Studio** (step 3). Or your role lacks `session:skill_graduate`, and so never sees Studio at all — sign in as an operator, approver or platform-admin |
+| **Studio** missing from the sidebar | The same grant decides it: Studio is visible exactly to `operator`, `approver` and `platform-admin`. `developer`, `read-only-observer` and `auditor` keep Chat alone |
+| "step(s) landed outside the declared target's origin" | You declared `localhost:9090` instead of the connector's `http://browser-check-target:8080/admin/`; the declaration is first-wins and cannot be widened, so open a new skill-development session in **Studio** |
+| "step(s) … have no observed origin" | A captured write **failed** — most often the model clicked "Sign in" after two `web.fill_credential` calls and hit the auto-login's already-replaced form (step 4). An unverified step is never treated as a corroborated one, so re-author in a fresh **Studio** session and let the page redirect itself |
 | "the session has no captured authoring trace" | No write was approved yet, or the model only performed read-tier calls — approve at least one write-tier interaction first |
 | "step(s) still carry an unresolved credential hole" | The model used `web.type`/`web.evaluate` with a value; re-author routing the secret through `web.fill_credential` or a URL parameter |
 | Graduation answered `503` | The validation leg is not configured — agent-service needs both `AGENT_SKILLS_SERVICE_URL` and `AGENT_SKILLS_CLIENT_SECRET` (`sync-skills-secrets.sh`) |

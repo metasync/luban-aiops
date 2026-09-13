@@ -88,6 +88,10 @@ of operational ones. It appears beside Chat only for `platform-admin`,
 `approver`, and `operator`; `developer`, `read-only-observer`, and `auditor`
 keep Chat alone.
 
+For a follow-along — your first development session end to end, the graduation
+refusal table, and why there is no *Move to Studio* — see the
+[Studio Guide](studio-guide.md). What follows is the shape of the split.
+
 The split is about **what a session is for**, and that is decided at birth:
 
 | | **Chat** | **Studio** |
@@ -508,5 +512,6 @@ for how roles are assigned.
 - [Getting Started](getting-started.md) — deploy and first login
 - [Approval and HITL Governance](approval-and-hitl.md) — the approval model
 - [Incident Triage and Collaboration Guide](incident-guide.md) — incident depth
+- [Studio Guide](studio-guide.md) — developing skills in development sessions
 - [Skills and Guidance Guide](skills-guide.md) — skill content operations
 - [Troubleshooting](troubleshooting.md) — when something misbehaves
