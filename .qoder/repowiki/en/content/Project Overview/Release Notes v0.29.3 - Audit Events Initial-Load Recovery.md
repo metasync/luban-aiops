@@ -23,15 +23,20 @@
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
+- [validate_version.py](file://shared/shared-contracts/scripts/validate_version.py)
+- [Makefile](file://Makefile)
+- [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
+- [health.py](file://products/execution-runtime/src/execution_runtime/api/routes/health.py)
+- [VERSION](file://VERSION)
 </cite>
 
 ## Update Summary
 **Changes Made**
 - Added comprehensive post-release review documentation for v0.37.1 patch release covering the approvals inbox refresh regression fix and verification of SPEC-056 load-bearing invariants
+- Enhanced deployment verification section with detailed health checks, version consistency validation, and build verification across all platform components
 - Updated project structure to include Studio panel components and approval workflow integration
-- Enhanced security hardening documentation with new Studio session management capabilities
-- Added comprehensive verification section documenting SPEC-056 invariant validation
-- Updated conclusion to include both audit events recovery and Studio panel refresh improvements
+- Added comprehensive verification methodology documenting the coordinated build and deployment process
+- Updated conclusion to include both audit events recovery and Studio panel refresh improvements with deployment validation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -43,13 +48,14 @@
 7. [Studio Panel Refresh Fix (v0.37.1)](#studio-panel-refresh-fix-v0371)
 8. [SPEC-056 Load-Bearing Invariant Verification](#spec-056-load-bearing-invariant-verification)
 9. [Credential Masking Performance Optimization (v0.36.3)](#credential-masking-performance-optimization-v0363)
-10. [Dependency Analysis](#dependency-analysis)
-11. [Performance Considerations](#performance-considerations)
-12. [Troubleshooting Guide](#troubleshooting-guide)
-13. [Conclusion](#conclusion)
+10. [Enhanced Deployment Verification (v0.37.1)](#enhanced-deployment-verification-v0371)
+11. [Dependency Analysis](#dependency-analysis)
+12. [Performance Considerations](#performance-considerations)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Conclusion](#conclusion)
 
 ## Introduction
-This release addresses multiple critical areas across three versions: an intermittent initial-load issue in the Operator Portal's Audit Events tab, comprehensive security hardening for the SPEC-049 browser connector, significant performance optimizations for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention. The v0.36.3 performance optimization introduces a module-global cache for secret shape pattern resolution, eliminating repeated deferred imports on the streaming hot path while preserving import cycle safety. The v0.37.1 Studio panel refresh fix addresses a regression where approvals inbox decisions failed to refresh development sessions, leaving amber "awaiting approval" tags visible up to 30 seconds longer than intended.
+This release addresses multiple critical areas across three versions: an intermittent initial-load issue in the Operator Portal's Audit Events tab, comprehensive security hardening for the SPEC-049 browser connector, significant performance optimizations for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention. The v0.36.3 performance optimization introduces a module-global cache for secret shape pattern resolution, eliminating repeated deferred imports on the streaming hot path while preserving import cycle safety. The v0.37.1 Studio panel refresh fix addresses a regression where approvals inbox decisions failed to refresh development sessions, leaving amber "awaiting approval" tags visible up to 30 seconds longer than intended. Additionally, this release includes enhanced deployment verification with comprehensive health checks, version consistency validation, and build verification across all platform components.
 
 ## Project Structure
 The changes span multiple components across the platform, including the newly introduced Studio workspace architecture:
@@ -82,6 +88,12 @@ subgraph "Kubernetes Security"
 NP["NetworkPolicy"]
 SC["Sidecar Config"]
 end
+subgraph "Build & Deploy"
+VV["validate_version.py"]
+MK["Makefile"]
+DO["deploy-overlay.sh"]
+HC["Health Checks"]
+end
 AV --> GW
 APP --> STUDIO
 GW --> QRY
@@ -91,7 +103,9 @@ BC --> BS
 BC --> CS
 BC --> NP
 BC --> SC
-PR --> TR
+VV --> MK
+MK --> DO
+DO --> HC
 ```
 
 **Diagram sources**
@@ -101,10 +115,13 @@ PR --> TR
 - [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
 - [browser-sidecar-network-policy.yaml:1-30](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L30)
+- [validate_version.py:1-149](file://shared/shared-contracts/scripts/validate_version.py#L1-L149)
+- [Makefile:178-179](file://Makefile#L178-L179)
+- [deploy-overlay.sh:97-107](file://shared/platform-ops/gitops/deploy-overlay.sh#L97-L107)
 
 **Section sources**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md:1-52](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md#L1-L52)
-- [2026-09-13-post-release-review-studio-panel-refresh.md:1-192](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L1-L192)
+- [2026-09-13-post-release-review-studio-panel-refresh.md:1-214](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L1-L214)
 
 ## Core Components
 - **AuditView (Portal)**: Owns filter state, loading/error/loaded flags, and the initial-load effect that fetches events and summary data. In v0.29.3, the effect is keyed on both role access and the session object to recover from stale-session failures.
@@ -114,6 +131,7 @@ PR --> TR
 - **CredentialSetStore**: Provides secure named credential management with file-based configuration and automatic reload capabilities.
 - **ProseRedactor Cache**: Implements hot-path caching for secret shape pattern resolution to optimize streaming performance.
 - **Studio Workspace**: New development-focused workspace instance with separate session scoping and active session key namespaces.
+- **Version Validation System**: Automated validation ensuring lockstep versioning across all platform components through centralized VERSION file and validation scripts.
 
 **Section sources**
 - [AuditView.tsx:101-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L101-L199)
@@ -122,6 +140,7 @@ PR --> TR
 - [browser_sessions.py:120-289](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L120-L289)
 - [credential_sets.py:30-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L30-L103)
 - [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
+- [validate_version.py:1-149](file://shared/shared-contracts/scripts/validate_version.py#L1-L149)
 
 ## Architecture Overview
 The portal's Audit view triggers an initial load when the user has the required roles. If the browser boots with a stale expired session, the first request can receive 401 while the shell still appears signed-in due to cached identity fallback. The fix ensures that when the session changes (stale cleared, fresh sign-in, or silent refresh), the effect clears any latched error and retries once if not yet loaded.
@@ -384,6 +403,87 @@ The deployment state reference was corrected to reflect that the cluster rebuild
 - [2026-09-11-post-release-doc-review-and-redaction-cache.md:35-58](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L35-L58)
 - [2026-09-11-post-release-doc-review-and-redaction-cache.md:147-157](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md#L147-L157)
 
+## Enhanced Deployment Verification (v0.37.1)
+
+### Version Consistency Validation
+The v0.37.1 release implements comprehensive version consistency validation through the `validate_version.py` script, ensuring all platform components maintain lockstep versioning:
+
+#### Centralized Version Management
+- **Single Source of Truth**: The root `VERSION` file serves as the authoritative version source
+- **Automated Validation**: The validation script checks all product versions against the central VERSION file
+- **Coverage Scope**: Validates `pyproject.toml` versions, `SERVICE_VERSION` constants, and `__version__` declarations
+
+#### Build-Time Verification
+The validation process ensures:
+- All Python products have matching versions in their `pyproject.toml` files
+- Service metadata modules report consistent `SERVICE_VERSION` values
+- Package `__init__.py` files declare matching `__version__` where present
+- Portal build-time version injection maintains consistency
+
+### Coordinated Build Process
+The v0.37.1 release demonstrates a sophisticated coordinated build and deployment process:
+
+#### Image Tag Generation
+- **Clean Builds**: Generate `<semver>-<profile>-<gitsha>` tags for clean repositories
+- **Dirty Builds**: Append `-dirty-<timestamp>` suffix for uncommitted changes
+- **Profile Support**: Optional profile suffixes for experimental builds
+
+#### Multi-Component Build
+The build process constructs nine coordinated images:
+- Agent Service, Platform Gateway, Tool Gateway
+- Identity Service, Audit Service, Skills Hub
+- Incident Service, Execution Runtime, Web UI
+
+### Deployment Health Verification
+The deployment process includes comprehensive health checking and status verification:
+
+#### Rollout Status Monitoring
+- **Sequential Deployment**: Each component deployed with rollout status monitoring
+- **Timeout Handling**: 120-second timeout for each deployment rollout
+- **Status Reporting**: Clear success/failure reporting for each component
+
+#### Health Check Validation
+Running services report comprehensive health status:
+- **Readiness Probes**: `/health/ready` endpoints verify service readiness
+- **Liveness Probes**: `/health/live` endpoints confirm service responsiveness
+- **Component Status**: All nine deployments report `1/1 READY` status
+- **Restart Tracking**: Zero restart counts across all components
+
+### Post-Deployment Verification
+The v0.37.1 deployment included extensive post-deployment verification:
+
+#### Version Consistency Verification
+- **Service Version Reports**: All eight Python services report `0.37.1` from `importlib.metadata.version()`
+- **Web UI Bundle**: Confirmed `0.37.1` literal in served bundle
+- **Container Build Validation**: Independent re-execution of portal gate (`tsc --noEmit && vite build`)
+
+#### Service Health Validation
+- **Application Startup**: Clean startup with zero error traces
+- **Model Catalog**: Successfully refreshed to 9 models
+- **Error Monitoring**: Zero lines matching `error|traceback|critical|exception|failed`
+
+### Build Verification Results
+The comprehensive verification process validates:
+
+#### Test Suite Coverage
+- **End-to-End Testing**: All product suites pass successfully
+- **Overlay Validation**: All four Kustomize overlays validate correctly
+- **Policy Compliance**: 18 policy rules validated against schema
+- **Scenario Testing**: 137 API and 19 tool policy scenarios tested
+
+#### Quality Gates
+- **Type Checking**: TypeScript compilation passes (`tsc --noEmit`)
+- **Secret Vocabulary**: All three secret-vocabulary parity checks pass
+- **Documentation Links**: 52 of 52 relative links resolve correctly
+- **Markdown Tables**: All tables maintain pipe consistency
+
+**Section sources**
+- [validate_version.py:1-149](file://shared/shared-contracts/scripts/validate_version.py#L1-L149)
+- [Makefile:96-124](file://Makefile#L96-L124)
+- [deploy-overlay.sh:97-107](file://shared/platform-ops/gitops/deploy-overlay.sh#L97-L107)
+- [health.py:9-26](file://products/execution-runtime/src/execution_runtime/api/routes/health.py#L9-L26)
+- [2026-09-13-post-release-review-studio-panel-refresh.md:153-214](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L153-L214)
+
 ## Dependency Analysis
 - The portal's AuditView depends on:
   - Auth context for roles and session
@@ -400,6 +500,11 @@ The deployment state reference was corrected to reflect that the cluster rebuild
   - Skill draft module for secret shape patterns
   - Shift summary and session transcript modules
   - Test suite for cache validation
+- **New**: The version validation system depends on:
+  - Central VERSION file as single source of truth
+  - Product pyproject.toml files for version extraction
+  - Metadata modules for service version validation
+  - Vite configuration for build-time version injection
 
 ```mermaid
 graph LR
@@ -415,6 +520,10 @@ PR["ProseRedactor"] --> SD["Skill Draft"]
 PR --> SS["Shift Summary"]
 PR --> ST["Session Transcript"]
 PR --> TR["Test Suite"]
+VV["Version Validator"] --> VF["VERSION File"]
+VF --> PP["Product pyproject.toml"]
+VF --> MM["Metadata Modules"]
+VF --> VC["Vite Config"]
 ```
 
 **Diagram sources**
@@ -424,6 +533,7 @@ PR --> TR["Test Suite"]
 - [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:159-260](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L159-L260)
 - [browser-sidecar-network-policy.yaml:1-30](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L30)
+- [validate_version.py:73-149](file://shared/shared-contracts/scripts/validate_version.py#L73-L149)
 
 **Section sources**
 - [gateway_service.py:201-261](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L201-L261)
@@ -437,6 +547,7 @@ PR --> TR["Test Suite"]
 - Credential set reloading uses file modification time checks to avoid unnecessary file reads.
 - **New**: The v0.36.3 hot-path cache eliminates repeated deferred imports on the streaming hot path, reducing overhead from three import cycles per delta to a single module-level cache lookup.
 - **New**: The v0.37.1 Studio panel refresh fix ensures immediate UI updates for approval decisions, eliminating up to 30-second delays in status synchronization.
+- **New**: The version validation system provides fast pre-deployment validation, catching version inconsistencies before deployment attempts.
 
 ## Troubleshooting Guide
 - **Symptom**: Audit Events tab shows "No audit events match these filters" on first load, but Summary counts show events.
@@ -470,12 +581,28 @@ PR --> TR["Test Suite"]
 - **Resolution**: Verify the cache is functioning correctly by checking that `_SECRET_SHAPE_PATTERNS` is properly initialized and cached after the first call.
 - **Verification**: Run the cache regression test to confirm proper caching behavior under normal and adversarial conditions.
 
+### Version Consistency Troubleshooting
+- **Symptom**: Build fails with version mismatch errors during `make validate-version`.
+- **Root cause**: Version drift between VERSION file and product versions.
+- **Resolution**: Update all product versions to match the central VERSION file using the automated validation script.
+- **Verification**: Run `make validate-version` to confirm all versions are synchronized.
+
+### Deployment Health Troubleshooting
+- **Symptom**: Services fail to become ready after deployment.
+- **Root cause**: Health check failures or dependency issues.
+- **Resolution**: Check `/health/ready` endpoints for detailed readiness status and investigate specific failure reasons.
+- **Verification**: Monitor rollout status and check pod logs for error messages.
+
 **Section sources**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md:11-41](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md#L11-L41)
 - [AuditView.tsx:185-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L185-L199)
 - [App.studio.test.tsx:239-266](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L239-L266)
 - [test_browser_connector.py:440-483](file://products/tool-gateway/tests/test_browser_connector.py#L440-L483)
 - [test_prose_redaction.py:753-770](file://products/agent-platform/tests/test_prose_redaction.py#L753-L770)
+- [validate_version.py:73-149](file://shared/shared-contracts/scripts/validate_version.py#L73-L149)
+- [deploy-overlay.sh:97-107](file://shared/platform-ops/gitops/deploy-overlay.sh#L97-L107)
 
 ## Conclusion
-This comprehensive update delivers significant improvements across multiple versions: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, comprehensive security hardening for the SPEC-049 browser connector, substantial performance optimization for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. The v0.36.3 performance optimization eliminates repeated deferred imports on the streaming hot path while maintaining import cycle safety and behavioral consistency. The v0.37.1 Studio panel refresh fix addresses a critical usability regression where approval decisions failed to refresh development sessions, ensuring immediate UI synchronization across both operation and development workspaces. Additionally, the comprehensive verification of all six SPEC-056 load-bearing invariants provides confidence in the Studio split's architectural integrity. Together, these changes enhance both user experience, security posture, and performance across the platform, with coordinated deployment approaches ensuring reliable rollout of all improvements.
+This comprehensive update delivers significant improvements across multiple versions: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, comprehensive security hardening for the SPEC-049 browser connector, substantial performance optimization for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. The v0.36.3 performance optimization eliminates repeated deferred imports on the streaming hot path while maintaining import cycle safety and behavioral consistency. The v0.37.1 Studio panel refresh fix addresses a critical usability regression where approval decisions failed to refresh development sessions, ensuring immediate UI synchronization across both operation and development workspaces. 
+
+Additionally, the enhanced deployment verification system provides comprehensive validation of version consistency, build integrity, and deployment health across all platform components. The coordinated build process ensures all nine platform services maintain version lockstep, while the automated validation scripts catch configuration drift before deployment. The post-deployment health checks verify service readiness and operational status, providing confidence in deployment success. Together, these changes enhance both user experience, security posture, and operational reliability across the platform, with coordinated deployment approaches ensuring reliable rollout of all improvements.
