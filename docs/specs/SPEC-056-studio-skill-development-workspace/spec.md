@@ -519,9 +519,16 @@ recorded in the changelog (the `approved`-spec rule).
   live in); `docs/guides/configuration-reference.md` verified unchanged (no new
   knob). RepoWiki pages were **skipped by operator decision** at the gate — the
   cache is IDE-regenerated and hand-edits revert (the v0.36.3 known limitation).
-  The build box's clean-image half is deliberately deferred to a post-commit
-  rebuild + redeploy, because `IMAGE_TAG` derives `-dirty-<timestamp>` from a
-  non-empty `git status --porcelain` and so a clean tag is only reachable after
-  the delivery commit. The multi-target follow-on (Chat→Studio spawn bridge +
-  composition / runbook-of-skills + assisted trace-extraction) stays deferred to
-  SPEC-057 behind its composition-trust-model ADR + spike.
+  The build box's clean-image half was met after the delivery commit rather
+  than before it: `IMAGE_TAG` derives `-dirty-<timestamp>` from a non-empty
+  `git status --porcelain`, so a clean tag is only reachable once the tree is
+  committed. The first pass therefore shipped `…-650082d-dirty-20260913092147`,
+  and the post-commit rebuild produced all nine images as
+  **`0.37.0-dev-k8s-19b25b7`** and redeployed them — every product `1/1 READY`
+  at `0` restarts, zero error lines in the fresh `agent-service` pod, and the
+  shipped DDL a clean no-op against the already-migrated `sessions` database
+  with every row still classified and none NULL, which exercises the
+  idempotency claim on the real server a second time. The multi-target follow-on
+  (Chat→Studio spawn bridge + composition / runbook-of-skills + assisted
+  trace-extraction) stays deferred to SPEC-057 behind its composition-trust-model
+  ADR + spike.
