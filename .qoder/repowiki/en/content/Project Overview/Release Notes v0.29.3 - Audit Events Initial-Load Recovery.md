@@ -5,7 +5,12 @@
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md)
 - [2026-09-11-post-release-doc-review-and-redaction-cache.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-doc-review-and-redaction-cache.md)
 - [2026-09-11-post-release-code-review-credential-masking-edge-cases.md](file://docs/agentic-aiops-platform/release-notes/2026-09-11-post-release-code-review-credential-masking-edge-cases.md)
+- [2026-09-13-post-release-review-studio-panel-refresh.md](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md)
+- [SPEC-056 spec.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md)
+- [SPEC-056 plan.md](file://docs/specs/SPEC-056-studio-skill-development-workspace/plan.md)
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
+- [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
+- [App.studio.test.tsx](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx)
 - [query.py](file://products/audit-service/src/audit_service/api/routes/query.py)
 - [summary.py](file://products/audit-service/src/audit_service/api/routes/summary.py)
 - [audit_store.py](file://products/audit-service/src/audit_service/services/audit_store.py)
@@ -22,11 +27,11 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive credential masking performance optimization section covering v0.36.3 hot-path cache implementation
-- Updated deployment state references to reflect batched cluster rebuild into v0.36.3 rather than standalone image tags
-- Enhanced security hardening documentation with new performance optimization details
-- Added documentation corrections and known limitations from v0.36.3 patch release
-- Updated conclusion to include both audit events recovery and credential masking performance improvements
+- Added comprehensive post-release review documentation for v0.37.1 patch release covering the approvals inbox refresh regression fix and verification of SPEC-056 load-bearing invariants
+- Updated project structure to include Studio panel components and approval workflow integration
+- Enhanced security hardening documentation with new Studio session management capabilities
+- Added comprehensive verification section documenting SPEC-056 invariant validation
+- Updated conclusion to include both audit events recovery and Studio panel refresh improvements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,22 +40,26 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Security Hardening for Browser Connector (SPEC-049)](#security-hardening-for-browser-connector-spec-049)
-7. [Credential Masking Performance Optimization (v0.36.3)](#credential-masking-performance-optimization-v0363)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Performance Considerations](#performance-considerations)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Conclusion](#conclusion)
+7. [Studio Panel Refresh Fix (v0.37.1)](#studio-panel-refresh-fix-v0371)
+8. [SPEC-056 Load-Bearing Invariant Verification](#spec-056-load-bearing-invariant-verification)
+9. [Credential Masking Performance Optimization (v0.36.3)](#credential-masking-performance-optimization-v0363)
+10. [Dependency Analysis](#dependency-analysis)
+11. [Performance Considerations](#performance-considerations)
+12. [Troubleshooting Guide](#troubleshooting-guide)
+13. [Conclusion](#conclusion)
 
 ## Introduction
-This release addresses three critical areas: an intermittent initial-load issue in the Operator Portal's Audit Events tab, comprehensive security hardening for the SPEC-049 browser connector, and significant performance optimizations for credential masking through a hot-path cache implementation. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention. The v0.36.3 performance optimization introduces a module-global cache for secret shape pattern resolution, eliminating repeated deferred imports on the streaming hot path while preserving import cycle safety.
+This release addresses multiple critical areas across three versions: an intermittent initial-load issue in the Operator Portal's Audit Events tab, comprehensive security hardening for the SPEC-049 browser connector, significant performance optimizations for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix resolves stale-session failures during initial load by adding identity-lifecycle awareness to retry logic. The browser connector hardening implements defense-in-depth security measures including read-tier origin re-checking, CDP port pinning with NetworkPolicy protection, concurrent access fixes, and information disclosure prevention. The v0.36.3 performance optimization introduces a module-global cache for secret shape pattern resolution, eliminating repeated deferred imports on the streaming hot path while preserving import cycle safety. The v0.37.1 Studio panel refresh fix addresses a regression where approvals inbox decisions failed to refresh development sessions, leaving amber "awaiting approval" tags visible up to 30 seconds longer than intended.
 
 ## Project Structure
-The changes span multiple components across the platform:
+The changes span multiple components across the platform, including the newly introduced Studio workspace architecture:
 
 ```mermaid
 graph TB
 subgraph "Operator Portal"
 AV["AuditView.tsx"]
+APP["App.tsx"]
+STUDIO["Studio Workspace"]
 end
 subgraph "Platform Gateway"
 GW["gateway_service.py"]
@@ -74,6 +83,7 @@ NP["NetworkPolicy"]
 SC["Sidecar Config"]
 end
 AV --> GW
+APP --> STUDIO
 GW --> QRY
 GW --> SUM
 QRY --> STORE
@@ -86,6 +96,7 @@ PR --> TR
 
 **Diagram sources**
 - [AuditView.tsx:134-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L134-L199)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
 - [gateway_service.py:201-261](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L201-L261)
 - [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
@@ -93,16 +104,20 @@ PR --> TR
 
 **Section sources**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md:1-52](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md#L1-L52)
+- [2026-09-13-post-release-review-studio-panel-refresh.md:1-192](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L1-L192)
 
 ## Core Components
 - **AuditView (Portal)**: Owns filter state, loading/error/loaded flags, and the initial-load effect that fetches events and summary data. In v0.29.3, the effect is keyed on both role access and the session object to recover from stale-session failures.
+- **App Component**: Manages dual workspace instances for operation and development sessions, with role-based visibility gating for Studio access.
 - **BrowserConnector**: Implements bounded web-check tool surface with comprehensive security controls including origin allowlist enforcement, flow binding, deviation guards, and credential masking.
 - **BrowserSessionPool**: Manages stateful browser sessions with concurrent access protection, TTL-based expiration, and memory-bounded eviction.
 - **CredentialSetStore**: Provides secure named credential management with file-based configuration and automatic reload capabilities.
 - **ProseRedactor Cache**: Implements hot-path caching for secret shape pattern resolution to optimize streaming performance.
+- **Studio Workspace**: New development-focused workspace instance with separate session scoping and active session key namespaces.
 
 **Section sources**
 - [AuditView.tsx:101-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L101-L199)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
 - [browser_connector.py:159-260](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L159-L260)
 - [browser_sessions.py:120-289](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L120-L289)
 - [credential_sets.py:30-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L30-L103)
@@ -114,6 +129,7 @@ The portal's Audit view triggers an initial load when the user has the required 
 ```mermaid
 sequenceDiagram
 participant UI as "AuditView.tsx"
+participant APP as "App.tsx"
 participant GW as "Platform Gateway"
 participant ASQ as "Audit Service /events"
 participant ASS as "Audit Service /summary"
@@ -194,44 +210,57 @@ The session pool uses a create lock to prevent race conditions where concurrent 
 - [browser_sessions.py:144-147](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L144-L147)
 - [credential_sets.py:42-50](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L42-L50)
 
-### Audit Service Query Endpoint
-- Validates cursors and enforces service authentication before querying.
-- Returns a page of events newest-first with a next_cursor for pagination.
+### Studio Panel Refresh Fix (v0.37.1)
+The v0.37.1 patch addresses a critical regression introduced by the SPEC-056 Studio split, where approvals inbox decisions failed to refresh development sessions.
 
-```mermaid
-sequenceDiagram
-participant GW as "Gateway"
-participant R as "query_events()"
-participant S as "Store.query()"
-GW->>R : "GET /api/v1/audit/events"
-R->>R : "authenticate_caller()"
-R->>R : "decode_cursor() if provided"
-R->>S : "query(filters, cursor, limit)"
-S-->>R : "AuditPage{events,next_cursor}"
-R-->>GW : "200 JSON"
+#### Problem Analysis
+When SPEC-056 split the single workspace into two mode-scoped instances (operation and development), the approvals inbox decision callback was left refreshing only the operation workspace. This meant that when an approver decided on a development session card, the Studio panel's amber "awaiting approval" tag remained visible for up to 30 seconds until the next poll tick.
+
+#### Root Cause Chain
+1. The tag derives from the session list's `pending_confirmation` flag
+2. A workspace refresh is exactly what clears it — this is not a separate piece of state
+3. `APPROVAL_DECIDER_ROLES` is `{approver, platform-admin}`, a subset of `STUDIO_ROLES`
+4. Every role that can decide from the inbox can also own a development session
+5. Self-approval is permitted at `tier_1`, making the path reachable rather than theoretical
+
+#### Solution Implementation
+Both workspace instances now refresh when a decision is applied:
+
+```tsx
+// Before (broken):
+() => void operationWorkspace.refresh(),
+
+// After (fixed):
+() => {
+  operationWorkspace.refresh();
+  developmentWorkspace.refresh(); // Safe: returns immediately if instance disabled
+}
 ```
 
-**Diagram sources**
-- [query.py:35-94](file://products/audit-service/src/audit_service/api/routes/query.py#L35-L94)
-- [audit_store.py:42-63](file://products/audit-service/src/audit_service/services/audit_store.py#L42-L63)
+The second call cannot manufacture a request a non-authoring role should not make: `refresh()` clears its list and returns before fetching when the instance was never enabled, covering both signed-out state and non-Studio roles.
+
+#### Verification Testing
+A regression test in `App.studio.test.tsx` captures the callback and asserts both workspaces refresh exactly once for each decider role:
+
+```typescript
+it.each(["approver", "platform-admin"])(
+  "refreshes the operation and the development workspace for %s",
+  (role) => {
+    signIn([role]);
+    render(<App />);
+    act(() => {
+      inboxCallback.current?.();
+    });
+    expect(operationStub.refresh).toHaveBeenCalledTimes(1);
+    expect(developmentStub.refresh).toHaveBeenCalledTimes(1);
+  }
+);
+```
 
 **Section sources**
-- [query.py:35-94](file://products/audit-service/src/audit_service/api/routes/query.py#L35-L94)
-
-### Audit Service Summary Endpoint
-- Authenticates the caller and returns deterministic envelope-column aggregates.
-- Used by the Summary tab; unaffected by the v0.29.3 fix but part of the same view.
-
-**Section sources**
-- [summary.py:34-78](file://products/audit-service/src/audit_service/api/routes/summary.py#L34-L78)
-
-### Audit Store Abstraction
-- Provides consistent query and summarize behavior across backends.
-- In-memory store for tests/dev; PostgreSQL store for production with keyset pagination and bounded eviction.
-
-**Section sources**
-- [audit_store.py:42-63](file://products/audit-service/src/audit_service/services/audit_store.py#L42-L63)
-- [audit_store.py:386-415](file://products/audit-service/src/audit_service/services/audit_store.py#L386-L415)
+- [2026-09-13-post-release-review-studio-panel-refresh.md:37-93](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L37-L93)
+- [App.studio.test.tsx:239-266](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L239-L266)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
 
 ## Security Hardening for Browser Connector (SPEC-049)
 
@@ -269,6 +298,28 @@ Named credential sets provide secure login automation:
 - [browser_connector.py:218-222](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L218-L222)
 - [browser_sessions.py:144-147](file://products/tool-gateway/src/tool_gateway/tools/browser_sessions.py#L144-L147)
 - [credential_sets.py:1-17](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L1-L17)
+
+## SPEC-056 Load-Bearing Invariant Verification
+The v0.37.1 post-release review conducted a comprehensive verification of all six load-bearing invariants from SPEC-056, deriving them from the shipped code rather than relying on spec claims.
+
+### Verified Invariants
+
+| Invariant | Where It Is Actually Enforced | Status |
+|-----------|-------------------------------|--------|
+| `session_type` written once at birth, never mutated | No setter exists on the `SessionStore` protocol; the only `UPDATE … SET session_type` statements are the two OQ-2 backfill lines; touch, title and model updates never name the column; the upsert's re-type is guarded by the expired-reclaim `WHERE` | ✅ Verified |
+| List scope is server-side, not client-side | `AND (%(session_type)s::text IS NULL OR COALESCE(session_type,'operation') = %(session_type)s::text)` inside `_LIST_USER_SESSIONS`; the portal sends `?session_type=<mode>` and filters nothing itself | ✅ Verified |
+| The create route dual-gates on an existing action | `session:create` always, plus `session:skill_graduate` for `development` — an action that predates the train (SPEC-055). No `policy-default.yaml`, `policy-scenarios.yaml` or bundle content-hash change | ✅ Verified |
+| `mode` never reaches the trust path | In `ChatView.tsx` the prop appears only at the create-affordance branch, the `SessionPanel` prop and the header-control split — never in `useChatStream`, the masking renderer or the confirmation path | ✅ Verified |
+| The OQ-2 backfill defers its relation reference | The `authoring_trace_target` reference sits *inside* the `EXECUTE $q$…$q$` string, so parse-analysis reaches it only when the `IF to_regclass(…)` branch runs; both `UPDATE`s are `WHERE session_type IS NULL`, hence idempotent | ✅ Verified |
+| Development sessions are never shift material | The Documents picker reads the operation-scoped instance, **and** `build_digest` raises `DevelopmentSessionRejected` → 400 after the foreign gate and before any fact is read | ✅ Verified |
+
+### Review Methodology
+The review was conducted against the shipped source rather than against the spec or delivery claims, following a negative approach in the good sense: all six invariants were re-derived from code and every one holds. This represents a thorough validation of the implementation against its design requirements.
+
+**Section sources**
+- [2026-09-13-post-release-review-studio-panel-refresh.md:21-29](file://docs/agentic-aiops-platform/release-notes/2026-09-13-post-release-review-studio-panel-refresh.md#L21-L29)
+- [SPEC-056 spec.md:87-535](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L87-L535)
+- [SPEC-056 plan.md:52-63](file://docs/specs/SPEC-056-studio-skill-development-workspace/plan.md#L52-L63)
 
 ## Credential Masking Performance Optimization (v0.36.3)
 
@@ -337,8 +388,9 @@ The deployment state reference was corrected to reflect that the cluster rebuild
 - The portal's AuditView depends on:
   - Auth context for roles and session
   - Gateway endpoints for events and summary
-- The gateway enforces policy and forwards authenticated requests to the audit service.
-- The audit service depends on the configured store backend.
+- The App component manages dual workspace instances for operation and development sessions
+- The gateway enforces policy and forwards authenticated requests to the audit service
+- The audit service depends on the configured store backend
 - The browser connector depends on:
   - Playwright library for browser automation
   - Chromium headless shell sidecar via CDP
@@ -352,6 +404,7 @@ The deployment state reference was corrected to reflect that the cluster rebuild
 ```mermaid
 graph LR
 AV["AuditView.tsx"] --> GW["Platform Gateway"]
+APP["App.tsx"] --> WS["Workspaces"]
 GW --> AS["Audit Service"]
 AS --> STORE["Audit Store"]
 BC["BrowserConnector"] --> BS["BrowserSessionPool"]
@@ -366,6 +419,7 @@ PR --> TR["Test Suite"]
 
 **Diagram sources**
 - [AuditView.tsx:134-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L134-L199)
+- [App.tsx:105-143](file://products/operator-portal/web-ui/app/src/App.tsx#L105-L143)
 - [gateway_service.py:201-261](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L201-L261)
 - [prose_redaction.py:90-125](file://products/agent-platform/src/agent_service/services/prose_redaction.py#L90-L125)
 - [browser_connector.py:159-260](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L159-L260)
@@ -382,6 +436,7 @@ PR --> TR["Test Suite"]
 - Concurrent access patterns minimize resource contention while preventing race conditions.
 - Credential set reloading uses file modification time checks to avoid unnecessary file reads.
 - **New**: The v0.36.3 hot-path cache eliminates repeated deferred imports on the streaming hot path, reducing overhead from three import cycles per delta to a single module-level cache lookup.
+- **New**: The v0.37.1 Studio panel refresh fix ensures immediate UI updates for approval decisions, eliminating up to 30-second delays in status synchronization.
 
 ## Troubleshooting Guide
 - **Symptom**: Audit Events tab shows "No audit events match these filters" on first load, but Summary counts show events.
@@ -391,6 +446,12 @@ PR --> TR["Test Suite"]
   - Confirm the gateway logs show 401 followed by successful requests after session refresh.
   - Ensure the effect dependency includes the session object so it re-runs on identity lifecycle changes.
   - Confirm no manual Refresh is required post-sign-in.
+
+### Studio Panel Troubleshooting
+- **Symptom**: Approvals inbox decisions don't clear Studio panel's "awaiting approval" tag immediately.
+- **Root cause**: Regression in v0.37.0 where only operation workspace refreshes on decisions.
+- **Resolution**: Upgrade to v0.37.1 which fixes the dual workspace refresh.
+- **Verification**: Both operation and development workspace refresh methods should be called exactly once per decision.
 
 ### Browser Connector Troubleshooting
 - **Symptom**: Browser tools unavailable or returning BROWSER_NOT_READY errors.
@@ -412,8 +473,9 @@ PR --> TR["Test Suite"]
 **Section sources**
 - [2026-09-01-post-live-check-audit-events-initial-load-recovery.md:11-41](file://docs/agentic-aiops-platform/release-notes/2026-09-01-post-live-check-audit-events-initial-load-recovery.md#L11-L41)
 - [AuditView.tsx:185-199](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx#L185-L199)
+- [App.studio.test.tsx:239-266](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L239-L266)
 - [test_browser_connector.py:440-483](file://products/tool-gateway/tests/test_browser_connector.py#L440-L483)
 - [test_prose_redaction.py:753-770](file://products/agent-platform/tests/test_prose_redaction.py#L753-L770)
 
 ## Conclusion
-Release v0.29.3 delivers three significant improvements: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, comprehensive security hardening for the SPEC-049 browser connector, and substantial performance optimization for credential masking through a hot-path cache implementation. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. The v0.36.3 performance optimization eliminates repeated deferred imports on the streaming hot path while maintaining import cycle safety and behavioral consistency. Together, these changes enhance both user experience, security posture, and performance across the platform, with the batched deployment approach ensuring coordinated rollout of all improvements.
+This comprehensive update delivers significant improvements across multiple versions: resolution of initial-load recovery issues in the Audit Events tab through identity-lifecycle-aware retry logic, comprehensive security hardening for the SPEC-049 browser connector, substantial performance optimization for credential masking through a hot-path cache implementation, and a crucial Studio panel refresh regression fix from v0.37.1. The audit events fix is minimal, targeted, and validated with regression testing, preserving all existing server behaviors while improving resilience against transient authentication states. The browser connector hardening implements defense-in-depth security through multi-layered origin validation, CDP port pinning with NetworkPolicy protection, concurrent access safeguards, and robust information disclosure prevention. The v0.36.3 performance optimization eliminates repeated deferred imports on the streaming hot path while maintaining import cycle safety and behavioral consistency. The v0.37.1 Studio panel refresh fix addresses a critical usability regression where approval decisions failed to refresh development sessions, ensuring immediate UI synchronization across both operation and development workspaces. Additionally, the comprehensive verification of all six SPEC-056 load-bearing invariants provides confidence in the Studio split's architectural integrity. Together, these changes enhance both user experience, security posture, and performance across the platform, with coordinated deployment approaches ensuring reliable rollout of all improvements.

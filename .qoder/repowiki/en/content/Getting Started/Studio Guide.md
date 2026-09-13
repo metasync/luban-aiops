@@ -15,15 +15,16 @@
 - [useSessionWorkspace.ts](file://products/operator-portal/web-ui/app/src/sessions/useSessionWorkspace.ts)
 - [App.tsx](file://products/operator-portal/web-ui/app/src/App.tsx)
 - [roles.ts](file://products/operator-portal/web-ui/app/src/roles.ts)
+- [ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced SPEC-056 architecture accuracy with detailed dual-instance workspace explanation
-- Clarified Chat/Studio relationship as single mode parameterization with different session types
-- Improved role-based access control explanations with specific role mappings
-- Updated workspace instance descriptions to reflect dual-instance architecture where operation sessions back Chat/Incidents/Documents/Settings while development sessions back Studio
-- Added comprehensive technical implementation details from actual codebase analysis
+- Corrected documentation to accurately describe the dual-instance architecture where Chat/Incidents/Documents/Settings share the operation instance while Studio uses the development instance
+- Fixed misconceptions about separate workspaces per feature by clarifying that there are only two workspace instances total
+- Enhanced explanation of how the mode parameterization works within a single shared chat core
+- Updated architectural diagrams to reflect the actual implementation with operation and development workspace instances
+- Clarified role-based access control with specific mappings for STUDIO_ROLES
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -40,13 +41,13 @@
 ## Introduction
 This guide explains the operator-facing Studio workspace: how to create a development session, author procedures with approvals, and graduate them into replayable executable-flow skills. It also clarifies why Studio is separate from Chat, what stays identical between them, and how to troubleshoot common issues.
 
-**Updated** The Chat/Studio relationship is now understood as a single shared chat core parameterized by mode, where both entries render the same component but with different session types, list scopes, and authoring controls. Studio creates `development` sessions while Chat creates `operation` sessions, with each entry maintaining its own workspace instance.
+**Updated** The Chat/Studio relationship is implemented through a dual-instance architecture where the portal owns two separate `useSessionWorkspace` instances: an operation instance that backs Chat, Incidents, Documents, and Settings views, and a development instance that backs Studio only. Both entries use the same `ChatView` component parameterized by mode (`operation` vs `development`), sharing the same streaming transcript, secret masking, HITL confirmation path, tool evidence rendering, model selection, and voice input functionality.
 
-Studio is a scoping change over one shared chat core. The same streaming transcript, secret masking, HITL confirmation path, tool evidence rendering, model selection, and voice input apply identically in both entries. What differs is the session type (`operation` vs `development`), the session list scope (server-side filtered), and the authoring controls exposed (Draft as skill in Chat vs Declare target + Graduate as skill in Studio).
+Studio is fundamentally a scoping change over one shared chat core. The key difference is that each workspace instance maintains its own namespaced active-session keys and lists only sessions of its corresponding type via server-side filtering.
 
 ## Project Structure
-Studio spans multiple products and shared contracts with a dual-instance architecture:
-- **Operator portal** provides two mode-scoped workspace instances: an operation instance backing Chat, Incidents, Documents, and Settings; and a development instance backing Studio only.
+Studio spans multiple products and shared contracts with a clear dual-instance architecture:
+- **Operator portal** provides exactly two mode-scoped workspace instances: an operation instance backing Chat, Incidents, Documents, and Settings; and a development instance backing Studio only.
 - **Agent platform** stores sessions with fixed-at-birth session_type, captures authoring traces, and records observed origins for browser write steps.
 - **Platform gateway** enforces dual authorization for creating development sessions and forwards session_type filters for server-side list scoping.
 - **Shared contracts** define the additive session_type discriminator and skill format evolution across all mirrors.
@@ -175,7 +176,7 @@ Grad --> End
 - [SPEC-056 spec.md:119-184](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L119-L184)
 
 ### Dual Workspace Instance Architecture
-**New Section** The portal implements a dual-instance architecture where `App.tsx` owns two separate `useSessionWorkspace` instances, each serving different purposes:
+**Enhanced** The portal implements a dual-instance architecture where `App.tsx` owns two separate `useSessionWorkspace` instances, each serving different purposes:
 
 - **Operation workspace instance**: Backs Chat, Incidents, Documents, and Settings views. Always deals with operation sessions.
 - **Development workspace instance**: Backs Studio only. Only polls when user has studio roles.
@@ -351,7 +352,7 @@ Common symptoms and fixes:
 - [WALKTHROUGH.md:481-499](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L481-L499)
 
 ## Conclusion
-Studio separates operational work from skill development while sharing the same secure chat core through a single-mode parameterization approach. By fixing session type at birth, implementing dual workspace instances with proper scoping, placing authoring controls in their correct homes, and enforcing dual authorization for development sessions, the platform keeps blast-radius control intact and makes graduation deterministic and auditable.
+Studio separates operational work from skill development while sharing the same secure chat core through a dual-instance architecture. By fixing session type at birth, implementing separate workspace instances with proper scoping, placing authoring controls in their correct homes, and enforcing dual authorization for development sessions, the platform keeps blast-radius control intact and makes graduation deterministic and auditable.
 
 The dual-instance architecture ensures that operation sessions back Chat, Incidents, Documents, and Settings while development sessions back Studio, providing clear separation of concerns while maintaining shared security guarantees and user experience consistency.
 

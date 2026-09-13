@@ -21,10 +21,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated graduation walkthrough section to reflect the new Studio-first workflow with explicit step-by-step guidance
-- Added clarification about why Chat's New button cannot substitute for Studio's development session creation
-- Enhanced documentation of the strict separation between operational and development workflows
+- Enhanced graduation workflow section with explicit Studio-first approach guidance
+- Added clear clarification about why Chat's New button cannot substitute for Studio's development session creation
+- Strengthened documentation of the strict separation between development and operational workflows
 - Updated troubleshooting guidance to address common confusion points between Chat and Studio usage
+- Clarified that steps 3-6 (skill development) must occur exclusively in Studio
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -310,12 +311,12 @@ Exclude --> Render
 - [spec.md:185-202](file://docs/specs/SPEC-056-studio-skill-development-workspace/spec.md#L185-L202)
 
 ### Graduation Workflow: Studio-First Approach
-**Updated** The graduation workflow now explicitly requires using Studio for all skill development steps, with clear separation from Chat operations:
+**Enhanced** The graduation workflow now provides explicit Studio-first guidance with clear separation between development and operational phases:
 
-- **Steps 3-6 must occur in Studio**: Opening a skill-development session, authoring procedures ad hoc, approving per-action cards, and graduating the session all happen exclusively in Studio
+- **Steps 3-6 must occur exclusively in Studio**: Opening a skill-development session, authoring procedures ad hoc, approving per-action cards, and graduating the session all happen exclusively in Studio
 - **Chat's New button cannot substitute**: Chat creates operation sessions only and offers "Draft as skill" rather than development capabilities
-- **Clear workflow boundaries**: Steps 3-6 (skill development) happen in Studio; Step 8 (replay) happens in Chat after graduation
-- **Explicit rationale**: The develop-as-you-go opener moved to Studio so that nothing in Chat can create a session that could later graduate a captured flow
+- **Clear workflow boundaries established**: Steps 3-6 (skill development) happen in Studio; Step 8 (replay) happens in Chat after graduation
+- **Explicit rationale documented**: The develop-as-you-go opener moved to Studio so that nothing in Chat can create a session that could later graduate a captured flow
 
 ```mermaid
 flowchart TD
@@ -327,17 +328,19 @@ Step6 --> Step7["Step 7: Merge skill<br/>Manual merge process"]
 Step7 --> Step8["Step 8: Replay in Chat<br/>Operational execution"]
 Note1["Chat's New button creates operation sessions only"] -.-> Step3
 Note2["Authoring controls live in Studio"] -.-> Step6
+Note3["Strict separation: Development (Studio) vs Operations (Chat)"] -.-> Start
 ```
 
 **Diagram sources**
 - [WALKTHROUGH.md:81-132](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L81-L132)
 - [WALKTHROUGH.md:209-233](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L209-L233)
-- [WALKTHROUGH.md:327-362](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L327-L362)
+- [WALKTHROUGH.md:327-362](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L327-362)
+- [studio-guide.md:155-179](file://docs/guides/studio-guide.md#L155-L179)
 
 **Section sources**
 - [WALKTHROUGH.md:81-132](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L81-L132)
 - [WALKTHROUGH.md:209-233](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L209-L233)
-- [WALKTHROUGH.md:327-362](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L327-L362)
+- [WALKTHROUGH.md:327-362](file://samples/web-checks/skill-graduation/WALKTHROUGH.md#L327-362)
 - [studio-guide.md:155-179](file://docs/guides/studio-guide.md#L155-L179)
 
 ## Delivery Verification
@@ -437,6 +440,8 @@ Common issues and resolutions:
 - **Deployment restarts occur**: Verify image tags match coordinated tag in `.images.env`; check for configuration drift between deployments.
 - **Using Chat's New button for skill development**: This creates operation sessions only. Use Studio's flask icon New button for skill development sessions.
 - **Confusion between Chat and Studio workflows**: Remember that steps 3-6 (skill development) happen in Studio, while step 8 (replay) happens in Chat.
+- **Graduate as skill button missing**: You are in Chat, whose header offers only Draft as skill. The authoring controls live in Studio.
+- **Studio missing from sidebar**: Your role lacks `session:skill_graduate`. Sign in as operator, approver or platform-admin.
 
 **Section sources**
 - [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
@@ -459,11 +464,11 @@ SPEC-056 cleanly separates operational and development workflows while preservin
 - **All nine Luban services** deployed with zero restarts
 - **OQ-2 migration idempotency** verified against live dev-k8s cluster
 
-**Updated** The graduation workflow now provides clear, explicit guidance for the Studio-first approach:
+**Enhanced** The graduation workflow now provides clear, explicit guidance for the Studio-first approach:
 - **Steps 3-6 explicitly require Studio**: Opening skill-development sessions, authoring procedures, approving cards, and graduation all happen in Studio
-- **Chat limitations clarified**: Chat's New button creates operation sessions only and cannot substitute for Studio's development capabilities
-- **Workflow boundaries established**: Clear separation between development (Studio) and operational replay (Chat) phases
-- **Rationale documented**: The restriction prevents Chat from creating sessions that could later graduate captured flows
+- **Chat limitations clearly documented**: Chat's New button creates operation sessions only and cannot substitute for Studio's development capabilities
+- **Workflow boundaries firmly established**: Clear separation between development (Studio) and operational replay (Chat) phases
+- **Rationale thoroughly documented**: The restriction prevents Chat from creating sessions that could later graduate captured flows
 
 **Deferred Features**: The Chat→Studio spawn bridge ("Continue in Studio"), composition/runbook-of-skills construct, and assisted trace-extraction remain deferred to SPEC-057, allowing SPEC-056 to focus on the fundamental separation of concerns without additional complexity.
 

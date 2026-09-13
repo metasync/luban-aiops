@@ -47,6 +47,7 @@
 - Fixed user experience issue where Studio panel would show stale 'awaiting approval' state when approvers resolved cards on their own development sessions
 - Updated dual-workspace architecture to address edge cases introduced by SPEC-056
 - Added comprehensive test coverage for cross-workspace refresh behavior
+- Improved approval workflow coordination ensuring both workspaces stay synchronized
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -65,7 +66,7 @@ The Operator Portal is the operator-facing web application for platform administ
 
 Key capabilities include:
 - **Dual workspace architecture**: Separate Chat (operation) and Studio (development) workspaces with distinct session types and authoring controls
-- **Enhanced approval workflow**: Immediate refresh of both workspaces when approval decisions land, preventing stale 'awaiting approval' states in Studio panel
+- **Enhanced approval workflow coordination**: Cross-workspace refresh mechanism that updates both operation and development workspaces immediately when approval decisions are made, preventing stale 'awaiting approval' states in Studio panels
 - Chat and streaming responses with tool evidence and inline human-in-the-loop confirmations
 - **Enhanced confirmation cards with browser flow context showing skill titles, descriptions, target origins, and risk classifications with visual styling and flow headline rendering, plus parsed element labels as human-readable prose**
 - Incident management with triage reports and live runs
@@ -108,7 +109,7 @@ Nginx --> Dist
 - Authentication: OIDC login flow, token refresh scheduling, and session persistence; roles drive UI visibility and feature gating.
 - API client: Centralized fetch wrapper adding bearer tokens and request IDs, with configurable gateway URL override.
 - **Dual workspace architecture**: Operation workspace (Chat) for regular sessions and development workspace (Studio) for skill development sessions, each with separate session lists and active session management.
-- **Enhanced approval workflow**: Cross-workspace refresh mechanism that updates both operation and development workspaces immediately when approval decisions are made.
+- **Enhanced approval workflow coordination**: Cross-workspace refresh mechanism that updates both operation and development workspaces immediately when approval decisions are made, preventing stale UI states.
 - Mode-aware ChatView: Single component serving both operation and development modes with conditional authoring controls based on workspace mode.
 - Control views: Approvals inbox, **enhanced audit trail with sophisticated tabbed interface, critical hook ordering stability, and automatic recovery from stale session transitions**, permissions matrix, settings & debug, incidents triage.
 - Workspace views: Tools catalog and **enhanced skills inventory with lazy loading and read-only content viewer**.
@@ -247,7 +248,7 @@ DevelopmentRefresh --> DevelopmentUIUpdate["Update Development Session Panel"]
 - [roles.ts:83-90](file://products/operator-portal/web-ui/app/src/roles.ts#L83-L90)
 
 ### Enhanced Approval Workflow System
-**New** The approval workflow system has been enhanced to coordinate across both operation and development workspaces, ensuring consistent UI state when approval decisions are made.
+**Updated** The approval workflow system has been significantly enhanced to coordinate across both operation and development workspaces, ensuring consistent UI state when approval decisions are made.
 
 #### Cross-Workspace Refresh Mechanism
 - **Unified Callback**: The Approvals inbox passes a single callback that refreshes both workspaces when decisions are applied
