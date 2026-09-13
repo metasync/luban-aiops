@@ -182,10 +182,32 @@ additive, birth-fixed and immutable.
 
 ## Deployment state
 
-The version bump and this note are committed before the cluster build, because
+The version bump and this note were committed before the cluster build, because
 `make build` derives a clean `IMAGE_TAG` from `VERSION` plus the git SHA and
 appends `-dirty-<timestamp>` on an uncommitted tree. The rebuild and redeploy
-therefore follow this commit, and their outcome — the coordinated image tag,
-the rollout status across all nine deployments, and the version constants the
-running services report — is recorded in a follow-up `docs:` commit rather than
-asserted here in advance.
+therefore followed the release commit, and this section records their outcome
+rather than asserting it in advance.
+
+With the tree clean at `b65b98b`, `make build` produced all nine images under
+the coordinated tag **`0.37.1-dev-k8s-b65b98b`** — no `-dirty-` suffix — and
+`make deploy` rolled them onto dev-k8s. Every luban deployment is `1/1 READY`
+on that tag, and all nine pods report `ready=true` with `restartCount=0`
+(`tool-gateway`'s two containers both so). The fresh `agent-service` pod came up
+clean: application startup complete, model catalog refreshed to 9 models, and
+zero lines matching `error|traceback|critical|exception|failed`.
+
+The version constants the running services report agree with the tag they are
+running. All eight Python services return `0.37.1` from
+`importlib.metadata.version(<service>)` inside their own containers, and the
+web-ui's served bundle carries the same `0.37.1` literal. The web-ui image build
+also independently re-ran the portal's own gate — `tsc --noEmit && vite build`
+— clean, so the `App.tsx` fix type-checks in the container path as well as in
+the working tree.
+
+Because this patch changes no contract, policy, schema, migration or store
+protocol, the redeploy carried nothing to reconcile: unlike v0.37.0, whose
+rebuild re-exercised the OQ-2 backfill against an already-migrated database, the
+only content difference between the `0.37.0` and `0.37.1` images is the portal
+bundle and the version constants, plus one docstring inside `agent-service` —
+the Python images copy `src` alone, so the corrected `test_skill_graduation.py`
+docstring ships in the repository and in no image.
