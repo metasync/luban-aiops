@@ -18,8 +18,11 @@ Studio session still runs under, see
 The portal has two peer chat entries in the sidebar: **Chat** (a speech-bubble
 icon) and **Studio** (a flask icon). They are the *same* chat surface — one
 shared component, one stream, one secret-masking path, one approval path — and
-they differ in exactly three things: the type of session they create, the
-session list they show, and the authoring controls they offer.
+they are driven by a single mode. Underneath, that mode fixes three things: the
+`session_type` a new session is born with, the scope of the session list, and
+which entry remembers the session you last had open. On top of those it swaps the
+create affordance and the authoring controls, and decides who sees the entry at
+all.
 
 | | **Chat** | **Studio** |
 |---|---|---|
@@ -37,10 +40,11 @@ work you are about to do by hand — the develop-as-you-go path, where each
 mutation parks its own approval card and the approved ones are then graduated
 into an executable-flow draft.
 
-If you do not see **Studio** in the sidebar, your role does not hold
-`session:skill_graduate`. That is the same grant that decides whether the
-**Graduate as skill** control appears, so the entry and the power are never out
-of step. `developer`, `read-only-observer` and `auditor` keep Chat alone.
+If you do not see **Studio** in the sidebar, you are either signed out or your
+role does not hold `session:skill_graduate`. That is the same grant that decides
+whether the **Graduate as skill** control appears, so the entry and the power are
+never out of step. `developer`, `read-only-observer` and `auditor` keep Chat
+alone.
 
 ## Your first development session
 
@@ -203,14 +207,16 @@ namespaced key. A detour from Studio into Chat and back restores your place in
 both, and a reload lands you on the session you were last reading in whichever
 entry you open.
 
-Chat, Studio, Incidents, Documents and Settings each keep their own view of the
-world: everything except Studio deals in operation sessions.
+Underneath there are two workspace instances rather than one per view: the
+operation instance backs Chat and is reused by Incidents, Documents and Settings,
+and the development instance backs Studio. Everything except Studio therefore
+deals in operation sessions.
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| **Studio** is missing from the sidebar | Your role lacks `session:skill_graduate`. Sign in as `operator`, `approver` or `platform-admin` |
+| **Studio** is missing from the sidebar | You are signed out, or your role lacks `session:skill_graduate`. Sign in as `operator`, `approver` or `platform-admin` |
 | **Graduate as skill** is missing | You are in **Chat**, whose header offers only **Draft as skill**. The authoring controls live in Studio |
 | **Declare target** says the scope is already in force | The first declaration wins and cannot be widened. Open a new development session if you need a different target |
 | Creating a session returns `403` | The dual gate: creating a development session needs `session:create` **and** `session:skill_graduate`. The response names the missing grant |

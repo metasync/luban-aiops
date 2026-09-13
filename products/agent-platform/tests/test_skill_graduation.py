@@ -16,10 +16,12 @@ parameter a replayed flow binds its origin guard and step budget to, and
 R-2's per-step observations corroborate every captured mutation against
 it. There are two paths to that declaration: at session birth (the primary
 one, where nothing can have been captured yet) and through a standalone
-endpoint afterwards, for a session that becomes a development session
-later. Both are first-wins, both report the target actually in force
-rather than echoing the request, and both run one validator that holds the
-scope as origin and path with any query or fragment dropped.
+endpoint afterwards, for a *development* session opened unscoped — SPEC-056
+R-2/R-3 made the birth target optional, and neither path re-types anything,
+since ``session_type`` is fixed at birth. Both are first-wins, both report
+the target actually in force rather than echoing the request, and both run
+one validator that holds the scope as origin and path with any query or
+fragment dropped.
 
 The service underneath the route is covered here too, because it is where
 R-4's substance lives. ``revalidate_blast_radius`` re-applies at graduation

@@ -1235,10 +1235,13 @@ async def declare_skill_target(
 
     The primary path declares at birth (``skill_target`` on session create),
     where nothing can have been captured yet. This endpoint is the path for a
-    session that *becomes* a development session after it was opened, so a
-    declaration made here can postdate the first captured step — which is why
-    graduation checks the ordering rather than assuming it, and why this
-    endpoint cannot be used to widen a scope that is already in force.
+    *development* session opened unscoped: SPEC-056 R-2/R-3 make the birth
+    target optional, so declaring it mid-session from Studio is a first-class
+    path. Such a declaration can therefore postdate the first captured step —
+    which is why graduation checks the ordering rather than assuming it, and
+    why this endpoint cannot be used to widen a scope that is already in
+    force. It never re-types anything: ``session_type`` is fixed at birth
+    (R-1), so "declare a target" is not "become a development session".
 
     Authorized by the same ``session:skill_graduate`` action as graduation
     itself (enforced by the platform-gateway): declaring a target is part of
