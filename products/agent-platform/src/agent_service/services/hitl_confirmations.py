@@ -272,7 +272,17 @@ def _cr_web_select(parameters: dict, display_hint: str | None) -> dict:
 
 def _cr_web_press_key(parameters: dict, display_hint: str | None) -> dict:
     key = _display_value(parameters.get("key", ""))
-    return {"summary": f'Press key "{key}"'}
+    summary = f'Press key "{key}"'
+    # ``ref`` is optional for press_key (it only focuses before pressing), so the
+    # element is named when the call targets one and the sentence stays bare when
+    # it does not — ``_element_label``'s "the target element" fallback would add
+    # noise rather than information. Enter is a submitting key, so *where* it
+    # lands is the decision-relevant half of the card; every other ref-taking
+    # formatter projects it and the display_hint is already computed here, since
+    # ``web.press_key`` is in ``browser_ref_tools``.
+    if parameters.get("ref") is not None:
+        summary += f' in "{_element_label(parameters, display_hint)}"'
+    return {"summary": summary}
 
 
 def _cr_web_upload_file(parameters: dict, display_hint: str | None) -> dict:

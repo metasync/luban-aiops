@@ -356,6 +356,30 @@ def test_change_request_curated_web_click_uses_element_label() -> None:
     }
 
 
+def test_change_request_curated_web_press_key_names_the_element() -> None:
+    """``web.press_key`` takes an optional ``ref`` and is in
+    ``browser_ref_tools``, so its card names the element like every other
+    ref-taking formatter — Enter is a submitting key, and *where* it lands is
+    the decision-relevant half of an approval that previously read only
+    ``Press key "Enter"``."""
+    assert build_change_request(
+        "web.press_key", {"key": "Enter", "ref": 4}, "Search filters form"
+    ) == {"summary": 'Press key "Enter" in "Search filters form"'}
+    # No element map entry: the raw ref still beats an unnamed keypress.
+    assert build_change_request("web.press_key", {"key": "Enter", "ref": 4}) == {
+        "summary": 'Press key "Enter" in "ref 4"'
+    }
+
+
+def test_change_request_web_press_key_without_a_ref_omits_the_location() -> None:
+    """``ref`` is optional for press_key, so a call that targets no element keeps
+    the bare sentence rather than inheriting ``_element_label``'s "the target
+    element" fallback — noise, not information."""
+    assert build_change_request("web.press_key", {"key": "Escape"}) == {
+        "summary": 'Press key "Escape"'
+    }
+
+
 def test_change_request_generic_fallback_for_uncurated_tool() -> None:
     """Every other tool gets a generic lead + label->value fields, so no action
     card regresses for want of a curated formatter (R-3). SPEC-055 R-7: the
