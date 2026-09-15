@@ -56,9 +56,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated browser tool descriptions for web.type, web.select, web.upload_file, web.click, and web.press_key to clarify write-tier rationale
-- Enhanced explanations of why typing/selecting/uploading operations require operator confirmation despite not immediately submitting data
-- Clarified that these tools represent the payload of changes requiring approval rather than immediate submission actions
+- Corrected browser card context and tool gateway service classifications for web.fill_credential as read-tier with no approval card generation
+- Clarified statements about web.evaluate parameters and security boundaries
+- Addressed overclaims about test coverage and performance optimizations in browser connector documentation
+- Updated browser tool descriptions to accurately reflect tier classifications and approval workflows
 - No risk tier moved: the registry still reports fifteen web.* tools (9 read, 6 write), and both web-check demos still assert `web.type: write` and `web.select: write`
 
 ## Table of Contents
