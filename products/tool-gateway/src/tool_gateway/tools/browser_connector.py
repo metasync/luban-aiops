@@ -1151,8 +1151,9 @@ class WebClickTool(_WebInteractionTool):
             name="web.click",
             description=(
                 "Click the element identified by a web.snapshot ref. "
-                "Write tier: this mutates the target application, so it "
-                "requires operator confirmation — either under a bound, "
+                "Write tier: the click is the submitting interaction — it "
+                "commits whatever the page's fields already hold, so it "
+                "requires operator confirmation either under a bound, "
                 "approved write-class web-check flow, or ad-hoc with no flow "
                 "bound, where the call parks its own per-action approval "
                 "card. The live page origin must stay on the allowlist."
@@ -1208,12 +1209,14 @@ class WebTypeTool(_WebInteractionTool):
             name="web.type",
             description=(
                 "Type text into the element identified by a web.snapshot "
-                "ref. Write tier: this mutates the target application, so it "
-                "requires operator confirmation — either under a bound, "
-                "approved write-class web-check flow, or ad-hoc with no flow "
-                "bound, where the call parks its own per-action approval "
-                "card. The live page origin must stay on the allowlist. "
-                "Never type credentials with this tool — use "
+                "ref. Write tier, though typing submits nothing: the text is "
+                "model-chosen and is the payload of the change, so the gate "
+                "belongs here — a later submitting click would not reveal "
+                "what was submitted. Requires operator confirmation either "
+                "under a bound, approved write-class web-check flow, or "
+                "ad-hoc with no flow bound, where the call parks its own "
+                "per-action approval card. The live page origin must stay on "
+                "the allowlist. Never type credentials with this tool — use "
                 "web.fill_credential."
             ),
             risk_level="write",
@@ -1398,11 +1401,14 @@ class WebSelectTool(_WebInteractionTool):
             name="web.select",
             description=(
                 "Select an option from a <select> element identified by a "
-                "web.snapshot ref. Write tier: this mutates the target "
-                "application, so it requires operator confirmation — either "
-                "under a bound, approved write-class web-check flow, or "
-                "ad-hoc with no flow bound, where the call parks its own "
-                "per-action approval card."
+                "web.snapshot ref. Write tier, though choosing an option "
+                "submits nothing: the value is model-chosen and is the "
+                "payload of the change, so the gate belongs here rather than "
+                "on a later submitting click that would not reveal what was "
+                "submitted. Requires operator confirmation either under a "
+                "bound, approved write-class web-check flow, or ad-hoc with "
+                "no flow bound, where the call parks its own per-action "
+                "approval card."
             ),
             risk_level="write",
             category=CATEGORY,
@@ -1486,9 +1492,10 @@ class WebPressKeyTool(BaseTool):
             name="web.press_key",
             description=(
                 "Press a keyboard key or combination, optionally focusing "
-                "an element by snapshot ref first. Write tier: this mutates "
-                "the target application, so it requires operator "
-                "confirmation — either under a bound, approved write-class "
+                "an element by snapshot ref first. Write tier: Enter and Tab "
+                "are submitting interactions that commit whatever the page's "
+                "fields already hold, so each call requires operator "
+                "confirmation either under a bound, approved write-class "
                 "web-check flow, or ad-hoc with no flow bound, where the "
                 "call parks its own per-action approval card."
             ),
@@ -1597,11 +1604,13 @@ class WebUploadFileTool(_WebInteractionTool):
             description=(
                 "Upload a file to an <input type=file> element identified "
                 "by a web.snapshot ref. The file must reside in the "
-                "configured upload directory. Write tier: this mutates the "
-                "target application, so it requires operator confirmation — "
-                "either under a bound, approved write-class web-check flow, "
-                "or ad-hoc with no flow bound, where the call parks its own "
-                "per-action approval card."
+                "configured upload directory. Write tier, though setting the "
+                "input submits nothing: the filename is model-chosen and is "
+                "the payload of the change, so the gate belongs here rather "
+                "than on a later submitting click. Requires operator "
+                "confirmation either under a bound, approved write-class "
+                "web-check flow, or ad-hoc with no flow bound, where the "
+                "call parks its own per-action approval card."
             ),
             risk_level="write",
             category=CATEGORY,
