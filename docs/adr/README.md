@@ -46,3 +46,4 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 | `ADR-0008` | Spec delivery requires requirement-to-test traceability and exercised samples | `accepted` |
 | `ADR-0009` | Graduate troubleshooting sessions into replayable executable skills via a durable authoring trace | `accepted` |
 | `ADR-0010` | Signed execution envelopes declare their authority provenance | `accepted` |
+| `ADR-0011` | A composition carries no authority; each sub-skill keeps its own gate | `proposed` |
