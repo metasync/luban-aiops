@@ -42,10 +42,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced web.press_key approval cards now include element context when ref parameter is provided, improving operator understanding of where keypress actions will occur
-- Updated _cr_web_press_key function to conditionally include element location in approval summaries (e.g., 'Press key Enter in Search filters form')
-- Aligned web.press_key with the four sibling ref-taking formatters (click, type, select, upload_file) that already project the element label
-- Added two tests pinning the three outcomes: element named from the snapshot map, raw-ref fallback, and no ref supplied
+- Updated Enhanced Change Request Formatters section to reflect improved web.press_key element context functionality
+- Documented the two tests pinning three outcomes: element named from the snapshot map, raw-ref fallback, and no ref supplied
+- Updated Troubleshooting Guide with new web.press_key element context troubleshooting scenarios
+- Noted in Performance Considerations that the element context is conditional on a ref being supplied
+- Updated Conclusion to include the latest enhancement for improved operator understanding of browser interaction flows
 
 ## Table of Contents
 1. Introduction
@@ -213,7 +214,7 @@ AI -.-> AI
 - **Card message persistence**: Confirmation card messages persist on durable records ensuring parity between live operator cards and replayed surfaces.
 - **Secret parameter masking**: **Fail-closed security posture** ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe. Uses curated formatters for specific tools and generic fallback masking for unknown parameters. **Updated**: Pre-redaction occurs in runtime kernel before streaming and persistence to prevent any secret leakage.
 - **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking. **Enhanced**: Properly handles 410 Gone responses by settling confirmation cards and preventing stuck UI states.
-- **Enhanced web.press_key element context**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with the four sibling ref-taking formatters (click, type, select, upload_file) that already project the element label; `web.evaluate` takes a ref but deliberately projects no page content, and `web.fill_credential` is read-tier and names its credential set instead of an element.
+- **Enhanced web.press_key element context**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with the other four members of `browser_ref_tools` (click, type, select, upload_file), which already projected the element label; `web.evaluate` takes no ref and `web.fill_credential` is read-tier, parking no card.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
@@ -529,7 +530,7 @@ Responsibilities:
 - Handle optional parameters intelligently (e.g., web.press_key only includes element context when ref is provided).
 - Align behavior across browser tools for consistent operator experience.
 
-**Updated web.press_key formatter**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with other browser tools like click, type, select, upload_file, and fill_credential that already display element context.
+**Updated web.press_key formatter**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with the other four members of `browser_ref_tools` (click, type, select, upload_file), which already projected the element label; `web.evaluate` takes no ref and `web.fill_credential` is read-tier, parking no card.
 
 Key behaviors:
 - **Conditional element context**: Only includes "in [element]" when ref parameter is present
@@ -692,8 +693,8 @@ CheckAllow -- No --> DefaultDeny["Return deny (no matching rule)"]
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 
 **Section sources**
-- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
-- [policy_engine.py:183-220](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L183-L220)
+- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-148)
+- [policy_engine.py:183-220](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L183-220)
 - [policy_engine.py:335-389](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L335-389)
 
 ### Agent Platform Confirm Route
@@ -967,7 +968,7 @@ USESTREAM["useChatStream.ts"] -.-> PORTAL
 - [confirmation_records.py:214-565](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L214-L565)
 - [secret_params.py:1-149](file://products/agent-platform/src/agent_service/services/secret_params.py#L1-L149)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
-- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
+- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-148)
 - [decoder.ts:39-125](file://products/operator-portal/web-ui/app/src/stream/decoder.ts#L39-L125)
 - [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
@@ -1005,7 +1006,7 @@ USESTREAM["useChatStream.ts"] -.-> PORTAL
 - **SPEC-055 Enhancement**: Pre-redaction occurs once per confirmation park, avoiding redundant masking operations during streaming and persistence.
 - **SPEC-055 Enhancement**: Vocabulary validation runs at build time, not runtime, preventing performance impact during confirmation processing.
 - **Enhanced Expired Handling**: Model pinning consistency in expired confirmation handling prevents costly agent rebuilds and ensures interrupts reach the correct agent instance efficiently.
-- **Enhanced web.press_key Optimization**: Conditional element context inclusion only occurs when ref parameter is present, avoiding unnecessary string concatenation for keypresses without element targeting.
+- **web.press_key element context is conditional**: the label is projected only when a ref parameter is present, so a keypress with no element targeting still renders the bare sentence rather than naming a location the model never supplied.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1180,6 +1181,6 @@ The integration provides a seven-layer security model: deny-by-default policy bu
 
 **New Capability**: Improved frontend stream management for 410 Gone responses provides better user experience by properly settling expired confirmation cards and preventing stuck UI states, giving operators clear feedback about confirmation status.
 
-**New Capability**: **Enhanced web.press_key element context** improves operator understanding of where keypress actions will occur by including element location information when ref parameter is provided. This aligns web.press_key behavior with other browser tools like click, type, select, upload_file, and fill_credential that already display element context, creating a consistent user experience across all browser interaction tools.
+**New Capability**: **Enhanced web.press_key element context** improves operator understanding of where keypress actions will occur by including element location information when ref parameter is provided. This aligns web.press_key with the other four members of `browser_ref_tools` (click, type, select, upload_file), which already projected the element label — all five ref-taking write tools now name the element. `web.evaluate` takes no ref and `web.fill_credential` is read-tier, so neither is comparable.
 
 [No sources needed since this section summarizes without analyzing specific files]

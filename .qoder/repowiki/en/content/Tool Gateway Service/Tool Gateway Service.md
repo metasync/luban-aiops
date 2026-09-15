@@ -56,10 +56,10 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced browser connector query redaction functions to handle DSN-style credentials in URL userinfo sections
-- Added explicit handling for parsed.password to mask credentials in netloc before processing query parameters
-- Fixed critical security gap in error handling path where exception messages containing URLs with credentials were passed directly to make_error_result()
-- Updated documentation to reflect improved credential masking coverage across all browser tool results and error paths
+- Updated browser tool descriptions for web.type, web.select, web.upload_file, web.click, and web.press_key to clarify write-tier rationale
+- Enhanced explanations of why typing/selecting/uploading operations require operator confirmation despite not immediately submitting data
+- Clarified that these tools represent the payload of changes requiring approval rather than immediate submission actions
+- No risk tier moved: the registry still reports fifteen web.* tools (9 read, 6 write), and both web-check demos still assert `web.type: write` and `web.select: write`
 
 ## Table of Contents
 1. [Introduction](#introduction)
