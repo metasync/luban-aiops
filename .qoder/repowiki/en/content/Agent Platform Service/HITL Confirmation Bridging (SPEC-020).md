@@ -42,11 +42,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated kernel-side HITL expiry handling to properly interrupt agents when confirmation cards expire, preventing transcript wedging issues
-- Enhanced expired confirmation handling with model pinning consistency to ensure interrupts reach the correct agent instance
-- Fixed frontend stream management for 410 Gone responses to properly settle confirmation cards and prevent stuck UI states
-- Added comprehensive testing coverage for expired confirmation scenarios including pinned model resolution
-- Updated documentation to reflect the fix for orphaned turns where parked calls never receive their interrupted result
+- Enhanced web.press_key approval cards now include element context when ref parameter is provided, improving operator understanding of where keypress actions will occur
+- Updated _cr_web_press_key function to conditionally include element location in approval summaries (e.g., 'Press key Enter in Search filters form')
+- Aligned web.press_key with the four sibling ref-taking formatters (click, type, select, upload_file) that already project the element label
+- Added two tests pinning the three outcomes: element named from the snapshot map, raw-ref fallback, and no ref supplied
 
 ## Table of Contents
 1. Introduction
@@ -85,6 +84,7 @@ Key outcomes:
 - **Improved headline leak prevention**: Explicit approval kind discrimination prevents non-browser action cards from inheriting stale flow headlines.
 - **Secret parameter masking**: Fail-closed security posture ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface.
 - **Enhanced expired confirmation handling**: Model pinning consistency ensures expired confirmation interrupts reach the correct agent instance with proper model resolution, preventing orphaned turns and transcript wedging.
+- **Enhanced web.press_key element context**: Approval cards now include element location information when ref parameter is provided, improving operator understanding of where keypress actions will occur.
 
 **Section sources**
 - [spec.md:11-20](file://docs/specs/SPEC-020-hitl-confirmation-bridging/spec.md#L11-L20)
@@ -102,7 +102,7 @@ Key outcomes:
 - [spec.md:43-67](file://docs/specs/SPEC-031-approval-inbox-persistent-confirmation/spec.md#L43-L67)
 
 ## Project Structure
-The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, **SPEC-055 secret masking hardening**, v0.23.1 canonical name resolution, v0.33.1 flow summary propagation, and **enhanced expired confirmation handling with model pinning consistency**:
+The feature spans three products plus shared contracts, enhanced with SPEC-021 capabilities, SPEC-030 tier enforcement, SPEC-031 persistent storage, SPEC-053 skill-declared intent, **SPEC-054 action-level approvals**, **SPEC-055 secret masking hardening**, v0.23.1 canonical name resolution, v0.33.1 flow summary propagation, **enhanced expired confirmation handling with model pinning consistency**, and **enhanced web.press_key element context**:
 - Agent platform: runtime park/resume, in-memory registry with risk tracking, v2 routes, schemas, settings, durable confirmation records store, and **secret parameter masking with fail-closed security posture**.
 - Platform gateway: confirm proxy route, tiered policy enforcement, audit emission, approval validation, and approvals inbox relay.
 - Tool gateway: risk-tier admission gate, mutating tool registration, tools:mutate enforcement, and browser flow binding with intent propagation.
@@ -213,6 +213,7 @@ AI -.-> AI
 - **Card message persistence**: Confirmation card messages persist on durable records ensuring parity between live operator cards and replayed surfaces.
 - **Secret parameter masking**: **Fail-closed security posture** ensures all secret-bearing parameters are masked unless explicitly allow-listed as safe. Uses curated formatters for specific tools and generic fallback masking for unknown parameters. **Updated**: Pre-redaction occurs in runtime kernel before streaming and persistence to prevent any secret leakage.
 - **Portal card**: Renders confirmation_request as inline card with tier badges ("operator confirmation" vs "approver required"), tool names, parameters, and permission message; posts to gateway confirm and continues SSE stream after decision. **Enhanced**: Supports persistent card rendering from durable records and Approvals view for designated approvers. **New**: Displays authored intent as prominent decision line above technical details when flow_intent is present. **New**: Renders change request layout for action approvals with secret masking. **Enhanced**: Properly handles 410 Gone responses by settling confirmation cards and preventing stuck UI states.
+- **Enhanced web.press_key element context**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with the four sibling ref-taking formatters (click, type, select, upload_file) that already project the element label; `web.evaluate` takes a ref but deliberately projects no page content, and `web.fill_credential` is read-tier and names its credential set instead of an element.
 
 **Section sources**
 - [hitl_confirmations.py:34-208](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L34-L208)
@@ -224,7 +225,7 @@ AI -.-> AI
 - [v2.py:210-242](file://products/agent-platform/src/agent_service/schemas/v2.py#L210-L242)
 - [chat.py:134-175](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L134-L175)
 - [gateway_service.py:336-446](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L446)
-- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-L148)
+- [policy_engine.py:97-148](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L97-148)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [k8s_connector.py:439-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L439-L518)
 - [config.py:75-81](file://products/tool-gateway/src/tool_gateway/core/config.py#L75-L81)
@@ -237,7 +238,7 @@ AI -.-> AI
 - [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
 
 ## Architecture Overview
-End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, **action-level approval discrimination**, **fail-closed secret masking**, and **enhanced expired confirmation handling with model pinning consistency**:
+End-to-end flow from kernel ASK to portal decision and resumed execution, enhanced with tiered approval enforcement, resilient model resolution, persistent state management, canonical tool name resolution, flow summary propagation, skill-declared intent display, **action-level approval discrimination**, **fail-closed secret masking**, **enhanced expired confirmation handling with model pinning consistency**, and **enhanced web.press_key element context**:
 
 ```mermaid
 sequenceDiagram
@@ -263,6 +264,7 @@ AP->>AP : redact_pending_calls(pending, pending_calls) - fail-closed masking
 AP->>Store : save_parked(confirm_id, session_id, owner, pending_calls, action, flow_summary, approval_kind, change_request, message)
 Store->>DB : INSERT confirmation_records (with redacted pending_calls JSONB)
 AP-->>Portal : data : {type : "confirmation_request", confirm_id, pending_calls[risk_level, canonical_tool_name, change_request], flow_summary{title, description, flow_intent}, approval_kind, message}
+Note over Portal : For web.press_key with ref parameter, change_request includes element context
 Portal->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>GW : enforce_policy("chat : confirm")
 alt Decision involves write/admin tool
@@ -520,6 +522,43 @@ Interrupt --> CleanUp["Clean up parked reply"]
 - [runtime_kernel.py:1328-1344](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1328-L1344)
 - [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 
+### Enhanced Change Request Formatters (Curated Tool-Specific Projections)
+Responsibilities:
+- Provide curated change request projections for demo-critical mutating tools with human-readable effect sentences.
+- Apply fail-closed secret masking to sensitive parameters while preserving structural information.
+- Handle optional parameters intelligently (e.g., web.press_key only includes element context when ref is provided).
+- Align behavior across browser tools for consistent operator experience.
+
+**Updated web.press_key formatter**: The `_cr_web_press_key` function now conditionally includes element location information when a ref parameter is provided, improving operator understanding of where keypress actions will occur. This aligns with other browser tools like click, type, select, upload_file, and fill_credential that already display element context.
+
+Key behaviors:
+- **Conditional element context**: Only includes "in [element]" when ref parameter is present
+- **Smart fallback**: Omits element context entirely when no ref is provided (avoids noise)
+- **Consistent formatting**: Uses same element label logic as other browser tools
+- **Security**: Applies appropriate masking to sensitive parameters
+
+Examples:
+- With ref: "Press key 'Enter' in 'Search filters form'"
+- Without ref: "Press key 'Escape'" (no element context)
+- With raw ref: "Press key 'Enter' in 'ref 4'" (when element map not available)
+
+```mermaid
+flowchart TD
+Parameters["web.press_key parameters"] --> CheckRef{"Has ref parameter?"}
+CheckRef -- Yes --> GetElement["Get element label from display_hint or ref"]
+CheckRef -- No --> BareSentence["Create bare sentence: Press key 'X'"]
+GetElement --> ElementContext["Add element context: in 'Element Name'"]
+ElementContext --> FinalSummary["Final: Press key 'X' in 'Element Name'"]
+BareSentence --> FinalSummary
+```
+
+**Diagram sources**
+- [hitl_confirmations.py:273-285](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L273-L285)
+
+**Section sources**
+- [hitl_confirmations.py:273-285](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L273-L285)
+- [test_hitl_confirmations.py:359-380](file://products/agent-platform/tests/test_hitl_confirmations.py#L359-L380)
+
 ### Secret Parameter Masking (Fail-Closed Security Posture)
 Responsibilities:
 - **Fail-closed masking**: All secret-bearing parameters are masked unless explicitly allow-listed as safe, preventing plaintext secrets from appearing in any confirmation surface.
@@ -702,14 +741,14 @@ end
 **Diagram sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
-- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-409)
 - [hitl_confirmations.py:101-199](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L199)
 - [runtime_kernel.py:708-794](file://products/agent-platform/src/agent_service/runtime_kernel.py#L708-L794)
 - [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 
 **Section sources**
 - [routes.py:65-227](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L227)
-- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-409)
 
 ### Platform Gateway Confirm Proxy and Tier Enforcement
 Responsibilities:
@@ -966,6 +1005,7 @@ USESTREAM["useChatStream.ts"] -.-> PORTAL
 - **SPEC-055 Enhancement**: Pre-redaction occurs once per confirmation park, avoiding redundant masking operations during streaming and persistence.
 - **SPEC-055 Enhancement**: Vocabulary validation runs at build time, not runtime, preventing performance impact during confirmation processing.
 - **Enhanced Expired Handling**: Model pinning consistency in expired confirmation handling prevents costly agent rebuilds and ensures interrupts reach the correct agent instance efficiently.
+- **Enhanced web.press_key Optimization**: Conditional element context inclusion only occurs when ref parameter is present, avoiding unnecessary string concatenation for keypresses without element targeting.
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -1014,6 +1054,11 @@ Common issues and resolutions:
   - **Model pinning inconsistency**: Verify that expired confirmation handling passes the session's pinned model to expire_confirmation to ensure interrupts reach the correct agent instance.
   - **Frontend stuck states**: Check that 410 Gone responses are properly handled in the frontend to settle confirmation cards and prevent stuck UI states.
   - **Agent rebuild issues**: Ensure that expired confirmation interrupts use the same model resolution ladder (request > pinned > default) as resume paths to prevent agent rebuilds that lose parked replies.
+- **Enhanced web.press_key Issues**:
+  - **Element context missing**: Verify that ref parameter is provided when element context is expected; element context is only included when ref is present.
+  - **Incorrect element label**: Check that display_hint is properly computed from browser element map; falls back to raw ref when element map entry is not available.
+  - **Unexpected element context**: Ensure ref parameter is not accidentally included when element targeting is not desired; web.press_key without ref should show bare sentence.
+  - **Test coverage gaps**: Verify tests cover both scenarios: with ref (element context included) and without ref (bare sentence).
 
 Operational checks:
 - Verify AGENT_HITL_CONFIRM_TIMEOUT > 0 to enable bridging; set to 0 to restore legacy silent-park behavior.
@@ -1040,6 +1085,7 @@ Operational checks:
 - **Enhanced Expired Confirmation Verification**: Verify that expired confirmation handling properly passes model pins to ensure interrupts reach the correct agent instance and prevent orphaned turns.
 - **Frontend 410 Handling Verification**: Verify that 410 Gone responses properly settle confirmation cards and clear stuck UI states.
 - **Vocabulary Synchronization**: Run `make verify` to ensure agent platform and tool gateway masking vocabularies remain synchronized; address any validation failures immediately.
+- **Enhanced web.press_key Verification**: Verify that web.press_key approval cards include element context when ref parameter is provided, improving operator understanding of where keypress actions will occur.
 
 **Section sources**
 - [routes.py:65-94](file://products/agent-platform/src/agent_service/api/v2/routes.py#L65-L94)
@@ -1047,7 +1093,7 @@ Operational checks:
 - [routes.py:277-294](file://products/agent-platform/src/agent_service/api/v2/routes.py#L277-L294)
 - [routes.py:497-614](file://products/agent-platform/src/agent_service/api/v2/routes.py#L497-L614)
 - [routes.py:578-601](file://products/agent-platform/src/agent_service/api/v2/routes.py#L578-L601)
-- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-L409)
+- [routes.py:395-409](file://products/agent-platform/src/agent_service/api/v2/routes.py#L395-409)
 - [gateway_service.py:336-396](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L336-L396)
 - [approvals.py:19-51](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L19-L51)
 - [policy-default.yaml:42-54](file://shared/shared-contracts/policies/policy-default.yaml#L42-L54)
@@ -1068,6 +1114,8 @@ Operational checks:
 - [hitl_confirmations.py:369-399](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L369-L399)
 - [runtime_kernel.py:2190-2244](file://products/agent-platform/src/agent_service/runtime_kernel.py#L2190-L2244)
 - [useChatStream.ts:393-407](file://products/operator-portal/web-ui/app/src/stream/useChatStream.ts#L393-L407)
+- [hitl_confirmations.py:273-285](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L273-L285)
+- [test_hitl_confirmations.py:359-380](file://products/agent-platform/tests/test_hitl_confirmations.py#L359-L380)
 
 ## Conclusion
 SPEC-020 delivers a robust, auditable HITL bridge that transforms kernel ASK parking into a portal-driven approval workflow, enhanced with SPEC-021's bounded mutating actions, SPEC-030's require-approval tier system, SPEC-031's persistent confirmation registry, SPEC-053's skill-declared step intent, **SPEC-054's action-level approval with change request cards**, and **SPEC-055's secret parameter masking hardening**. It enforces policy at the gateway, preserves session integrity, and records decisions durably with tier context and authored workflow intent. The design keeps the kernel unchanged, relies on existing agentscope machinery, and scales to future write/mutating tools by gating them behind the same confirmation surface with risk-tier enforcement.
@@ -1131,5 +1179,7 @@ The integration provides a seven-layer security model: deny-by-default policy bu
 **New Capability**: Enhanced expired confirmation handling with model pinning consistency prevents orphaned turns by ensuring expired confirmation interrupts reach the correct agent instance with proper model resolution, maintaining system reliability and preventing stuck sessions.
 
 **New Capability**: Improved frontend stream management for 410 Gone responses provides better user experience by properly settling expired confirmation cards and preventing stuck UI states, giving operators clear feedback about confirmation status.
+
+**New Capability**: **Enhanced web.press_key element context** improves operator understanding of where keypress actions will occur by including element location information when ref parameter is provided. This aligns web.press_key behavior with other browser tools like click, type, select, upload_file, and fill_credential that already display element context, creating a consistent user experience across all browser interaction tools.
 
 [No sources needed since this section summarizes without analyzing specific files]
