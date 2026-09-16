@@ -16,6 +16,12 @@
 # do not by themselves protect already-corrected prose from being overwritten.
 # To make a hand correction durable, absorb it through Git Directory Sync or
 # revise it with /knowledge -> Modify, which marks the content as protected.
+#
+# Confirmed empirically by the 2026-09 full regeneration: it dropped the pages
+# carrying two previously settled corrections (the portal's `Digest data` tab
+# label and ADR-0011's status transition) rather than preserving them, and only
+# 16 of the 130 prior page titles survived. A Regenerate rewrites the catalog;
+# it does not merge into it.
 
 version: 1
 
@@ -59,17 +65,47 @@ repowiki:
         prefix, so it is shared/shared-contracts/schemas/..., not
         products/shared-contracts/schemas/... Product test suites legitimately
         live at products/<name>/tests/, outside `src/`.
+        This rule was stated before the 2026-09 regeneration and did not fully
+        hold. Of the 31 links that run left unresolvable, 24 put a hyphen in the
+        `src/<package>/` segment - `src/tool-gateway/` 20 times,
+        `src/agent-service/` 3, `src/platform-gateway/` 1; 2 hyphenated a product
+        directory that is spelled with one, writing products/skills_hub/ for
+        products/skills-hub/; 1 named the wrong product directory entirely,
+        products/agent-service/src/audit_service/ for products/audit-service/;
+        and 3 revived the pre-SPEC-010 package name, src/agent_platform/ for
+        src/agent_service/. The 31st is the one worth naming separately: a
+        doubled syllable, shared/shared-concontracts/policies/policy-default.yaml
+        for shared/shared-contracts/policies/policy-default.yaml. It prints as a
+        valid path and greps as one, so only a length or codepoint comparison
+        against the real path exposes it.
+        So state the rule as a shape, not an abstraction: a hyphen may appear
+        only in a product directory name that is actually spelled with a hyphen
+        on disk, never in the `src/<package>/` segment that follows it.
     - text: >-
         Do not invent source paths. Verify each rendered link target exists
         before emitting it; if the file cannot be located, cite the directory
-        that does exist or omit the link. Roughly 2,120 of 14,361 emitted links
-        currently resolve to nothing. About 1,526 of those are the wrong-package
-        and wrong-prefix errors named above, but the remaining ~594 point at
-        files that do not exist under any spelling - for example
-        tool-gateway api/routes/auth.py, api/routes/sessions.py,
-        services/agent_client.py, the gitops api-gateway-deployment.yaml, and
-        operator-portal web-ui/app.js. A citation that cannot be opened is worse
-        than no citation.
+        that does exist or omit the link. A citation that cannot be opened is
+        worse than no citation.
+        Measured state after the 2026-09 full regeneration: 31 of 13,779 links
+        resolve to nothing, 0.2%, down from 2,120 of 14,361, or 14.8%. Do not
+        quote the older counts. The earlier defect was not prose-level: the
+        wiki's own index at en/meta/repowiki-metadata.json cached pre-SPEC-010
+        api_gateway package paths and replayed them into every incremental
+        Update, which is why markdown-level repair never stuck. That
+        regeneration removed the offending index keys outright and the class is
+        closed.
+        This note previously listed tool-gateway api/routes/auth.py,
+        api/routes/sessions.py, services/agent_client.py, the gitops
+        api-gateway-deployment.yaml and operator-portal web-ui/app.js as files
+        that do not exist under any spelling. That claim was wrong and is
+        corrected here, because a note carrying disproved examples teaches the
+        wrong lesson. The first three do exist, under
+        products/platform-gateway/src/platform_gateway/ - SPEC-010 split
+        api-gateway into two products and those routes went to platform-gateway,
+        so citing them beneath tool-gateway was a misattribution, not an
+        invention. The gitops manifest is named tool-gateway-deployment.yaml.
+        And web-ui/app.js was real until the SPEC-023 portal rebuild deleted it;
+        the React app that replaced it lives at web-ui/app/src/.
     - text: >-
         A change summary must describe only the files that actually changed in
         the commit it cites. Do not report that documentation sections were
@@ -97,6 +133,20 @@ repowiki:
         when a ref is supplied is a rendering condition; recasting it as avoiding
         unnecessary string concatenation invents a performance rationale the code
         never claims.
+    - text: >-
+        Keep exactly one index page for the architecture decision records in
+        docs/adr/. The 2026-09 regeneration reorganised the catalog by technical
+        area and dropped the per-ADR and per-spec pages, leaving 3 of the 13
+        records cited anywhere in the wiki, against 10 of 13 before.
+        The loss is deliberate and accepted for specifications: their
+        authoritative text is docs/specs/SPEC-NNN-*/spec.md, and the wiki's
+        per-spec restatements were the origin of the change-summary defects
+        named above. ADRs are the exception worth an index, because they are
+        short decision records whose value is their current status and what
+        superseded them, which no single technical-area page carries.
+        When restating an ADR, read its status line from the file. Do not carry
+        a status forward from a previous generation: ADR-0011 was recorded as
+        moving from draft when it moved from proposed.
 
   # `documents` is deliberately omitted. It is a strict allowlist - when present,
   # only the listed pages are generated - so a partial list would silently
