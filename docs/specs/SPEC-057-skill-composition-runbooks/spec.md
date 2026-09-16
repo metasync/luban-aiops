@@ -2,9 +2,10 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-09-16
+- approved: 2026-09-16
 - release slice: R5 — Hardening and External Consumption (nineteenth R5 slice,
   targeting v0.38.0)
 - related ADRs: **ADR-0011** (a composition carries no authority; each
@@ -122,6 +123,13 @@ Acceptance criteria:
 - Every `sub_skills[].skill_id` **resolves** to an ingested skill that is
   **published**, and that skill is **single-target**: it declares exactly one
   `web_target` (browser) or none (infra), never several.
+- Ingestion re-checks **only those two structural facts** — still published,
+  still single-target (resolved from OQ-2). It does **not** re-run SPEC-055 R-4
+  blast-radius validation: R-4 validated each sub-skill when it graduated, and
+  re-litigating that against a stored trace at composition-ingestion time would
+  re-open a decision already made. The published-and-single-target re-check is
+  what catches the drift that actually matters — a sub-skill later republished
+  against a different target.
 - **No nesting in Phase 1**: a referenced sub-skill must be `knowledge` or
   `executable_flow`, never `composition`. This removes cycles and unbounded
   depth by construction rather than by detection.
@@ -133,8 +141,13 @@ Acceptance criteria:
   consume them (R-6), and a `steps` list on a composition would imply platform
   sequencing that this spec explicitly does not provide.
 - The sub-skill count is bounded by a new `SKILLS_COMPOSITION_MAX_SUB_SKILLS`
-  knob (default **8**). Exceeding it rejects ingestion. This is the
-  composite-wide bound R-4's trade-off requires; see OQ-4 for the arithmetic.
+  knob (default **8**, resolved from OQ-4). Exceeding it rejects ingestion. This
+  is the composite-wide bound R-4's trade-off requires, and its arithmetic is
+  `cap × GATEWAY_BROWSER_FLOW_MAX_STEPS` — 8 × 20 = **160** worst-case unlocked
+  browser writes per run, each still individually signed, audited and receipted,
+  and each sub-skill still gated once. The value is revisited on the first real
+  composition an operator authors, since the right number is a property of real
+  runbooks rather than of this draft.
 - Ingestion emits no new audit event type: the existing `skill_ingested` event
   carries the outcome, and a rejection is a failed ingestion like any other.
 
@@ -237,11 +250,12 @@ Acceptance criteria:
 
 - Every R-1..R-7 criterion above maps to at least one automated test asserting
   it, recorded in `tasks.md` at delivery.
-- A `samples/` demo ships only if it exercises something otherwise
-  unexercised. A composition of the **existing** single-target web-check skills
-  (password-reset and one other) is the candidate: it would exercise
-  multi-binding re-park end to end, which nothing in the suite covers today.
-  Whether that demo is required is OQ-5.
+- A `samples/` demo **is required** (resolved from OQ-5, under ADR-0008 rule 2:
+  a demo is owed when it exercises something otherwise unexercised). It composes
+  the **existing** single-target web-check skills — password-reset and one
+  other — and asserts multi-binding re-park end to end, which nothing in the
+  suite covers today. It also gives R-4's gate-count assertion a live leg rather
+  than a unit test alone.
 
 ## Non-Goals
 
@@ -252,6 +266,11 @@ Acceptance criteria:
   multi-identity authority store ADR-0007 removed.
 - **No rollback, compensation, or saga semantics** (R-5).
 - **No nested compositions** in Phase 1 (R-2).
+- **No aggregate half-state surface** (resolved from OQ-3). The completed prefix
+  of a stopped run is derivable from `execution_records` signed receipts, but
+  nothing aggregates it per composition and no new view is added; R-5's
+  report-and-stop message names the failed sub-skill in the transcript instead.
+  A dedicated surface is promoted only if operators ask for one.
 - **No Chat→Studio spawn bridge and no assisted trace-extraction** — row 346's
   (a) and (c), deferred to Phase 2 behind this spec.
 - **No multi-target graduation.** SPEC-055 R-4 stays single-target; a
@@ -279,6 +298,11 @@ Acceptance criteria:
 - **audit-service**: unchanged; no new event type.
 
 ## Open Questions
+
+All five were resolved at approval on 2026-09-16, adopting the recommendation
+recorded in the draft in every case. The original options are retained so the
+decision stays auditable; from here a requirement changes only by agreement,
+recorded in the changelog (the `approved`-spec rule).
 
 - **OQ-1: storage shape.** A third `kind` on the existing skill record (as
   drafted) versus a separate document kind beside `shift_summary` and
@@ -325,3 +349,15 @@ Acceptance criteria:
   guard, so R-4 asserts that nothing new is added rather than specifying new
   machinery. Carries five open questions with recommendations, including the
   composite-wide sub-skill cap that closes the spike memo's OQ-1 trade-off.
+- 2026-09-16: **approved** by the operator. Slice fixed as the nineteenth R5
+  slice, targeting v0.38.0. OQ-1..OQ-5 resolved on the draft's own recorded
+  recommendations in every case: OQ-1 a third skill `kind` rather than a
+  separate document kind, OQ-2 trust published state but re-check
+  published-and-single-target only, OQ-3 defer the aggregate half-state view,
+  OQ-4 ship the sub-skill cap at 8 (8 × 20 = 160 worst-case unlocked browser
+  writes per run), OQ-5 the `samples/` demo is required. The resolutions are
+  folded into R-2, R-8, Non-Goals and the Open Questions preamble; no
+  requirement IDs renumbered (stable once `approved`). Bookkeeping:
+  `docs/specs/README.md` row `draft` → `approved` and the
+  `delivery-roadmap.md` row 346 entry → `approved`. Implementation
+  (`plan.md`/`tasks.md`) is authored next, not at approval.
