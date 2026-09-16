@@ -1,0 +1,130 @@
+# Repo Wiki pre-generation configuration.
+#
+# Consumed by the Qoder Repo Wiki generator; normally created and edited through
+# the /knowledge-plan chat command. Unlike the generated output under en/ and
+# knowledge/, this file is shared with the team through Git and is meant to be
+# committed.
+#
+# Every note below exists because a specific defect was observed in generated
+# output and had to be corrected by hand, sometimes repeatedly. Do not delete a
+# note without first checking that the defect it names has stopped recurring.
+#
+# Changes here take effect only on the next manual Generate / Regenerate.
+#
+# Note on durability: these notes are injected during the *planning* phase, so
+# they steer page structure and emphasis and reduce the chance of a repeat. They
+# do not by themselves protect already-corrected prose from being overwritten.
+# To make a hand correction durable, absorb it through Git Directory Sync or
+# revise it with /knowledge -> Modify, which marks the content as protected.
+
+version: 1
+
+repowiki:
+  # Left empty deliberately. Selecting a preset template restructures every page
+  # on the next regeneration; the existing pages are already architecture-shaped.
+  template: ""
+  author: "chi"
+
+  notes:
+    - text: >-
+        Transcribe tool, permission and risk-tier sets from the source literal.
+        Never infer set membership from sibling symmetry. Ground truth:
+        `browser_ref_tools` in
+        products/agent-platform/src/agent_service/services/hitl_confirmations.py
+        has exactly five members - web.click, web.type, web.select,
+        web.press_key, web.upload_file. `BROWSER_WRITE_TOOLS` in
+        products/agent-platform/src/agent_service/services/flow_approvals.py has
+        those five plus web.evaluate. web.fill_credential is in neither set and
+        is read-tier; it parks no card and names its credential set.
+        web.evaluate takes only `expression` and no element `ref`, so it is not a
+        ref-taking tool. The claim that web.fill_credential already projects
+        element context has recurred across successive regenerations and has now
+        needed correcting four separate times.
+    - text: >-
+        Do not claim test coverage that was not located. Before writing that a
+        behaviour is tested, or that coverage is comprehensive, name the test
+        file and state what it asserts. If no test was found, describe the
+        behaviour and say nothing about coverage. Tests are inside the indexing
+        scope on purpose so that coverage claims can be checked rather than
+        guessed.
+    - text: >-
+        Source-file links must carry the full path from the repository root, and
+        every product's Python package name differs from its directory name:
+        agent-platform is agent_service, tool-gateway is tool_gateway,
+        identity-broker is identity_service, skills-hub is skills_hub,
+        audit-service is audit_service. So the correct link is
+        products/tool-gateway/src/tool_gateway/core/request_context.py - never
+        `src/api_gateway/`, never `src/agent_platform/`, and never dropping the
+        `src/<package>/` segment. Shared contracts live under the `shared/`
+        prefix, so it is shared/shared-contracts/schemas/..., not
+        products/shared-contracts/schemas/... Product test suites legitimately
+        live at products/<name>/tests/, outside `src/`.
+    - text: >-
+        Do not invent source paths. Verify each rendered link target exists
+        before emitting it; if the file cannot be located, cite the directory
+        that does exist or omit the link. Roughly 2,120 of 14,361 emitted links
+        currently resolve to nothing. About 1,526 of those are the wrong-package
+        and wrong-prefix errors named above, but the remaining ~594 point at
+        files that do not exist under any spelling - for example
+        tool-gateway api/routes/auth.py, api/routes/sessions.py,
+        services/agent_client.py, the gitops api-gateway-deployment.yaml, and
+        operator-portal web-ui/app.js. A citation that cannot be opened is worse
+        than no citation.
+    - text: >-
+        A change summary must describe only the files that actually changed in
+        the commit it cites. Do not report that documentation sections were
+        updated when only the summary block itself changed, and do not widen a
+        fix beyond its real scope - a change confined to a sample suite is not a
+        platform behaviour change.
+    - text: >-
+        Use the label the portal actually ships, and keep a retired label only as
+        explicit history. The shift-summary digest tab reads `Digest data`
+        (products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx,
+        asserted by the __tests__/DocumentsView.test.tsx beside it); `Raw JSON` is
+        the retired label for that same tab and has reappeared in generated pages
+        after being settled. Separately, read the root VERSION file for the
+        platform version rather than carrying forward the literal from a previous
+        generation.
+    - text: >-
+        A mermaid block whose source is a script must match that script's real
+        steps. Never insert post-delivery narrative as a runtime step - edges
+        such as `Cleanup --> PostFixes[...]` or
+        `Demo->>Demo : Post-delivery fixes applied` describe repository history,
+        not execution, and do not belong in a runtime diagram.
+    - text: >-
+        State a conditional behaviour as a behaviour, not as an optimization,
+        unless the source documents it as one. Projecting an element label only
+        when a ref is supplied is a rendering condition; recasting it as avoiding
+        unnecessary string concatenation invents a performance rationale the code
+        never claims.
+
+  # `documents` is deliberately omitted. It is a strict allowlist - when present,
+  # only the listed pages are generated - so a partial list would silently
+  # suppress existing pages. Populating it needs a deliberate curation pass over
+  # all current pages, not a guess.
+
+knowledgecard:
+  notes:
+    - text: >-
+        Partition modules by stable architectural boundary: product plus
+        concern. Before creating a module card, check whether one already covers
+        that module and update it in place. Never mint a near-duplicate title for
+        a module that is already carded. Title drift on regeneration has
+        accumulated 22 variants of the per-product uv lockfile card and 4
+        variants of the operator-portal styling card among roughly 290
+        directories, and none of the variants are pruned automatically.
+    - text: >-
+        The repository-level card is "Luban Agentic AIOps Platform Workspace".
+        Update that card in place when the repository description changes rather
+        than re-minting it under a new title, which orphans the previous
+        directory.
+
+scope:
+  # Empty include list means no allowlist: the whole repository stays visible.
+  include: []
+  exclude:
+    # Generated cache and local scratch. Indexing the wiki into itself lets a
+    # previous generation's errors become the next generation's source.
+    - ".qoder/**"
+    - ".workspaces/**"
+    - "**/.dev-keys/**"
