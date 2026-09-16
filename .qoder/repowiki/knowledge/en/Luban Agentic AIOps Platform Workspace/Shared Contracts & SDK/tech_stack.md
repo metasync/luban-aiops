@@ -1,0 +1,1 @@
+JSON Schema Draft 2020-12 for API/event contracts; YAML for policy bundles; Python scripts using `jsonschema.Draft202012Validator` and PyYAML to validate policy bundles against `policy-rule.schema.json`.

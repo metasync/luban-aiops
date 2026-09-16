@@ -1,0 +1,1 @@
+Python `unittest` with `fastapi.testclient.TestClient` for HTTP-layer tests; `pyjwt` + `cryptography` to mint RS256 delegated tokens for end-to-end auth path coverage; `jsonschema` to validate policy rules and decisions against shared schemas in `shared/shared-contracts/schemas/`.

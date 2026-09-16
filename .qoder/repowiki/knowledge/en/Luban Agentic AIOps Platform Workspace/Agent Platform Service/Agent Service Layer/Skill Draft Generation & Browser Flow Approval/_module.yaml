@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: agent_platform/services/skills_flow
+title: Skill Draft Generation & Browser Flow Approval
+scope:
+    - products/agent-platform/src/agent_service/services/skills_client.py
+    - products/agent-platform/src/agent_service/services/skill_draft.py
+    - products/agent-platform/src/agent_service/services/flow_approvals.py
+source_files: []
+depends_on: []
+related_to:
+    - path: skills_hub

@@ -1,0 +1,1 @@
+Self-contained tutorial samples that demonstrate browser web-check automation patterns (password reset, ad-hoc mutation, skill graduation) and are installed into a cluster via a single ConfigMap-based deploy script.

@@ -1,0 +1,1 @@
+`make verify` serves as the verification gate across the workspace (runs product tests and renders GitOps overlays); spec delivery requires every acceptance criterion mapped to at least one asserting test per ADR-0008, and new specs are scaffolded from `docs/specs/templates/`.

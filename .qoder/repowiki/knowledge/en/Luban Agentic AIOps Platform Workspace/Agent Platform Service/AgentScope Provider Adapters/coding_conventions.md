@@ -1,0 +1,6 @@
+- Each provider class sets class-level attributes `provider_name`, `default_model`, optional `default_base_url`, `model_series`, and discovery filters (`discover_family_prefixes`, `discover_exclude_markers`) instead of passing them through a constructor.
+- `build_model` performs lazy imports of `agentscope.credential` and `agentscope.model` at call time to avoid hard dependencies on third-party SDKs during import.
+- `build_model` calls `self.validate(settings)` first, then checks `isinstance(settings.provider_options, <X>Options)` and raises `ProviderConfigurationError` when the options type does not match the provider.
+- Credential construction uses keyword kwargs built from `settings.api_key` and `self.resolved_base_url(settings)`, with optional extras like `organization` or `base_url` only when present.
+- Model parameters are passed via the vendor model's nested `.Parameters` class, mapping fields such as `max_tokens`, `thinking_enable`, `temperature`, `top_p`, and `parallel_tool_calls` from `options`.
+- Discovery filtering combines shared non-chat markers (embedding, rerank, tts, whisper, audio, image, moderation, transcrib, guard, realtime) with per-provider family prefixes to restrict live `/models` results.

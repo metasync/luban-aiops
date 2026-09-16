@@ -1,0 +1,1 @@
+Shell script (`deploy-samples.sh`) invoking `kubectl` to manage a Kubernetes ConfigMap mounted read-only by the `skills-hub` deployment at `/skills/samples`; skill documents are Markdown frontmatter files consumed by the platform's skills-hub.

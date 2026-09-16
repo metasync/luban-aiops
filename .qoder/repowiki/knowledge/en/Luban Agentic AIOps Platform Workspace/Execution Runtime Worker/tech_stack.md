@@ -1,0 +1,1 @@
+FastAPI + uvicorn server, httpx async client for tool-gateway calls, psycopg3 for postgres-backed execution records, Prometheus client for metrics, OpenTelemetry SDK with FastAPI/HTTPX/logging instrumentation for traces, and HMAC-SHA256 for envelope signing/receipt generation.

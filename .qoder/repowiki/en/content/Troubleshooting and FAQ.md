@@ -3,1392 +3,483 @@
 <cite>
 **Referenced Files in This Document**
 - [README.md](file://README.md)
-- [agent-platform/README.md](file://products/agent-platform/README.md)
-- [identity-broker/README.md](file://products/identity-broker/README.md)
-- [tool-gateway/README.md](file://products/tool-gateway/README.md)
-- [operator-portal/README.md](file://products/operator-portal/README.md)
-- [operator-portal/nginx.conf](file://products/operator-portal/nginx.conf)
-- [operator-portal/Dockerfile](file://products/operator-portal/Dockerfile)
-- [operator-portal/web-ui/app/vite.config.ts](file://products/operator-portal/web-ui/app/vite.config.ts)
-- [operator-portal/web-ui/app/src/chat/ChatView.tsx](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx)
-- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts)
-- [operator-portal/web-ui/app/src/voice/languages.ts](file://products/operator-portal/web-ui/app/src/voice/languages.ts)
-- [operator-portal/web-ui/app/src/auth/oidc.ts](file://products/operator-portal/web-ui/app/src/auth/oidc.ts)
-- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
-- [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
-- [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
-- [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
-- [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
-- [agent-platform/src/agent_platform/core/observability.py](file://products/agent-platform/src/agent_platform/core/observability.py)
-- [agent-platform/src/agent_platform/services/runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
-- [agent-platform/src/agent_platform/services/session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
-- [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
-- [agent-platform/src/agent_platform/services/session_transcript.py](file://products/agent-platform/src/agent_platform/services/session_transcript.py)
-- [agent-platform/src/agent_platform/services/hitl_confirmations.py](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py)
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [platform-gateway/src/platform_gateway/services/gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
-- [platform-gateway/tests/test_session_workspace.py](file://products/platform-gateway/tests/test_session_workspace.py)
-- [platform-gateway/src/platform_gateway/services/policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
-- [platform-gateway/src/platform_gateway/schemas/api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
-- [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
-- [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [identity-broker/src/identity_service/services/identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
-- [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
-- [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [tool-gateway/src/api_gateway/api/routes/auth.py](file://products/tool-gateway/src/api_gateway/api/routes/auth.py)
-- [tool-gateway/src/api_gateway/api/routes/health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [tool-gateway/src/api_gateway/services/policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool-gateway/src/api_gateway/services/token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [tool-gateway/src/api_gateway/tools/k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env)
-- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [shared/platform-ops/gitops/sync-otel-secrets.sh](file://shared/platform-ops/gitops/sync-otel-secrets.sh)
-- [.ooq.py](file://.ooq.py)
-- [.ooq2.py](file://.ooq2.py)
-- [docs/guides/configuration-reference.md](file://docs/guides/configuration-reference.md)
-- [docs/guides/troubleshooting.md](file://docs/guides/troubleshooting.md)
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md)
-- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md)
+- [troubleshooting.md](file://docs/guides/troubleshooting.md)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
+- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
+- [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
+- [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
+- [sync-audit-secrets.sh](file://shared/platform-ops/gitops/sync-audit-secrets.sh)
+- [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
+- [gateway_service.py](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py)
+- [token_verifier.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
+- [token_verifier.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py)
+- [test_gateway_auth.py](file://products/platform-gateway/tests/test_gateway_auth.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [session_store.py](file://products/agent-platform/src/agent_service/services/session_store.py)
+- [executor.py](file://products/execution-runtime/src/execution_runtime/services/executor.py)
+- [metrics.py (execution-runtime)](file://products/execution-runtime/src/execution_runtime/core/metrics.py)
+- [observability.py (execution-runtime)](file://products/execution-runtime/src/execution_runtime/core/observability.py)
+- [observability.py (audit-service)](file://products/audit-service/src/audit_service/core/observability.py)
+- [observability.py (skills-hub)](file://products/skills-hub/src/skills_hub/core/observability.py)
+- [observability.py (incident-service)](file://products/incident-service/src/incident_service/core/observability.py)
+- [health-response.schema.json](file://shared/shared-contracts/schemas/health-response.schema.json)
+- [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
+- [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 </cite>
 
-## Update Summary
-**Changes Made**
-- Updated policy bundle troubleshooting section to reflect complete SPEC-048 workflow including edit → sync → verify → diff → commit → deploy → confirm provenance hash
-- Enhanced outdated bundle handling with comprehensive guidance for policy_bundle_sha256 fingerprint checking and bundle caching behavior
-- Added detailed explanation of path-keyed bundle caching and restart requirements (no hot reload)
-- Updated policy enforcement troubleshooting with scenario-expectation harness and policy-diff impact reporting
-- Enhanced deployment verification procedures using provenance fingerprints across both gateways
-- Added comprehensive guidance for handling stale or outdated policy bundles through the complete SPEC-048 lifecycle
-
 ## Table of Contents
-1. [Introduction](#introduction)
-2. [Project Structure](#project-structure)
-3. [Core Components](#core-components)
-4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+1. Introduction
+2. Project Structure
+3. Core Components
+4. Architecture Overview
+5. Detailed Component Analysis
+6. Dependency Analysis
+7. Performance Considerations
+8. Troubleshooting Guide
+9. Conclusion
+10. Appendices
 
 ## Introduction
-This document provides comprehensive troubleshooting guidance for the Luban AIOps Platform, focusing on deployment issues, service connectivity problems, performance bottlenecks, configuration mistakes, and integration failures. It includes step-by-step diagnostic procedures, log analysis techniques, metric interpretation, trace correlation, and platform-specific FAQs covering agent execution, policy enforcement, identity integration, OpenObserve telemetry pipeline issues, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, bounded pane rendering issues, and **SPEC-048 policy bundle rollout controls**. Escalation procedures and community resources are also included to help you resolve issues efficiently.
+This document provides a symptom-based troubleshooting guide for the Luban AIOPS platform, covering deployment failures, authentication problems, tool execution errors, performance issues, and data consistency problems. It includes diagnostic steps, log analysis techniques, remediation procedures, frequently asked questions, known limitations, upgrade considerations, and guidance for using observability tools such as metrics, traces, and audit logs across services.
 
 ## Project Structure
-The platform is organized into multiple products:
-- Agent Platform: runtime kernel, session management, metrics, observability, and provider integrations
-- Identity Broker: authentication, token issuance, and identity services
-- Tool Gateway: API gateway, policy enforcement, tool invocation, and orchestration
-- Operator Portal: web UI for operators with voice input capabilities and cached asset management
-- Shared contracts and GitOps overlays for Kubernetes deployments
+The platform is organized into product-oriented services with clear boundaries:
+- Platform edge: platform-gateway (authentication, policy enforcement, chat/session proxying, token delegation)
+- Agent runtime: agent-platform (sessions, streaming, HITL bridging, execution signing/handoff)
+- Tool integration: tool-gateway (tool registry, connectors, redaction, tool audit)
+- Identity: identity-broker (OIDC flows, JWT issuance, delegation)
+- Execution isolation: execution-runtime (bounded worker handoff)
+- Observability and evidence: audit-service (durable trail), Elastic connector (optional)
+- Skills and incidents: skills-hub, incident-service
+- Operator portal: operator-portal
 
 ```mermaid
 graph TB
-subgraph "Platform Services"
-AG["Agent Platform"]
-IDB["Identity Broker"]
-GW["Tool Gateway"]
-OP["Operator Portal"]
-end
-subgraph "Infrastructure"
-REDIS["Redis"]
-K8S["Kubernetes Cluster"]
-OO["OpenObserve"]
-NGINX["Nginx Cache Layer"]
-end
-CLIENT["Client / Operator"] --> NGINX
-NGINX --> OP
-OP --> GW
-GW --> AG
-GW --> IDB
-AG --> REDIS
-GW --> K8S
-AG --> OO
-IDB --> OO
-GW --> OO
+Client["Operator / Browser"] --> PGW["Platform Gateway"]
+PGW --> IDB["Identity Broker"]
+PGW --> AGP["Agent Platform"]
+AGP --> TGW["Tool Gateway"]
+AGP --> ERW["Execution Runtime Worker"]
+TGW --> EXT["External Systems"]
+PGW --> AUD["Audit Service"]
+AGP --> AUD
+TGW --> AUD
+IDB --> AUD
+ERW --> AUD
 ```
 
-[No sources needed since this diagram shows conceptual workflow, not actual code structure]
-
-## Core Components
-Key components and their responsibilities:
-- Agent Platform: manages runtime sessions, invokes providers, exposes APIs, and emits metrics/telemetry
-- Identity Broker: handles authentication flows, token validation, and identity context propagation
-- Tool Gateway: routes requests, enforces policies, verifies tokens, and orchestrates tool invocations
-- Operator Portal: serves cached SPA assets with content hashing, proxies API requests, and provides voice input via Web Speech API
-- Infrastructure: Redis for session storage; Kubernetes for deployment and scaling; OpenObserve for telemetry aggregation
-
-Common areas where issues occur:
-- Deployment misconfiguration (env vars, secrets, RBAC)
-- Service connectivity (DNS, networking, TLS)
-- Policy enforcement errors (rules, scopes, permissions)
-- Token and identity mismatches
-- Session persistence failures (Redis connectivity)
-- Performance bottlenecks (provider latency, queueing, resource limits)
-- **OpenObserve telemetry pipeline failures** (exporter connectivity, authentication, log bridging)
-- **Transcript fallback scenarios** when kernel state snapshots are unavailable
-- **Session delete conflicts** with parked HITL confirmations returning 409 status
-- **Session enumeration prevention** through anti-enumeration 404 responses
-- **Stale UI symptoms** from cached assets after redeployment
-- **Voice input microphone issues** due to browser compatibility or permission problems
-- **OIDC callback hostname confusion** between canonical and fallback origins
-- **Bounded pane rendering issues** with overflow detection and expand/collapse affordances
-- **Outdated policy bundles** requiring complete SPEC-048 workflow resolution
+**Diagram sources**
+- [README.md:24-45](file://README.md#L24-L45)
+- [configuration-reference.md:33-126](file://docs/guides/configuration-reference.md#L33-L126)
 
 **Section sources**
-- [agent-platform/README.md](file://products/agent-platform/README.md)
-- [identity-broker/README.md](file://products/identity-broker/README.md)
-- [tool-gateway/README.md](file://products/tool-gateway/README.md)
-- [operator-portal/README.md](file://products/operator-portal/README.md)
+- [README.md:15-45](file://README.md#L15-L45)
+
+## Core Components
+- Authentication and authorization:
+  - Token verification at platform-gateway and tool-gateway via JWKS and audience checks.
+  - Policy enforcement through mounted bundles; readiness reports degraded state when bundle is missing or invalid.
+- Session and streaming:
+  - Agent platform manages sessions, transcripts, and evidence stores with graceful degradation on backend failure.
+- Tool execution:
+  - Tool gateway exposes tools/connectors; mutating tools are deny-by-default and require explicit activation and approvals.
+- Audit trail:
+  - Fire-and-forget ingestion from multiple emitters to audit-service; counters expose delivery health.
+- Observability:
+  - Always-on /metrics per service; opt-in OTel push pipeline; structured logging bridge to OTLP.
+
+**Section sources**
+- [token_verifier.py (platform-gateway):52-80](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L52-L80)
+- [token_verifier.py (tool-gateway):52-80](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py#L52-L80)
+- [configuration-reference.md:282-327](file://docs/guides/configuration-reference.md#L282-L327)
+- [session_store.py:949-969](file://products/agent-platform/src/agent_service/services/session_store.py#L949-L969)
+- [configuration-reference.md:128-168](file://docs/guides/configuration-reference.md#L128-L168)
+- [SPEC-005-observability-baseline/spec.md:12-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L12-L35)
 
 ## Architecture Overview
-End-to-end request flow from client to agent execution with identity and policy checks, plus telemetry export:
+End-to-end request flow with authentication, policy, and optional execution approval:
 
 ```mermaid
 sequenceDiagram
-participant Client as "Client"
-participant Nginx as "Nginx Cache"
-participant Portal as "Operator Portal"
-participant Gateway as "Tool Gateway"
-participant Auth as "Identity Broker"
-participant Keycloak as "Keycloak OIDC"
-participant Agent as "Agent Platform"
-participant Store as "Redis"
-participant K8S as "Kubernetes"
-participant Otel as "OTel Exporter"
-participant Observe as "OpenObserve"
-Client->>Nginx : "HTTP request"
-Nginx->>Portal : "Serve cached assets/index.html"
-Portal->>Gateway : "API proxy (/api/*)"
-Gateway->>Auth : "Verify token / obtain identity"
-Auth->>Keycloak : "OIDC authorization flow"
-Keycloak-->>Auth : "Authorization code"
-Auth-->>Gateway : "Identity context"
-Gateway->>Gateway : "Policy decision"
-Gateway->>Agent : "Forward request"
-Agent->>Store : "Read/Write session"
-Agent->>K8S : "Invoke tools/resources"
-Agent->>Otel : "Export traces/metrics/logs"
-Otel->>Observe : "OTLP HTTP/protobuf"
-Agent-->>Gateway : "Response"
-Gateway-->>Portal : "API response"
-Portal-->>Client : "Final response"
+participant U as "User"
+participant PGW as "Platform Gateway"
+participant IDB as "Identity Broker"
+participant AGP as "Agent Platform"
+participant TGW as "Tool Gateway"
+participant ERW as "Execution Runtime"
+participant AUD as "Audit Service"
+U->>PGW : HTTP request (Bearer token)
+PGW->>IDB : Verify token / delegate token
+IDB-->>PGW : Identity context + delegated token
+PGW->>PGW : Policy decision (tools : * / actions)
+PGW->>AGP : Proxy chat/session
+AGP->>TGW : Invoke tool (read-only or write)
+alt Write path requires approval
+AGP->>AGP : Park confirmation (HITL)
+U->>PGW : Approve/deny
+PGW->>AGP : Resume under approver token
+end
+AGP->>ERW : Handoff approved mutation (signed envelope)
+ERW-->>AGP : Result (success/timeout/failure)
+AGP-->>U : Streamed response
+PGW-->>AUD : Emit audit events (fire-and-forget)
+AGP-->>AUD : Emit audit events
+TGW-->>AUD : Emit audit events
 ```
 
 **Diagram sources**
-- [operator-portal/nginx.conf:8-17](file://products/operator-portal/nginx.conf#L8-L17)
-- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
-- [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
-- [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [identity-broker/src/identity_service/services/identity_service.py:88-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L88-L111)
-- [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
-- [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
-- [tool-gateway/src/api_gateway/tools/k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [gateway_service.py:130-215](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L130-L215)
+- [runtime_kernel.py:1542-1557](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1542-L1557)
+- [configuration-reference.md:90-126](file://docs/guides/configuration-reference.md#L90-L126)
 
 ## Detailed Component Analysis
 
-### Agent Platform
-Responsibilities:
-- Application lifecycle and routing
-- Runtime settings and configuration
-- Metrics and observability
-- Session management and persistence
-- Provider integrations and tool execution
-- **OpenTelemetry push pipeline initialization and log bridging**
-- **Transcript reconstruction from kernel state snapshots**
-- **HITL confirmation parking and resolution**
-
-Common issues:
-- Misconfigured environment variables or secrets
-- Redis connection failures
-- Provider credential errors
-- Session store timeouts or capacity issues
-- **OTel exporter connectivity failures**
-- **Authentication header missing or invalid**
-- **Log bridge not attaching properly**
-- **Kernel state snapshot unavailability causing transcript fallback**
-- **Parked HITL confirmations blocking session deletion**
-- **Foreign session ID access attempts triggering anti-enumeration**
+### Authentication and Authorization
+Symptoms:
+- Login fails or portal shows unauthorized
+- Tool invocation returns 401/403
+- “Stream never completes” due to expired delegated tokens
 
 Diagnostics:
-- Validate startup logs and health endpoints
-- Check metrics for error rates and latency
-- Inspect session store connectivity and TTLs
-- Verify provider credentials and quotas
-- **Check OTel setup logs for initialization status**
-- **Validate OTEL_EXPORTER_OTLP_ENDPOINT configuration**
-- **Verify OTEL_EXPORTER_OTLP_HEADERS secret presence**
-- **Monitor transcript extraction failures and fallback behavior**
-- **Check for parked confirmation states blocking operations**
+- Check identity broker OIDC configuration and reachability
+- Validate token issuer/audience and JWKS endpoint
+- Inspect delegation exchange metrics and logs
+- Confirm policy bundle loaded and roles mapped correctly
 
-Resolution steps:
-- Confirm env var presence and correctness
-- Test Redis connectivity and network policies
-- Rotate or update provider credentials
-- Adjust session TTL and concurrency settings
-- **Run sync-otel-secrets.sh to provision authentication headers**
-- **Verify OpenObserve endpoint accessibility**
-- **Check pod logs for "otel telemetry setup failed" messages**
-- **Resolve parked confirmations before attempting session deletion**
-- **Handle 404 responses for foreign session access attempts**
+Remediation:
+- Reconcile Keycloak client redirect URIs if callback mismatches occur
+- Re-provision delegation secrets and restart affected deployments
+- Increase delegated token TTL only if necessary and investigate long-running operations
+- Ensure policy bundle is valid and synced; restart gateways to pick up changes
+
+Observability:
+- Use /metrics to check delegation counters and token verification outcomes
+- Correlate x-request-id across services; enable OTel push to join logs and traces
 
 **Section sources**
-- [agent-platform/src/agent_platform/app.py](file://products/agent-platform/src/agent_platform/app.py)
-- [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
-- [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
-- [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
-- [agent-platform/src/agent_platform/core/observability.py](file://products/agent-platform/src/agent_platform/core/observability.py)
-- [agent-platform/src/agent_platform/services/runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
-- [agent-platform/src/agent_platform/services/session_service.py](file://products/agent-platform/src/agent_platform/services/session_service.py)
-- [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
-- [agent-platform/src/agent_platform/services/session_transcript.py](file://products/agent-platform/src/agent_platform/services/session_transcript.py)
-- [agent-platform/src/agent_platform/services/hitl_confirmations.py](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py)
-- [agent-platform/src/agent_service/core/telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [troubleshooting.md:102-135](file://docs/guides/troubleshooting.md#L102-L135)
+- [troubleshooting.md:292-311](file://docs/guides/troubleshooting.md#L292-L311)
+- [configuration-reference.md:62-75](file://docs/guides/configuration-reference.md#L62-L75)
+- [test_gateway_auth.py:34-67](file://products/platform-gateway/tests/test_gateway_auth.py#L34-L67)
+- [token_verifier.py (platform-gateway):52-80](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L52-L80)
+- [token_verifier.py (tool-gateway):52-80](file://products/tool-gateway/src/tool_gateway/services/token_verifier.py#L52-L80)
 
-### Identity Broker
-Responsibilities:
-- Authentication endpoints
-- Token issuance and validation
-- Identity context propagation
-- **OpenTelemetry telemetry export**
-- **OIDC callback redirect URI resolution**
-
-Common issues:
-- OIDC provider misconfiguration
-- Token signature or expiration errors
-- Missing or incorrect audience/issuer settings
-- Network/TLS issues between services
-- **OTel exporter authentication failures**
-- **Redirect URI mismatch between canonical and fallback origins**
+### Tool Execution Errors
+Symptoms:
+- “No tools available” or empty tool list
+- “ELASTIC_NOT_CONFIGURED”
+- Mutating tool absent from discovery
+- Mutating tool invoke returns 403 denied
+- Confirming a parked mutating call returns 403
+- Approved mutation fails with K8S_PERMISSION_DENIED
 
 Diagnostics:
-- Validate OIDC discovery endpoint
-- Inspect token payloads and claims
-- Check issuer, audience, and signing keys
-- Review broker logs for auth failures
-- **Check OTel setup and export logs**
-- **Verify redirect URI resolution logic**
+- Verify TOOL_GATEWAY_URL and tool-gateway readiness
+- Check GATEWAY_K8S_ENABLED and RBAC for Kubernetes tools
+- Confirm GATEWAY_ELASTIC_* settings for Elastic connector
+- Validate GATEWAY_MUTATING_TOOLS_ENABLED and HITL bridging flags
+- Inspect policy decisions and matrix endpoints for role/action grants
+- Check browser connector flags and credential sets for web.* tools
 
-Resolution steps:
-- Correct OIDC configuration
-- Ensure consistent token formats across services
-- Update signing keys and rotation policies
-- Fix DNS/TLS configurations
-- **Provision OTel headers via sync-otel-secrets.sh**
-- **Understand canonical vs fallback hostname behavior**
-
-**Updated** Enhanced OIDC callback troubleshooting with canonical vs fallback hostname clarification
+Remediation:
+- Set required URLs and credentials; redeploy affected services
+- Apply opt-in RBAC manifests for mutating tools
+- Enable HITL bridging by setting a positive timeout
+- Re-run secret sync scripts to align clients and secrets
+- For web tools, ensure CDP endpoint reachable and origins allowlisted
 
 **Section sources**
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [identity-broker/src/identity_service/api/routes/auth.py](file://products/identity-broker/src/identity_service/api/routes/auth.py)
-- [identity-broker/src/identity_service/api/routes/identity.py](file://products/identity-broker/src/identity_service/api/routes/identity.py)
-- [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
+- [troubleshooting.md:71-99](file://docs/guides/troubleshooting.md#L71-L99)
+- [troubleshooting.md:211-231](file://docs/guides/troubleshooting.md#L211-L231)
+- [troubleshooting.md:588-613](file://docs/guides/troubleshooting.md#L588-L613)
+- [troubleshooting.md:614-644](file://docs/guides/troubleshooting.md#L614-L644)
+- [troubleshooting.md:645-673](file://docs/guides/troubleshooting.md#L645-L673)
+- [troubleshooting.md:698-718](file://docs/guides/troubleshooting.md#L698-L718)
+- [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
+- [configuration-reference.md:452-494](file://docs/guides/configuration-reference.md#L452-L494)
 
-### Tool Gateway
-Responsibilities:
-- API routing and request handling
-- Policy enforcement
-- Token verification
-- Orchestration of agent and tool calls
-- **OpenTelemetry telemetry export**
-- **Anti-enumeration posture preservation for session operations**
-
-Common issues:
-- Policy rule misconfigurations
-- Token verification failures
-- Upstream service timeouts
-- RBAC or namespace restrictions
-- **OTel exporter connectivity issues**
-- **Incorrect mapping of upstream 4xx errors to gateway responses**
+### Performance Issues
+Symptoms:
+- Long-running streams stall or time out
+- High error rates or slow responses
+- Missing traces/metrics/logs in OpenObserve
 
 Diagnostics:
-- Review policy engine decisions and logs
-- Validate token verifier configuration
-- Check upstream health endpoints
-- Inspect Kubernetes RBAC and network policies
-- **Verify OTel endpoint configuration**
-- **Check that 404 responses pass through unchanged for anti-enumeration**
+- Check provider health and timeouts (CHAT_RESPONSE_TIMEOUT_SECONDS)
+- Review /metrics for RED metrics and domain counters
+- Validate OTEL_ENABLED and exporter endpoint/auth headers
+- Inspect session store backends and fallbacks
 
-Resolution steps:
-- Update policy rules and scopes
-- Align token verifier settings with Identity Broker
-- Increase timeouts or scale upstream services
-- Fix RBAC roles and permissions
-- **Ensure OTel headers are properly configured**
-- **Preserve upstream 404 responses for unknown/foreign sessions**
+Remediation:
+- Adjust timeouts and provider rate limits
+- Provision OTel headers and correct endpoint
+- Ensure Postgres/Redis availability for session/state stores
+- Monitor evidence store truncation markers and session budgets
 
 **Section sources**
-- [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
-- [tool-gateway/src/api_gateway/api/routes/chat.py](file://products/tool-gateway/src/api_gateway/api/routes/chat.py)
-- [tool-gateway/src/api_gateway/api/routes/auth.py](file://products/tool-gateway/src/api_gateway/api/routes/auth.py)
-- [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [tool-gateway/src/api_gateway/services/policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool-gateway/src/api_gateway/services/token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [tool-gateway/src/api_gateway/tools/k8s_connector.py](file://products/tool-gateway/src/api_gateway/tools/k8s_connector.py)
+- [troubleshooting.md:138-168](file://docs/guides/troubleshooting.md#L138-L168)
+- [troubleshooting.md:551-586](file://docs/guides/troubleshooting.md#L551-L586)
+- [session_store.py:949-969](file://products/agent-platform/src/agent_service/services/session_store.py#L949-L969)
+- [SPEC-005-observability-baseline/spec.md:27-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L27-L35)
 
-### Operator Portal
-Responsibilities:
-- Web UI for operators to manage platform resources
-- Integration with Tool Gateway APIs
-- **Content-hashed asset serving with immutable caching**
-- **Voice input via Web Speech API with browser compatibility handling**
-- **SPA shell with no-store caching for immediate redeployment**
-- **OIDC callback handling with origin-aware navigation**
-- **Bounded pane rendering with overflow detection and expand/collapse affordances**
-
-Common issues:
-- CORS or proxy misconfiguration
-- Incorrect base paths or headers
-- Authentication cookie/token handling
-- **Stale UI after redeployment due to cached assets**
-- **Voice input microphone button disabled or non-functional**
-- **Browser compatibility issues with Web Speech API**
-- **OIDC callback confusion about redirect origins**
-- **Bounded pane overflow detection timing issues**
-- **Expand/collapse affordance not appearing correctly**
+### Data Consistency Problems
+Symptoms:
+- Session workspace shows no history (transcript_available: false)
+- Session detail returns evidence_turns: null
+- Session delete returns 409 (cannot delete)
+- Audit view empty or recent events missing
+- Audit ingest rejected with 401
 
 Diagnostics:
-- Check browser console and network tab
-- Validate Nginx configuration and reverse proxy settings
-- Confirm portal's API endpoints and auth headers
-- **Inspect asset caching headers and version changes**
-- **Test Web Speech API availability in different browsers**
-- **Verify microphone permissions and audio device access**
-- **Check OIDC callback URL handling and origin preservation**
-- **Verify bounded pane height calculations and overflow detection**
+- Inspect session API fields and agent-platform logs for transcript/evidence warnings
+- Check audit emitter delivery counters and audit-service readiness
+- Validate *_AUDIT_SERVICE_URL and *_AUDIT_CLIENT_SECRET alignment
 
-Resolution steps:
-- Fix CORS and proxy headers
-- Ensure correct base path and API versioning
-- Align token handling with Identity Broker
-- **Force browser reload to fetch fresh index.html**
-- **Use Chrome/Edge for voice input functionality**
-- **Grant microphone permissions and verify audio device availability**
-- **Understand that callbacks always return to canonical hostname regardless of starting origin**
-- **Accept 320px bounded pane constraint with expand affordance for overflow content**
-
-**Updated** Enhanced bounded pane troubleshooting with v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
+Remediation:
+- For transcripts: send a chat turn to populate snapshot; corrupt snapshots degrade gracefully
+- For evidence: verify database connectivity; accept truncation markers as design
+- Resolve pending HITL confirmations before deleting sessions
+- Re-sync audit secrets and restart emitters and audit-service
 
 **Section sources**
-- [operator-portal/README.md:37-113](file://products/operator-portal/README.md#L37-L113)
-- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
-- [operator-portal/web-ui/app/vite.config.ts:6-25](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L25)
-- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
-- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
-- [operator-portal/web-ui/app/src/auth/oidc.ts:114-156](file://products/operator-portal/web-ui/app/src/auth/oidc.ts#L114-L156)
-- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
+- [troubleshooting.md:720-783](file://docs/guides/troubleshooting.md#L720-L783)
+- [troubleshooting.md:314-353](file://docs/guides/troubleshooting.md#L314-L353)
+- [troubleshooting.md:356-382](file://docs/guides/troubleshooting.md#L356-L382)
+- [runtime_kernel.py:1826-1857](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1826-L1857)
+
+### Deployment Failures
+Symptoms:
+- Pods fail with ErrImagePull after deployment
+- Readiness shows “degraded” due to policy bundle load failure
+
+Diagnostics:
+- Inspect pod images and overlay state
+- Check readiness endpoints for policy_error and bundle fingerprints
+
+Remediation:
+- Always deploy via make deploy to patch image tags
+- Validate and re-sync policy bundle; restart gateways to reload
+
+**Section sources**
+- [troubleshooting.md:235-258](file://docs/guides/troubleshooting.md#L235-L258)
+- [troubleshooting.md:261-289](file://docs/guides/troubleshooting.md#L261-L289)
+- [deploy-overlay.sh:1-44](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L44)
+
+### Environment-Specific Troubleshooting
+- Dev vs production:
+  - Dev overlays include browser-dev and mutating-dev postures; production disables mutating tools by default
+  - Ensure workload identity and project-scoped secrets are provisioned
+- External integrations:
+  - Keycloak reachability and redirect URIs must match portal origins
+  - Elastic connector requires URL and auth; output redaction can be toggled
+  - Incident intake requires webhook token; misconfigurations return 503 or 401
+
+**Section sources**
+- [configuration-reference.md:682-724](file://docs/guides/configuration-reference.md#L682-L724)
+- [troubleshooting.md:102-135](file://docs/guides/troubleshooting.md#L102-L135)
+- [troubleshooting.md:450-484](file://docs/guides/troubleshooting.md#L450-L484)
 
 ## Dependency Analysis
-Service dependencies and deployment manifests:
+Cross-service dependency chains that commonly cause failures:
+- Token delegation chain: mismatched client IDs/secrets block tool invocation
+- Identity verification chain: issuer/audience/JWKS mismatches cause 401
+- Tool relay chain: unset URLs prevent tool registration and invocation
+- Audit ingestion chain: misaligned secrets lead to 401 ingest rejections
+- Skills retrieval chain: missing URL/credentials hides skills tools
+- Incident intake/triage chain: webhook token or query clients misconfigured blocks intake and triage
 
 ```mermaid
-graph TB
-GW["Tool Gateway"] --> AG["Agent Platform"]
-GW --> IDB["Identity Broker"]
-AG --> REDIS["Redis"]
-GW --> K8S["Kubernetes"]
-AG --> OO["OpenObserve"]
-IDB --> OO
-GW --> OO
-OP["Operator Portal"] --> GW
-OP --> NGINX["Nginx Cache"]
+graph LR
+PGW["Platform Gateway"] -- "Delegated token" --> IDB["Identity Broker"]
+PGW -- "Policy decision" --> PGW
+AGP -- "Tool calls" --> TGW
+AGP -- "Handoff" --> ERW
+PGW -- "Audit events" --> AUD
+AGP -- "Audit events" --> AUD
+TGW -- "Audit events" --> AUD
+IDB -- "Audit events" --> AUD
 ```
 
 **Diagram sources**
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-deployment.yaml)
-- [operator-portal/nginx.conf:8-17](file://products/operator-portal/nginx.conf#L8-L17)
+- [configuration-reference.md:33-126](file://docs/guides/configuration-reference.md#L33-L126)
+- [configuration-reference.md:128-168](file://docs/guides/configuration-reference.md#L128-L168)
 
 **Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
+- [configuration-reference.md:33-126](file://docs/guides/configuration-reference.md#L33-L126)
+- [configuration-reference.md:128-168](file://docs/guides/configuration-reference.md#L128-L168)
 
 ## Performance Considerations
-- Monitor latency and error rates via metrics endpoints
-- Tune session store TTLs and concurrency limits
-- Scale horizontally based on CPU/memory utilization
-- Optimize provider call batching and retries
-- Use caching strategies where appropriate
-- Profile slow paths in policy evaluation and tool invocation
-- **Monitor OTel exporter batch processing and network performance**
-- **Track OpenObserve ingestion throughput and latency**
-- **Monitor transcript reconstruction performance and fallback frequency**
-- **Track parked confirmation resolution times and session operation delays**
-- **Analyze asset caching effectiveness and CDN performance for portal assets**
-- **Monitor voice recognition latency and browser compatibility metrics**
-- **Monitor bounded pane rendering performance and overflow detection accuracy**
+- Prefer read-only tools where possible; enabling mutating tools increases risk and requires approvals
+- Tune timeouts for chat responses and worker handoffs to avoid stalls
+- Use evidence store size caps and session budgets to bound memory usage
+- Keep OTel push enabled for correlation; ensure collector endpoint is reachable
+- Monitor RED metrics and domain counters to detect degradation early
+
+[No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 
-### Deployment Issues
-Symptoms:
-- Pods failing to start or crash-looping
-- Health checks failing
-- ConfigMap/Secret mount errors
-- **Stale UI content after redeployment**
+### Symptom Categories and Procedures
 
-Diagnostic steps:
-- Inspect pod logs and events
-- Validate environment variables and secrets
-- Check readiness/liveness probes
-- Verify image tags and pull policies
-- **Check browser cache and asset versioning**
-
-Resolution:
-- Fix missing or invalid config values
-- Ensure secrets are present and correctly referenced
-- Adjust probe thresholds and timeouts
-- Confirm container images are accessible
-- **Force browser reload to clear cached assets**
-
-**Updated** Added stale UI troubleshooting for portal redeployment issues
+#### Deployment Failures
+- ErrImagePull:
+  - Diagnose: inspect pod images and overlay state
+  - Remediate: run deploy-overlay script or use make deploy
+- Policy bundle degraded:
+  - Diagnose: check readiness endpoint for policy_error and bundle fingerprint
+  - Remediate: validate and re-sync policy bundle; restart gateways
 
 **Section sources**
-- [agent-platform/src/agent_platform/main.py](file://products/agent-platform/src/agent_platform/main.py)
-- [identity-broker/src/identity_service/app.py](file://products/identity-broker/src/identity_service/app.py)
-- [tool-gateway/src/api_gateway/app.py](file://products/tool-gateway/src/api_gateway/app.py)
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
-- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
+- [troubleshooting.md:235-289](file://docs/guides/troubleshooting.md#L235-L289)
+- [deploy-overlay.sh:1-44](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L44)
 
-### Service Connectivity Problems
-Symptoms:
-- Timeouts between services
-- DNS resolution failures
-- TLS handshake errors
-
-Diagnostic steps:
-- Verify service names and ports
-- Check network policies and firewall rules
-- Validate TLS certificates and CA chains
-- Test connectivity using kubectl exec
-
-Resolution:
-- Correct service definitions and endpoints
-- Update network policies to allow required traffic
-- Renew or configure proper certificates
-- Ensure consistent naming conventions
+#### Authentication Problems
+- Portal login fails:
+  - Diagnose: OIDC config, Keycloak reachability, redirect URIs
+  - Remediate: reconcile Keycloak client; restart identity-service
+- Token verification errors:
+  - Diagnose: issuer/audience/JWKS; test with local verification
+  - Remediate: fix issuer/audience; refresh JWKS cache
 
 **Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-service.yaml)
-- [shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-service.yaml)
+- [troubleshooting.md:102-135](file://docs/guides/troubleshooting.md#L102-L135)
+- [test_gateway_auth.py:48-67](file://products/platform-gateway/tests/test_gateway_auth.py#L48-L67)
+- [token_verifier.py (platform-gateway):52-80](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L52-L80)
 
-### Performance Bottlenecks
-Symptoms:
-- High latency on API calls
-- Elevated error rates under load
-- Resource saturation (CPU/Memory)
-
-Diagnostic steps:
-- Analyze metrics for hotspots
-- Profile request tracing spans
-- Check queue depths and worker utilization
-- Review provider rate limits and quotas
-
-Resolution:
-- Scale out services and increase replicas
-- Tune concurrency and timeout settings
-- Implement backpressure and circuit breakers
-- Optimize provider interactions and caching
+#### Tool Execution Errors
+- No tools available:
+  - Diagnose: TOOL_GATEWAY_URL, tool-gateway readiness, K8s connector
+  - Remediate: set URL; apply RBAC; restart tool-gateway
+- ELASTIC_NOT_CONFIGURED:
+  - Diagnose: GATEWAY_ELASTIC_* variables
+  - Remediate: enable and configure Elastic connector
+- Mutating tool absent or denied:
+  - Diagnose: GATEWAY_MUTATING_TOOLS_ENABLED, policy grants, HITL bridging
+  - Remediate: enable flag; apply RBAC; grant tools:mutate; enable HITL
+- Confirmed mutation fails with K8S_PERMISSION_DENIED:
+  - Diagnose: service account permissions
+  - Remediate: apply pod-delete Role/RoleBinding
 
 **Section sources**
-- [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
-- [tool-gateway/src/api_gateway/services/gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
+- [troubleshooting.md:71-99](file://docs/guides/troubleshooting.md#L71-L99)
+- [troubleshooting.md:211-231](file://docs/guides/troubleshooting.md#L211-L231)
+- [troubleshooting.md:588-718](file://docs/guides/troubleshooting.md#L588-L718)
+- [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
 
-### Configuration Mistakes
-Symptoms:
-- Startup failures due to missing env vars
-- Invalid configuration values causing runtime errors
-- Secrets not mounted or unreadable
-
-Diagnostic steps:
-- Compare desired vs actual config in pods
-- Validate schema and types for config values
-- Check secret references and permissions
-
-Resolution:
-- Add missing environment variables
-- Correct invalid values and defaults
-- Ensure secrets are properly mounted and readable
+#### Performance Issues
+- Stream stalls or timeouts:
+  - Diagnose: provider health, CHAT_RESPONSE_TIMEOUT_SECONDS
+  - Remediate: adjust timeouts; check provider rate limits
+- Missing telemetry:
+  - Diagnose: OTEL_ENABLED, endpoint, headers
+  - Remediate: provision OTel headers; redeploy
 
 **Section sources**
-- [agent-platform/src/agent_platform/core/config.py](file://products/agent-platform/src/agent_platform/core/config.py)
+- [troubleshooting.md:138-168](file://docs/guides/troubleshooting.md#L138-L168)
+- [troubleshooting.md:551-586](file://docs/guides/troubleshooting.md#L551-L586)
+- [SPEC-005-observability-baseline/spec.md:27-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L27-L35)
 
-### Integration Failures
-Symptoms:
-- Policy enforcement denials
-- Token verification failures
-- Provider authentication errors
-
-Diagnostic steps:
-- Inspect policy engine logs and decisions
-- Validate token signatures and claims
-- Check provider credentials and endpoints
-
-Resolution:
-- Update policy rules and scopes
-- Align token verifier settings with Identity Broker
-- Refresh provider credentials and test endpoints
-
-**Section sources**
-- [tool-gateway/src/api_gateway/services/policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-- [tool-gateway/src/api_gateway/services/token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-- [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-
-### OIDC Callback Hostname Issues
-
-#### Symptom: Sign-in redirects to unexpected hostname
-**Most likely cause:** Confusion between canonical and fallback hostnames. The identity broker always uses the primary `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`) as the callback destination, regardless of which origin the user started from.
-
-**Understanding the behavior:**
-- **Canonical hostname**: `https://aiops.luban.metasync.cc/callback` - This is the primary callback URI used by the identity broker
-- **Fallback hostnames**: `https://aiops.luban.k8s.orb.local/callback`, `http://localhost:18080/callback` - These are registered with Keycloak for reachability but never selected as callbacks
-- **Round-trip behavior**: When users start sign-in from any origin (including fallback hostnames), they always land back on the canonical hostname after authentication
-
-**Diagnostic:**
-
-```bash
-# Check current OIDC configuration
-kubectl -n dev-luban-aiops get configmap identity-broker-runtime-config \
-  -o jsonpath='{.data.OIDC_REDIRECT_URI}{"\n"}{.data.OIDC_EXTRA_REDIRECT_URIS}'
-
-# Verify Keycloak client registration
-kubectl -n dev-luban-aiops exec deployment/identity-broker -- \
-  curl -s http://localhost:8000/.well-known/openid-configuration | jq '.issuer'
-
-# Check browser network tab for redirect URLs during login flow
-```
-
-**Resolution:**
-- **Accept the canonical hostname behavior**: All sign-in flows will return to `https://aiops.luban.metasync.cc/callback` regardless of starting origin
-- **Configure browser bookmarks/favorites** to use the canonical hostname for consistent experience
-- **Update documentation** to clarify that fallback hostnames are for internal testing only
-- **Reconcile Keycloak client** if additional redirect URIs are needed: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
-
-**Updated** Clarified canonical vs fallback hostname behavior and explained round-trip behavior
+#### Data Consistency Problems
+- Transcript unavailable:
+  - Diagnose: session snapshot state; agent-platform logs
+  - Remediate: send a chat turn; accept degraded transcript behavior
+- Evidence turns null:
+  - Diagnose: evidence store backend; metrics for write failures
+  - Remediate: restore DB; accept truncation markers
+- Session delete 409:
+  - Diagnose: pending HITL confirmation
+  - Remediate: resolve confirmation before deletion
+- Audit view empty or 401 ingest:
+  - Diagnose: emitter URLs and secrets; audit-service readiness
+  - Remediate: re-sync audit secrets; restart emitters and audit-service
 
 **Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:8-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L8-L11)
-- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
-- [docs/guides/configuration-reference.md:443-446](file://docs/guides/configuration-reference.md#L443-L446)
+- [troubleshooting.md:720-783](file://docs/guides/troubleshooting.md#L720-L783)
+- [troubleshooting.md:314-382](file://docs/guides/troubleshooting.md#L314-L382)
+- [runtime_kernel.py:1826-1857](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1826-L1857)
 
-### OpenObserve Telemetry Pipeline Issues
-
-#### Symptom: No traces/metrics/logs appear in OpenObserve
-**Most likely cause:** One of — the OTLP ingest auth header is missing from a service's secret (OpenObserve answers 401 and the exporter drops batches), `OTEL_ENABLED` is false, or `OTEL_EXPORTER_OTLP_ENDPOINT` points at the wrong org/path. Telemetry always fails open, so services themselves look healthy.
-
-**Diagnostic:**
-
-```bash
-# Gate + endpoint come from the shared ConfigMap
-kubectl -n dev-luban-aiops get configmap platform-runtime-config \
-  -o jsonpath='{.data.OTEL_ENABLED}{"\n"}{.data.OTEL_EXPORTER_OTLP_ENDPOINT}{"\n"}'
-
-# The auth header must be present in each service's runtime-secrets Secret
-kubectl -n dev-luban-aiops get secret skills-hub-runtime-secrets \
-  -o jsonpath='{.data.OTEL_EXPORTER_OTLP_HEADERS}' | base64 -d | cut -c1-40
-
-# Exporter errors surface in pod logs ("otel telemetry setup failed",
-# "401" from the batch exporter)
-kubectl -n dev-luban-aiops logs deployment/skills-hub --tail=50 | grep -i otel
-```
-
-**Resolution:**
-
-- Header missing or 401s in the logs: export the OpenObserve root credentials
-  (luban-bootstrapper `openobserve/secrets/openobserve.env`) and re-run
-  `shared/platform-ops/gitops/sync-otel-secrets.sh` (or `make deploy` with the
-  variables exported); it upserts the header into all six secrets and restarts
-  the workloads.
-- `OTEL_ENABLED=false`: set it to `true` in
-  `dev-k8s/base/shared/runtime.env` and redeploy.
-- Endpoint wrong: it must stop at the org prefix
-  (`.../api/default`); the exporters append `/v1/{traces,metrics,logs}`.
-- Conventions and the log-bridge semantics:
-  `shared/shared-contracts/observability-conventions.md`.
-
-#### Symptom: Exporter connectivity failures
-**Most likely cause:** Network connectivity issues to OpenObserve endpoint, incorrect endpoint URL, or TLS certificate problems.
-
-**Diagnostic:**
-
-```bash
-# Test endpoint connectivity from within a pod
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  curl -v http://openobserve-router.openobserve.svc.cluster.local:5080/api/default/v1/traces
-
-# Check if OpenObserve is reachable and responding
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  curl -s http://openobserve-router.openobserve.svc.cluster.local:5080/api/default/_search?type=traces \
-  -H "Authorization: Basic $(echo -n 'root@example.com:Complexpass#123' | base64)"
-
-# Verify DNS resolution
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  nslookup openobserve-router.openobserve.svc.cluster.local
-```
-
-**Resolution:**
-
-- Fix network policies blocking outbound connections to OpenObserve
-- Correct the `OTEL_EXPORTER_OTLP_ENDPOINT` to point to the right service
-- Verify TLS certificates if using HTTPS
-- Check OpenObserve service health and availability
-
-#### Symptom: Log bridge not working
-**Most likely cause:** Log bridge attachment failed during initialization, or structured logs are not being emitted in JSON format.
-
-**Diagnostic:**
-
-```bash
-# Check if log bridge is attached by examining pod logs
-kubectl -n dev-luban-aiops logs deployment/agent-service --tail=100 | grep -E "otel|log.*bridge"
-
-# Verify structured logging is enabled
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python -c "import logging; print(logging.getLogger().handlers)"
-
-# Check if OTel logging handler is present
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python -c "from opentelemetry.instrumentation.logging.handler import LoggingHandler; import logging; print([h for h in logging.getLogger().handlers if isinstance(h, LoggingHandler)])"
-```
-
-**Resolution:**
-
-- Ensure `OTEL_ENABLED=true` is set in the service environment
-- Verify that the service imports and calls `setup_telemetry()` during startup
-- Check that structured logging is configured with JSON format
-- Restart the service after making configuration changes
-
-#### Symptom: Cross-service trace correlation broken
-**Most likely cause:** Trace context not propagating correctly between services, or OpenObserve not receiving complete trace data.
-
-**Diagnostic:**
-
-```bash
-# Use the cross-service trace probe to check trace propagation
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python /root/.ooq2.py
-
-# Check for traces spanning multiple services
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python -c "
-import urllib.request, json, base64
-BASE = 'http://openobserve-router.openobserve.svc.cluster.local:5080'
-AUTH = base64.b64encode(b'root@example.com:Complexpass#123').decode()
-req = urllib.request.Request(
-    BASE + '/api/default/_search?type=traces',
-    data=json.dumps({'query': {'sql': 'select trace_id, count(distinct service_name) as svc_count, array_agg(distinct service_name) as services from \"default\" group by trace_id having count(distinct service_name) >= 3 order by svc_count desc limit 5'}}).encode(),
-    headers={'Authorization': f'Basic {AUTH}', 'Content-Type': 'application/json'}
-)
-resp = urllib.request.urlopen(req, timeout=30)
-print(resp.read().decode())
-"
-```
-
-**Resolution:**
-
-- Verify that all services have OTel instrumentation enabled
-- Check that trace context headers are being propagated correctly
-- Ensure OpenObserve is configured to accept traces from all services
-- Validate that service names are unique and properly configured
-
-#### Symptom: Telemetry pipeline validation failures
-**Most likely cause:** Issues with the telemetry pipeline setup, exporter configuration, or OpenObserve backend connectivity.
-
-**Diagnostic:**
-
-```bash
-# Run the one-shot OpenObserve probe to validate pipeline
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python /root/.ooq.py
-
-# Check individual service telemetry setup
-for service in agent-service audit-service identity-service platform-gateway skills-hub tool-gateway; do
-  echo "=== $service ==="
-  kubectl -n dev-luban-aiops logs deployment/$service --tail=20 | grep -E "otel|telemetry"
-done
-
-# Verify OTel configuration in each service
-for service in agent-service audit-service identity-service platform-gateway skills-hub tool-gateway; do
-  echo "=== $service config ==="
-  kubectl -n dev-luban-aiops exec deployment/$service -- env | grep OTEL
-done
-```
-
-**Resolution:**
-
-- Run `sync-otel-secrets.sh` to ensure all services have proper authentication
-- Verify `OTEL_ENABLED=true` across all services
-- Check that `OTEL_EXPORTER_OTLP_ENDPOINT` is correctly configured
-- Ensure OpenObserve is running and accepting connections
-- Review service logs for specific error messages
+### Frequently Asked Questions
+- Why do I see “denied by policy” for a tool?
+  - The user’s role lacks the required action; verify OIDC groups and policy bundle grants.
+- How do I enable mutating tools safely?
+  - Enable GATEWAY_MUTATING_TOOLS_ENABLED, apply RBAC, enable HITL bridging, and grant tools:mutate.
+- What happens if audit-service is down?
+  - Ingestion degrades to log-only auditing; user requests succeed but events are not stored.
+- Can I disable OTel push without affecting /metrics?
+  - Yes; /metrics remains always-on; OTel push is gated by OTEL_ENABLED and fails open.
+- How do I rotate secrets safely?
+  - Use provided sync scripts to regenerate and propagate secrets; restart affected deployments.
 
 **Section sources**
-- [docs/guides/troubleshooting.md:438-474](file://docs/guides/troubleshooting.md#L438-L474)
-- [shared/platform-ops/gitops/sync-otel-secrets.sh:1-131](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L1-L131)
-- [.ooq.py:1-84](file://.ooq.py#L1-L84)
-- [.ooq2.py:1-69](file://.ooq2.py#L1-L69)
-- [agent-platform/src/agent_service/core/telemetry.py:1-133](file://products/agent-platform/src/agent_service/core/telemetry.py#L1-L133)
+- [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
+- [configuration-reference.md:128-168](file://docs/guides/configuration-reference.md#L128-L168)
+- [SPEC-005-observability-baseline/spec.md:27-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L27-L35)
 
-### Transcript Fallback Scenarios
-
-#### Symptom: Session transcript returns empty despite active conversation
-**Most likely cause:** Kernel state snapshot is unavailable, corrupted, or in an unexpected format. The system gracefully falls back to `transcript_available: false` with an empty transcript list rather than failing the request.
-
-**Diagnostic:**
-
-```bash
-# Check session detail for transcript availability flag
-curl -s -H "X-User-ID: alice" \
-  http://localhost:8080/api/v2/sessions/<session_id> | jq '{transcript_available, pending_confirmation}'
-
-# Verify kernel state snapshot exists
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python -c "
-from agent_service.services.agent_state_store import AGENT_STATE_STORE
-state = AGENT_STATE_STORE.load_state('<session_id>')
-print('State exists:', state is not None)
-if state:
-    import json
-    try:
-        parsed = json.loads(state)
-        print('Has context:', 'context' in parsed)
-        print('Context type:', type(parsed.get('context')))
-    except:
-        print('State is corrupted')
-"
-```
-
-**Resolution:**
-
-- Accept that transcripts are best-effort by design — missing snapshots degrade gracefully
-- For production systems, ensure kernel state snapshots are being persisted successfully
-- Investigate kernel state store connectivity and capacity issues
-- Note that system messages and tool frames are intentionally excluded from transcripts
-- Evidence panel remains live-stream-scoped regardless of transcript availability
+### Known Limitations and Workarounds
+- Shared query credential for audit-service allows ingest clients to query directly; plan to split registries for non-dev deployments.
+- Mutating tools are deny-by-default; enabling them requires full activation checklist including RBAC and HITL.
+- Evidence persistence is best-effort; failures do not fail turns but reduce replay fidelity.
 
 **Section sources**
-- [agent-platform/src/agent_platform/services/session_transcript.py:1-83](file://products/agent-platform/src/agent_platform/services/session_transcript.py#L1-L83)
+- [configuration-reference.md:159-168](file://docs/guides/configuration-reference.md#L159-L168)
+- [troubleshooting.md:588-613](file://docs/guides/troubleshooting.md#L588-L613)
+- [troubleshooting.md:750-783](file://docs/guides/troubleshooting.md#L750-L783)
 
-### Session Delete Conflict Resolution
-
-#### Symptom: Session delete returns 409 (cannot delete a session)
-**Most likely cause:** The session holds an unresolved parked HITL confirmation (SPEC-020). Deleting it would orphan the parked decision, so the API refuses the delete until the confirmation is resolved. A foreign or unknown session id returns `404` instead — both anti-enumeration by design.
-
-**Diagnostic:**
-
-```bash
-# The session detail flags the pending confirmation
-curl -s -H "X-User-ID: $USER" \
-  http://localhost:8080/api/v1/sessions/<session_id> | jq '.pending_confirmation'
-
-# Check for parked confirmations in the confirmation registry
-kubectl -n dev-luban-aiops exec deployment/agent-service -- \
-  python -c "
-from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
-is_parked = CONFIRMATION_REGISTRY.is_parked('<session_id>', timeout=0)
-has_pending = CONFIRMATION_REGISTRY.has_pending('<session_id>')
-print('Is parked:', is_parked)
-print('Has pending:', has_pending)
-"
-```
-
-**Resolution:**
-
-- Resolve the parked confirmation first — approve or deny it through the
-  portal's confirmation card (or `POST /api/v1/chat/confirm`) — then retry
-  the delete. Expired parks still block deletion until they are resolved:
-  the flag is TTL-agnostic on purpose, so a stale confirmation card is
-  closed deliberately rather than silently dropped.
-- If the confirmation has expired, use the expire endpoint to close it properly
-- After resolution, the session can be deleted normally
+### Upgrade Considerations
+- Policy bundle rollout requires editing canonical source, validating scenarios, syncing replicas, and restarting gateways to reload bundles.
+- Image tag management relies on deploy-overlay; avoid raw kubectl apply -k to prevent placeholder tags.
+- Secret provisioning scripts centralize rotation; prefer scripts over manual edits.
 
 **Section sources**
-- [docs/guides/troubleshooting.md:703-725](file://docs/guides/troubleshooting.md#L703-L725)
-- [agent-platform/src/agent_platform/services/hitl_confirmations.py:205-228](file://products/agent-platform/src/agent_platform/services/hitl_confirmations.py#L205-L228)
+- [configuration-reference.md:282-327](file://docs/guides/configuration-reference.md#L282-L327)
+- [troubleshooting.md:235-258](file://docs/guides/troubleshooting.md#L235-L258)
+- [sync-runtime-secret.sh:1-28](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L28)
+- [sync-audit-secrets.sh:71-92](file://shared/platform-ops/gitops/sync-audit-secrets.sh#L71-L92)
+- [sync-incident-secrets.sh:71-92](file://shared/platform-ops/gitops/sync-incident-secrets.sh#L71-L92)
 
-### Session Enumeration Prevention
-
-#### Symptom: Accessing unknown or foreign session IDs returns 404
-**Most likely cause:** Anti-enumeration protection prevents distinguishing between unknown session IDs and foreign session IDs (belonging to other users). Both cases return 404 to prevent session ID enumeration attacks.
-
-**Diagnostic:**
-
-```bash
-# Test accessing unknown session ID
-curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
-  http://localhost:8080/api/v2/sessions/nonexistent-session-id
-
-# Test accessing foreign session ID (owned by another user)
-curl -s -w "\nStatus: %{http_code}\n" -H "X-User-ID: alice" \
-  http://localhost:8080/api/v2/sessions/bob-session-id
-```
-
-**Resolution:**
-
-- This behavior is by design for security — treat 404 as "session not found" without distinguishing between unknown and foreign sessions
-- Applications should handle 404 responses gracefully without retrying with different session IDs
-- The platform gateway preserves upstream 404 responses unchanged to maintain anti-enumeration posture
-- Focus on legitimate session management workflows rather than probing for valid session IDs
+### Using Observability Tools
+- Metrics:
+  - Every service exposes /metrics; use it to inspect RED metrics and domain counters (e.g., delegation, audit emits).
+- Traces:
+  - Enable OTel push; correlate logs via x-request-id and trace_id; ensure headers and endpoint are configured.
+- Audit logs:
+  - Check emitter delivery counters; validate audit-service readiness; review retention and max event caps.
 
 **Section sources**
-- [agent-platform/src/agent_platform/services/session_service.py:19-24](file://products/agent-platform/src/agent_platform/services/session_service.py#L19-L24)
-- [platform-gateway/src/platform_gateway/services/gateway_service.py:305-327](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L305-L327)
-- [platform-gateway/tests/test_session_workspace.py:160-172](file://products/platform-gateway/tests/test_session_workspace.py#L160-L172)
-
-### Stale UI Symptoms After Redeployment
-
-#### Symptom: Portal UI appears outdated after redeployment
-**Most likely cause:** Browser caching of content-hashed assets combined with immutable cache headers. While `index.html` uses `no-store` caching for immediate redeployment, JavaScript bundles and CSS files may be cached with 1-year immutable headers.
-
-**Diagnostic:**
-
-```bash
-# Check asset caching headers in browser developer tools
-# Look for Cache-Control: public, max-age=31536000, immutable on /assets/* files
-
-# Verify current portal version is deployed
-kubectl -n dev-luban-aiops get deployment operator-portal -o jsonpath='{.spec.template.spec.containers[0].image}'
-
-# Check if new assets are available in the deployment
-kubectl -n dev-luban-aiops exec deployment/operator-portal -- ls -la /usr/share/nginx/html/assets/
-```
-
-**Resolution:**
-
-- **Hard refresh the browser** (Ctrl+Shift+R or Cmd+Shift+R) to bypass cached assets
-- **Clear browser cache** for the portal domain if hard refresh doesn't work
-- **Use incognito/private browsing mode** to avoid cached assets entirely
-- **Wait for the next build** which generates new content-hashed filenames
-- **Verify deployment completed successfully** before assuming stale UI
-
-**Updated** Added comprehensive stale UI troubleshooting based on SPEC-023 caching strategy
-
-**Section sources**
-- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
-- [operator-portal/web-ui/app/vite.config.ts:19-25](file://products/operator-portal/web-ui/app/vite.config.ts#L19-L25)
-- [operator-portal/Dockerfile:23-26](file://products/operator-portal/Dockerfile#L23-L26)
-
-### Voice Input Microphone Issues
-
-#### Symptom: Voice input microphone button is missing or does nothing
-**Most likely cause:** Voice composition uses the browser's Web Speech API (SPEC-023 R-4). Browsers without `SpeechRecognition`/`webkitSpeechRecognition` (e.g. Firefox) show a disabled microphone with a tooltip; nothing is sent to the backend. Recognition also requires microphone permission and a browser supporting the selected language.
-
-**Diagnostic:**
-
-```bash
-# Check browser console for Web Speech API availability
-# In Chrome DevTools Console:
-console.log(typeof window.SpeechRecognition !== 'undefined' ? 'Supported' : 'Not supported')
-console.log(typeof window.webkitSpeechRecognition !== 'undefined' ? 'Supported' : 'Not supported')
-
-# Test microphone permissions
-navigator.mediaDevices.getUserMedia({ audio: true })
-  .then(stream => {
-    console.log('Microphone access granted');
-    stream.getTracks().forEach(track => track.stop());
-  })
-  .catch(error => {
-    console.error('Microphone access denied:', error);
-  });
-```
-
-**Resolution:**
-
-- **Use Chrome or Edge** (desktop) for full voice input support
-- **Grant microphone permission** when prompted by the browser
-- **Check browser compatibility** - Firefox and Safari have limited Web Speech API support
-- **Verify audio device availability** and microphone hardware functionality
-- **Switch recognition language** in the composer selector (en-US / zh-CN)
-- **Check for recognition errors** displayed above the composer (not-allowed, no-speech, audio-capture, network)
-- **Voice turns are audited** with `details.input_modality: voice` on the `chat_started` event
-
-**Updated** Enhanced voice input troubleshooting with comprehensive browser compatibility and permission handling
-
-**Section sources**
-- [docs/guides/troubleshooting.md:748-765](file://docs/guides/troubleshooting.md#L748-L765)
-- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:38-56](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L38-L56)
-- [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
-- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
-
-### Bounded Pane Rendering Issues
-
-#### Symptom: Expand to full height affordance not appearing on long content
-**Most likely cause:** The bounded pane overflow detection is experiencing timing issues with antd's enter motion. The v0.25.1/v0.25.2 fixes address this with a post-motion re-measure approach and single-sourced height configuration.
-
-**Understanding the behavior:**
-- **320px bounded pane constraint**: Digest and narrative blocks are bounded to 320px with internal scrolling
-- **Single-sourced height**: The `BOUNDED_PANE_MAX_HEIGHT` constant (320px) is now the single source of truth, applied via CSS custom property `--bounded-pane-max-height`
-- **Post-motion re-measure**: Overflow detection runs immediately and again after 300ms delay to account for antd's enter motion settling
-- **Pinned chrome**: Tab bars and collapse headers stay visible while content scrolls underneath
-
-**Diagnostic:**
-
-```bash
-# Check bounded pane implementation in DocumentsView
-kubectl -n dev-luban-aiops exec deployment/operator-portal -- \
-  cat /usr/share/nginx/html/assets/*.js | grep -A5 "BOUNDED_PANE_MAX_HEIGHT"
-
-# Verify CSS custom property is applied
-# In browser developer tools, inspect the bounded pane wrapper element
-# Look for style="--bounded-pane-max-height: 320px"
-
-# Check for overflow detection timing issues
-# Open browser console and watch for overflow detection logs
-```
-
-**Resolution:**
-
-- **Accept the 320px bounded pane behavior**: Long content will show an "Expand to full height" affordance when overflow is detected
-- **Wait for the delayed re-measure**: The affordance appears 300ms after initial render to account for animation settling
-- **Use expand/collapse affordance**: Click "Expand to full height" to view complete content without bounds
-- **Verify single-sourced height**: The 320px bound is consistently applied via CSS custom property, preventing drift between presentation and logic
-- **Check browser compatibility**: Ensure modern browser support for CSS custom properties and DOM measurements
-
-**Updated** Enhanced bounded pane troubleshooting with v0.25.1/v0.25.2 improvements including single-sourced height and post-motion re-measure race fix
-
-**Section sources**
-- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
-- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
-- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
-
-### Outdated Policy Bundle Resolution
-
-#### Symptom: Policy bundle appears outdated or stale after deployment
-**Most likely cause:** The policy bundle is cached keyed on the configured path, and bundles require pod restart to take effect — there is no hot reload. The bundle change workflow was enhanced with SPEC-048 to include complete rollout controls with provenance verification.
-
-**Understanding the SPEC-048 workflow:**
-- **Path-keyed caching**: Bundles are cached in memory keyed on the configured path (`PLATFORM_GATEWAY_POLICY_PATH` or `GATEWAY_POLICY_PATH`)
-- **Restart requirement**: Changed ConfigMaps take effect only on pod restart — hot reload is deliberately absent
-- **Provenance verification**: Each gateway exposes SHA-256 fingerprints of the exact loaded bundle text
-- **Complete workflow**: Edit → `make sync-policy` → `make verify` → `make policy-diff` → commit → deploy → confirm provenance hash
-
-**Diagnostic:**
-
-```bash
-# Check current policy bundle fingerprint on both gateways
-kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
-  curl -s localhost:8000/health/ready | jq '.policy_bundle_sha256'
-
-kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
-  curl -s localhost:8000/health/ready | jq '.policy_bundle_sha256'
-
-# Compare against the canonical bundle file
-shasum -a 256 shared/shared-contracts/policies/policy-default.yaml
-
-# Check if bundles are cached by examining process memory
-kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
-  ps aux | grep policy
-
-# Verify the mounted policy file matches expected version
-kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
-  head -5 /etc/luban/policy/policy.yaml
-```
-
-**Resolution:**
-
-1. **Follow the complete SPEC-048 workflow**:
-   ```bash
-   # Edit the canonical bundle (bump version field)
-   vi shared/shared-contracts/policies/policy-default.yaml
-   
-   # Sync to all locations
-   make sync-policy
-   
-   # Validate schema and run scenario guard
-   make verify
-   
-   # Review impact with policy-diff
-   make policy-diff CANDIDATE=/tmp/new-bundle.yaml
-   
-   # Commit changes
-   git add . && git commit -m "Update policy bundle with new rules"
-   
-   # Deploy with rolling restart
-   make deploy
-   ```
-
-2. **Verify provenance hash matches**:
-   ```bash
-   # Expected hash from canonical file
-   EXPECTED_HASH=$(shasum -a 256 shared/shared-contracts/policies/policy-default.yaml | awk '{print $1}')
-   
-   # Actual hash from tool-gateway
-   ACTUAL_TOOL_HASH=$(kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
-     curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
-   
-   # Actual hash from platform-gateway  
-   ACTUAL_PLATFORM_HASH=$(kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
-     curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
-   
-   # Verify both match expected
-   if [ "$EXPECTED_HASH" == "$ACTUAL_TOOL_HASH" ] && [ "$EXPECTED_HASH" == "$ACTUAL_PLATFORM_HASH" ]; then
-     echo "✓ Policy bundles verified across both gateways"
-   else
-     echo "✗ Hash mismatch detected!"
-     echo "Expected: $EXPECTED_HASH"
-     echo "Tool Gateway: $ACTUAL_TOOL_HASH"
-     echo "Platform Gateway: $ACTUAL_PLATFORM_HASH"
-   fi
-   ```
-
-3. **Handle stale bundle scenarios**:
-   - If bundles don't update after ConfigMap changes, perform rolling restart:
-     ```bash
-     kubectl rollout restart deployment/tool-gateway deployment/platform-gateway
-     ```
-   - Verify the restart took effect by checking readiness endpoints
-   - Use `make policy-diff` to understand what changed between versions
-
-**Updated** Enhanced policy bundle troubleshooting with complete SPEC-048 workflow including provenance verification and path-keyed caching behavior
-
-**Section sources**
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md:46-63](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L63)
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md:101-114](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md#L101-L114)
-- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md:16-25](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L16-L25)
-- [products/platform-gateway/src/platform_gateway/services/policy_engine.py:323-360](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L323-L360)
-- [products/tool-gateway/src/tool-gateway/services/policy_engine.py:254-296](file://products/tool-gateway/src/tool-gateway/services/policy_engine.py#L254-L296)
-
-### Log Analysis Techniques
-- Centralize logs and use structured formats
-- Correlate logs by request IDs and trace spans
-- Filter by severity and component
-- Use log aggregation tools for search and dashboards
-
-**Section sources**
-- [agent-platform/src/agent_platform/core/observability.py](file://products/agent-platform/src/agent_platform/core/observability.py)
-- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-### Metric Interpretation
-- Track request rate, latency percentiles, and error rates
-- Monitor session store operations and TTL expirations
-- Observe provider call success/failure ratios
-- Alert on anomalies and threshold breaches
-- **Monitor OTel exporter metrics and OpenObserve ingestion rates**
-- **Track transcript fallback frequency and kernel state snapshot success rates**
-- **Monitor parked confirmation resolution times and session operation delays**
-- **Analyze asset caching hit rates and portal performance metrics**
-- **Track voice recognition success rates and browser compatibility metrics**
-- **Monitor bounded pane rendering performance and overflow detection accuracy**
-- **Monitor policy bundle provenance hashes and deployment verification**
-
-**Section sources**
-- [agent-platform/src/agent_platform/core/metrics.py](file://products/agent-platform/src/agent_platform/core/metrics.py)
-- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-### Trace Correlation
-- Propagate trace IDs across services
-- Map spans to specific operations (auth, policy, tool invocation)
-- Visualize end-to-end flows to identify bottlenecks
-- Annotate traces with contextual metadata
-- **Use OpenObserve to correlate traces across the entire platform**
-
-**Section sources**
-- [shared/shared-contracts/observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-### Agent Execution Issues
-Symptoms:
-- Agents fail to start or execute tasks
-- Provider calls time out or return errors
-- Sessions not persisted or restored
-
-Diagnostic steps:
-- Check agent logs for startup errors
-- Validate provider credentials and quotas
-- Inspect session store connectivity and TTLs
-
-Resolution:
-- Fix provider configuration and credentials
-- Adjust session TTL and concurrency
-- Scale agents and tune resource limits
-
-**Section sources**
-- [agent-platform/src/agent_platform/services/runtime_service.py](file://products/agent-platform/src/agent_platform/services/runtime_service.py)
-- [agent-platform/src/agent_platform/services/session_store.py](file://products/agent-platform/src/agent_platform/services/session_store.py)
-
-### Policy Enforcement Problems
-Symptoms:
-- Requests denied unexpectedly
-- Policies not applied as expected
-- Scope mismatches leading to access issues
-
-Diagnostic steps:
-- Review policy engine decisions and logs
-- Validate policy rules and scopes
-- Check identity context propagation
-
-Resolution:
-- Update policy rules and ensure correct scoping
-- Align identity context with policy requirements
-- Test policy changes in staging before production
-
-**Section sources**
-- [tool-gateway/src/api_gateway/services/policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
-
-### Identity Integration Challenges
-Symptoms:
-- Authentication failures
-- Token validation errors
-- Mismatched audiences or issuers
-
-Diagnostic steps:
-- Validate OIDC discovery and endpoints
-- Inspect token payloads and claims
-- Ensure consistent issuer and audience settings
-
-Resolution:
-- Correct OIDC configuration
-- Align token verifier with Identity Broker
-- Rotate signing keys and update clients
-
-**Section sources**
-- [identity-broker/src/identity_service/services/token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [tool-gateway/src/api_gateway/services/token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
-
-### Escalation Procedures
-- Collect logs, metrics, and traces for the affected period
-- Reproduce the issue in a staging environment if possible
-- Engage platform maintainers with detailed diagnostics
-- Follow up with community channels for additional support
-- **For OpenObserve issues, include telemetry pipeline validation results and exporter logs**
-- **For session issues, include confirmation registry state and transcript fallback logs**
-- **For portal issues, include browser compatibility details and caching behavior**
-- **For voice input issues, include browser version, OS, and microphone permission status**
-- **For OIDC issues, include redirect URI configuration and hostname behavior details**
-- **For bounded pane issues, include browser console logs and overflow detection timing**
-- **For policy bundle issues, include provenance hash comparison and SPEC-048 workflow completion status**
-
-### Community Resources
-- Repository documentation and specs
-- Issue templates and contribution guidelines
-- Release notes and roadmap updates
-
-**Section sources**
-- [README.md](file://README.md)
-- [CONTRIBUTING.md](file://CONTRIBUTING.md)
+- [SPEC-005-observability-baseline/spec.md:12-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L12-L35)
+- [observability-conventions.md:58-69](file://shared/shared-contracts/observability-conventions.md#L58-L69)
+- [metrics.py (execution-runtime):93-111](file://products/execution-runtime/src/execution_runtime/core/metrics.py#L93-L111)
+- [observability.py (execution-runtime):9-24](file://products/execution-runtime/src/execution_runtime/core/observability.py#L9-L24)
+- [observability.py (audit-service):9-23](file://products/audit-service/src/audit_service/core/observability.py#L9-L23)
+- [observability.py (skills-hub):9-23](file://products/skills-hub/src/skills_hub/core/observability.py#L9-L23)
+- [observability.py (incident-service):9-23](file://products/incident-service/src/incident_service/core/observability.py#L9-L23)
 
 ## Conclusion
-This troubleshooting guide equips you with systematic approaches to diagnose and resolve common issues across the Luban AIOps Platform. By leveraging logs, metrics, and traces, and following the step-by-step resolutions provided, you can quickly address deployment, connectivity, performance, configuration, integration, OpenObserve telemetry challenges, transcript fallback scenarios, session delete conflicts, session enumeration prevention, stale UI symptoms after redeployment, voice input microphone issues, OIDC callback hostname behavior, bounded pane rendering issues, and **SPEC-048 policy bundle rollout controls**. For further assistance, consult community resources and escalate with comprehensive diagnostics when necessary.
+Use this guide to systematically diagnose and resolve common issues across deployment, authentication, tool execution, performance, and data consistency. Leverage the platform’s built-in observability surfaces (/metrics, OTel, audit trail) and follow the documented secret provisioning and policy rollout procedures to maintain reliability and security. When in doubt, start with readiness endpoints, metrics, and structured logs to narrow the problem scope before making configuration changes.
+
+[No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
-### Frequently Asked Questions
-- Why am I seeing "unauthorized" errors?
-  - Verify token format, issuer, and audience; check Identity Broker configuration.
-- Why do my agent sessions disappear?
-  - Check Redis connectivity, TTL settings, and session store configuration.
-- Why are policy decisions denying my requests?
-  - Review policy rules, scopes, and identity context propagation.
-- How do I troubleshoot high latency?
-  - Analyze metrics and traces; scale services; optimize provider calls.
-- What should I include when escalating an issue?
-  - Logs, metrics, traces, reproduction steps, and environment details.
-- **Why aren't my traces appearing in OpenObserve?**
-  - Check `OTEL_ENABLED`, verify `OTEL_EXPORTER_OTLP_ENDPOINT`, ensure `OTEL_EXPORTER_OTLP_HEADERS` secret is present, and run `sync-otel-secrets.sh`.
-- **How do I validate the telemetry pipeline?**
-  - Use `.ooq.py` and `.ooq2.py` probes to check OpenObserve connectivity and trace propagation across services.
-- **What causes log bridge failures?**
-  - Ensure `OTEL_ENABLED=true`, verify structured logging is configured, and check that `setup_telemetry()` is called during service startup.
-- **Why does my session transcript show as unavailable?**
-  - Kernel state snapshots may be missing or corrupted; transcripts are best-effort and fall back gracefully to empty lists.
-- **Why can't I delete a session?**
-  - Check for parked HITL confirmations that must be resolved first; 409 status indicates unresolved confirmations.
-- **Why do I get 404 for session access attempts?**
-  - Anti-enumeration protection treats unknown and foreign session IDs identically to prevent enumeration attacks.
-- **Why is my portal UI showing old content after redeployment?**
-  - Force browser reload (Ctrl+Shift+R) to bypass cached assets; content-hashed assets use immutable caching for performance.
-- **Why is the voice input microphone button disabled or not working?**
-  - Use Chrome or Edge browser, grant microphone permissions, and ensure Web Speech API support; Firefox has limited compatibility.
-- **Why do OIDC callbacks always return to the canonical hostname?**
-  - The identity broker always uses `OIDC_REDIRECT_URI` (`https://aiops.luban.metasync.cc/callback`) as the callback destination, regardless of which origin users start from. Fallback hostnames like `.k8s.orb.local` are only for reachability testing.
-- **How do I fix voice recognition errors?**
-  - Check browser microphone permissions, verify audio device availability, and switch recognition language in the composer selector.
-- **Why isn't the "Expand to full height" affordance appearing for long content?**
-  - The bounded pane uses a 320px constraint with delayed overflow detection (300ms) to account for animations; wait for the post-motion re-measure to trigger the affordance.
-- **How do I handle outdated policy bundles?**
-  - Follow the complete SPEC-048 workflow: edit → `make sync-policy` → `make verify` → `make policy-diff` → commit → deploy → confirm provenance hash via `policy_bundle_sha256` fingerprints.
-
-### OpenObserve Configuration Reference
-**Environment Variables:**
-- `OTEL_ENABLED`: Enable/disable OTel push pipeline (default: false)
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: OTLP HTTP endpoint (e.g., `http://openobserve-router.openobserve.svc.cluster.local:5080/api/default`)
-- `OTEL_EXPORTER_OTLP_HEADERS`: Authentication header (provisioned via secrets)
-- `OTEL_SERVICE_NAME`: Service name for telemetry identification
-
-**Secret Management:**
-- Headers are provisioned via `sync-otel-secrets.sh` script
-- Requires `OO_ROOT_USER_EMAIL` and `OO_ROOT_USER_PASSWORD` environment variables
-- Updates all six service secrets and performs rolling restart
-
-**Validation Tools:**
-- `.ooq.py`: One-shot OpenObserve probe for stream validation
-- `.ooq2.py`: Cross-service trace correlation probe
-- Both tools authenticate with default OpenObserve credentials
+### Health and Response Schemas
+- Health response schema defines status values and service metadata used by readiness endpoints.
+- Chat response schema defines status values for streaming responses.
 
 **Section sources**
-- [docs/guides/configuration-reference.md:302-313](file://docs/guides/configuration-reference.md#L302-L313)
-- [shared/platform-ops/gitops/sync-otel-secrets.sh:1-131](file://shared/platform-ops/gitops/sync-otel-secrets.sh#L1-L131)
-- [.ooq.py:1-84](file://.ooq.py#L1-L84)
-- [.ooq2.py:1-69](file://.ooq2.py#L1-L69)
-- [shared/shared-contracts/observability-conventions.md:47-57](file://shared/shared-contracts/observability-conventions.md#L47-L57)
+- [health-response.schema.json:1-20](file://shared/shared-contracts/schemas/health-response.schema.json#L1-L20)
+- [chat-response.schema.json:1-25](file://shared/shared-contracts/schemas/chat-response.schema.json#L1-L25)
 
-### Portal Caching Strategy Reference
-**Asset Caching:**
-- Content-hashed bundle assets: `Cache-Control: public, max-age=31536000, immutable`
-- Index HTML: `Cache-Control: no-store` for immediate redeployment
-- Asset filenames change with every build to enable long-term caching
-
-**Build Process:**
-- Vite generates content-hashed filenames for static assets
-- PLATFORM_VERSION injected at build time from repository VERSION file
-- Multi-stage Docker build ensures clean separation of build and runtime environments
-
-**Deployment Behavior:**
-- Nginx serves hashed assets with immutable caching
-- SPA fallback maintains client routing integrity
-- Redeployments automatically roll over to new asset versions
+### Error Mapping and Receipts
+- Execution results map to receipt statuses: success → succeeded, TIMEOUT → timeout, other errors → failed.
+- Rejection reasons are recorded with digest mismatch detection for signed envelopes.
 
 **Section sources**
-- [operator-portal/nginx.conf:19-30](file://products/operator-portal/nginx.conf#L19-L30)
-- [operator-portal/web-ui/app/vite.config.ts:6-25](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L25)
-- [operator-portal/Dockerfile:1-29](file://products/operator-portal/Dockerfile#L1-L29)
+- [executor.py:124-151](file://products/execution-runtime/src/execution_runtime/services/executor.py#L124-L151)
+- [runtime_kernel.py:1826-1857](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1826-L1857)
 
-### Voice Input Configuration Reference
-**Browser Compatibility:**
-- Full support: Chrome, Edge (desktop)
-- Limited support: Firefox, Safari (may require workarounds)
-- Web Speech API detection and graceful degradation implemented
-
-**Language Support:**
-- English (US): `en-US`
-- Chinese (Mandarin): `zh-CN`
-- Default resolves from browser locale with fallback to `en-US`
-- Language selection persists in localStorage
-
-**Permission Handling:**
-- Microphone permission required for voice input
-- Error messages map to browser error codes (not-allowed, no-speech, audio-capture, network)
-- Graceful degradation when Web Speech API unavailable
+### Portal Error Messaging
+- Portal maps API errors to user-friendly messages for incident report creation and related operations.
 
 **Section sources**
-- [operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts:1-135](file://products/operator-portal/web-ui/app/src/voice/useSpeechRecognition.ts#L1-L135)
-- [operator-portal/web-ui/app/src/voice/languages.ts:1-60](file://products/operator-portal/web-ui/app/src/voice/languages.ts#L1-L60)
-- [operator-portal/web-ui/app/src/chat/ChatView.tsx:487-721](file://products/operator-portal/web-ui/app/src/chat/ChatView.tsx#L487-L721)
-
-### OIDC Callback Hostname Reference
-**Primary vs Extra Redirect URIs:**
-- **Primary callback**: `OIDC_REDIRECT_URI=https://aiops.luban.metasync.cc/callback` - Always used by identity broker
-- **Extra callbacks**: `OIDC_EXTRA_REDIRECT_URIS=https://aiops.luban.k8s.orb.local/callback,http://localhost:18080/callback` - Registered with Keycloak only for reachability
-- **Behavior**: All sign-in flows return to the canonical hostname regardless of starting origin
-
-**Configuration:**
-- Primary URI defined in `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env`
-- Extra URIs registered with Keycloak client for development/testing flexibility
-- Reconciliation script: `shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh`
-
-**Expected Behavior:**
-- Users can start sign-in from any registered origin
-- Authentication always completes at `https://aiops.luban.metasync.cc/callback`
-- Browser history and bookmarks should use canonical hostname for consistency
-- Fallback hostnames are for internal testing and debugging only
-
-**Section sources**
-- [shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env:8-11](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtime-config.env#L8-L11)
-- [identity-broker/src/identity_service/services/identity_service.py:81-111](file://products/identity-broker/src/identity_service/services/identity_service.py#L81-L111)
-- [docs/guides/configuration-reference.md:443-446](file://docs/guides/configuration-reference.md#L443-L446)
-
-### Bounded Pane Implementation Reference
-**Height Constraint:**
-- **320px bounded pane**: Digest and narrative blocks are bounded to 320px maximum height
-- **Single-sourced configuration**: `BOUNDED_PANE_MAX_HEIGHT = 320` is the single source of truth
-- **CSS custom property**: Height applied via `--bounded-pane-max-height: 320px` for consistent styling
-
-**Overflow Detection:**
-- **Immediate measurement**: Initial overflow check runs on component mount
-- **Delayed re-measure**: Second measurement runs after 300ms delay to account for antd enter motion
-- **Affordance display**: "Expand to full height" button appears only when content overflows the bound
-
-**Pinned Chrome Behavior:**
-- **Tab bar pinning**: Digest tab bar stays visible while content scrolls underneath
-- **Collapse header pinning**: Narrative collapse header stays visible while body scrolls
-- **Bound removal**: When expanded, the bound class is removed entirely for full-height viewing
-
-**Implementation Details:**
-- **useBoundedRegion hook**: Manages overflow detection state and timing
-- **boundedPaneStyle function**: Applies CSS custom property to wrapper elements
-- **ExpandAffordance component**: Provides expand/collapse toggle functionality
-
-**Section sources**
-- [operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx:1074-1143](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L1074-L1143)
-- [docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md:14-31](file://docs/agentic-aiops-platform/release-notes/2026-08-29-bounded-pane-review-follow-ups.md#L14-L31)
-- [docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md:17-37](file://docs/agentic-aiops-platform/release-notes/2026-08-29-portal-live-check-polish.md#L17-L37)
-
-### Policy Bundle Rollout Reference (SPEC-048)
-**Complete Workflow:**
-1. **Edit**: Modify `shared/shared-contracts/policies/policy-default.yaml` (bump version field)
-2. **Sync**: `make sync-policy` copies to all locations (packaged, overlay, etc.)
-3. **Verify**: `make verify` runs schema validation and scenario-expectation guard
-4. **Review**: `make policy-diff CANDIDATE=<bundle>` reports per-(role, action) transitions
-5. **Commit**: Include bundle, scenario updates, and synced replicas in one commit
-6. **Deploy**: `make deploy` with rolling restart of gateway deployments
-7. **Confirm**: Verify `policy_bundle_sha256` fingerprints match expected hash
-
-**Bundle Caching Behavior:**
-- **Path-keyed caching**: Bundles cached in memory keyed on configured path
-- **No hot reload**: Changed ConfigMaps require pod restart to take effect
-- **Provenance tracking**: SHA-256 fingerprint computed at load time, never authored
-- **Verification surfaces**: Available on both gateways' `/health/ready` endpoints
-
-**Fingerprint Verification:**
-```bash
-# Expected hash from canonical file
-EXPECTED_HASH=$(shasum -a 256 shared/shared-contracts/policies/policy-default.yaml | awk '{print $1}')
-
-# Actual hashes from gateways
-TOOL_HASH=$(kubectl -n dev-luban-aiops exec deployment/tool-gateway -- \
-  curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
-  
-PLATFORM_HASH=$(kubectl -n dev-luban-aiops exec deployment/platform-gateway -- \
-  curl -s localhost:8000/health/ready | jq -r '.policy_bundle_sha256')
-
-# Verify both match expected
-echo "Expected: $EXPECTED_HASH"
-echo "Tool Gateway: $TOOL_HASH"
-echo "Platform Gateway: $PLATFORM_HASH"
-```
-
-**Scenario-Expectation Harness:**
-- **Full grant coverage**: Every canonical rule's grants covered by expectations
-- **Deliberate denials**: Named denial scenarios enforced (auditor, observer, developer restrictions)
-- **Mechanical enforcement**: Any new grant without recorded expectation fails the gate
-- **Shared evaluator**: Uses real engine modules, no re-implementation
-
-**Section sources**
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md:46-63](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L46-L63)
-- [docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md:101-114](file://docs/specs/SPEC-048-policy-testing-rollout-controls/plan.md#L101-L114)
-- [docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md:16-25](file://docs/agentic-aiops-platform/release-notes/2026-09-02-spec-048-policy-testing-rollout-controls.md#L16-L25)
-- [docs/guides/configuration-reference.md:300-323](file://docs/guides/configuration-reference.md#L300-L323)
+- [DocumentsView.tsx:70-102](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L70-L102)

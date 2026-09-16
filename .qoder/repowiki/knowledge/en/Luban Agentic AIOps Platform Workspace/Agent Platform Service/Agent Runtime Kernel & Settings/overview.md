@@ -1,0 +1,1 @@
+Wraps AgentScope to orchestrate per-session agent turns, streaming events, HITL confirmation bridging, signed execution handoff, and evidence persistence for the Luban agent platform.

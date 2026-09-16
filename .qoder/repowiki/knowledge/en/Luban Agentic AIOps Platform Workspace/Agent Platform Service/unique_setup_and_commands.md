@@ -1,0 +1,1 @@
+Built and run via the project `Makefile` and `pyproject.toml` lockfile; the service supports two launch modes — a native FastAPI process and a runtime `AgentApp` wrapper — selected through environment-driven entrypoints.

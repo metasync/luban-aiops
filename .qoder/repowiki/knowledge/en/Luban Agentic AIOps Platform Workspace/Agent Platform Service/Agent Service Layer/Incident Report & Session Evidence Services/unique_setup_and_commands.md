@@ -1,0 +1,1 @@
+Postgres-backed evidence store requires `AGENT_STATE_STORE_BACKEND=postgres` plus `AGENT_STATE_DB_URL`; on startup `initialize()` runs the `session_evidence` table DDL. If the connection fails, `build_evidence_store()` logs a warning and silently falls back to the in-memory backend so evidence degrades to live-only rather than crashing.

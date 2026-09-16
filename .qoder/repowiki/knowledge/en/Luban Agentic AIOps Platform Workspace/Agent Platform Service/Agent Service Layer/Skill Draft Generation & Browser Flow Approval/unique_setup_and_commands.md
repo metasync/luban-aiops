@@ -1,0 +1,1 @@
+Requires `RuntimeSettings.skills_service_url` and `skills_client_secret` to be configured; when absent, `is_configured()` returns false and validation short-circuits with a 503-style `SkillsDependencyNotConfigured` rather than calling the upstream service.

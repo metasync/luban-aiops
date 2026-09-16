@@ -1,0 +1,1 @@
+Python async runtime over the AgentScope framework (`agentscope.agent.Agent`, `agentscope.tool.Toolkit`, `agentscope.middleware.*`); configurable providers dashscope/deepseek/openai/luban; HMAC-SHA256 signing for execution requests via `execution_signing`; zoneinfo-based timezone validation.

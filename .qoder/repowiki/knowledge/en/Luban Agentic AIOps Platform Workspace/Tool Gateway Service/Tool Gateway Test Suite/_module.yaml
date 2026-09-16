@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: tool_gateway/tests
+title: Tool Gateway Test Suite
+scope:
+    - products/tool-gateway/tests/
+source_files: []
+depends_on: []
+related_to: []

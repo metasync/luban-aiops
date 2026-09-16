@@ -6,38 +6,58 @@ scope:
     - '**'
 ---
 
-### SDD
-- Definition：Spec-Driven Development - the project's development methodology where features are implemented through formal specifications (SPEC-XXX documents) that define requirements, acceptance criteria, and tasks before implementation begins. Each spec follows a lifecycle from draft → approved → delivered, with delivery gates ensuring quality standards.
-- Aliases：spec-driven development、SPEC-XXX
+### HITL
+- Definition：Human-In-The-Loop approval gate. Write-tier browser actions (click, type, select, press_key, upload_file) park a confirmation card in the operator portal that a human must approve before execution proceeds. The design enforces a single HITL boundary per mutating flow (e.g., the admin sign-in click is the access-control gate; subsequent password reset uses read-only navigation).
+- Aliases：human-in-the-loop、approval gate、confirmation card
 
-### ADR
-- Definition：Architecture Decision Record - formal documentation of architectural decisions made during development, following a template that captures context, decision, consequences, and status. ADRs follow a lifecycle from proposed → accepted and serve as immutable records of design rationale.
-- Aliases：architecture decision record、ADR-000X
+### read-tier / write-tier
+- Definition：Risk classification for browser tools. Read-tier tools (navigate, snapshot, screenshot, fill_credential, extract, wait_for, hover, evaluate, scroll, switch_frame) do not mutate state and auto-execute after origin re-check. Write-tier tools mutate the target page and require HITL approval. This distinction drives whether a call parks a confirmation card or executes immediately.
+- Aliases：risk tier、tier_1、tier_2
 
-### Identity Broker
-- Definition：The identity-broker service acts as the platform's internal identity provider, handling SSO authentication, identity federation, group normalization, and identity propagation. It issues JWT tokens signed with RSA keys and serves JWKS endpoints for token verification by other services.
-- Aliases：identity-service、broker
+### flow-bound / bound flow
+- Definition：A browser session is scoped to a single target origin established when `web.navigate` first loads a page. Subsequent tool calls must stay within that origin; cross-origin interactions (including iframes via `web.switch_frame`) are denied. The flow also tracks steps consumed and can be marked approved/denied.
+- Aliases：flow binding、bound origin、flow scope
 
-### Tool Gateway
-- Definition：The api-gateway service provides normalized tool and connector access, including MCP (Model Context Protocol) integration and external system connectivity. It enforces policies, validates identities, and routes tool invocations to appropriate execution backends.
-- Aliases：api-gateway、gateway
+### skill
+- Definition：A natural-language runbook document (Markdown) that instructs the AgentScope agent how to operate a target system. Skills are ingested into the skills-hub service and surfaced to agents during chat. A complete automation pairs a skill with target infrastructure, credential sets, deployment wiring, and a demo script.
+- Aliases：runbook、platform-runbook、ResetUserPassword skill
 
-### Agent Platform
-- Definition：The agent-platform service provides the agent runtime, orchestration, session handling, and streaming capabilities. It implements the platform-owned agent-service contract and currently uses AgentScope as its underlying orchestration kernel.
-- Aliases：agent-service、runtime
+### credential set
+- Definition：Server-side secret definitions (e.g., `admin-portal`) mounted into the agent runtime. Tools like `web.fill_credential` consume a credential set name — the actual values never leave the secrets store and are never logged or returned in snapshots/results.
+- Aliases：credentials、secret set
 
-### Operator Portal
-- Definition：The web-based interface for operators, approvers, and auditors to manage the platform. It includes silent token refresh functionality (~60s before expiry via POST /api/v1/auth/refresh) and provides administrative controls for the agentic AIOps platform.
-- Aliases：web-ui、portal
+### SPEC-NNN
+- Definition：The project's requirement/specification numbering scheme. Each feature goes through draft → approved → delivered stages tracked in `docs/specs/SPEC-NNN-*/spec.md`, with index rows in `docs/specs/README.md` and roadmap entries in `delivery-roadmap.md`. Examples seen: SPEC-049 (browser web-check tools), SPEC-050 (browser tools expansion + samples reorganization), SPEC-048 (policy testing & rollout controls).
+- Aliases：spec number、SPEC
 
-### dev-k8s Overlay
-- Definition：The Kubernetes deployment overlay for the development environment, managed through kustomize. It configures all platform services, Redis infrastructure, and networking for local development and testing purposes.
-- Aliases：dev overlay、development k8s
+### samples/web-checks/password-reset
+- Definition：Self-contained tutorial sample demonstrating a write-class browser web-check: an agent follows the ResetUserPassword skill to log into a simulated legacy admin panel and reset a user's password, with a single HITL gate for the login click. Bundles the skill doc, target HTML pages, credential set, demo script, and kustomize wiring.
+- Aliases：password-reset demo、password-reset sample
 
-### Runtime Profile
-- Definition：Environment-specific configuration sets for different AI model providers (dashscope, deepseek, openai). Each profile contains ConfigMaps and example secrets that customize the agent-platform behavior for specific model backends.
-- Aliases：profile、runtime-config
+### tool-gateway
+- Definition：FastAPI service that hosts the browser tool surface (`web.*` tools). It owns session lifecycle, origin allowlisting, deviation guarding, credential masking, and HITL confirmation cards exposed to the operator portal. Runs alongside a browser sidecar container.
+- Aliases：gateway、tool gateway
 
-### Release 0/1
-- Definition：Major release milestones in the platform's evolution. Release 0 established the platform foundation, while Release 1 delivered SPEC-001 through SPEC-006 including agent-platform, identity-broker, tool-gateway, and operator-portal implementations.
-- Aliases：R0、R1、release milestone
+### skills-hub
+- Definition：Service that serves skill documents to agents. Skills are mounted into its volume via a ConfigMap generator; changes to skill content require regeneration and redeploy.
+- Aliases：skills hub
+
+### agent-service
+- Definition：Service that orchestrates agents. It forwards tool calls to the tool-gateway, renders HITL confirmation cards in the operator portal, and enforces flow binding and step budgets.
+- Aliases：agent service
+
+### operator portal
+- Definition：Web UI at `http://localhost:8080` where operators chat with agents, view live streams, and approve HITL confirmation cards. Also shows settings and audit logs.
+- Aliases：portal、operator UI
+
+### target admin panel
+- Definition：Simulated legacy web application served at `http://localhost:9090/admin/` for demos. Includes login, user management, password reset form (auto-fills from URL params and auto-submits), and confirmation page. Mounted into the cluster as HTML files via a ConfigMap.
+- Aliases：admin panel、legacy admin panel、target
+
+### L3 deep review
+- Definition：Security scan performed before pushing commits. In this repo it is invoked as a subagent that reviews diffs and reports findings with severity/confidence. Findings can be accepted as deliberate design (e.g., `web.fill_credential` auto-allow classified as correct per SPEC-049 D-3).
+- Aliases：security scan、deep review、L3 scan
+
+### make verify
+- Definition：Top-level verification gate that runs all product test suites, renders all kustomize overlays, validates policy rules, checks version lockstep across products, and confirms scenario coverage. Green status is required before tagging releases.
+- Aliases：verify gate、verification

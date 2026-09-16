@@ -1,0 +1,4 @@
+- Process-wide singletons are exposed as module-level objects (e.g. `MODEL_CATALOG`, `CONFIRMATION_REGISTRY`) rather than passed as arguments, with lazy initialization at import time.
+- Credential-bearing objects expose a separate `to_public_dict()` view that strips secrets before being serialized for discovery endpoints.
+- Mutable shared state is updated atomically under a `threading.Lock` while readers take snapshots of internal references to avoid holding locks during iteration.
+- Per-provider configuration is resolved uniformly from `<PROVIDER>_API_KEY` / `_BASE_URL` / `_MODELS` env vars with a helper (`_env`, `_model_list`) that normalizes whitespace and None values.

@@ -1,0 +1,1 @@
+httpx async client for skills-hub validation; Pydantic `BaseModel` with `ConfigDict(extra='forbid')` for fenced-contract frontmatter parsing; regex-based fenced-contract extraction (````skill-frontmatter`); AgentScope `Msg`/`TextBlock` for LLM calls with a hard `SKILL_DRAFT_TIMEOUT_SECONDS=30` timeout.

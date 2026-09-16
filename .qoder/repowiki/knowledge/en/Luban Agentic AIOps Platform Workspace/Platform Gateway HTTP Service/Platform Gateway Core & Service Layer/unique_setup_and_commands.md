@@ -1,0 +1,1 @@
+The service is started via `platform_gateway.main.run()`, which reads `PLATFORM_GATEWAY_HOST` / `PLATFORM_GATEWAY_PORT` into `GatewayRunSettings` and invokes `uvicorn.run(app, ...)`. All runtime configuration (service URLs, JWKS cache TTL, auth toggles, timeouts, client secrets) comes from environment variables read by `PlatformGatewaySettings.from_env()`.

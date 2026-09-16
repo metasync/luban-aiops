@@ -1,0 +1,1 @@
+FastAPI + Uvicorn for the native HTTP server; AgentScope (`agentscope.app`) for storage/message bus/workspace management; optional `agentscope-runtime` (`AgentApp`) for the streaming runtime entrypoint.

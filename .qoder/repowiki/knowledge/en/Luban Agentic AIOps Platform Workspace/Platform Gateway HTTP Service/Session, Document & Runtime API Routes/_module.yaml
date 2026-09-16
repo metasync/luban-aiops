@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: platform_gateway/session_workspace
+title: Session, Document & Runtime API Routes
+scope:
+    - products/platform-gateway/src/platform_gateway/api/routes/sessions.py
+    - products/platform-gateway/src/platform_gateway/api/routes/documents.py
+    - products/platform-gateway/src/platform_gateway/api/routes/runtime.py
+source_files: []
+depends_on: []
+related_to: []

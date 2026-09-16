@@ -1,0 +1,5 @@
+- Configuration is exposed as frozen dataclasses with `from_env()` classmethods and a cached `get_settings()` accessor, validated in `__post_init__` rather than at read time.
+- All failures on the handoff path return structured JSON bodies with a uniform `{request_id, error: {code, reason, message}}` shape instead of raising exceptions, ensuring the caller always receives a parseable response.
+- Secrets and sensitive values are compared with `hmac.compare_digest` (constant-time) and never logged or persisted; missing secrets cause fail-closed behavior rather than silent degradation.
+- Cross-cutting concerns (logging, metrics, telemetry, request context) are wired once during app startup and accessed via module-level helpers rather than per-request construction.
+- Audit events are emitted through a dedicated `audit_emitter` layer using `build_audit_event`/`emit_audit_event`, keeping audit payload construction out of route handlers.

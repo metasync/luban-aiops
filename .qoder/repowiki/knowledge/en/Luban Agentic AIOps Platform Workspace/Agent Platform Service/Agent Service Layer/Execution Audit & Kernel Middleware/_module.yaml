@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: agent_platform/services/execution_audit
+title: Execution Audit & Kernel Middleware
+scope:
+    - products/agent-platform/src/agent_service/services/execution_worker_client.py
+    - products/agent-platform/src/agent_service/services/execution_records.py
+    - products/agent-platform/src/agent_service/services/kernel_middleware.py
+source_files: []
+depends_on: []
+related_to:
+    - path: execution_runtime

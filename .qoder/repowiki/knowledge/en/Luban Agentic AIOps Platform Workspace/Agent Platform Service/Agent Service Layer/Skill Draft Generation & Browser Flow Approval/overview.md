@@ -1,0 +1,1 @@
+Generates validated Markdown skill drafts from session or incident facts via a bounded LLM call and enforces per-session, TTL-bounded operator approval for mutating browser flows.

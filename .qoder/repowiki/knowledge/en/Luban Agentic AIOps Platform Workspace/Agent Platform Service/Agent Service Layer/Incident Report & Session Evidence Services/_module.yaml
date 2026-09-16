@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: agent_platform/services/document_evidence
+title: Incident Report & Session Evidence Services
+scope:
+    - products/agent-platform/src/agent_service/services/incident_client.py
+    - products/agent-platform/src/agent_service/services/incident_report.py
+    - products/agent-platform/src/agent_service/services/evidence_store.py
+source_files: []
+depends_on: []
+related_to:
+    - path: incident_service

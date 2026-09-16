@@ -1,0 +1,1 @@
+Masks secrets in tool-call parameters, chat prose, and evidence frames, and persists durable authoring traces of approved mutating steps for skill graduation.

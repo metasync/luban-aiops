@@ -1,0 +1,1 @@
+Python (uv-managed), FastAPI for HTTP, AgentScope as the agent runtime kernel, Redis and Postgres for session persistence, OpenTelemetry for telemetry, and Pydantic for API contracts.

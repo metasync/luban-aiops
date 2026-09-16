@@ -1,0 +1,1 @@
+FastAPI-based agent-service that exposes /api/v2 endpoints over an AgentScope runtime kernel with pluggable model providers, session stores, and skill execution.

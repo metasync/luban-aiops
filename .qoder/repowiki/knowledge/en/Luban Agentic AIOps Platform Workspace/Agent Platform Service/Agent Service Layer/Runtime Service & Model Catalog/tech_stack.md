@@ -1,0 +1,1 @@
+Python async/await with `AsyncIterator[str]` for SSE streaming; `functools.lru_cache(maxsize=1)` for process-wide kernel caching; `threading.Lock` for thread-safe in-place catalog swaps; dataclasses with frozen=True for immutable catalog entries.

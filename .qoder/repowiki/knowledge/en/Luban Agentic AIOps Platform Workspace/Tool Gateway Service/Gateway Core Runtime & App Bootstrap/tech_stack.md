@@ -1,0 +1,1 @@
+FastAPI application server with uvicorn; settings modeled as frozen `dataclass` instances with `lru_cache`-memoized loaders; optional connectors (Kubernetes client, Elasticsearch, Skills/Incidents services, Chromium CDP) loaded lazily at startup based on environment flags.

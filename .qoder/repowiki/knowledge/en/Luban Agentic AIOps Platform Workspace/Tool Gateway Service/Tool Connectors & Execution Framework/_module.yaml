@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: tool_gateway/tool_connectors
+title: Tool Connectors & Execution Framework
+scope:
+    - products/tool-gateway/src/tool_gateway/tools/
+source_files: []
+depends_on: []
+related_to: []

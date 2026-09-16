@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: agent_platform/api_routes
+title: Agent Service v2 HTTP API Routes & Schemas
+scope:
+    - products/agent-platform/src/agent_service/api/
+    - products/agent-platform/src/agent_service/schemas/
+source_files: []
+depends_on: []
+related_to:
+    - path: platform_gateway/gateway_core
+    - path: shared_contracts_and_sdk

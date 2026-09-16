@@ -1,0 +1,1 @@
+FastAPI + Uvicorn for the HTTP server; `prometheus_client` for in-process metrics exposed at GET /metrics; optional OpenTelemetry SDK with OTLP HTTP/protobuf exporters (traces, metrics, logs) and FastAPI/HTTPX instrumentors, gated by `OTEL_ENABLED`.

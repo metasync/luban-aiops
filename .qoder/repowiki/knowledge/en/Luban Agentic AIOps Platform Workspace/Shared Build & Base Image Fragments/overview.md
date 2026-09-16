@@ -1,0 +1,1 @@
+Reusable GNU Make fragments and a pinned Amazon Linux 2023 base image that standardize container builds, Python dependency sync, and test execution across all products.

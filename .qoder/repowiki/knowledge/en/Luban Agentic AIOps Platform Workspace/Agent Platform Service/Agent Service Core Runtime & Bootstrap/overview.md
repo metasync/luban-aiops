@@ -1,0 +1,1 @@
+Bootstraps the FastAPI agent-service process, wires logging, metrics, OpenTelemetry telemetry, request correlation, and configuration into a single application lifecycle.

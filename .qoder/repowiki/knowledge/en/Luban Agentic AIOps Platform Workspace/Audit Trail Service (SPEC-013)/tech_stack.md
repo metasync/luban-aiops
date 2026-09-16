@@ -1,0 +1,1 @@
+FastAPI + Uvicorn server; psycopg async driver for PostgreSQL; PyJWT with RS256 verification against a cached JWKS client; Prometheus metrics via prometheus-client; OpenTelemetry SDK with OTLP HTTP exporter and FastAPI/httpx/logging instrumentation; Pydantic v2 models for request/response schemas.

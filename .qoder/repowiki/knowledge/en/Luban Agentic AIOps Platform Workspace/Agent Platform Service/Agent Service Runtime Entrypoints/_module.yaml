@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: agent_platform/entrypoints
+title: Agent Service Runtime Entrypoints
+scope:
+    - products/agent-platform/src/agent_service/entrypoints/
+source_files: []
+depends_on: []
+related_to: []

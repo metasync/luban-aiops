@@ -1,0 +1,1 @@
+FastAPI `APIRouter`-based HTTP handlers; Pydantic request/response schemas from `platform_gateway.schemas.api`; policy engine with named action constants; structured observability via `core.observability.log_event` and `services.audit_emitter`.

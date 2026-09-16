@@ -1,0 +1,1 @@
+`make -C products/incident-service` delegates to shared `mk/image.mk` and `mk/python.mk` fragments for build/lint/test/image targets; the package installs a console script `incident-service = incident_service.main:run` via pyproject.toml; environment variables prefixed `INCIDENT_*` configure all behavior (store backend, DB URL, connectors, auth clients, agent service URL).

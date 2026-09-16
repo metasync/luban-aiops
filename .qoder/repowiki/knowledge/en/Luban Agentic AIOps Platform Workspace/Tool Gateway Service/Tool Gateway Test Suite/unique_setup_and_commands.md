@@ -1,0 +1,1 @@
+Tests assume the repository root is three levels up from this directory and require read access to `shared/shared-contracts/policies/policy-default.yaml` and `shared/shared-contracts/schemas/*.json` as well as sibling product sources under `products/*/src/...` for the parity suite; policy overlay drift checks also reach into `platform-ops/gitops/dev-k8s/base/shared/policy.yaml`.

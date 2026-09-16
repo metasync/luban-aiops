@@ -1,0 +1,5 @@
+- Infrastructure modules expose module-level metric objects (Counters, Gauges, Histograms) and small `record_*` helper functions rather than classes, keeping repeated create_app() calls in tests free of double registration.
+- Environment-driven features are guarded by explicit boolean flags read from `os.getenv` (e.g. `OTEL_ENABLED`, `LOG_LEVEL`) so optional subsystems can be toggled without changing code paths.
+- Cross-cutting concerns (logging, metrics, telemetry) are attached as FastAPI middlewares or via `setup_*` functions called during `create_app()`, keeping route handlers free of cross-cutting logic.
+- Request correlation keys are resolved centrally in `request_context.resolve_request_id` by falling back through inbound header → active OTel trace id → generated UUID, instead of being handled per handler.
+- Service identity and defaults are centralized in `metadata.py` and imported by both the entrypoint and the app factory, avoiding magic strings scattered across bootstrap code.

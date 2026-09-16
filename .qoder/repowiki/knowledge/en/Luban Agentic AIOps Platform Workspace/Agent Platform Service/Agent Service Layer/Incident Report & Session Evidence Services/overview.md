@@ -1,0 +1,1 @@
+Fetches incident bundles from the incident-service and assembles deterministic incident-report digests, plus persists per-session tool-call evidence with pluggable in-memory/Postgres backends.

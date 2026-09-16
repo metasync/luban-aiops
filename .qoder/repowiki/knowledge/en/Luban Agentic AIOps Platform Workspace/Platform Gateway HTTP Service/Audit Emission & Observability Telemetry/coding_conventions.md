@@ -1,0 +1,5 @@
+- Long-running or side-effect operations (audit HTTP POST) are offloaded to daemon threads so they never block the request path and exceptions are caught and recorded rather than propagated.
+- Optional features are gated behind environment variables (`OTEL_ENABLED`, `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`) and degrade gracefully to no-op behavior when disabled or unset.
+- Prometheus metrics are declared as module-level `Counter`/`Histogram` objects and incremented through dedicated helper functions (`record_*`) to keep label cardinality bounded and centralized.
+- Structured audit/log events are emitted as JSON strings via `json.dumps(..., sort_keys=True)` so downstream collectors see deterministic field ordering.
+- Heavy third-party libraries (OpenTelemetry SDK, exporters, instrumentations) are imported lazily inside functions so they are only loaded when the feature flag is enabled.

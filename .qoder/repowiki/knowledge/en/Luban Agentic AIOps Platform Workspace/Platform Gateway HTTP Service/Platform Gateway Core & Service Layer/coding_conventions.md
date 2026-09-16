@@ -1,0 +1,6 @@
+- Configuration is modeled as frozen dataclasses with a `from_env()` classmethod that reads named environment variables and falls back to module-level defaults, exposed through an LRU-cached `get_settings()` accessor.
+- Outbound HTTP calls use `httpx.AsyncClient` inside `async with` blocks with explicit `timeout=` values chosen per operation (e.g., 10s for CRUD, 60s for draft generation, connect-only for SSE streams).
+- SSE streaming endpoints build a request with `client.build_request(...)` and `client.send(request, stream=True)`, eagerly check `response.status_code >= 400` before yielding any frames, and always close response/client in finally blocks.
+- Upstream proxy functions follow a uniform error posture: catch `httpx.HTTPStatusError` and pass 4xx through with extracted structured detail, catch `httpx.HTTPError` and re-raise as FastAPI `HTTPException(502, ...)`.
+- Cross-cutting headers propagated to downstream services include `x-request-id` (from request context) and `X-User-ID` (from resolved identity), built by a shared `_headers` helper in each client.
+- Pydantic request/response models mirror shared-contracts schemas with `model_config = ConfigDict(extra='forbid')` and use `Literal` enums for constrained fields rather than free-form strings.

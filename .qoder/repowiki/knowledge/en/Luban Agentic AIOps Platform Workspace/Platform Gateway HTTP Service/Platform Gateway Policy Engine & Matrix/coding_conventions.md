@@ -1,0 +1,6 @@
+- Protected action vocabulary is declared as module-level string constants and aggregated into a `frozenset(PROTECTED_ACTIONS)` that gates which routes are subject to policy enforcement.
+- Policy rules are parsed into frozen `dataclass` objects (`PolicyRule`, `ApprovalSpec`, `PolicyDecision`) with explicit `to_dict()` serializers that map to the published decision schema.
+- Bundle loading is cached in module-level globals keyed by the configured path, with a SHA-256 content fingerprint recorded at load time for provenance reporting.
+- Validation failures during bundle parse raise a single `PolicyLoadError` carrying the offending rule id and source path, rather than propagating raw exceptions.
+- require_approval rules are constrained to a whitelisted `APPROVAL_BRIDGED_ACTIONS` set, and tier_2 approvals explicitly forbid self-approval — enforced in `_parse_approval`.
+- Default deny semantics are implemented by returning a `deny` `PolicyDecision` with an empty `matched_rule_ids` list when no enabled rule matches the requested role-action pair.

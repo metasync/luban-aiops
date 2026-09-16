@@ -1,0 +1,1 @@
+pytest with `fastapi.testclient.TestClient` for HTTP smoke tests, `fakeredis` for Redis-backed session store tests, and a custom fake sync `psycopg` connect context manager for Postgres-backed store tests; Prometheus metrics are read via `prometheus_client.REGISTRY`.

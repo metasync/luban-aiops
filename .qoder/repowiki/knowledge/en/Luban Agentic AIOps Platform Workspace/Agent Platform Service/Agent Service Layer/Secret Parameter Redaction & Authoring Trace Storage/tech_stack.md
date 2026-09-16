@@ -1,0 +1,1 @@
+Python stdlib `re`, `urllib.parse`, `zlib`, `datetime`; Postgres via `psycopg` with JSONB columns and `pg_advisory_xact_lock` for concurrency control; shared vocabulary validated against the tool-gateway twin by `shared/shared-contracts/scripts/validate_secret_vocabulary.py`.

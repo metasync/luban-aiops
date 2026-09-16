@@ -1,0 +1,1 @@
+Markdown-based documentation workflow governed by a spec-driven development process enforced via `make verify` and review discipline rather than automated tooling; ADRs use a numbered sequential scheme with an index table.

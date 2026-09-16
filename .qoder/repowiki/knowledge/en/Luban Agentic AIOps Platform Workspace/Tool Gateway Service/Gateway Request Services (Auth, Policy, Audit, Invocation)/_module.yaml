@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: tool_gateway/gateway_services
+title: Gateway Request Services (Auth, Policy, Audit, Invocation)
+scope:
+    - products/tool-gateway/src/tool_gateway/services/
+source_files: []
+depends_on: []
+related_to:
+    - path: audit_service

@@ -1,0 +1,1 @@
+Bootstraps the FastAPI gateway process, wires configuration, observability, metrics, and tool connectors into a single application instance.

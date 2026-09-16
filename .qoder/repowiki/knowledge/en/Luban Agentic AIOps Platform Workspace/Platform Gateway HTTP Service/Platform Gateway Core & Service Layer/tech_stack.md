@@ -1,0 +1,1 @@
+Python FastAPI + Uvicorn HTTP server; httpx AsyncClient for all outbound service calls (including SSE streaming); Pydantic v2 models with `ConfigDict(extra='forbid')` for strict contract mirroring; JWT verification via a local token verifier backed by JWKS cache; Prometheus metrics via `core/metrics`; OpenTelemetry-style telemetry via `core/telemetry`.

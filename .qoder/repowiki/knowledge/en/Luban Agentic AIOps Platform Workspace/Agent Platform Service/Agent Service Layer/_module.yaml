@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: agent_platform/services
+title: Agent Service Layer
+scope:
+    - products/agent-platform/src/agent_service/services/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,4 @@
+- Each external system is implemented as a `BaseTool` subclass registered through the tool registry rather than imported directly by callers.
+- HTTP handlers obtain stateful collaborators (policy engine, token verifier, audit emitter) via FastAPI dependency injection instead of global singletons.
+- Request boundaries are typed with Pydantic models defined centrally in `schemas/api.py` and reused across routes and tests.
+- Policy decisions follow a deny-by-default model evaluated against a YAML policy file before any tool invocation proceeds.

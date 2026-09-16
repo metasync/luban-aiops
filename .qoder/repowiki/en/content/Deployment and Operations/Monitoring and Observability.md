@@ -3,23 +3,14 @@
 <cite>
 **Referenced Files in This Document**
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
-- [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway core metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
-- [tool-gateway core telemetry.py](file://products/tool-gateway/src/api_gateway/core/telemetry.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [dev-k8s shared observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
-- [dev-k8s agent platform deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [dev-k8s identity broker deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [dev-k8s tool gateway deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
+- [telemetry.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/core/telemetry.py)
+- [observability.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/core/observability.py)
+- [metrics.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
+- [request_context.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/core/request_context.py)
+- [telemetry.py (agent-platform)](file://products/agent-platform/src/agent_service/core/telemetry.py)
+- [observability.py (agent-platform)](file://products/agent-platform/src/agent_service/core/observability.py)
+- [metrics.py (audit-service)](file://products/audit-service/src/audit_service/core/metrics.py)
+- [telemetry.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/core/telemetry.py)
 </cite>
 
 ## Table of Contents
@@ -35,329 +26,257 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive monitoring and observability guidance for the Luban AIOps Platform. It covers Prometheus metrics collection, structured logging conventions, distributed tracing setup, health check endpoints, readiness and liveness probes, dashboarding with Grafana, alerting rules, and performance monitoring. It also includes troubleshooting techniques using logs, metrics, and traces to diagnose operational issues across services such as Agent Platform, Identity Broker, and Tool Gateway.
+This document describes the monitoring and observability model for the Luban AIOPS platform. It explains how OpenTelemetry is integrated across services, how metrics are exposed via a local Prometheus endpoint, how distributed tracing and structured logging are implemented consistently, and how to operate dashboards and alerting on top of these signals. It also documents conventions for metric naming, trace context propagation, log correlation, and health checks.
+
+The platform follows a two-surface design:
+- A pull-based /metrics endpoint that is always enabled and collector-independent.
+- An opt-in OpenTelemetry push pipeline that exports traces, metrics, and mirrored logs over OTLP HTTP/protobuf to a configured backend.
+
+These surfaces are independent; disabling OTel push does not affect /metrics.
+
+**Section sources**
+- [observability-conventions.md:9-16](file://shared/shared-contracts/observability-conventions.md#L9-L16)
 
 ## Project Structure
-Observability is implemented consistently across services via a common set of modules:
-- Core observability modules (metrics, observability, telemetry)
-- API routes exposing health endpoints
-- Kubernetes deployments configuring probes and environment variables
-- Shared observability conventions and specifications
+Each service exposes a consistent observability surface through three modules:
+- telemetry: optional OpenTelemetry initialization and bridge
+- observability: structured logging configuration and helper
+- metrics: always-on Prometheus RED metrics and /metrics endpoint
 
 ```mermaid
 graph TB
-subgraph "Agent Platform"
-AP_app["app.py"]
-AP_metrics["core/metrics.py"]
-AP_obs["core/observability.py"]
-AP_telemetry["core/telemetry.py"]
+subgraph "Service"
+A["FastAPI App"]
+B["Metrics (/metrics)"]
+C["Structured Logging"]
+D["OpenTelemetry Push"]
 end
-subgraph "Identity Broker"
-IB_app["app.py"]
-IB_metrics["core/metrics.py"]
-IB_obs["core/observability.py"]
-IB_telemetry["core/telemetry.py"]
-IB_health["api/routes/health.py"]
-end
-subgraph "Tool Gateway"
-TG_app["app.py"]
-TG_metrics["core/metrics.py"]
-TG_obs["core/observability.py"]
-TG_telemetry["core/telemetry.py"]
-TG_health["api/routes/health.py"]
-end
-subgraph "Kubernetes"
-K_env["shared/observability.env"]
-K_deploy_agent["base/agent-platform/agent-service-deployment.yaml"]
-K_deploy_identity["base/identity-broker/identity-service-deployment.yaml"]
-K_deploy_gateway["base/tool-gateway/api-gateway-deployment.yaml"]
-end
-AP_app --> AP_metrics
-AP_app --> AP_obs
-AP_app --> AP_telemetry
-IB_app --> IB_metrics
-IB_app --> IB_obs
-IB_app --> IB_telemetry
-IB_app --> IB_health
-TG_app --> TG_metrics
-TG_app --> TG_obs
-TG_app --> TG_telemetry
-TG_app --> TG_health
-K_env --> K_deploy_agent
-K_env --> K_deploy_identity
-K_env --> K_deploy_gateway
+A --> B
+A --> C
+C --> D
+A --> D
 ```
 
-**Diagram sources**
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
-- [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway core metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
-- [tool-gateway core telemetry.py](file://products/tool-gateway/src/api_gateway/core/telemetry.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [dev-k8s shared observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
-- [dev-k8s agent platform deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [dev-k8s identity broker deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [dev-k8s tool gateway deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
-
-**Section sources**
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-- [dev-k8s shared observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
-- [dev-k8s agent platform deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [dev-k8s identity broker deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [dev-k8s tool gateway deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
+[No sources needed since this diagram shows conceptual workflow, not actual code structure]
 
 ## Core Components
-Each service implements a consistent observability stack:
-- Metrics: Prometheus-compatible counters, histograms, and gauges exposed on a standard endpoint
-- Structured Logging: JSON-formatted logs with correlation IDs and contextual fields
-- Distributed Tracing: OpenTelemetry-based spans propagated across requests
-- Health Endpoints: Readiness and liveness checks for Kubernetes probes
-- Telemetry Initialization: Centralized setup for exporters and context propagation
+- Telemetry module: initializes TracerProvider, MeterProvider, FastAPI instrumentation, HTTP client instrumentation, and an OTLP log bridge when OTEL_ENABLED is true. It fails open if setup errors occur.
+- Observability module: configures root logger level to INFO by default so structured audit events are emitted, and provides a structured log_event helper.
+- Metrics module: registers a RED middleware and GET /metrics endpoint using prometheus_client with bounded labels.
 
-Key implementation points:
-- Metrics are registered and exported via a dedicated module per service
-- Observability middleware injects trace context and request metadata into logs
-- Telemetry module configures OpenTelemetry providers and propagators
-- Health routes expose readiness and liveness endpoints consumed by Kubernetes
+Key environment variables:
+- OTEL_ENABLED: master switch for OTel push
+- OTEL_EXPORTER_OTLP_ENDPOINT: OTLP HTTP base URL
+- OTEL_EXPORTER_OTLP_HEADERS: authentication headers for the backend
+- OTEL_SERVICE_NAME: resource service name
+- LOG_LEVEL: overrides root logger level
 
 **Section sources**
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
-- [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [tool-gateway core metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
-- [tool-gateway core telemetry.py](file://products/tool-gateway/src/api_gateway/core/telemetry.py)
+- [telemetry.py (platform-gateway):1-133](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L1-L133)
+- [observability.py (platform-gateway):9-24](file://products/platform-gateway/src/platform_gateway/core/observability.py#L9-L24)
+- [metrics.py (platform-gateway):1-117](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L1-L117)
+- [observability-conventions.md:47-69](file://shared/shared-contracts/observability-conventions.md#L47-L69)
 
 ## Architecture Overview
-The observability architecture follows a standardized pattern across services:
-- Application layer initializes telemetry and registers metrics
-- HTTP middleware captures request/response metrics and emits spans
-- Health endpoints provide readiness/liveness status
-- Kubernetes probes call health endpoints to manage lifecycle
-- Prometheus scrapes metrics endpoints; Grafana visualizes dashboards; Alertmanager triggers alerts
+The platform standardizes how each service emits signals and correlates them across boundaries.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
-participant Service as "Service App"
-participant Obs as "Observability Middleware"
-participant Metrics as "Prometheus Exporter"
-participant Tracer as "OpenTelemetry Tracer"
-participant Kube as "Kubernetes Probes"
-Client->>Service : HTTP Request
-Service->>Obs : Intercept request
-Obs->>Tracer : Create span and propagate context
-Obs->>Metrics : Record latency and counters
-Service-->>Client : HTTP Response
-Kube->>Service : GET /healthz (liveness)
-Kube->>Service : GET /ready (readiness)
-Service-->>Kube : Status OK/NotReady
+participant Gateway as "Platform Gateway"
+participant Agent as "Agent Platform"
+participant ToolGW as "Tool Gateway"
+participant Audit as "Audit Service"
+participant OTLP as "OTLP Backend"
+Client->>Gateway : HTTP request
+Gateway->>Gateway : RED metrics + x-request-id resolution
+Gateway->>Agent : Forwarded call (traceparent propagated)
+Agent->>ToolGW : Outbound call (HTTPX instrumented)
+ToolGW->>Audit : Emit audit event
+Note over Gateway,ToolGW : Structured logs bridge to OTLP when enabled
+Gateway-->>Client : Response
+Gateway->>OTLP : Export spans/metrics/logs (if enabled)
+Agent->>OTLP : Export spans/metrics/logs (if enabled)
+ToolGW->>OTLP : Export spans/metrics/logs (if enabled)
+Audit->>OTLP : Export spans/metrics/logs (if enabled)
 ```
 
 **Diagram sources**
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
+- [telemetry.py (platform-gateway):69-117](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L69-L117)
+- [telemetry.py (agent-platform):69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
+- [telemetry.py (tool-gateway):69-117](file://products/tool-gateway/src/tool_gateway/core/telemetry.py#L69-L117)
+- [metrics.py (platform-gateway):74-95](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L74-L95)
+- [metrics.py (audit-service):85-106](file://products/audit-service/src/audit_service/core/metrics.py#L85-L106)
 
 ## Detailed Component Analysis
 
-### Metrics Collection (Prometheus)
-- Each service exposes a metrics endpoint compatible with Prometheus scraping
-- Metrics include request counts, error rates, latency histograms, and business-specific counters
-- Naming follows shared conventions for consistency across services
-
-Implementation highlights:
-- Metrics registration occurs at startup
-- Histograms capture request durations
-- Counters track successful and failed operations
-- Gauges reflect resource utilization where applicable
-
-**Section sources**
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [identity-broker core metrics.py](file://products/identity-broker/src/identity_service/core/metrics.py)
-- [tool-gateway core metrics.py](file://products/tool-gateway/src/api_gateway/core/metrics.py)
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-
-### Structured Logging
-- Logs are emitted in JSON format with consistent fields
-- Correlation IDs enable cross-service request tracing
-- Log levels follow standard conventions (DEBUG, INFO, WARN, ERROR)
-- Sensitive data is excluded from logs
-
-Implementation highlights:
-- Logger initialization sets default fields (service name, version, instance ID)
-- Contextual fields injected per request (trace ID, user ID, session ID)
-- Error logs include stack traces and relevant payloads
-
-**Section sources**
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
-
-### Distributed Tracing (OpenTelemetry)
-- Traces are initialized with OpenTelemetry SDK
-- Spans are created for HTTP requests, database calls, and external API invocations
-- Trace context is propagated via headers (W3C TraceContext)
-- Sampling strategies balance visibility and overhead
-
-Implementation highlights:
-- Tracer provider configured with exporters (e.g., OTLP)
-- Instrumentation libraries auto-instrument HTTP clients/servers
-- Custom spans added for critical business logic
-
-**Section sources**
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker core telemetry.py](file://products/identity-broker/src/identity_service/core/telemetry.py)
-- [tool-gateway core telemetry.py](file://products/tool-gateway/src/api_gateway/core/telemetry.py)
-
-### Health Check Endpoints
-- Liveness probe: Validates service is running and responsive
-- Readiness probe: Validates dependencies (database, cache, external APIs) are available
-- Health endpoints return standard HTTP status codes (200 OK, 503 Service Unavailable)
-
-Implementation highlights:
-- Dedicated routes for /healthz and /ready
-- Dependency checks performed asynchronously
-- Graceful degradation when non-critical dependencies fail
-
-**Section sources**
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
-
-### Kubernetes Probes Configuration
-- Liveness and readiness probes configured in deployment manifests
-- Probe intervals tuned for fast failure detection without excessive load
-- Startup probes allow slow-starting services to initialize properly
-
-Implementation highlights:
-- HTTP probes call health endpoints
-- TCP probes used for port availability checks
-- Failure thresholds prevent premature restarts
-
-**Section sources**
-- [dev-k8s agent platform deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/agent-service-deployment.yaml)
-- [dev-k8s identity broker deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/identity-broker/identity-service-deployment.yaml)
-- [dev-k8s tool gateway deployment.yaml](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/api-gateway-deployment.yaml)
-
-### Environment Configuration
-- Observability settings centralized in environment files
-- Common variables include log level, tracing endpoints, and metric export settings
-- Secrets managed separately for sensitive configuration
-
-Implementation highlights:
-- Environment variables override defaults
-- Feature flags control optional observability features
-- Validation ensures required variables are present
-
-**Section sources**
-- [dev-k8s shared observability.env](file://shared/platform-ops/gitops/dev-k8s/base/shared/observability.env)
-
-## Dependency Analysis
-Observability components have clear dependency relationships:
-- Application code depends on metrics, observability, and telemetry modules
-- Health endpoints depend on dependency checkers
-- Kubernetes probes depend on health endpoints
-- Prometheus scrapes metrics endpoints
-- Grafana queries Prometheus for visualization
+### OpenTelemetry Integration Pattern
+All services implement the same opt-in OTel pipeline:
+- Gated by OTEL_ENABLED; disabled means zero overhead and no providers initialized.
+- Initializes TracerProvider and MeterProvider once per process with Resource containing service.name.
+- Instruments FastAPI and HTTPX clients automatically.
+- Attaches an OTLP log bridge to mirror structured logs to the backend while keeping stdout JSON as source of truth.
+- current_trace_id() returns the active span’s W3C trace_id when tracing is active.
 
 ```mermaid
-graph LR
-App["Application Code"] --> Metrics["Metrics Module"]
-App --> Observability["Observability Module"]
-App --> Telemetry["Telemetry Module"]
-Health["Health Endpoints"] --> Dependencies["Dependency Checkers"]
-Kube["Kubernetes"] --> Health
-Prometheus["Prometheus"] --> Metrics
-Grafana["Grafana"] --> Prometheus
+flowchart TD
+Start(["App startup"]) --> CheckEnabled{"OTEL_ENABLED?"}
+CheckEnabled --> |No| Skip["Skip OTel init<br/>/metrics still works"]
+CheckEnabled --> |Yes| Init["Create Resource<br/>TracerProvider + MeterProvider<br/>Instrument FastAPI + HTTPX<br/>Attach Log Bridge"]
+Init --> Ready["Ready to export spans/metrics/logs"]
+Skip --> Ready
 ```
 
 **Diagram sources**
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [agent-platform core metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [agent-platform core telemetry.py](file://products/agent-platform/src/agent_service/core/telemetry.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
+- [telemetry.py (platform-gateway):28-35](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L28-L35)
+- [telemetry.py (platform-gateway):69-117](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L69-L117)
+- [telemetry.py (agent-platform):69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
+- [telemetry.py (tool-gateway):69-117](file://products/tool-gateway/src/tool_gateway/core/telemetry.py#L69-L117)
 
 **Section sources**
-- [agent-platform app.py](file://products/agent-platform/src/agent_service/app.py)
-- [identity-broker api routes health.py](file://products/identity-broker/src/identity_service/api/routes/health.py)
-- [tool-gateway api routes health.py](file://products/tool-gateway/src/api_gateway/api/routes/health.py)
+- [telemetry.py (platform-gateway):1-133](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L1-L133)
+- [telemetry.py (agent-platform):1-133](file://products/agent-platform/src/agent_service/core/telemetry.py#L1-L133)
+- [telemetry.py (tool-gateway):1-133](file://products/tool-gateway/src/tool_gateway/core/telemetry.py#L1-L133)
+
+### Structured Logging and Log Correlation
+- configure_logging sets root logger to INFO by default so audit events are never silently dropped; can be overridden via LOG_LEVEL.
+- log_event emits single-line JSON records at INFO level.
+- When OTel is enabled, a LoggingHandler bridges these records to OTLP logs, associating them with active spans via trace_id/span_id.
+- Request correlation: x-request-id is resolved from inbound header, bridged to active trace_id when tracing is active, or generated as req-uuid4 otherwise.
+
+```mermaid
+sequenceDiagram
+participant App as "Service"
+participant Logger as "Root Logger"
+participant Bridge as "OTLP Log Bridge"
+participant Backend as "OTLP Backend"
+App->>Logger : log_event(event, fields)
+alt OTel enabled
+Logger->>Bridge : Mirrors record with trace/span ids
+Bridge->>Backend : Export log record
+else OTel disabled
+Logger-->>App : Record written to stdout
+end
+```
+
+**Diagram sources**
+- [observability.py (platform-gateway):9-24](file://products/platform-gateway/src/platform_gateway/core/observability.py#L9-L24)
+- [telemetry.py (platform-gateway):37-66](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L37-L66)
+- [observability-conventions.md:58-69](file://shared/shared-contracts/observability-conventions.md#L58-L69)
+
+**Section sources**
+- [observability.py (platform-gateway):9-24](file://products/platform-gateway/src/platform_gateway/core/observability.py#L9-L24)
+- [observability.py (agent-platform):9-24](file://products/agent-platform/src/agent_service/core/observability.py#L9-L24)
+- [observability-conventions.md:58-76](file://shared/shared-contracts/observability-conventions.md#L58-L76)
+- [request_context.py (platform-gateway):8-19](file://products/platform-gateway/src/platform_gateway/core/request_context.py#L8-L19)
+
+### Prometheus Metrics Surface
+Every service implements a minimal RED middleware and exposes GET /metrics:
+- Counters: http_requests_total with method, handler, status labels
+- Histograms: http_request_duration_seconds with method, handler labels
+- Domain-specific counters/gauges per service (e.g., policy decisions, token verification, audit ingestion)
+
+Cardinality rules:
+- Use templated route path for handler label, never raw URLs
+- Use bounded enum labels only (no user/session IDs)
+
+Example service metrics:
+- Platform gateway: policy decisions, token verification, delegation exchange/cache, audit emit outcomes
+- Audit service: ingest accepted/rejected, queries, summaries, exports, evictions, store errors, store size gauge
+
+**Section sources**
+- [metrics.py (platform-gateway):25-65](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L25-L65)
+- [metrics.py (platform-gateway):74-117](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L74-L117)
+- [metrics.py (audit-service):23-76](file://products/audit-service/src/audit_service/core/metrics.py#L23-L76)
+- [metrics.py (audit-service):85-147](file://products/audit-service/src/audit_service/core/metrics.py#L85-L147)
+- [observability-conventions.md:18-45](file://shared/shared-contracts/observability-conventions.md#L18-L45)
+
+### Trace Context Propagation and Health Checks
+- traceparent (W3C Trace Context) is managed automatically by OpenTelemetry instrumentation across service hops.
+- x-request-id is the log- and portal-facing correlation key; bridged to active trace_id when tracing is active, otherwise generated.
+- Health endpoints are part of the application surface; /metrics is always available for basic health and debugging.
+
+**Section sources**
+- [observability-conventions.md:71-76](file://shared/shared-contracts/observability-conventions.md#L71-L76)
+- [request_context.py (platform-gateway):8-19](file://products/platform-gateway/src/platform_gateway/core/request_context.py#L8-L19)
+- [metrics.py (platform-gateway):93-95](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L93-L95)
+
+## Dependency Analysis
+Services depend on shared conventions and standardized modules:
+- All services import their own core/telemetry, core/observability, and core/metrics modules.
+- The platform gateway uses its request_context to resolve x-request-id and bridge to trace_id.
+- HTTP client calls are instrumented via HTTPX instrumentation to propagate trace context outbound.
+
+```mermaid
+graph LR
+A["platform_gateway.core.telemetry"] --> B["OTLP exporters"]
+C["agent_service.core.telemetry"] --> B
+D["tool_gateway.core.telemetry"] --> B
+E["platform_gateway.core.metrics"] --> F["prometheus_client"]
+G["audit_service.core.metrics"] --> F
+H["platform_gateway.core.request_context"] --> A
+```
+
+**Diagram sources**
+- [telemetry.py (platform-gateway):69-117](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L69-L117)
+- [telemetry.py (agent-platform):69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
+- [telemetry.py (tool-gateway):69-117](file://products/tool-gateway/src/tool_gateway/core/telemetry.py#L69-L117)
+- [metrics.py (platform-gateway):1-23](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L1-L23)
+- [metrics.py (audit-service):1-21](file://products/audit-service/src/audit_service/core/metrics.py#L1-L21)
+- [request_context.py (platform-gateway):1-19](file://products/platform-gateway/src/platform_gateway/core/request_context.py#L1-L19)
+
+**Section sources**
+- [observability-conventions.md:47-69](file://shared/shared-contracts/observability-conventions.md#L47-L69)
+- [telemetry.py (platform-gateway):69-117](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L69-L117)
+- [metrics.py (platform-gateway):74-95](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L74-L95)
 
 ## Performance Considerations
-- Metrics sampling: Use appropriate histogram buckets to avoid cardinality explosion
-- Log rotation: Implement log rotation to prevent disk space exhaustion
-- Tracing overhead: Configure sampling rates based on traffic volume
-- Health check frequency: Tune probe intervals to balance responsiveness and resource usage
-- Memory usage: Monitor memory consumption of observability components
+- OTel push is off by default; enabling it adds batched export overhead but remains fail-open.
+- RED metrics use bounded labels to avoid cardinality explosion.
+- Log bridge attaches once per process and detaches OTel internal loggers to prevent recursion.
+- Avoid labeling on unbounded values such as raw URLs, user IDs, session IDs, or request IDs.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-Common diagnostic techniques:
-- **Logs**: Search for error patterns, correlation IDs, and stack traces
-- **Metrics**: Analyze error rates, latency percentiles, and resource utilization
-- **Traces**: Follow request flows across services to identify bottlenecks
-- **Health Checks**: Verify service status and dependency health
-- **Probes**: Investigate why pods are restarting or failing readiness checks
+Common issues and resolutions:
+- OTel push disabled: verify OTEL_ENABLED is set to a truthy value; check OTEL_EXPORTER_OTLP_ENDPOINT and headers; confirm backend availability.
+- Missing correlation: ensure x-request-id is present or tracing is active so it bridges to trace_id; confirm HTTPX instrumentation is enabled for outbound calls.
+- No metrics: confirm /metrics endpoint is reachable and not filtered by middleware; validate prometheus scraping configuration.
+- High cardinality alerts: review custom metrics for unbounded labels; replace with bounded enums or templated handlers.
 
-Step-by-step approach:
-1. Check pod status and events
-2. Review application logs for errors
-3. Examine metrics for anomalies
-4. Analyze traces for slow operations
-5. Validate health endpoints manually
-6. Inspect Kubernetes probe configurations
+Operational checks:
+- Confirm root logger level is INFO unless explicitly overridden by LOG_LEVEL.
+- Validate that services log “otel telemetry enabled” with service_name and endpoint when OTel is active.
 
 **Section sources**
-- [agent-platform core observability.py](file://products/agent-platform/src/agent_service/core/observability.py)
-- [identity-broker core observability.py](file://products/identity-broker/src/identity_service/core/observability.py)
-- [tool-gateway core observability.py](file://products/tool-gateway/src/api_gateway/core/observability.py)
+- [observability-conventions.md:47-69](file://shared/shared-contracts/observability-conventions.md#L47-L69)
+- [telemetry.py (platform-gateway):109-117](file://products/platform-gateway/src/platform_gateway/core/telemetry.py#L109-L117)
+- [observability.py (platform-gateway):9-19](file://products/platform-gateway/src/platform_gateway/core/observability.py#L9-L19)
 
 ## Conclusion
-The Luban AIOps Platform implements comprehensive observability through standardized metrics, structured logging, distributed tracing, and health checks. Consistent conventions ensure interoperability across services, while Kubernetes integration enables automated monitoring and self-healing. The documented practices provide a foundation for effective operational monitoring and troubleshooting.
+The Luban AIOPS platform standardizes observability across all services with a consistent, opt-in OpenTelemetry push pipeline and an always-on Prometheus /metrics surface. Structured logging is unified and correlated via x-request-id and W3C trace context. By following the documented conventions for metric naming, labels, and correlation, operators can build reliable dashboards and alerting for platform health, performance, business events, and error rates.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
-### Observability Conventions
-- Metric naming follows hierarchical structure with units and labels
-- Log formats include mandatory fields for correlation and context
-- Trace propagation uses W3C TraceContext standard
-- Health endpoints use standard paths and response formats
+### Configuration Reference
+- OTEL_ENABLED: enable/disable OTel push
+- OTEL_EXPORTER_OTLP_ENDPOINT: OTLP HTTP base URL
+- OTEL_EXPORTER_OTLP_HEADERS: authentication headers for backend
+- OTEL_SERVICE_NAME: resource service name
+- LOG_LEVEL: root logger level override
 
 **Section sources**
-- [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
-- [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
+- [observability-conventions.md:47-55](file://shared/shared-contracts/observability-conventions.md#L47-L55)
 
-### Dashboard Setup (Grafana)
-Recommended dashboard panels:
-- Service overview with request rate and error rate
-- Latency distribution with percentile calculations
-- Resource utilization (CPU, memory, disk)
-- Dependency health status
-- Custom business metrics
-
-Alerting rules:
-- High error rate thresholds
-- Latency SLI violations
-- Resource exhaustion warnings
-- Service unavailability alerts
+### Example Queries and Alert Rules
+- HTTP error rate: increase in http_requests_total with status >= 500 grouped by method and handler
+- Latency SLO: p95/http_request_duration_seconds by handler exceeds threshold
+- Policy enforcement: spike in gateway_policy_decisions_total with decision=deny
+- Token verification failures: increase in gateway_token_verification_total{result="invalid"}
+- Audit ingestion backlog: audit_events_ingested_total vs audit_query_total growth mismatch
+- Store pressure: audit_store_errors_total increases or audit_evicted_total spikes
 
 [No sources needed since this section provides general guidance]

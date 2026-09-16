@@ -1,0 +1,1 @@
+Bundle source is selected at runtime by `settings.policy_path`: when set, the file must exist or `PolicyLoadError` is raised (no silent fallback); when unset, the packaged `policy-default.yaml` is used. Tests can reset state via `reset_policy_state()` to clear the module-level bundle cache.

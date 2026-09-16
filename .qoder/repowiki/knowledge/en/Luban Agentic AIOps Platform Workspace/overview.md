@@ -1,1 +1,1 @@
-Multi-product workspace for an enterprise agentic AIOps platform, composing agent runtime, identity broker, policy-enforcing gateways, skills hub, audit and incident services, and an operator portal behind shared JSON-schema contracts.
+Monorepo workspace that coordinates the Luban agentic AIOps platform's product services, shared contracts, GitOps overlays, and e2e demos through a single Makefile-driven build, verify, and deploy pipeline.

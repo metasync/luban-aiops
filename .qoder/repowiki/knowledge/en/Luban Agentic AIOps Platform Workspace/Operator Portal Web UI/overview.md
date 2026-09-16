@@ -1,0 +1,1 @@
+Operator-facing React SPA that provides chat, approval queue, audit trail, incidents, and workspace resource views for the Luban AIOps platform.

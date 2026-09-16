@@ -1,0 +1,1 @@
+FastAPI (APIRouter, Header, Query, StreamingResponse) with Pydantic v2 BaseModel for request/response contracts; SSE streaming via `text/event-stream`; responses validated against external JSON Schema files under `shared/shared-contracts/schemas/`.

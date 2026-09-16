@@ -1,0 +1,6 @@
+- Long-running side effects (evidence writes, confirmation record saves, execution request/receipt persistence, authoring-trace steps) are wrapped in try/except that log a warning and never raise, so failures degrade gracefully without aborting a turn.
+- Per-request mutable state is propagated through `contextvars` (`DELEGATED_TOKEN`, `CHAT_SESSION_ID`, `EXECUTION_REQUESTS`, `EXECUTION_AUDIT_CONTEXT`, `TOOL_EVIDENCE_SINK`) set before the Agent call and explicitly reset in a `finally` block.
+- User-provided text is always passed through `prose_redaction` helpers (`redact_user_text`, `redact_assistant_text`, `StreamingProseRedactor`) before being emitted to the client or persisted, with credential literals harvested from prior user messages and the current message.
+- Environment parsing uses small typed helpers (`_optional_str`, `_optional_int`, `_optional_float`, `_optional_bool`, `_optional_choice`) rather than ad-hoc `os.getenv` calls, centralizing None/empty handling and type coercion.
+- Provider-specific options are modeled as frozen dataclasses selected by `default_provider_options` / `provider_options_type`, and validated in `RuntimeSettings.__post_init__` against the active provider.
+- Spec references (SPEC-NNN R-N) are embedded in docstrings of the methods that implement them, tying each behavioral invariant to its specification requirement.

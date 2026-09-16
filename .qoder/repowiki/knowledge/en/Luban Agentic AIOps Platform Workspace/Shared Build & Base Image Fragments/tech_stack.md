@@ -1,0 +1,1 @@
+GNU Make fragments + Docker build; base image built from Amazon Linux 2023 minimal with a pinned uv installer from astral.sh; Python toolchain driven by `uv` in frozen-lock mode with `pytest`.

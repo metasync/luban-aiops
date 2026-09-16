@@ -1,0 +1,1 @@
+FastAPI-based platform gateway that exposes a unified HTTP surface, authenticates callers, enforces role-action policies, and proxies requests to downstream agent-platform services.

@@ -1,0 +1,1 @@
+Runtime entrypoint requires the optional `agentscope-runtime` package; importing `runtime.py` without it raises a `RuntimeError` instructing to install the package. Configuration is driven entirely by environment variables: `AGENTSCOPE_REDIS_*`, `AGENTSCOPE_WORKSPACE_DIR`, `AGENTSCOPE_WORKSPACE_TTL_SECONDS`, and `AGENT_NATIVE_HOST|PORT|TITLE|VERSION`.

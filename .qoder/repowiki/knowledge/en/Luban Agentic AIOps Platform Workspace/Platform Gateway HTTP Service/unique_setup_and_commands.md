@@ -1,0 +1,1 @@
+`uv run src/platform_gateway/main.py` starts the service using `GatewayRunSettings.from_env()` for host/port and downstream endpoint configuration; tests are run via pytest under the project's `.venv` managed by `uv`.

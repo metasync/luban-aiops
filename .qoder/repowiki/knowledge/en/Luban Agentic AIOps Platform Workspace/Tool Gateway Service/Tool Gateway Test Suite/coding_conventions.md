@@ -1,0 +1,6 @@
+- Each test class sets up a fresh FastAPI app via `create_app()`, injects a `ToolRegistry` into `app.state.tool_registry`, overrides `get_settings` with `GatewaySettings(require_auth=True)`, and resets policy/token state in both `setUp` and `tearDown` using `reset_policy_state()` and `token_verifier.reset_verifier_state()`.
+- Authentication is exercised through real JWT flows: helpers mint delegated RS256 tokens signed by an in-memory RSA key and patch `token_verifier._get_jwks_client` so the JWKS lookup resolves to the controlled public key.
+- Policy tests write temporary YAML bundles to temp paths, pass them via `GatewaySettings(policy_path=...)`, and clean them up in `tearDown` with `unlink(missing_ok=True)`.
+- Cross-product duplication is guarded by `test_module_parity.py`, which normalizes per-service identifiers (package name, settings class) to placeholders and strips docstrings via AST before asserting equality between copies.
+- Connector tests isolate external I/O by constructing the connector with mocked dependencies rather than hitting live endpoints, keeping assertions focused on request/response shape and error handling.
+- Assertions reference SPEC/ADR numbers in docstrings and comments (e.g., SPEC-021 R-1, SPEC-049 R-1, ADR-0010) to tie each test case to its originating requirement.

@@ -1,0 +1,1 @@
+FastAPI service that ingests, persists, and queries durable audit events with retention-bounded storage and JWT/Basic authentication for platform callers.

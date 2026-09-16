@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: agent_platform/core_runtime
+title: Agent Service Core Runtime & Bootstrap
+scope:
+    - products/agent-platform/src/agent_service/core/
+    - products/agent-platform/src/agent_service/app.py
+    - products/agent-platform/src/agent_service/main.py
+    - products/agent-platform/src/agent_service/agent_app.py
+    - products/agent-platform/src/agent_service/metadata.py
+source_files: []
+depends_on: []
+related_to: []

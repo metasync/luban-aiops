@@ -1,0 +1,4 @@
+- Module-level singletons expose a `reset_*_state()` helper that clears cached clients and flags so tests can isolate state between runs.
+- External failures in token verification and delegation are wrapped into domain exceptions or returned as `None` rather than propagated, keeping request handlers resilient.
+- All authentication-related HTTP requests record structured events via `log_event(LOGGER, ...)` including `request_id` resolved from `x_request_id` headers.
+- Per-replica caches store entries with both absolute expiry and a pre-expiry refresh threshold (80% of TTL) to proactively rotate delegated tokens before they expire.

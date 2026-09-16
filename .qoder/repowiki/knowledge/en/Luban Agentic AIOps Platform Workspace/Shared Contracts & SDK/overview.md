@@ -1,0 +1,1 @@
+Defines the workspace-wide JSON Schema contracts, policy bundles, and validation tooling that decouple product services, plus a placeholder SDK for shared client helpers.

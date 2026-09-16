@@ -1,0 +1,1 @@
+Entry point registered as `audit-service = audit_service.main:run` in `pyproject.toml`; build uses `uv_build` backend with `uv.lock` lockfile; run via `uv run audit-service` which reads host/port from `AuditRunSettings.from_env()`; store backend toggled at runtime via `AUDIT_STORE_BACKEND=postgres|memory` and requires `AUDIT_DB_URL` when postgres is selected.

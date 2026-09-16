@@ -1,0 +1,1 @@
+Defines two runtime entrypoints — a native FastAPI/AgentScope app backed by Redis and a runtime AgentApp wrapper — that bootstrap the agent platform service from environment configuration.

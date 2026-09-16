@@ -1,0 +1,1 @@
+Built with `uv_build` (see `pyproject.toml`); packaged as image via shared `mk/image.mk` and `mk/python.mk` fragments included from `Makefile`; run via the `execution-runtime` console script (`python -m execution_runtime.main`) which reads `EXECUTION_HOST`/`EXECUTION_PORT` to bind uvicorn.
