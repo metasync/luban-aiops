@@ -2,9 +2,10 @@
 
 ## Status
 
-`proposed`
+`accepted`
 
 - date: 2026-09-16
+- accepted: 2026-09-16
 - deciders: workspace maintainers
 - related specs: SPEC-057 (multi-target composition — roadmap row 346 blocks its
   promotion on this decision), SPEC-056 (Studio — confirmed skills stay

@@ -1,6 +1,6 @@
 # Spike: Composition Trust Model — Does a Composite Need Its Own Gate? (SPEC-057 candidate)
 
-Status: spike complete — findings below; ADR-0011 drafted `proposed` 2026-09-16 recording the decision; SPEC-057 Phase 1 drafts after it is accepted
+Status: spike complete — findings below; ADR-0011 **accepted** 2026-09-16 recording the decision, so SPEC-057 Phase 1 is unblocked
 Date: 2026-09-16
 Roadmap home: Exploration Backlog row "Multi-target skill development — Studio spawn bridge + composition" (`delivery-roadmap.md` row 346), whose named spike question this answers; row 347 ("Generalized non-browser (infra) executable-flow binding") is reframed by §6
 Verified against: agent-platform and tool-gateway at 0.37.1 (`30b84ff`), SPEC-051/054/055/056 as delivered; live browser checks on `dev-luban-aiops` at `0.37.1-dev-k8s-b430795`
@@ -191,6 +191,9 @@ semantics and would widen Phase 1 without reducing its risk.
 
 ## Changelog
 
+- 2026-09-16: **ADR-0011 accepted** by the operator the same day it was drafted,
+  unblocking row 346's promotion gate. OQ-1 stays open for SPEC-057 as the
+  ADR's recorded accepted trade-off.
 - 2026-09-16: §6 step 1 taken — `docs/adr/0011-composition-carries-no-authority.md`
   drafted as `proposed`, recording Option B and leaving OQ-1 (the
   composite-wide step budget) to SPEC-057 as an accepted trade-off rather than
