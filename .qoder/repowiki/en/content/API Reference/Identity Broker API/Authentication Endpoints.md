@@ -10,7 +10,7 @@
 - [router.py](file://products/identity-broker/src/identity_service/api/router.py)
 - [router.py](file://products/tool-gateway/src/api_gateway/api/router.py)
 - [config.py](file://products/identity-broker/src/identity_service/core/config.py)
-- [api.py](file://products/shared-contracts/schemas/identity-token.schema.json)
+- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
 </cite>
 
 ## Table of Contents
@@ -270,7 +270,7 @@ Proceed --> End(["Response"])
 
 **Section sources**
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
-- [api.py](file://products/shared-contracts/schemas/identity-token.schema.json)
+- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
 
 ### Configuration and Security Headers
 - Required headers for authenticated requests:

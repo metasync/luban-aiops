@@ -1,0 +1,6 @@
+- Each product exposes a `create_app()` factory in `src/<pkg>/app.py` that configures logging, registers an HTTP middleware that logs method/path/status/duration with a resolved `x-request-id`, includes the API router, sets up metrics and telemetry, and returns the FastAPI instance.
+- Cross-service data interchange is defined once as JSON Schema files under `shared/shared-contracts/schemas/` and consumed by products rather than duplicated, with schema `$id` URIs referencing the canonical location.
+- Policy bundles are authored centrally as `policy-default.yaml` in `shared/shared-contracts/policies/` and distributed to consumers via `make sync-policy`, keeping platform-gateway and tool-gateway policy definitions in lockstep.
+- Product versions are synchronized across the repo by reading the root `VERSION` file and enforcing consistency with `make validate-version`, so every product's metadata derives from a single source of truth.
+- Per-product Makefiles delegate to shared fragments in `mk/defaults.mk`, `mk/image.mk`, and `mk/python.mk`, so build, lint, test, and Docker targets follow a uniform interface across all services.
+- Spec-driven development artifacts are organized as `docs/specs/SPEC-NNN/<name>/` directories containing parallel `plan.md`, `spec.md`, and `tasks.md` files, with release notes dated under `docs/agentic-aiops-platform/release-notes/`.

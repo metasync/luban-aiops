@@ -16,7 +16,7 @@
 - [token_verifier.py](file://products/tool-gateway/src/api_gateway/services/token_verifier.py)
 - [policy_engine.py](file://products/tool-gateway/src/api_gateway/services/policy_engine.py)
 - [gateway_service.py](file://products/tool-gateway/src/api_gateway/services/gateway_service.py)
-- [api.py](file://products/shared-contracts/schemas/identity-token.schema.json)
+- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
 </cite>
 
 ## Table of Contents
@@ -268,7 +268,7 @@ TG-->>Client : Response
   - See shared schema file for identity token structure.
 
 **Section sources**
-- [api.py](file://products/shared-contracts/schemas/identity-token.schema.json)
+- [identity-token.schema.json](file://shared/shared-contracts/schemas/identity-token.schema.json)
 
 ### Signing Algorithms and Secret Key Management
 - Algorithms:

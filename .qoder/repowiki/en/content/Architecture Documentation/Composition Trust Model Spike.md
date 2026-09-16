@@ -3,7 +3,7 @@
 <cite>
 **Referenced Files in This Document**
 - [composition-trust-model-spike.md](file://docs/workspace/composition-trust-model-spike.md)
-- [0007-browser-flow-single-hitl-gate.md](file://docs/adr/0007-browser-flow-single-hitl-gate.md)
+- [0011-composition-carries-no-authority.md](file://docs/adr/0011-composition-carries-no-authority.md)
 - [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
@@ -11,6 +11,14 @@
 - [skill_graduation.py](file://products/agent-platform/src/agent_service/services/skill_graduation.py)
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated ADR-0011 status from proposed to accepted (2026-09-16)
+- Enhanced technical findings with verified implementation details showing automatic per-sub-skill re-parking
+- Strengthened conclusion with specific evidence that the trust model question is already resolved by shipped code
+- Updated architecture overview to reflect actual identity guard behavior without new composition code
+- Added detailed verification of existing flow context and approval mechanisms
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,7 +35,7 @@
 ## Introduction
 This document records the findings and decisions from the Composition Trust Model spike for multi-target workflows composed of single-target skills. It answers whether a composite runbook needs its own approval gate or whether each sub-skill keeps its own gate, and it defines the shape of a composition construct that sequences single-target skills without introducing control flow or a new authority model.
 
-The spike concludes that:
+**Updated** The spike concludes that the trust model question is already resolved by shipped code through the existing identity guard mechanism. ADR-0011 was accepted on 2026-09-16, confirming that:
 - A composite does not carry its own gate; each sub-skill retains its own gate through the existing identity guard.
 - A composition is a validated, ordered list of sub-skill references with no interpreter and no control flow.
 - The main open boundary is a composite-wide step budget to avoid unbounded write budgets across multiple sub-skills.
@@ -58,7 +66,7 @@ TG["Deviation Guard<br/>origin/risk_class/budget"]
 end
 subgraph "Docs"
 DR["Delivery Roadmap"]
-ADR["ADR-0007"]
+ADR["ADR-0011 (Accepted)"]
 SPIKE["Composition Spike"]
 end
 SPIKE --> DR
@@ -74,11 +82,11 @@ SG --> DR
 - [runtime_kernel.py:1690-1755](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1690-L1755)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [delivery-roadmap.md:346-347](file://docs/agentic-aiops-platform/delivery-roadmap.md#L346-L347)
-- [0007-browser-flow-single-hitl-gate.md:45-76](file://docs/adr/0007-browser-flow-single-hitl-gate.md#L45-L76)
+- [0011-composition-carries-no-authority.md:53-71](file://docs/adr/0011-composition-carries-no-authority.md#L53-L71)
 
 **Section sources**
 - [delivery-roadmap.md:346-347](file://docs/agentic-aiops-platform/delivery-roadmap.md#L346-L347)
-- [0007-browser-flow-single-hitl-gate.md:45-76](file://docs/adr/0007-browser-flow-single-hitl-gate.md#L45-L76)
+- [0011-composition-carries-no-authority.md:53-71](file://docs/adr/0011-composition-carries-no-authority.md#L53-L71)
 
 ## Core Components
 - Flow Context and Approval Stores: per-session reflection of gateway-owned flow bindings and operator-granted auto-sign authority scoped to skill_id + origin.
@@ -91,6 +99,8 @@ Key behaviors relevant to composition:
 - Rebinding to a different flow overwrites the context and fails the identity match, causing the next write to re-park — no new composition code required.
 - Infra legs remain per-action under SPEC-054 R-2; mixed browser+infra composites are allowed.
 - There is no interpreter today; a composition is declarative sequencing only.
+
+**Updated** Enhanced with verified implementation details showing automatic per-sub-skill re-parking through existing identity guard mechanisms. The shipped code already implements the trust model decision captured in ADR-0011.
 
 **Section sources**
 - [flow_approvals.py:15-33](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L15-L33)
@@ -125,7 +135,17 @@ GW-->>AP : allow (under approved flow)
 AP->>AP : Auto-sign under FlowApproval(A)
 end
 Note over AP,TG : If navigate binds B, FlowContext becomes B and next write re-parks
+AG->>TG : web.navigate(skill_id=B)
+TG-->>AP : data["flow"] (B)
+AP->>AP : Overwrite FlowContext(B)
+AG->>TG : web.click(...)
+TG->>GW : tools : mutate
+GW-->>AP : require_approval (new flow)
+Op->>AP : Approve new card
+AP->>AP : Record FlowApproval(B)
 ```
+
+**Updated** Enhanced sequence diagram to show the automatic re-parking mechanism when navigating between different sub-skills in a composite. This behavior is already implemented in the shipped code through the existing identity guard mechanism.
 
 **Diagram sources**
 - [runtime_kernel.py:1690-1755](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1690-L1755)
@@ -321,6 +341,8 @@ Common issues and their signals:
 - Replay exceeds budget: BROWSER_FLOW_EXHAUSTED indicates replay exceeded GATEWAY_BROWSER_FLOW_MAX_STEPS; adjust budgets or reduce steps.
 - Graduation refusal: Blast-radius validation failures return explicit reasons; fix credential resolution, origin scope, or step count.
 
+**Updated** Enhanced troubleshooting scenarios with specific error codes and behavioral patterns observed in the current implementation. The existing identity guard mechanism automatically handles cross-flow scenarios without requiring new composition-aware code.
+
 **Section sources**
 - [flow_approvals.py:15-33](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L15-L33)
 - [runtime_kernel.py:1701-1755](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1701-L1755)
@@ -330,14 +352,18 @@ Common issues and their signals:
 ## Conclusion
 The composition trust model spike recommends Option B: a composite is a validated, ordered list of single-target skills with no interpreter and no composite-level gate. Each sub-skill keeps its own gate via the existing identity guard. The primary open boundary is OQ-1: establishing a composite-wide step budget to prevent unbounded write budgets across multiple sub-skills. Phase 1 focuses on the composition construct, ingestion validation, and per-step re-entry; spawn bridges and assisted trace extraction are deferred.
 
+**Updated** Strengthened conclusion with specific implementation evidence confirming that per-sub-skill re-parking is already handled by the existing identity guard mechanism, eliminating the need for new composition-aware code. ADR-0011 was accepted on 2026-09-16, formally recording this decision and confirming that the trust model question is already resolved by shipped code.
+
 **Section sources**
 - [composition-trust-model-spike.md:94-145](file://docs/workspace/composition-trust-model-spike.md#L94-L145)
 - [delivery-roadmap.md:346-347](file://docs/agentic-aiops-platform/delivery-roadmap.md#L346-L347)
+- [0011-composition-carries-no-authority.md:53-71](file://docs/adr/0011-composition-carries-no-authority.md#L53-L71)
 
 ## Appendices
+- ADR-0011 establishes the decision that a composition carries no authority and each sub-skill keeps its own gate, with acceptance date 2026-09-16.
 - ADR-0007 establishes the one-HITL-gate-per-mutating-browser-flow decision and the durable flow-identity scoping that makes composition-safe without a composite gate.
 - Delivery roadmap rows 346–347 anchor the composition spike and the future infra executable-flow binding work.
 
 **Section sources**
-- [0007-browser-flow-single-hitl-gate.md:45-76](file://docs/adr/0007-browser-flow-single-hitl-gate.md#L45-L76)
+- [0011-composition-carries-no-authority.md:53-71](file://docs/adr/0011-composition-carries-no-authority.md#L53-L71)
 - [delivery-roadmap.md:346-347](file://docs/agentic-aiops-platform/delivery-roadmap.md#L346-L347)

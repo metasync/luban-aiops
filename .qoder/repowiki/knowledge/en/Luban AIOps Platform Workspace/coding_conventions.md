@@ -1,6 +1,0 @@
-- Each product follows a uniform layout of `src/<product_pkg>/api/`, `core/`, `schemas/`, `services/`, plus `app.py`/`main.py` entry points and a per-product `pyproject.toml` declaring uv dependencies and console scripts.
-- Cross-product data exchange uses JSON Schema files under `shared/shared-contracts/schemas/` rather than shared Python packages, keeping integration points schema-first and language-neutral.
-- Policy evaluation in gateway products consumes the single canonical bundle at `shared/shared-contracts/policies/policy-default.yaml`, validated via `validate_policy_scenarios.py` against `policy-scenarios.yaml` during `make verify`.
-- Observability is standardized across products: OTLP export gated by `OTEL_ENABLED`, always-on `/metrics` Prometheus endpoint, and correlation bridging between `x-request-id` and OTel trace IDs as documented in `observability-conventions.md`.
-- Product versions are kept lockstep with the root `VERSION` file and enforced by `make validate-version`, ensuring coordinated releases across all services.
-- Secret literals and sensitive vocabulary are centrally validated via `validate_secret_vocabulary.py` so products cannot drift from the approved set of secret names.
