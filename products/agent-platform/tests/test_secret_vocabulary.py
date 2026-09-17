@@ -5,7 +5,8 @@ compares three pairs of deliberate second copies, each pair spanning products
 that never import each other, so the comparison is by source extraction:
 
 1. the agent-platform ``SECRET_PARAM_SUBSTRINGS`` tuple against its
-   tool-gateway twin ``_SECRET_QUERY_PARAMS`` (SPEC-054 R-3 / SPEC-049 R-5);
+   tool-gateway twin ``SECRET_QUERY_PARAMS`` in ``url_redaction`` (SPEC-054
+   R-3 / SPEC-049 R-5; SPEC-058 R-6 moved it out of ``browser_connector``);
 2. the agent-platform ``TRACE_CREDENTIAL_PLACEHOLDER`` marker against its
    skills-hub twin ``CREDENTIAL_HOLE`` (SPEC-055 R-2 writes it, R-3 refuses it);
 3. the agent-platform ``REDACTION_VALUE_PATTERNS`` shape tuple against its
@@ -43,7 +44,7 @@ SCRIPT = (
 )
 
 AGENT_REL = Path("products/agent-platform/src/agent_service/services/secret_params.py")
-GATEWAY_REL = Path("products/tool-gateway/src/tool_gateway/tools/browser_connector.py")
+GATEWAY_REL = Path("products/tool-gateway/src/tool_gateway/tools/url_redaction.py")
 SKILLS_HUB_REL = Path("products/skills-hub/src/skills_hub/services/ingestion.py")
 SKILL_DRAFT_REL = Path("products/agent-platform/src/agent_service/services/skill_draft.py")
 REDACTION_REL = Path("products/tool-gateway/src/tool_gateway/tools/redaction.py")
@@ -120,7 +121,7 @@ def _write_tree(
         agent_src += f'TRACE_CREDENTIAL_PLACEHOLDER = "{agent_hole}"\n'
     agent_path.write_text(agent_src, encoding="utf-8")
     gateway_path.write_text(
-        _module("_SECRET_QUERY_PARAMS", gateway_entries), encoding="utf-8"
+        _module("SECRET_QUERY_PARAMS", gateway_entries), encoding="utf-8"
     )
     if hub_hole is not None:
         hub_path.write_text(

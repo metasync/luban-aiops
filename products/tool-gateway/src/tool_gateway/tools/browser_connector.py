@@ -68,7 +68,7 @@ import logging
 import os
 import re
 import time
-from urllib.parse import unquote, urlparse, urlsplit, urlunsplit
+from urllib.parse import urlparse
 
 import httpx
 
@@ -87,6 +87,7 @@ from tool_gateway.tools.browser_sessions import (
 )
 from tool_gateway.tools.credential_sets import CredentialSetStore
 from tool_gateway.tools.registry import ToolRegistry
+from tool_gateway.tools.url_redaction import redact_secret_query
 
 LOGGER = logging.getLogger(__name__)
 
@@ -171,72 +172,6 @@ def origin_of(url: str) -> str | None:
     return f"{parsed.scheme}://{parsed.netloc}".lower()
 
 
-# Query-string parameter names whose values are secret-bearing and must
-# never enter results, evidence, or the audit trail in plaintext
-# (SPEC-049 R-5). Matched case-insensitively as a substring of the
-# parameter name, so ``newpw``/``newPassword``/``user_password`` all match.
-#
-# TWIN: products/agent-platform/src/agent_service/services/secret_params.py
-# ``SECRET_PARAM_SUBSTRINGS`` — the SPEC-054 R-3 change-request projection
-# masks by the same vocabulary kernel-side. Keep the two in lockstep; the
-# validate-secret-vocabulary ``make verify`` leg pins them.
-_SECRET_QUERY_PARAMS: tuple[str, ...] = (
-    "password", "passwd", "pwd", "newpw", "oldpw", "secret", "token",
-    "apikey", "api_key", "accesskey", "access_key", "privatekey",
-    "private_key", "credential", "otp", "cvv", "ssn", "sessionid",
-    "session_id", "signature",
-)
-
-
-def _is_secret_param(name: str) -> bool:
-    lowered = name.lower()
-    return any(secret in lowered for secret in _SECRET_QUERY_PARAMS)
-
-
-def _redact_secret_query(url: str) -> str:
-    """Mask secret-bearing query-param values in a URL for evidence.
-
-    The password-reset demo passes the new password as a query parameter
-    (``?newpw=...``) so the legacy target can auto-fill it; the real value
-    must reach the page but must never be serialized into results,
-    evidence, or the audit trail (SPEC-049 R-5). Only the value is masked
-    (to ``***``); the key stays so the URL shape is still visible. The raw
-    query is rewritten segment-by-segment so every non-secret byte is
-    preserved exactly (no re-encoding). A URL with no secret-bearing params
-    is returned unchanged.
-    """
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return url
-    changed = False
-    # A credential can ride in the userinfo (``scheme://user:password@host``)
-    # with no query string at all, so the password is masked independently of
-    # the query loop below and an empty query is no longer an early return.
-    # Kernel twin of ``secret_params.redact_secret_query`` — keep the two in
-    # lockstep. The raw netloc is rewritten by a single first-occurrence
-    # replace so every non-secret byte is preserved exactly (no re-encoding).
-    netloc = parsed.netloc
-    if parsed.password:
-        netloc = netloc.replace(f":{parsed.password}@", ":***@", 1)
-        changed = True
-    segments: list[str] = []
-    for segment in parsed.query.split("&"):
-        key, sep, _value = segment.partition("=")
-        # A bare key with no '=' carries no value to leak; leave it as-is.
-        if sep and _is_secret_param(unquote(key)):
-            segments.append(f"{key}{sep}***")
-            changed = True
-        else:
-            segments.append(segment)
-    if not changed:
-        return url
-    return urlunsplit((
-        parsed.scheme, netloc, parsed.path,
-        "&".join(segments), parsed.fragment,
-    ))
-
-
 def _evidence_url(entry: BrowserSessionEntry) -> str:
     """The URL to report for a result: the live frame's, secret values masked.
 
@@ -246,14 +181,14 @@ def _evidence_url(entry: BrowserSessionEntry) -> str:
     lands when a target carries one in its query string (the password-reset
     demo's ``?newpw=...``), and the reported value is persisted into results,
     evidence frames, and the audit trail, so it goes through
-    ``_redact_secret_query`` first (SPEC-049 R-5).
+    ``redact_secret_query`` first (SPEC-049 R-5).
 
     Masking here is what makes the navigate-only redaction hold: navigating to
     a secret-bearing URL is followed by snapshots, clicks, and screenshots on
     that same URL, and each of those results re-serializes it. The page keeps
     the real value — only the reported copy is masked.
     """
-    return _redact_secret_query(entry.active_target.url)
+    return redact_secret_query(entry.active_target.url)
 
 
 def _denied(tool_name: str, code: str, message: str, risk_level: str) -> ToolResult:
@@ -822,7 +757,7 @@ class WebNavigateTool(BaseTool):
                 # (and a DSN-style target could carry it in the userinfo). The
                 # message rides into results, evidence and the audit trail, so
                 # the secret is masked before it leaves (SPEC-049 R-5).
-                _redact_secret_query(str(exc)),
+                redact_secret_query(str(exc)),
                 source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
             )
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -850,7 +785,7 @@ class WebNavigateTool(BaseTool):
         # (SPEC-049 R-5). The page still navigated with the real value; only
         # the reported URL is masked.
         data: dict = {
-            "url": _redact_secret_query(final_url),
+            "url": redact_secret_query(final_url),
             "title": await entry.page.title(),
         }
         if entry.flow is not None:
@@ -932,7 +867,7 @@ async def _build_snapshot(entry: BrowserSessionEntry) -> tuple[str, int]:
     # The header URL rides into ``data["snapshot"]`` alongside ``data["url"]``,
     # so it is masked too — masking one and not the other would leave the
     # secret readable in the same result (SPEC-049 R-5).
-    lines = [f"URL: {_redact_secret_query(target.url)}", ""]
+    lines = [f"URL: {redact_secret_query(target.url)}", ""]
     for index, element in enumerate(elements, start=1):
         info = await element.evaluate(_ELEMENT_INSPECT_JS)
         if not isinstance(info, dict):
@@ -1570,7 +1505,7 @@ class WebPressKeyTool(BaseTool):
                 duration_ms=duration_ms,
             )
         duration_ms = int((time.perf_counter() - start) * 1000)
-        data = {"url": _redact_secret_query(target.url), "key": key}
+        data = {"url": redact_secret_query(target.url), "key": key}
         flow = entry.flow
         if flow is not None:
             # Bound flow: account the step (SPEC-051). An unbound ad-hoc
@@ -2431,7 +2366,7 @@ class WebSwitchFrameTool(BaseTool):
             tool_name=self.tool_name,
             status="success",
             data={
-                "url": _redact_secret_query(frame_url),
+                "url": redact_secret_query(frame_url),
                 "frame_depth": len(entry.frame_stack),
             },
             evidence=build_evidence("read", SOURCE_SYSTEM, duration_ms),

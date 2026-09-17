@@ -1,0 +1,24 @@
+# The origin the four SPEC-059 skills address: `http://acme-admin:8080`.
+#
+# ClusterIP (the default) rather than NodePort: nothing outside the cluster
+# should reach the console directly. The walkthroughs use
+# `kubectl port-forward svc/acme-admin 8080:8080` for the human-facing surface,
+# which is a per-operator tunnel and does not need the Service to publish a
+# node port.
+#
+# The port name `http` is required because the NetworkPolicy in this directory
+# refers to 8080 by number and because a named port makes
+# `kubectl port-forward` output self-describing.
+apiVersion: v1
+kind: Service
+metadata:
+  name: acme-admin
+  labels:
+    app: acme-admin
+spec:
+  selector:
+    app: acme-admin
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -50,6 +50,17 @@ Suppose an internal CMDB service exposes
 `GET /api/v1/entries/{entry_id}` behind Basic auth, and we want the agent to
 be able to look up ownership records. One read-only tool: `cmdb.lookup`.
 
+> **Two tool shapes, and this example is only one of them.** `cmdb.lookup`
+> takes its upstream from *configuration* (`GATEWAY_CMDB_SERVICE_URL`) while
+> the model supplies only a validated identifier — the deployment chooses the
+> upstream, so the tool is SSRF-safe by construction. The other shape, where
+> **the model supplies the full URL**, needs a different discipline: a
+> server-side origin allowlist, deny-by-default, and redirects that halt the
+> moment they leave it. That is `http.get`/`http.post`
+> ([SPEC-058](../specs/SPEC-058-http-service-check-tools/spec.md)), which
+> inherits `web.navigate`'s allowlist posture rather than this example's
+> config-base-URL one. Do not assume the recipe below covers both.
+
 ### 1. Create the connector class
 
 `products/tool-gateway/src/tool_gateway/tools/cmdb_connector.py`:

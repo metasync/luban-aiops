@@ -1,0 +1,112 @@
+# `acme-admin` — a real application with real state (SPEC-059 R-1/R-5).
+#
+# State is in memory in one module-level store, which is why this Deployment is
+# pinned to a single replica and to `Recreate`:
+#
+#   replicas: 1        two replicas would be two independent consoles that
+#                      disagree — a lock performed through one would not be
+#                      visible through the other, and the cross-skill
+#                      verification this sample exists to teach would fail at
+#                      random. There is no database to share and no PVC to
+#                      mount, precisely so the target needs no provisioning.
+#   strategy: Recreate the default RollingUpdate would run two pods at once
+#                      during a rollout, and for those seconds the Service would
+#                      alternate between two stores holding different state.
+#                      Recreate takes the old pod down first, so every request
+#                      a demo makes lands on the same store.
+#
+# The image tag here is a placeholder: `samples/acme-admin/deploy.sh` runs
+# `kubectl set image` to the tag `make build`'s coordinated tagging produced,
+# exactly as dev-k8s/deploy.sh does for the platform services.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-admin
+  labels:
+    app: acme-admin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: acme-admin
+  template:
+    metadata:
+      labels:
+        app: acme-admin
+    spec:
+      # Service-link env vars (ACME_ADMIN_PORT=tcp://…) collide with the
+      # service's own port setting; service discovery uses DNS names instead.
+      enableServiceLinks: false
+      containers:
+        - name: acme-admin
+          image: luban-aiops/acme-admin:dev-local
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            # The one operator password, written by sync-browser-credentials.sh
+            # into the `acme-admin-credentials` secret from the same random
+            # value it puts in the `acme-admin` browser credential set (R-3).
+            # No default and not `optional`: with the secret missing the pod
+            # fails closed at startup and says which script to run, rather than
+            # starting with a well-known password.
+            - name: ACME_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: acme-admin-credentials
+                  key: ACME_ADMIN_PASSWORD
+          ports:
+            - containerPort: 8080
+          # Probes need headroom beyond the 1s default, for the same reason the
+          # platform services carry it: on a loaded dev host (e.g. after VM
+          # sleep/wake) healthy responses take 2-4s and the default triggers
+          # needless liveness kills.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 250m
+              memory: 192Mi
+          volumeMounts:
+            # `readOnlyRootFilesystem: true` needs one writable scratch dir
+            # because the entrypoint is `uv run`: even with `UV_NO_SYNC=1` in
+            # the base image, uv still takes a lock under its cache dir before
+            # resolving the project, and on a read-only root filesystem that
+            # fails closed at startup with
+            #   error: Could not acquire lock: Read-only file system (os error
+            #   30) at path "/home/app/.cache/uv/.tmpXXXX"
+            # so the container never binds 8080. An emptyDir is writable by
+            # uid 1000 (the kubelet creates it 0777) and holds nothing the app
+            # cares about: state lives in memory, and the volume dies with the
+            # pod. Verified with `docker run --read-only --tmpfs
+            # /home/app/.cache/uv:rw,mode=1777`, where the plain `--tmpfs`
+            # default was itself too restrictive (uid 1000 got `Permission
+            # denied (os error 13)` writing CACHEDIR.TAG).
+            - name: uv-cache
+              mountPath: /home/app/.cache/uv
+      volumes:
+        - name: uv-cache
+          emptyDir: {}

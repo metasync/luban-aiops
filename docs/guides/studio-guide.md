@@ -135,6 +135,50 @@ ones worth knowing:
 | *step(s) … have no observed origin* | a captured write failed, or its landing could not be verified |
 | *N captured steps exceed the 20-step budget* | raise the graduation and replay budgets together, or author a shorter procedure |
 
+## An example set: the four-skill ladder
+
+When you want something real to author against, the repository ships a target
+and four reference skills: [`samples/acme-admin`](../../samples/acme-admin/).
+
+| Rung | Skill | Surface | Effect | Declares | Cards |
+|---|---|---|---|---|---|
+| 1 | `health-check` | `http.get` | read | nothing | 0 |
+| 2 | `user-status` | browser flow | read | `web_target` | 0 |
+| 3 | `lock-unlock-user` | `http.post` | write | `risk_class: write` | 1 `action` |
+| 4 | `password-reset` | browser flow | write | `web_target`, `risk_class: write`, `flow_intent` | 1 `flow` |
+
+**None of the four is a Studio session.** They are operational runs, so they
+live in **Chat** and never appear in Studio's list — that scoping is the point
+of [SPEC-056](../specs/SPEC-056-studio-skill-development-workspace/spec.md),
+and each of their `WALKTHROUGH.md` files says so out loud. What they give you
+is the four declarations to aim at, and a target worth aiming them at: it holds
+state, validates a login, refuses a mutation that would change nothing, and
+answers its own confirmation page from that state rather than from the query
+string it was handed. Deploy it with `make deploy-sample-app` and install the
+skills with `make deploy-samples`.
+
+The exercise that uses Studio is to author a **fifth** skill against it: open a
+development session declaring `http://acme-admin:8080/admin/` (the in-cluster
+form — the warning in step 2 is exactly this trap), drive a password reset
+through the console UI, have a second identity approve the write-tier click, and
+graduate. The draft you get is comparable to rung 4's shipped document, and the
+preview's blast-radius facts will report the declaration as `preceded`.
+
+Two things the ladder teaches about traces that are hard to learn any other way:
+
+- **A read rung produces no trace at all.** Rungs 1 and 2 capture nothing,
+  because the trace records *approved write-tier* executions. Graduating one is
+  the `the session has no captured authoring trace` refusal — worth seeing once
+  deliberately, so the modal is familiar before it means something.
+- **A non-browser write is captured, and reported rather than refused.** Rung 3
+  parks an `action` card over `http.post`; approving it in a development session
+  appends a step like any browser write. Graduation then prints
+  *"Outside the origin guard: step(s) N are not browser interactions, so the
+  flow's target does not bound them; each replays under its own per-action
+  approval until a non-browser flow binding lands"* — because the gateway binds
+  a flow from `web_target` and has no non-browser binding yet. The draft says so
+  out loud rather than implying an origin guard covers it.
+
 ## What Studio deliberately does not change
 
 Studio is a *scoping* change, not a trust change. The following are identical in
@@ -233,5 +277,8 @@ deals in operation sessions.
   and covers the human half of the merge that no script can do.
 - To understand what happens to the draft afterwards, see the
   [Skills and Guidance Guide](skills-guide.md).
+- For a target to author against, and four reference skills showing what each
+  declaration buys, see [the four-skill ladder](#an-example-set-the-four-skill-ladder)
+  above and [`samples/acme-admin`](../../samples/acme-admin/).
 - For the portal around Studio, see the
   [Portal User Guide](portal-user-guide.md).

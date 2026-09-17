@@ -190,6 +190,16 @@ class AllowListTests(unittest.TestCase):
         self.assertNotIn("web_type", allow)
         self.assertNotIn("web_evaluate", allow)
 
+    def test_http_read_tool_in_default_list_but_not_the_write_tool(self) -> None:
+        """SPEC-058 R-1/R-2: the service-check read is vetted, the mutating
+        POST is not. The ladder's bottom rung ("a read-only http.get turn
+        parks zero cards") is only true if the kernel agrees with the
+        gateway's ``risk_level="read"`` — an unlisted read tool gets an
+        explicit ASK and parks an ``action`` card like any write."""
+        allow = _load_auto_allowed_tools()
+        self.assertIn("http_get", allow)
+        self.assertNotIn("http_post", allow)
+
 
 class GatewayPermissionMiddlewareTests(unittest.TestCase):
     def _decide(self, middleware, tool, next_decision=None, tool_call=None):
@@ -242,6 +252,28 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
         decision, calls = self._decide(mw, tool)
         self.assertEqual(decision.behavior, PermissionBehavior.ASK)
         self.assertEqual(calls, [])
+
+    def test_http_get_allowed_and_http_post_parks_even_if_forced(self) -> None:
+        """SPEC-058: the two HTTP tools sit on opposite sides of the gate.
+        ``http.get`` is auto-allowed as a vetted read; ``http.post`` parks its
+        single per-action card, and forcing its name onto the allow-list
+        changes nothing because the read-only half of the gate refuses it."""
+        from agentscope.permission import PermissionBehavior
+
+        mw = GatewayPermissionMiddleware(
+            auto_allowed=_load_auto_allowed_tools() | {"http_post"},
+        )
+        read_decision, read_calls = self._decide(
+            mw, _StubTool("http_get", gateway_tool_name="http.get", is_read_only=True),
+        )
+        self.assertEqual(read_decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(read_calls, [])
+
+        write_decision, write_calls = self._decide(
+            mw, _StubTool("http_post", gateway_tool_name="http.post", is_read_only=False),
+        )
+        self.assertEqual(write_decision.behavior, PermissionBehavior.ASK)
+        self.assertEqual(write_calls, [])
 
     def test_browser_write_tools_never_auto_allowed_even_if_forced(
         self,

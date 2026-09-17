@@ -11,6 +11,114 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.38.0 — 2026-09-17
+
+Release train delivering **SPEC-058 — HTTP service-check tools** and
+**SPEC-059 — the `acme-admin` sample application and its single-target skill
+suite** (the twentieth and twenty-first R5 slices), shipped together because
+two of SPEC-059's four skills cannot exist without SPEC-058's tools; SPEC-059
+was slated for v0.39.0 and is pulled in with its dependency. SPEC-058 gives the
+platform its **first HTTP surface** — `http.get` (read tier) and `http.post`
+(write tier) in a new tool-gateway connector confined to a server-side origin
+allowlist that is deny-by-default with redirects halting when they leave it —
+closing the gap where "is this service healthy" had to drive a headless browser
+to `/healthz` and scrape JSON out of a rendered page, and where the shipped
+`InventoryHealth` skill claimed to complement "the API-level checks" that did
+not exist. SPEC-059 adds a small FastAPI console that really mutates alongside
+the retained static tutorial target whose reset page "reports success for any user",
+plus four skills that demonstrate the approval model as a clean **0 / 0 / 1 / 1**
+card ladder across both surfaces. There is **no** new policy action (policy is
+tier-based, so a read tool needs no bundle edit — `make validate-policy` passing
+on an unmodified bundle is itself the assertion), **no** new audit event type,
+and **no** stream-contract or Skill-schema change; the other products move on
+version lockstep only.
+
+### Added
+
+- **`http.get` and `http.post` (SPEC-058 R-1..R-4)** — a new
+  `tools/http_connector.py` registering both tools behind
+  `GATEWAY_HTTP_ENABLED`, confined to `GATEWAY_HTTP_ALLOW_ORIGINS` with the same
+  discipline `web.navigate` carries for a model-supplied URL: deny-by-default,
+  GET redirects resolved and re-checked and halting outside the allowlist
+  (max three hops), POST redirects never followed, scheme/userinfo refused,
+  and loopback / link-local /
+  multicast refused even when listed. A fixed response projection whose header
+  allowlist can never carry `set-cookie` or `authorization`; an upstream 4xx/5xx
+  returned as a **fact** in the result rather than a tool error, because "the
+  service answered 503" is the signal a health check exists to report;
+  credentials by `credential_set` reference only with **no `headers` parameter**
+  on either tool, so the model cannot supply a literal authentication header.
+  `http.post` is write tier, one URL per invocation, a JSON body
+  bounded to depth 2 / 32 keys / 4096 bytes, and secret-bearing POST URLs refused
+  outright.
+- **The `_cr_http_post` change-request formatter (SPEC-058 R-5)** — `http.post`
+  parks exactly one `approval_kind: action` card through machinery the runtime
+  kernel already derives for every non-browser write, so it arrives with the
+  SPEC-054/055/037 approval, masking, signing and audit posture built rather than
+  invented; the one new design work is a curated formatter, because the generic
+  fallback would render `url: ***` / `body: ***` and turn the gate into approval
+  theatre. It names the target and the mutated fields and carries the slice's
+  single recorded divergence from SPEC-055 R-7's fail-closed masking (non-secret-
+  named scalar body values render). Authentication headers remain reference-only;
+  body values still require secret-name and secret-shape masking.
+  `KNOWN_SAFE_FIELDS` gains `http.post.url` only, so an HTTP-mutating skill stays
+  graduable.
+- **`tools/url_redaction.py` shared helper (SPEC-058 R-6)** — `_redact_secret_query`
+  and `_SECRET_QUERY_PARAMS` extract out of the browser connector into a shared
+  gateway module, with `validate_secret_vocabulary.py`'s textually pinned
+  `TOOL_GATEWAY_REL` path constant moved in the **same** commit so the lockstep
+  guard never points at a file mid-move.
+- **The `acme-admin` sample application (SPEC-059 R-1..R-3)** — the first sample
+  to own a container image: a stand-alone FastAPI user-administration console with
+  **real state** (in-memory, `replicas: 1` + `Recreate`, a monotonic `revision` on
+  every mutation, real 401/404/409, real credential validation) over two parallel
+  surfaces — a JSON API and the same six server-rendered page shapes and element
+  ids the current static target serves, which is what makes the later rebase of
+  the three shipped samples a *retarget* rather than a rewrite. Its
+  `/internal/reset-demo` reseed is gated on a header `http.post` structurally
+  cannot send, so these HTTP tools cannot reset demo state mid-run. This is a
+  tool-surface restriction, not a platform-wide authorization boundary. One
+  generated admin password is written into two secret sinks by an extended
+  `sync-browser-credentials.sh`. A fresh deployment fails closed if credential
+  provisioning is skipped; skipping does not remove an existing secret.
+- **`make deploy-sample-app` (SPEC-059 R-4..R-6)** — an out-of-band deploy path
+  that reuses the coordinated `IMAGE_TAG` and the `mk/` fragments **without**
+  joining `IMAGE_PRODUCTS` (whose loops are hardcoded to `products/$$p`), keeping
+  SPEC-050 R-11's tutorial→platform dependency direction: manifests live under
+  `samples/`, allowlist entries in the `browser-dev` runtime profile, and
+  `dev-k8s/base` names nothing. The companion `deploy.sh` asserts the allowlists,
+  the credential set and `GATEWAY_HTTP_ENABLED` in the live config before it exits
+  0, so a failed run names the checkbox you missed.
+- **The four-skill 0 / 0 / 1 / 1 ladder (SPEC-059 R-7)** — `health-check`
+  (`http.get`, read, **zero** cards, the repository's first genuinely card-free
+  read-only skill), `user-status` (bound browser read, zero cards, `web_target`
+  only), `lock-unlock-user` (`http.post`, write, one `action` card) and
+  `password-reset` (bound browser write, one `flow` card), where the read-only
+  status skill exists to *verify what the mutating one did* — so a reader sees
+  SPEC-054's `action`-vs-`flow` discriminator from both sides and sees that the
+  card count tracks *effect*, not surface. Skill ids are named around
+  `deploy-samples.sh`'s leaf-dir slug rule to avoid colliding byte-identically
+  with the shipped `samples/password-reset-resetuserpassword`.
+- **Walkthroughs, demos and guides (SPEC-059 R-8, R-9)** — a `WALKTHROUGH.md`,
+  `README.md`, `skill/` document and `demo/demo.sh` per sample plus a
+  `demo-suite.sh` that runs all four rungs in order and a cross-skill
+  verification (lock over HTTP, then observe `locked` on the rendered console);
+  `make e2e` gains the new script. Guides grow a read-only-skills section, a
+  four-skill-ladder Studio section and a dev-target note, and a stale
+  `skills-guide` bullet claiming `risk_class` requires `web_target` is corrected
+  (SPEC-055 R-3 decoupled them; `flow_intent` still requires it).
+
+### Fixed during validation and review
+
+- Added `http.get` to the kernel's default read-tool auto-allow list; the live
+  health-check rung exposed that read-tier registration alone did not prevent
+  a confirmation card. `http.post` remains non-auto-allowable.
+- Masked secret-bearing query values in projected `location` headers, and
+  stopped every POST redirect before a second request could execute against
+  a URL absent from the approval card. Regression tests pin both boundaries.
+- Corrected sample permission names, skill counts, requirement references,
+  redirect/body assertions and documentation of the demo reset restriction.
+
 ## 0.37.1 — 2026-09-13
 
 Patch closing the in-depth **code and documentation review** that followed the

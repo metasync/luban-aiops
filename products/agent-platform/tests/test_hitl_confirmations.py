@@ -42,7 +42,10 @@ from agent_service.services.hitl_confirmations import (
 )
 from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
 from agent_service.services.runtime_dependencies import get_runtime_kernel
-from agent_service.services.secret_params import TRACE_CREDENTIAL_PLACEHOLDER
+from agent_service.services.secret_params import (
+    TRACE_CREDENTIAL_PLACEHOLDER,
+    redact_parameters,
+)
 from agent_service.tools.gateway_tools import (
     EXECUTION_REJECTION,
     EXECUTION_REQUESTS,
@@ -83,6 +86,19 @@ CREDENTIAL_TOOL_CALL = ToolCallBlock(
     id="call-cred",
     name="web.fill_credential",
     input='{"credential_set": "admin-portal", "field": "password"}',
+)
+
+# SPEC-058 R-5: an ``http.post`` write parked as an ``action`` card. The
+# sanitized name (``http_post``) maps back to the canonical ``http.post`` so
+# the curated ``_cr_http_post`` formatter renders the destination and body key
+# names instead of the generic ``url: ***`` / ``body: ***`` approval theatre.
+HTTP_POST_TOOL_CALL = ToolCallBlock(
+    id="call-http",
+    name="http_post",
+    input=(
+        '{"url": "http://acme-admin:8080/api/users/alice/lock", '
+        '"body": {"locked": true}}'
+    ),
 )
 
 
@@ -455,6 +471,165 @@ def test_change_request_masks_off_vocabulary_secret_fail_closed() -> None:
         {"label": "data", "value": "***", "masked": True}
     ]
     assert "AKIAIOSFODNN7EXAMPLE" not in json.dumps(cr)
+
+
+# --- SPEC-058 R-5: the http.post change-request card ---
+
+
+def test_change_request_http_post_renders_destination_and_body_keys() -> None:
+    """R-5: the generic fallback would render ``url: ***`` / ``body: ***`` —
+    approval theatre that manufactures a record of a considered decision. The
+    curated card names the destination and the body's key names so an approver
+    can read what the mutation does; a non-secret body value renders verbatim."""
+    cr = build_change_request(
+        "http.post",
+        {
+            "url": "http://acme-admin:8080/api/users/alice/lock",
+            "body": {"locked": True},
+        },
+    )
+    assert cr["summary"] == (
+        "POST to http://acme-admin:8080/api/users/alice/lock — 1 field: locked"
+    )
+    assert cr["fields"] == [
+        {"label": "locked", "value": "True", "masked": False}
+    ]
+
+
+def test_change_request_http_post_masks_a_secret_body_key() -> None:
+    """A secret-named body key keeps its label and masks its value, so the card
+    reads ``password: ***`` — the approver sees a secret is involved without
+    seeing it (R-5)."""
+    cr = build_change_request(
+        "http.post",
+        {"url": "http://acme-admin:8080/api/reset", "body": {"password": "hunter2"}},
+    )
+    assert cr["summary"] == (
+        "POST to http://acme-admin:8080/api/reset — 1 field: password"
+    )
+    assert cr["fields"] == [
+        {"label": "password", "value": "***", "masked": True}
+    ]
+    assert "hunter2" not in json.dumps(cr)
+
+
+def test_change_request_http_post_masks_a_nested_secret_shape_preserving() -> None:
+    """A nested body renders its structure with only the secret-bearing leaf
+    hidden — ``{"user": {"password": ...}}`` shows the inner key masked rather
+    than an opaque blob (R-5)."""
+    cr = build_change_request(
+        "http.post",
+        {
+            "url": "http://acme-admin:8080/api/users",
+            "body": {"user": {"password": "hunter2", "name": "alice"}},
+        },
+    )
+    assert cr["summary"] == (
+        "POST to http://acme-admin:8080/api/users — 1 field: user"
+    )
+    field = cr["fields"][0]
+    assert field["label"] == "user"
+    assert field["masked"] is False
+    # The inner value is a shape-preserving JSON render with the secret masked.
+    assert json.loads(field["value"]) == {"name": "alice", "password": "***"}
+    assert "hunter2" not in json.dumps(cr)
+
+
+def test_change_request_http_post_masks_a_secret_query_in_the_url() -> None:
+    """Defence in depth: R-3 already refuses a secret-bearing POST URL, but the
+    card masks one too, so a value that somehow rode the query never renders."""
+    cr = build_change_request(
+        "http.post",
+        {
+            "url": "http://acme-admin:8080/api/reset?newpw=hunter2",
+            "body": {"a": 1},
+        },
+    )
+    assert "newpw=***" in cr["summary"]
+    assert "hunter2" not in json.dumps(cr)
+
+
+def test_change_request_http_post_credential_set_shows_the_name_only() -> None:
+    """A ``credential_set`` row shows the reference name; there is no value to
+    leak (R-4/R-5)."""
+    cr = build_change_request(
+        "http.post",
+        {
+            "url": "http://acme-admin:8080/api/lock",
+            "body": {"locked": True},
+            "credential_set": "acme-admin",
+        },
+    )
+    by_label = {f["label"]: f for f in cr["fields"]}
+    assert by_label["credential_set"] == {
+        "label": "credential_set", "value": "acme-admin", "masked": False,
+    }
+
+
+def test_change_request_http_post_without_a_body_names_no_fields() -> None:
+    """A bodyless POST still reads as a destination, with no field list."""
+    cr = build_change_request(
+        "http.post", {"url": "http://acme-admin:8080/api/ping"}
+    )
+    assert cr["summary"] == "POST to http://acme-admin:8080/api/ping"
+    assert "fields" not in cr
+
+
+def test_http_post_raw_parameters_mask_the_body_but_not_the_url() -> None:
+    """R-5's single recorded divergence: ``http.post.url`` is KNOWN_SAFE so the
+    raw ``parameters`` sibling keeps it verbatim, while ``body`` (deliberately
+    not listed) masks to ``***`` — the fail-closed posture still holds for the
+    body a curated projection only names by key."""
+    raw = {
+        "url": "http://acme-admin:8080/api/users/alice/lock",
+        "body": {"locked": True},
+    }
+    redacted = redact_parameters("http.post", raw)
+    assert redacted["url"] == "http://acme-admin:8080/api/users/alice/lock"
+    assert redacted["body"] == "***"
+
+
+def test_http_post_projection_never_mutates_the_signing_input() -> None:
+    """The projection and the raw-parameter redaction are display-only: neither
+    mutates ``parameters``, so the signed ``args_digest`` a gateway verifies is
+    byte-identical with the projection built (R-5, the R-3 invariant applied to
+    http.post)."""
+    raw = {
+        "url": "http://acme-admin:8080/api/lock",
+        "body": {"locked": True},
+    }
+    before = canonical_digest(raw)
+    build_change_request("http.post", raw)
+    redact_parameters("http.post", raw)
+    assert canonical_digest(raw) == before
+    assert raw == {
+        "url": "http://acme-admin:8080/api/lock",
+        "body": {"locked": True},
+    }
+
+
+def test_pending_calls_payload_renders_the_http_post_card_for_action_kind() -> None:
+    """End to end: an ``http.post`` write parked as an ``action`` card renders
+    the curated projection as a SIBLING of the raw ``parameters``, and the
+    signed digest binds the raw arguments (R-5)."""
+    registry = ConfirmationRegistry()
+    pending = registry.register(
+        "s1", "alice", "r1", [HTTP_POST_TOOL_CALL], timeout=600,
+        gateway_names={"http_post": "http.post"},
+        approval_kind="action",
+    )
+    entry = pending.pending_calls_payload()[0]
+    assert entry["tool_name"] == "http.post"
+    assert entry["change_request"]["summary"] == (
+        "POST to http://acme-admin:8080/api/users/alice/lock — 1 field: locked"
+    )
+    assert "change_request" not in entry["parameters"]
+    assert canonical_digest(entry["parameters"]) == canonical_digest(
+        {
+            "url": "http://acme-admin:8080/api/users/alice/lock",
+            "body": {"locked": True},
+        }
+    )
 
 
 def test_curated_effect_sentence_none_for_uncurated_tool() -> None:

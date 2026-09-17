@@ -21,10 +21,12 @@ This is a deliberate **second copy** of the gateway's masking vocabulary
 data file on purpose: a masking vocabulary that lived in a mounted file
 would fail **open** (nothing gets masked) if the file were missing or
 unmounted, whereas a constant has no such failure mode. The twin lives in
-``products/tool-gateway/src/tool_gateway/tools/browser_connector.py`` as
-``_SECRET_QUERY_PARAMS``; ``shared/shared-contracts/scripts/
-validate_secret_vocabulary.py`` (a ``make verify`` leg) fails the build if
-the two tuples diverge as sets, so the copies cannot drift silently.
+``products/tool-gateway/src/tool_gateway/tools/url_redaction.py`` as
+``SECRET_QUERY_PARAMS`` (SPEC-058 R-6 moved it there from
+``browser_connector`` so the HTTP connector shares one copy);
+``shared/shared-contracts/scripts/validate_secret_vocabulary.py`` (a
+``make verify`` leg) fails the build if the two tuples diverge as sets, so
+the copies cannot drift silently.
 
 SPEC-055 R-2 reuses this vocabulary for a third purpose: parameterizing
 the arguments an authoring trace stores, so a literal credential never
@@ -44,8 +46,8 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 # as a substring of the parameter name, so ``newpw``/``newPassword``/
 # ``user_password`` all match — the same semantics as the gateway twin.
 #
-# TWIN: products/tool-gateway/src/tool_gateway/tools/browser_connector.py
-# `_SECRET_QUERY_PARAMS`. Keep the two in lockstep; the
+# TWIN: products/tool-gateway/src/tool_gateway/tools/url_redaction.py
+# `SECRET_QUERY_PARAMS`. Keep the two in lockstep; the
 # validate-secret-vocabulary `make verify` leg pins them.
 SECRET_PARAM_SUBSTRINGS: tuple[str, ...] = (
     "password", "passwd", "pwd", "newpw", "oldpw", "secret", "token",
@@ -139,6 +141,15 @@ KNOWN_SAFE_FIELDS: frozenset[str] = frozenset({
     "web.fill_credential.field",
     "web.press_key.key",
     "web.upload_file.filename",
+    # SPEC-058 R-5: an ``http.post`` destination renders verbatim on the
+    # change-request card. Sound only because R-3 refuses a secret-bearing
+    # POST URL (``HTTP_URL_SECRET_NOT_ALLOWED``) and R-4 ships no ``headers``
+    # parameter, so a credential can never ride the URL by construction. This
+    # is the slice's single recorded divergence from the fail-closed posture;
+    # ``http.post.body`` is deliberately **not** listed here, so the raw
+    # ``parameters`` sibling still masks the body even while the curated
+    # projection renders key names and non-secret scalar values.
+    "http.post.url",
 })
 
 
@@ -214,7 +225,7 @@ def redact_parameters(tool_name: str, parameters: dict) -> dict:
 def redact_secret_query(url: str) -> str:
     """Mask secret-bearing query-param values in a URL, key and shape kept.
 
-    Kernel twin of ``browser_connector._redact_secret_query``, which masks the
+    Kernel twin of ``url_redaction.redact_secret_query``, which masks the
     same vocabulary in every gateway-side representation (results, snapshot
     header, ``_evidence_url``). The kernel needs it because the ``tool_call``
     evidence frame carries the *arguments the model chose* — including a

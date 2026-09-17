@@ -94,6 +94,23 @@ def _build_tool_registry() -> tuple[ToolRegistry, object | None]:
         browser_connector.register_tools(registry)
         LOGGER.info("browser connector registered")
 
+    if settings.http_enabled:
+        # SPEC-058: the HTTP connector has no app-lifecycle hooks (no eager
+        # connection to warm), so it is registered here and deliberately not
+        # added to the returned tuple — ``create_app`` unpacks that tuple and
+        # its shape is unchanged.
+        from tool_gateway.tools.http_connector import HttpConnector
+
+        http_connector = HttpConnector(
+            allow_origins=settings.http_allow_origins,
+            timeout_ms=settings.http_timeout_ms,
+            max_response_bytes=settings.http_max_response_bytes,
+            max_request_bytes=settings.http_max_request_bytes,
+            credential_sets_path=settings.http_credential_sets_path,
+        )
+        http_connector.register_tools(registry)
+        LOGGER.info("http connector registered")
+
     return registry, browser_connector
 
 

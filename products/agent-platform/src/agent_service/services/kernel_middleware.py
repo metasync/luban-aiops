@@ -93,6 +93,18 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "web.hover",
     "web.scroll",
     "web.switch_frame",
+    # SPEC-058 R-1: the HTTP service-check read is vetted on the same footing
+    # as the read-class browser probes — it is registered ``risk_level="read"``,
+    # so listing it here is what makes "a read-tier http.get parks no card"
+    # true end to end rather than only at the gateway. The gateway still
+    # enforces the origin allowlist, the response-byte bound and the
+    # secret-bearing-URL refusal on every call.
+    #
+    # ``http.post`` is intentionally absent: it is write-tier, so the
+    # ``is_read_only`` half of the gate below would refuse it even if an
+    # operator named it in AGENT_GATEWAY_TOOL_AUTO_ALLOW, and its single
+    # per-action card is the point of the tool.
+    "http.get",
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
 

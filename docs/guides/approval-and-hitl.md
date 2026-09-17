@@ -95,9 +95,17 @@ There is no configuration path that auto-runs a mutating tool.
 
 Semantics:
 
-- **Unset** → the built-in vetted list (the read tools shipped with the platform:
+- **Unset** → the built-in vetted list (the read tools shipped with the
+  platform). The authoritative copy is `DEFAULT_AUTO_ALLOWED_TOOLS` in
+  `agent_service/services/kernel_middleware.py`; as shipped it is
   `k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`,
-  `skills.search`, `skills.get`, `skills.list`, `incidents.list`, `incidents.get`).
+  `skills.search`, `skills.get`, `skills.list`, `incidents.list`,
+  `incidents.get`, the read-class browser probes (`web.navigate`,
+  `web.snapshot`, `web.screenshot`, `web.fill_credential`, `web.extract`,
+  `web.wait_for`, `web.hover`, `web.scroll`, `web.switch_frame`) and
+  `http.get`. Every write-tier tool is absent by construction — including
+  `web.click`/`web.type`/`web.evaluate`, `http.post` and `k8s.delete_pod` —
+  and naming one cannot change that (see the invariant below).
 - **Empty string** → auto-approve nothing; every gateway tool parks for confirmation.
 - **Comma-separated dotted names** → replaces the default entirely. Names are
   normalized to AgentScope's sanitized form (`k8s.get_pod` → `k8s_get_pod`).

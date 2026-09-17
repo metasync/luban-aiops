@@ -79,6 +79,36 @@ re-checked too).
 > the HITL bridge. See the [Approval and HITL Governance Guide](approval-and-hitl.md) for
 > the full model and the activation checklist below for `k8s.delete_pod`.
 
+### HTTP Connector Tools (SPEC-058)
+
+Bounded HTTP service checks against a server-side origin allowlist. Unlike
+the config-base-URL connectors below (the `cmdb.lookup` shape documented in
+[Adding a Tool](adding-a-tool.md)), the **model supplies the full URL**, so
+these tools inherit `web.navigate`'s discipline rather than `cmdb.lookup`'s:
+deny-by-default origins, GET redirects that halt the moment they leave the
+allowlist (at most three hops), and refusal of any loopback / link-local /
+multicast literal even if it is listed. POST redirects are never followed:
+the approved mutation is confined to the URL shown on the card. Both report
+through the standard `ToolResult` envelope, and
+there is deliberately **no `headers` parameter** — a credential resolves by
+reference from a named set, never as a model-supplied literal.
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `http.get` | Fetch a URL and report its status, projected headers and body — the read-only "is this service healthy / what does its API say" check. The origin must be allowlisted; an upstream 4xx/5xx is reported as the status, not as a tool failure | `url` (required), `timeout_ms` (default 10000, max 30000), `max_bytes` (default/cap `GATEWAY_HTTP_MAX_RESPONSE_BYTES`), `credential_set` (optional) | read |
+| `http.post` | POST a small JSON body to an allowlisted origin — a non-browser HTTP mutating primitive; parks exactly one `action` confirmation card. One URL per call; the body is bounded to depth 2, 32 keys and `GATEWAY_HTTP_MAX_REQUEST_BYTES`. A non-2xx response reports `mutation_confirmed: false`. Requires `GATEWAY_MUTATING_TOOLS_ENABLED=true` | `url` (required), `body` (optional JSON object), `timeout_ms` (default 10000, max 30000), `credential_set` (optional) | write |
+
+> **The allowlist is the bound (SPEC-058 R-2).** `http.get`/`http.post` are
+> gated on `GATEWAY_HTTP_ENABLED`; even when enabled, a request is refused
+> unless its origin is in `GATEWAY_HTTP_ALLOW_ORIGINS`, and a redirect that
+> leaves the allowlist halts with `HTTP_REDIRECT_NOT_ALLOWED`. `http.post` is
+> write-tier, so it registers only when `GATEWAY_MUTATING_TOOLS_ENABLED=true`
+> and rides the same triple gate as `k8s.delete_pod`.
+
+A projected `location` header is query-masked just like `url`. A POST redirect
+refusal stops further requests but cannot undo the initial POST: inspect the
+target state before retrying, since the first request may already have mutated it.
+
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
 - [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — the base commits `false`
@@ -124,6 +154,57 @@ re-checked too).
 - [ ] **Skills with `web_target`/`risk_class`** — flows bind to a
       skill's declared target; see the Skills Guide's frontmatter
       section
+
+### HTTP Tool Activation Checklist (`http.*`, SPEC-058)
+
+- [ ] **`GATEWAY_HTTP_ENABLED=true`** — the base commits `false`
+      (while false, `http.*` tools are absent from discovery and invoke
+      returns `TOOL_NOT_FOUND`); dev-k8s opts in through the
+      `runtime-profiles/browser-dev` profile, which merges the flag and the
+      `acme-admin` dev origin (SPEC-059 R-5)
+- [ ] **`GATEWAY_HTTP_ALLOW_ORIGINS=<origins>`** — comma-separated;
+      deny-by-default: an empty list refuses every URL with
+      `HTTP_ORIGIN_NOT_ALLOWED`. The base names no origin (SPEC-050 R-11)
+- [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true` for `http.post`** — `http.post`
+      is write-tier, so it registers only under the mutating flag with the
+      `tools:mutate` policy grant reviewed; `http.get` (read-tier) needs no
+      bundle change
+- [ ] **HITL confirmation enabled for `http.post`** —
+      `AGENT_HITL_CONFIRM_TIMEOUT > 0` on agent-platform; while bridging is
+      disabled, agent-platform excludes write-tier tools from the toolkit
+      entirely, so `http.post` never reaches the model
+- [ ] **Credential sets (optional)** — `GATEWAY_HTTP_CREDENTIAL_SETS` points at
+      a secret-mounted JSON file and **defaults to the browser path**
+      (`GATEWAY_BROWSER_CREDENTIAL_SETS`) when unset, so one mounted secret
+      serves both surfaces; without it a `credential_set` reference fails
+      closed at call time with `CREDENTIAL_SET_NOT_FOUND`
+
+> **Dev target.** The repository ships one: [`samples/acme-admin`](../../samples/acme-admin/),
+> a FastAPI console deployed out-of-band with `make deploy-sample-app` (the
+> platform base overlay names no sample origin, per SPEC-050 R-11). It is on
+> both allowlists in the `browser-dev` profile, so `http.get`, `http.post` and
+> `web.*` all reach the same store — which is what lets
+> [`samples/acme-admin/lock-unlock-user`](../../samples/acme-admin/lock-unlock-user/)
+> change something over HTTP and
+> [`samples/acme-admin/user-status`](../../samples/acme-admin/user-status/)
+> read it back off a rendered page. `make deploy-sample-app` asserts the
+> allowlists, the credential set and `GATEWAY_HTTP_ENABLED` in the live config
+> before it exits 0, so a failed run names the checkbox you missed.
+
+**HTTP connector error codes.** Both tools report a structured code in the
+`ToolResult`: `INVALID_PARAMETERS` (missing/bad `url`, URL userinfo, malformed
+body, or body depth/key overflow), `HTTP_SCHEME_NOT_ALLOWED` (non-http/https),
+`HTTP_ORIGIN_NOT_ALLOWED` (origin not allowlisted, or a
+loopback/link-local/multicast literal — a `denied` result),
+`HTTP_REDIRECT_NOT_ALLOWED` (a GET hop left the allowlist, exceeded the
+three-hop limit, or a POST returned a redirect), `HTTP_URL_SECRET_NOT_ALLOWED`
+(a POST URL carried a secret-bearing query parameter), `HTTP_BODY_TOO_LARGE`
+(serialized body over the byte limit),
+`HTTP_TIMEOUT`, `TOOL_EXECUTION_ERROR` (connection failure), `UPSTREAM_ERROR`,
+and `CREDENTIAL_SET_NOT_FOUND`. An upstream 4xx/5xx is **not** an error: it is
+reported as `status: "success"` with the real code in `data.status` (and
+`data.mutation_confirmed: false` for a non-2xx POST), so a skill can assert on
+the fact rather than having the gateway swallow it.
 
 ## Kubernetes Connector
 

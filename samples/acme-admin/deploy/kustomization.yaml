@@ -1,0 +1,18 @@
+# `acme-admin` — the sample application the SPEC-059 skill suite is written
+# against.
+#
+# Deliberately self-contained and deliberately NOT referenced by
+# dev-k8s/base: SPEC-050 R-11 keeps samples out of the base overlay, so
+# `make deploy` works with zero samples installed and the base never names one.
+# This kustomization is applied out-of-band by `make deploy-sample-app`, which
+# passes the namespace (`-n`) — hence no `namespace:` key here.
+#
+# Render check (the `make overlays` loop prefixes $(GITOPS_DIR)/ and cannot
+# reach samples/, so deploy.sh does this in its pre-flight):
+#   kustomize build samples/acme-admin/deploy
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml

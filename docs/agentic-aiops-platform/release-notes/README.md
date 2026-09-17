@@ -7,6 +7,16 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-17-http-tools-and-acme-admin-skill-suite.md`
+  - delivers SPEC-058 and SPEC-059 together in v0.38.0: deny-by-default HTTP
+    checks with server-side credential references, signed per-action POST
+    approval, shared URL redaction, and a standalone ACME Admin sample with
+    four skills demonstrating 0 / 0 / 1 / 1 approval cards. Review hardening
+    masks projected Location queries and refuses POST redirects; live testing
+    fixes the default GET auto-allow entry and demo assertions. Includes the
+    deployment guides and four browser walkthroughs, with validation evidence
+    and limitations recorded in the note. No new policy action, audit event,
+    shared schema, or database migration.
 - `2026-09-13-post-release-review-studio-panel-refresh.md`
   - patch (v0.37.1) closing the in-depth **code and documentation review** of
     the v0.37.0 Studio split. All six of SPEC-056's load-bearing invariants were

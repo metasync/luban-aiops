@@ -57,12 +57,17 @@ Rules that matter for day-2 operations:
   rejected.
 - **Web-check skills (SPEC-049):** the optional `web_target` key declares
   the flow's target URL (absolute http/https, ≤ 2048 chars) and
-  `risk_class` (`read` or `write`) declares whether the flow needs
-  interactions. `risk_class` requires `web_target`; without `risk_class`
-  the flow defaults to `read`. When the agent opens `web_target` with
+  `risk_class` (`read` or `write`) declares the *effect* of the skill's
+  steps. When the agent opens `web_target` with
   `web.navigate(skill_id=...)`, the gateway binds the flow and enforces
   its risk class (write-class flows get exactly one HITL gate before any
   interaction).
+- **`risk_class` does not require `web_target`** (SPEC-055 R-3 decoupled
+  them): a non-browser mutating skill — one whose steps are `k8s.*` or
+  `http.post` — declares `risk_class: write` on its own. `flow_intent`
+  still requires `web_target`, because it is a *flow* card's headline.
+  Omitting `risk_class` means `read`; see
+  [Read-only skills](#read-only-skills-what-declaring-nothing-buys-you).
 - **Declared step intent (SPEC-053):** the optional `flow_intent` key
   (≤ 200 chars, requires `web_target`) authors in plain language what the
   flow's single gated mutating step achieves. The confirmation card a
@@ -81,6 +86,76 @@ Rules that matter for day-2 operations:
   (`web.fill_credential`) — never from a skill.
 - Adapted open-source content must keep `source_url` pointing upstream and a
   `NOTICE` file in the source root (project, URL, license).
+
+## Read-only skills: what declaring nothing buys you
+
+The gate follows the **effect** of a skill, not the tooling it uses. A skill
+that changes nothing parks nothing, whichever surface it reads through — and
+the way to declare that is to declare nothing at all: no `risk_class`, and no
+`web_target` unless the skill really binds a browser flow.
+
+The repository ships the two shapes side by side under
+[`samples/acme-admin`](../../samples/acme-admin/), which is the only place you
+can see them compared against one target.
+
+**Shape 1 — read-only over HTTP, no flow declaration at all.**
+[`health-check/skill/CheckServiceHealth.md`](../../samples/acme-admin/health-check/skill/CheckServiceHealth.md)
+performs two `http.get` calls:
+
+```yaml
+---
+title: Check ACME Admin Service Health
+description: >
+  Verify that the acme-admin user-administration console is up and
+  answering, over its JSON API. … Read-only: it changes nothing and parks
+  no confirmation card.
+tags: [acme-admin, health, healthz, http, service-check, read-only, api, uptime, monitoring]
+version: "1.0"
+---
+```
+
+There is no `web_target` and no `risk_class`, because there is no flow to bind
+and no effect to gate. `http.get` is registered at `risk_level: read`, so the
+kernel's HITL bridge never asks anyone for a decision. This is the
+repository's first genuinely card-free sample.
+
+**Shape 2 — read-only through a browser, with a flow declaration.**
+[`user-status/skill/CheckUserStatus.md`](../../samples/acme-admin/user-status/skill/CheckUserStatus.md)
+drives the same target's rendered console and adds exactly one key:
+
+```yaml
+web_target: http://acme-admin:8080/admin/
+```
+
+Still no `risk_class`, so the bound flow is read class — and it still parks
+nothing, even though it navigates, snapshots, fills credentials and extracts.
+What the declaration buys is **enforcement rather than intent**: inside a
+read-class flow the gateway refuses any write-tier interaction outright with
+`BROWSER_FLOW_DENIED`. Ask the agent to lock a user in that same session and
+the click is refused — not parked, not approved, refused. The skill document
+did not stop the model from trying; the binding did.
+
+Read together with the two mutating rungs
+([`lock-unlock-user`](../../samples/acme-admin/lock-unlock-user/), one `action`
+card over `http.post`; [`password-reset`](../../samples/acme-admin/password-reset/),
+one `flow` card through the browser), the four make the point a single sample
+cannot: rungs 1 and 3 both talk to the JSON API and differ, and rungs 2 and 4
+both drive a browser and differ.
+
+**Two authoring mistakes this section exists to prevent:**
+
+- **Declaring `risk_class: read` to "be explicit" on a non-browser skill.** It
+  is harmless but it buys nothing, and it reads as though a flow is bound when
+  none is. Declare `web_target` only when the skill really navigates.
+- **Omitting `web_target` from a browser skill.** The steps still run — the
+  agent can navigate anywhere its allowlist permits — but nothing binds, so
+  nothing enforces the read class and the origin guard and step budget attach
+  to no declaration at all. A read-only browser skill without `web_target` is
+  a read-only browser skill on trust.
+
+Verify either shape against a live cluster with its `WALKTHROUGH.md`, or
+unattended with its `demo/demo.sh` (the chat legs are opt-in behind
+`RUN_CHAT_LEG=true`).
 
 ## Pre-flight validation
 

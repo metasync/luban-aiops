@@ -20,7 +20,9 @@ from dataclasses import dataclass, field
 
 from agent_service.services.secret_params import (
     MASK,
+    is_secret_param,
     redact_parameters,
+    redact_secret_query,
     should_mask,
 )
 
@@ -323,6 +325,66 @@ def _cr_web_fill_credential(parameters: dict, display_hint: str | None) -> dict:
     }
 
 
+def _mask_secret_keys(value: object) -> object:
+    """Recursively replace a secret-named key's value with ``MASK``.
+
+    Shape-preserving: a nested body renders its structure with only the
+    secret-bearing leaves hidden, so ``{"user": {"password": "…"}}`` shows
+    ``{"user": {"password": "***"}}`` rather than an opaque blob (SPEC-058 R-5).
+    """
+    if isinstance(value, dict):
+        return {
+            str(key): MASK if is_secret_param(str(key)) else _mask_secret_keys(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_secret_keys(item) for item in value]
+    return value
+
+
+def _cr_http_post(parameters: dict, display_hint: str | None) -> dict:
+    """The ``http.post`` change-request card (SPEC-058 R-5).
+
+    The generic fallback would render ``url: ***`` / ``body: ***`` — approval
+    theatre that manufactures a record of a considered decision. This projects
+    the destination and the body's key names so an approver can read what the
+    mutation does. The URL is masked through ``redact_secret_query`` even though
+    R-3 already refuses a secret-bearing POST URL (defence in depth). Body
+    values render shape-preserving with secret-named keys masked; a
+    ``credential_set`` row shows the reference **name**, never a value.
+    """
+    url = redact_secret_query(_display_value(parameters.get("url", "")))
+    body = parameters.get("body")
+    fields: list[dict] = []
+    key_names: list[str] = []
+    if isinstance(body, dict):
+        masked_body = _mask_secret_keys(body)
+        for key in body:
+            name = str(key)
+            key_names.append(name)
+            fields.append(
+                _cr_field(
+                    name,
+                    masked_body.get(key) if isinstance(masked_body, dict) else "",
+                    masked=is_secret_param(name),
+                )
+            )
+    credential_set = parameters.get("credential_set")
+    if credential_set:
+        fields.append(
+            _cr_field("credential_set", _display_value(credential_set))
+        )
+    count = len(key_names)
+    summary = f"POST to {url}"
+    if count:
+        noun = "field" if count == 1 else "fields"
+        summary += f" — {count} {noun}: " + ", ".join(key_names)
+    projection: dict = {"summary": summary}
+    if fields:
+        projection["fields"] = fields
+    return projection
+
+
 # Curated formatters keyed by canonical dotted gateway tool name: the
 # demo-critical mutating tools (R-3). Every other tool takes the generic
 # fallback below.
@@ -335,6 +397,7 @@ _CHANGE_REQUEST_FORMATTERS = {
     "web.upload_file": _cr_web_upload_file,
     "web.evaluate": _cr_web_evaluate,
     "web.fill_credential": _cr_web_fill_credential,
+    "http.post": _cr_http_post,
 }
 
 

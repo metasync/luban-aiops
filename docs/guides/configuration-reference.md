@@ -17,6 +17,7 @@ activate them. A feature is **active** when all required variables are set to no
 | **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
 | **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
+| **HTTP service-checks (`http.*`, SPEC-058)** | `GATEWAY_HTTP_ENABLED=true`, `GATEWAY_HTTP_ALLOW_ORIGINS` (deny-by-default); `http.post` (write) additionally needs `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0` + a `tools:mutate` grant; credentials via `GATEWAY_HTTP_CREDENTIAL_SETS` (defaults to the browser path) | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
 | **Isolated execution worker (SPEC-038)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret` | agent-service, execution-runtime | **must be provisioned** (`sync-execution-handoff-secret.sh` + worker URL); absent config or any transport error fails mutating resumes closed (`worker_unavailable`) |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
@@ -490,6 +491,12 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_BROWSER_FLOW_MAX_STEPS` | Interaction step budget per bound flow | `20` | code default |
 | `GATEWAY_BROWSER_CREDENTIAL_SETS` | Secret-mounted credential-sets JSON path; empty = `web.fill_credential` fails closed | *(none)* | **runtime-secrets** (mounted file) |
 | `GATEWAY_BROWSER_SCREENSHOT_MAX_BYTES` | Byte cap for base64 JPEG screenshots (compressed to fit) | `65536` | code default |
+| `GATEWAY_HTTP_ENABLED` | Enable the HTTP service-check connector (`http.get`/`http.post`, SPEC-058); while `false` no `http.*` tool registers | `false` | runtime-config (dev-k8s merges `true` via `browser-dev`) |
+| `GATEWAY_HTTP_ALLOW_ORIGINS` | Comma-separated origin allowlist; empty denies every URL; redirect landings re-checked; loopback/link-local/multicast literals refused regardless of the list | *(empty)* | runtime-config |
+| `GATEWAY_HTTP_TIMEOUT_MS` | Per-request timeout in milliseconds (capped at 30000) | `10000` | code default |
+| `GATEWAY_HTTP_MAX_RESPONSE_BYTES` | Response-body projection cap; a larger body is cut and reported with `truncated: true` | `65536` | code default |
+| `GATEWAY_HTTP_MAX_REQUEST_BYTES` | Serialized `http.post` body cap (alongside depth ≤ 2 and ≤ 32 keys) | `4096` | code default |
+| `GATEWAY_HTTP_CREDENTIAL_SETS` | Secret-mounted credential-sets JSON path for `http.*` Basic auth; **defaults to `GATEWAY_BROWSER_CREDENTIAL_SETS`** when unset so one mounted file serves both surfaces; empty = a `credential_set` reference fails closed (`CREDENTIAL_SET_NOT_FOUND`) | *(browser path)* | **runtime-secrets** (mounted file) |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service

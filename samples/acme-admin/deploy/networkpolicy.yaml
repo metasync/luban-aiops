@@ -1,0 +1,58 @@
+# Ingress-only NetworkPolicy for `acme-admin` (SPEC-059 R-5).
+#
+# Unlike the static target this replaces, the app holds a real credential and
+# can mutate state, so it is worth denying rather than merely not advertising.
+# One rule covers both surfaces because the browser sidecar shares the
+# tool-gateway pod: `web.*` tools arrive from the sidecar's loopback into the
+# gateway and out again from the gateway, and SPEC-058's `http.get`/`http.post`
+# are the gateway's own connector — either way the client pod is labelled
+# `app: tool-gateway`. This mirrors the defense-in-depth posture of
+# browser-sidecar-network-policy.yaml (SPEC-049 C-1), where the CDP port is
+# denied by omission.
+#
+# Two deliberate omissions:
+#
+#   egress          no `Egress` in policyTypes, so egress is unrestricted. No
+#                   egress policy exists anywhere in the repository today, and
+#                   this app makes no outbound calls at all — the store is in
+#                   memory — so there is nothing to constrain.
+#   other origins   the platform-gateway, web-ui, and the demo scripts are
+#                   deliberately absent. Human access is
+#                   `kubectl port-forward svc/acme-admin 8080:8080`, which the
+#                   kubelet tunnels straight into the pod's network namespace
+#                   and so never traverses pod ingress at all — no second hole
+#                   is needed for a reader to open the console. The in-cluster
+#                   assertions in `samples/acme-admin/deploy.sh` `kubectl exec`
+#                   into the real `tool-gateway` container instead of running a
+#                   labelled probe pod, so an assertion exercises the same rule
+#                   real traffic does (and needs no image pull: that container
+#                   already ships curl). Its negative check execs into
+#                   `audit-service`, a pod this rule does not admit, and is
+#                   reported informationally because CNI enforcement varies and
+#                   a non-enforcing local cluster must not fail a good deploy.
+#
+# A bare `podSelector` with no `namespaceSelector` matches pods in the same
+# namespace, which is what is wanted: `make deploy-sample-app` deploys into the
+# namespace the platform already occupies, so the tool-gateway it must accept
+# traffic from is a neighbour. Adding a `namespaceSelector` would widen the rule
+# to every namespace carrying that label.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-admin-allow-tool-gateway
+  labels:
+    app: acme-admin
+spec:
+  podSelector:
+    matchLabels:
+      app: acme-admin
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tool-gateway
+      ports:
+        - protocol: TCP
+          port: 8080

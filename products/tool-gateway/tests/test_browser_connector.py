@@ -17,11 +17,16 @@ from unittest.mock import patch
 from tool_gateway.core.config import GatewaySettings
 from tool_gateway.tools.browser_connector import (
     BrowserConnector,
-    _redact_secret_query,
     origin_of,
 )
 from tool_gateway.tools.browser_sessions import BrowserSessionPool, FlowState
 from tool_gateway.tools.registry import ToolRegistry
+# SPEC-058 R-6: the masking routine moved to the shared url_redaction module;
+# aliased to its former private name so these browser-focused assertions read
+# unchanged while exercising the same routine the connector now imports.
+from tool_gateway.tools.url_redaction import (
+    redact_secret_query as _redact_secret_query,
+)
 
 ALLOWED_ORIGIN = "https://inventory.internal:8443"
 IDENTITY = {"sub": "dev.operator", "username": "dev.operator", "roles": ["operator"]}

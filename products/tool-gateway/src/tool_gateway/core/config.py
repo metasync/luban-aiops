@@ -22,6 +22,13 @@ DEFAULT_BROWSER_FLOW_MAX_STEPS = 20
 DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES = 65536
 DEFAULT_BROWSER_UPLOAD_DIR = "/tmp/browser-uploads"
 
+# HTTP connector defaults (SPEC-058 R-1/R-3/R-4). Off by default with an empty
+# allowlist, which denies every request (deny-by-default, R-2). The response
+# cap mirrors the screenshot cap; the request cap bounds a JSON POST body.
+DEFAULT_HTTP_TIMEOUT_MS = 10000
+DEFAULT_HTTP_MAX_RESPONSE_BYTES = 65536
+DEFAULT_HTTP_MAX_REQUEST_BYTES = 4096
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -71,6 +78,16 @@ class GatewaySettings:
     browser_credential_sets_path: str = ""
     browser_screenshot_max_bytes: int = DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES
     browser_upload_dir: str = DEFAULT_BROWSER_UPLOAD_DIR
+    # HTTP connector (SPEC-058): off by default; a model-supplied URL is
+    # ``web.navigate``'s shape, so it inherits the browser's origin-allowlist
+    # discipline (R-2). The credential-set path defaults to the browser path
+    # in ``from_env`` so one mounted secret serves both surfaces.
+    http_enabled: bool = False
+    http_allow_origins: tuple[str, ...] = ()
+    http_timeout_ms: int = DEFAULT_HTTP_TIMEOUT_MS
+    http_max_response_bytes: int = DEFAULT_HTTP_MAX_RESPONSE_BYTES
+    http_max_request_bytes: int = DEFAULT_HTTP_MAX_REQUEST_BYTES
+    http_credential_sets_path: str = ""
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -180,6 +197,39 @@ class GatewaySettings:
             ),
             browser_upload_dir=os.getenv(
                 "GATEWAY_BROWSER_UPLOAD_DIR", DEFAULT_BROWSER_UPLOAD_DIR
+            ),
+            # HTTP connector knobs (SPEC-058). The allowlist is empty by
+            # default, which denies every request (deny-by-default, R-2), and
+            # the credential-set path falls back to the browser mount when
+            # unset so a single synced secret serves both surfaces (R-4) —
+            # no inline credential values are ever accepted.
+            http_enabled=_env_bool("GATEWAY_HTTP_ENABLED", "false"),
+            http_allow_origins=tuple(
+                part.strip()
+                for part in os.getenv("GATEWAY_HTTP_ALLOW_ORIGINS", "").split(",")
+                if part.strip()
+            ),
+            http_timeout_ms=int(
+                os.getenv(
+                    "GATEWAY_HTTP_TIMEOUT_MS",
+                    str(DEFAULT_HTTP_TIMEOUT_MS),
+                )
+            ),
+            http_max_response_bytes=int(
+                os.getenv(
+                    "GATEWAY_HTTP_MAX_RESPONSE_BYTES",
+                    str(DEFAULT_HTTP_MAX_RESPONSE_BYTES),
+                )
+            ),
+            http_max_request_bytes=int(
+                os.getenv(
+                    "GATEWAY_HTTP_MAX_REQUEST_BYTES",
+                    str(DEFAULT_HTTP_MAX_REQUEST_BYTES),
+                )
+            ),
+            http_credential_sets_path=(
+                os.getenv("GATEWAY_HTTP_CREDENTIAL_SETS", "")
+                or os.getenv("GATEWAY_BROWSER_CREDENTIAL_SETS", "")
             ),
         )
 

@@ -7,7 +7,9 @@
 - created: 2026-09-16
 - approved: 2026-09-16
 - release slice: R5 — Hardening and External Consumption (nineteenth R5 slice,
-  targeting v0.38.0)
+  targeting v0.40.0 — moved off v0.38.0 at the 2026-09-17 SPEC-058 approval,
+  because a composition needs single-target skills to compose; SPEC-058 and
+  SPEC-059 delivered that repertoire together in v0.38.0)
 - related ADRs: **ADR-0011** (a composition carries no authority; each
   sub-skill keeps its own gate — this spec is its Phase 1 realization),
   **ADR-0007** (one HITL gate per mutating browser flow — extended, never
@@ -361,3 +363,14 @@ recorded in the changelog (the `approved`-spec rule).
   `docs/specs/README.md` row `draft` → `approved` and the
   `delivery-roadmap.md` row 346 entry → `approved`. Implementation
   (`plan.md`/`tasks.md`) is authored next, not at approval.
+- 2026-09-17: release slice retargeted v0.38.0 → **v0.40.0** by agreement, with
+  no requirement changed. SPEC-058 (`http.get`/`http.post`) and SPEC-059 (the
+  `acme-admin` sample app and its four single-target skills) were approved the
+  same day and take v0.38.0 and v0.39.0: R-8's `samples/` demonstration needs a
+  repertoire of *published single-target skills* to compose, and until SPEC-059
+  the only candidates are three copies of the same password-reset mutation
+  wearing different approval clothes. Sequencing this slice last is what makes
+  its demo real rather than synthetic.
+- 2026-09-17: SPEC-059 shipped alongside SPEC-058 in **v0.38.0**, collapsing
+  its planned v0.39.0 slot. The earlier entry records the approval-time plan;
+  this spec remains approved and targeted at v0.40.0.

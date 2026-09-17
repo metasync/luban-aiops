@@ -8,7 +8,7 @@ constant in a product that never imports the other.
    secret-bearing values in the change-request projection using a
    name-substring vocabulary carried kernel-side in agent-platform
    (``secret_params.SECRET_PARAM_SUBSTRINGS``), a copy of the tool-gateway's
-   evidence-redaction list (``browser_connector._SECRET_QUERY_PARAMS``,
+   evidence-redaction list (``url_redaction.SECRET_QUERY_PARAMS``,
    SPEC-049 R-5): the projection is assembled in the agent-platform kernel,
    where the gateway's known-secret value set is unavailable, so it masks by
    the same names. A copy (rather than a shared mounted file) is intentional —
@@ -58,8 +58,8 @@ from pathlib import Path
 # module-level tuple each declares.
 AGENT_PLATFORM_REL = "products/agent-platform/src/agent_service/services/secret_params.py"
 AGENT_PLATFORM_VAR = "SECRET_PARAM_SUBSTRINGS"
-TOOL_GATEWAY_REL = "products/tool-gateway/src/tool_gateway/tools/browser_connector.py"
-TOOL_GATEWAY_VAR = "_SECRET_QUERY_PARAMS"
+TOOL_GATEWAY_REL = "products/tool-gateway/src/tool_gateway/tools/url_redaction.py"
+TOOL_GATEWAY_VAR = "SECRET_QUERY_PARAMS"
 
 # The credential-hole marker (SPEC-055 R-2 writes it, R-3 refuses it).
 SKILLS_HUB_REL = "products/skills-hub/src/skills_hub/services/ingestion.py"

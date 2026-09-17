@@ -190,13 +190,29 @@ deploy-samples: ## Install tutorial sample skills into the dev cluster (SAMPLE=<
 undeploy-samples: ## Remove all tutorial sample skills from the dev cluster
 	@ACTION=undeploy $(SAMPLES_DIR)/deploy-samples.sh $(NAMESPACE)
 
+# The acme-admin sample application (SPEC-059 R-6). Out-of-band for the same
+# reason the skills are: SPEC-050 R-11 keeps samples out of the base overlay,
+# so `make deploy` never names one. The script builds with the coordinated
+# IMAGE_TAG, applies samples/acme-admin/deploy/, and then asserts the app is
+# reachable and honest before it exits 0.
+.PHONY: deploy-sample-app deploy_sample_app undeploy-sample-app
+deploy-sample-app: ## Build and deploy the acme-admin sample app to the dev cluster
+	@$(SAMPLES_DIR)/acme-admin/deploy.sh $(NAMESPACE)
+
+deploy_sample_app: deploy-sample-app ## Alias for deploy-sample-app (underscore spelling)
+
+undeploy-sample-app: ## Remove the acme-admin sample app from the dev cluster
+	@ACTION=undeploy $(SAMPLES_DIR)/acme-admin/deploy.sh $(NAMESPACE)
+
 .PHONY: e2e
 e2e: ## Run the e2e demo scripts against the deployed dev cluster
 	@echo "Prerequisites: 'make deploy' completed, plus port-forwards for the chat legs:"
 	@echo "  kubectl -n dev-luban-aiops port-forward svc/platform-gateway 18083:8000"
 	@echo "  kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000"
+	@echo "The acme-admin suite additionally needs 'make deploy-sample-app' and"
+	@echo "'make deploy-samples' to have been run; it fails loudly naming them if not."
 	@status=0; \
-	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh; do \
+	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
 		echo "==> $$script"; \
 		sh $$script || status=1; \
 	done; \

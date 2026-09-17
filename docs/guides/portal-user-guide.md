@@ -48,6 +48,14 @@ Type a prompt and send; the agent's reply streams in live. The agent may
 invoke tools while answering — those show up as
 [evidence cards](#reading-tool-evidence) attached to the reply.
 
+**Enter sends.** The composer is a single-field sender, so <kbd>Enter</kbd>
+submits the turn and <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a newline.
+A multi-line prompt is therefore something to **paste**, not to type line by
+line: pasting keeps the newlines inside one draft, whereas typing the second
+line and pressing Enter sends the first line on its own and leaves the rest
+behind. The walkthroughs under `samples/` give their prompts as blocks for
+exactly this reason.
+
 ### Voice input
 
 The microphone button in the composer performs browser speech-to-text
