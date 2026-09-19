@@ -13,12 +13,23 @@
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+- [http_connector.py](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py)
+- [url_redaction.py](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [test_tool_registry.py](file://products/tool-gateway/tests/test_tool_registry.py)
 - [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
+- [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new HTTP connector with read/write tier tools
+- Documented the URL redaction module for secret parameter masking
+- Expanded configuration options for HTTP operations including allowlist management
+- Updated architecture diagrams to include HTTP connector integration
+- Enhanced credential management section with HTTP-specific authentication patterns
 
 ## Table of Contents
 1. Introduction
@@ -32,7 +43,9 @@
 9. Conclusion
 
 ## Introduction
-The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. Built-in connectors provide safe, bounded access to Kubernetes, Elasticsearch, browser automation (web-check flows), incidents, and skills repositories. The gateway enforces risk-tier admission for mutating actions and integrates with the platform’s audit and policy systems to ensure consistent governance across all tool invocations.
+The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. Built-in connectors provide safe, bounded access to Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, and skills repositories. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
+
+**Updated** Added support for HTTP service checks with bounded read/write operations, URL secret masking, and configurable origin allowlists.
 
 ## Project Structure
 The Tool Gateway service is organized into:
@@ -56,6 +69,8 @@ B --> H["ElasticConnector"]
 B --> I["BrowserConnector"]
 B --> J["IncidentsConnector"]
 B --> K["SkillsConnector"]
+B --> L["HttpConnector"]
+L --> M["URL Redaction<br/>secret masking"]
 ```
 
 **Diagram sources**
@@ -64,6 +79,7 @@ B --> K["SkillsConnector"]
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
+- [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 
 **Section sources**
 - [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
@@ -75,8 +91,11 @@ B --> K["SkillsConnector"]
 - GatewayService: Orchestrates identity resolution, policy checks, tool dispatch, redaction, audit emission, and response mapping.
 - PolicyEngine: Loads and evaluates policy bundles; deny-by-default semantics with explicit allow/deny and require_approval outcomes.
 - Redaction: Deterministic output sanitization using value patterns and sensitive key lists; fail-closed on overflow.
+- URL Redaction: Specialized URL secret masking for query parameters and userinfo components.
 - AuditEmitter: Fire-and-forget durable audit events to the audit service; non-blocking and failure-tolerant.
 - Config: Centralized environment-driven configuration for connectors, policy, auth, and feature flags.
+
+**Updated** Added URL Redaction module for coordinated secret masking across HTTP and browser connectors.
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
@@ -84,6 +103,7 @@ B --> K["SkillsConnector"]
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
 - [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
 - [redaction.py:1-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L1-L151)
+- [url_redaction.py:1-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L1-L91)
 - [audit_emitter.py:1-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L1-L98)
 - [config.py:32-190](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L190)
 
@@ -96,6 +116,8 @@ The invocation path enforces security and safety at every stage:
 - Output redaction before response and audit emission.
 - Durable audit trail via fire-and-forget emission.
 
+**Updated** HTTP connector follows the same security model as browser connector with origin allowlists and credential set references.
+
 ```mermaid
 sequenceDiagram
 participant Client as "Caller"
@@ -103,7 +125,8 @@ participant Gateway as "FastAPI App"
 participant Service as "GatewayService.invoke_tool"
 participant Policy as "PolicyEngine.evaluate"
 participant Registry as "ToolRegistry.invoke"
-participant Connector as "Connector.execute"
+participant HttpConn as "HttpConnector"
+participant UrlRedact as "URL Redaction"
 participant Redact as "Redaction"
 participant Audit as "AuditEmitter"
 Client->>Gateway : POST /api/v2/tools/invoke
@@ -114,8 +137,15 @@ alt denied
 Service-->>Client : 403 {status : "denied"}
 else allowed
 Service->>Registry : invoke(tool_name, parameters, identity)
+alt http.get/http.post
+Registry->>HttpConn : execute(parameters, identity)
+HttpConn->>UrlRedact : redact_secret_query(url)
+UrlRedact-->>HttpConn : masked URL
+HttpConn-->>Registry : ToolResult
+else other connector
 Registry->>Connector : execute(parameters, identity)
 Connector-->>Registry : ToolResult
+end
 Registry-->>Service : ToolResult
 Service->>Redact : redact_result(result)
 Redact-->>Service : redacted result + stats
@@ -128,6 +158,8 @@ end
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [registry.py:65-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L65-L89)
+- [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
+- [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
 
@@ -173,17 +205,92 @@ BaseTool <|-- ElasticConnector
 BaseTool <|-- BrowserConnector
 BaseTool <|-- IncidentsConnector
 BaseTool <|-- SkillsConnector
+BaseTool <|-- HttpGetTool
+BaseTool <|-- HttpPostTool
 ToolRegistry --> BaseTool : "dispatches"
 ```
 
 **Diagram sources**
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
+- [http_connector.py:497-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L497-L699)
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [test_tool_registry.py:56-172](file://products/tool-gateway/tests/test_tool_registry.py#L56-L172)
+
+### HTTP Connector
+**New** The HTTP connector provides bounded HTTP service check capabilities with two tools: `http.get` (read tier) and `http.post` (write tier). It implements strict security controls including origin allowlisting, redirect following with allowlist validation, body size limits, and credential set-based authentication.
+
+Key features:
+- **Origin Allowlist**: Deny-by-default with configurable allowed origins
+- **Redirect Handling**: Follows up to 3 redirects with allowlist validation at each hop
+- **Body Validation**: Limits JSON POST bodies to depth ≤ 2, ≤ 32 keys, and configurable byte limits
+- **Credential Management**: Uses named credential sets resolved server-side into HTTP Basic auth
+- **URL Secret Masking**: Automatically masks secret-bearing query parameters in reported URLs
+- **Response Projection**: Filters response headers to a safe allowlist, excluding credentials
+
+```mermaid
+flowchart TD
+Start(["http.get/http.post"]) --> ValidateDest{"Validate destination URL"}
+ValidateDest --> |Invalid| ErrorParam["Return INVALID_PARAMETERS"]
+ValidateDest --> |Valid| CheckAllowlist{"Origin in allowlist?"}
+CheckAllowlist --> |No| OriginDenied["HTTP_ORIGIN_NOT_ALLOWED"]
+CheckAllowlist --> |Yes| ResolveAuth{"Resolve credential_set"}
+ResolveAuth --> |Error| CredError["CREDENTIAL_SET_NOT_FOUND"]
+ResolveAuth --> |Success| MakeRequest["Make HTTP request"]
+MakeRequest --> Redirect{"3xx redirect?"}
+Redirect --> |Yes| ValidateHop{"Validate redirect target"}
+ValidateHop --> |Invalid| RedirectDenied["HTTP_REDIRECT_NOT_ALLOWED"]
+ValidateHop --> |Valid| FollowHop["Follow redirect"]
+Redirect --> |No| ProcessResponse["Process response"]
+ProcessResponse --> ProjectHeaders["Project safe headers only"]
+ProjectHeaders --> MaskSecrets["Mask secret query params"]
+MaskSecrets --> ReturnResult["Return ToolResult"]
+```
+
+**Diagram sources**
+- [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
+- [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
+- [http_connector.py:255-302](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L255-L302)
+
+**Section sources**
+- [http_connector.py:1-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L1-L699)
+- [test_http_connector.py:1-789](file://products/tool-gateway/tests/test_http_connector.py#L1-L789)
+
+### URL Redaction Module
+**New** The URL redaction module provides coordinated secret masking for URLs across HTTP and browser connectors. It masks secret-bearing query parameters and userinfo components while preserving URL structure and non-secret values.
+
+Features:
+- **Secret Parameter Detection**: Case-insensitive matching of known secret parameter names
+- **Userinfo Masking**: Masks passwords in `scheme://user:password@host` format
+- **Query Parameter Masking**: Replaces secret parameter values with `***` markers
+- **Preservation**: Maintains exact URL encoding and non-secret parameter values
+
+```mermaid
+flowchart TD
+Input["URL Input"] --> Parse["Parse URL components"]
+Parse --> CheckUserinfo{"Has password in userinfo?"}
+CheckUserinfo --> |Yes| MaskUserinfo["Replace password with ***"]
+CheckUserinfo --> |No| SkipUserinfo["Skip userinfo processing"]
+MaskUserinfo --> ProcessQuery["Process query parameters"]
+SkipUserinfo --> ProcessQuery
+ProcessQuery --> SplitQuery["Split by & delimiter"]
+SplitQuery --> ForEachParam{"For each parameter"}
+ForEachParam --> CheckSecret{"Is parameter name secret?"}
+CheckSecret --> |Yes| MaskValue["Replace value with ***"]
+CheckSecret --> |No| KeepValue["Keep original value"]
+MaskValue --> Reconstruct["Reconstruct URL"]
+KeepValue --> Reconstruct
+Reconstruct --> Output["Masked URL Output"]
+```
+
+**Diagram sources**
+- [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
+
+**Section sources**
+- [url_redaction.py:1-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L1-L91)
 
 ### Kubernetes Connector
 - Provides read-only tools: k8s.list_pods, k8s.get_pod, k8s.get_events, k8s.get_pod_logs.
@@ -240,6 +347,7 @@ Query --> ConnErr["Return ELASTIC_CONNECTION_ERROR"]
 - Interaction guards prevent off-origin navigation and enforce step budgets; read captures re-check live origin.
 - Credential sets resolved from secret-mounted files; screenshots mask password-tier values.
 - Write-tier tools include web.click, web.type, web.select, web.press_key, web.upload_file, web.evaluate; read-tier includes web.navigate, web.snapshot, web.screenshot, web.fill_credential, web.extract, web.wait_for, web.hover, web.scroll, web.switch_frame.
+- **Updated** Now uses shared URL redaction module for consistent secret masking across all URL outputs.
 
 ```mermaid
 sequenceDiagram
@@ -247,6 +355,7 @@ participant Caller as "Caller"
 participant Browser as "BrowserConnector"
 participant Pool as "BrowserSessionPool"
 participant Page as "Page/Frame"
+participant UrlRedact as "URL Redaction"
 Caller->>Browser : web.navigate(url, skill_id?)
 Browser->>Pool : get_or_create(session_key)
 Pool-->>Browser : BrowserSessionEntry
@@ -255,6 +364,8 @@ alt skill_id provided
 Browser->>Browser : fetch_skill(skill_id)
 Browser->>Browser : bind_flow(entry, skill_id, url, skill)
 end
+Browser->>UrlRedact : redact_secret_query(url)
+UrlRedact-->>Browser : masked URL
 Browser->>Page : goto(url)
 Page-->>Browser : active_target.url
 Browser->>Browser : gate_capture() for snapshots/screenshots
@@ -266,6 +377,7 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 - [browser_connector.py:425-531](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L425-L531)
 - [browser_connector.py:655-698](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L655-L698)
 - [browser_connector.py:730-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L730-L800)
+- [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
 
 **Section sources**
 - [browser_connector.py:1-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1-L800)
@@ -291,6 +403,8 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 - Policy enforcement denies without identity or matching allow rules; mutating tools additionally require tools:mutate.
 - Registry.invoke catches exceptions and returns TOOL_EXECUTION_ERROR with evidence.
 - Redaction applies deterministic masking and fails closed on overflow; audit events emitted for all outcomes.
+
+**Updated** HTTP connector follows the same error handling pattern with specific HTTP-related error codes.
 
 ```mermaid
 flowchart TD
@@ -326,10 +440,13 @@ Emit --> Resp["JSONResponse"]
 - Sensitive query parameters masked in reported URLs for evidence.
 - Screenshots mask password-tier values to avoid leaking secrets.
 - All connector credentials are passed via configuration and never exposed in results or audit payloads.
+- **Updated** HTTP connector uses the same credential set mechanism as browser connector, supporting rotation without restart.
 
 **Section sources**
 - [browser_connector.py:123-148](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L123-L148)
 - [browser_connector.py:174-257](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L174-L257)
+- [http_connector.py:361-387](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L361-L387)
+- [url_redaction.py:27-41](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L27-L41)
 - [config.py:63-73](file://products/tool-gateway/src/tool_gateway/core/config.py#L63-L73)
 
 ### Integration with Audit and Policy Systems
@@ -346,6 +463,7 @@ Emit --> Resp["JSONResponse"]
 - Application wiring: app creates registry and optional browser connector; lifespan starts/stops browser pool.
 - Connectors depend on external clients (kubernetes, elasticsearch, httpx) and register tools conditionally based on configuration.
 - GatewayService depends on policy engine, token verifier, redaction, and audit emitter.
+- **Updated** HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector.
 
 ```mermaid
 graph LR
@@ -356,6 +474,8 @@ Reg --> ES["ElasticConnector"]
 Reg --> Br["BrowserConnector"]
 Reg --> Inc["IncidentsConnector"]
 Reg --> Sk["SkillsConnector"]
+Reg --> Http["HttpConnector"]
+Http --> UrlRedact["URL Redaction"]
 GS["GatewayService"] --> PE["PolicyEngine"]
 GS --> AE["AuditEmitter"]
 GS --> RD["Redaction"]
@@ -364,6 +484,7 @@ GS --> RD["Redaction"]
 **Diagram sources**
 - [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 
 **Section sources**
 - [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
@@ -374,6 +495,7 @@ GS --> RD["Redaction"]
 - Parameter bounds: Time ranges, result limits, and log tail sizes are clamped to prevent resource exhaustion.
 - Redaction overhead: Redaction runs once per result; overflow detection prevents excessive processing.
 - Observability: Metrics recorded for policy decisions, redaction spans, token verification, and audit emissions.
+- **Updated** HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion.
 
 [No sources needed since this section provides general guidance]
 
@@ -385,14 +507,18 @@ Common issues and diagnostics:
 - Upstream connectivity: Connectors return structured errors (e.g., K8S_NOT_CONFIGURED, ELASTIC_NOT_CONFIGURED, UPSTREAM_ERROR); check configuration and network reachability.
 - Browser flow deviations: Off-origin navigation or stale flow provenance triggers specific denial codes; navigate back to bound target or re-bind flow.
 - Redaction overflow: If too much of the result appears sensitive, outputs are withheld; tighten parameters or reduce payload size.
+- **Updated** HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems.
 
 **Section sources**
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
 - [k8s_connector.py:41-92](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L41-L92)
 - [elastic_connector.py:40-103](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py#L40-L103)
 - [browser_connector.py:533-698](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L533-L698)
+- [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [test_tool_invoke.py:184-549](file://products/tool-gateway/tests/test_tool_invoke.py#L184-L549)
 
 ## Conclusion
-The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. Built-in connectors cover Kubernetes, Elasticsearch, browser automation, incidents, and skills repositories, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
+The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. Built-in connectors cover Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, and skills repositories, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
+
+**Updated** The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking.

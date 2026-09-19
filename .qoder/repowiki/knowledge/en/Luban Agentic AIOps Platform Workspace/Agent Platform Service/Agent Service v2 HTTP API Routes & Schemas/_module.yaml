@@ -8,4 +8,3 @@ source_files: []
 depends_on: []
 related_to:
     - path: platform_gateway/gateway_core
-    - path: shared_contracts_and_sdk

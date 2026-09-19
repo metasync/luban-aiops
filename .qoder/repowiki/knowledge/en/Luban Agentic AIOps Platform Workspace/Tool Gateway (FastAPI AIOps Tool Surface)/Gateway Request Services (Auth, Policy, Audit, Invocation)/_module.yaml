@@ -7,3 +7,4 @@ source_files: []
 depends_on: []
 related_to:
     - path: audit_service
+    - path: tool_gateway/tool_connectors

@@ -1,0 +1,6 @@
+- Errors are returned as a uniform `{"error": <CODE>, "message": <human>}` JSON envelope so callers branch on status code and code rather than parsing prose.
+- Mutating routes wrap store calls in a helper (`_mutation_response`) that catches `UnknownUser`, `NoOpMutation`, and `InvalidPassword` and maps them to 404/409/400 responses respectively.
+- State mutations bump a global `revision` counter and stamp each affected row with it, making revision the authoritative discriminator of which action changed a record.
+- HTML templates are defined as `string.Template` constants inside the page module and rendered through a `_page()` helper, avoiding external template file paths.
+- Authentication is enforced per-route via FastAPI `Depends(require_admin)` for the JSON API and a `session_user(request)` check for HTML pages, both backed by the same `ACME_ADMIN_PASSWORD` environment variable.
+- Each skill sample directory follows a fixed shape: `README.md` + `WALKTHROUGH.md` + `skill/<Name>.md` + `demo/demo.sh`, and new skills must be registered explicitly in `demo-suite.sh` and the root Makefile's e2e target.

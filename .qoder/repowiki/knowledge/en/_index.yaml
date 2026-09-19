@@ -3,7 +3,7 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-09-16T16:00:22Z"
+exported_at: "2026-09-19T15:15:40Z"
 modules:
     "":
         dir_name: Luban Agentic AIOps Platform Workspace
@@ -66,7 +66,6 @@ modules:
         depends_on: []
         related_to:
             - path: platform_gateway/gateway_core
-            - path: shared_contracts_and_sdk
     agent_platform/core_runtime:
         dir_name: Agent Service Core Runtime & Bootstrap
         title: Agent Service Core Runtime & Bootstrap
@@ -97,7 +96,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: shared_contracts_and_sdk
     agent_platform/runtime_kernel:
         dir_name: Agent Runtime Kernel & Settings
         title: Agent Runtime Kernel & Settings
@@ -108,7 +108,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: execution_runtime
     agent_platform/services:
         dir_name: Agent Service Layer
         title: Agent Service Layer
@@ -212,6 +213,7 @@ modules:
         depends_on: []
         related_to:
             - path: platform_gateway/audit_observability
+            - path: platform_ops
             - path: tool_gateway/gateway_services
     build_infrastructure:
         dir_name: Shared Build & Base Image Fragments
@@ -224,8 +226,8 @@ modules:
         depends_on: []
         related_to: []
     docs:
-        dir_name: Platform Documentation, Specs & ADRs
-        title: Platform Documentation, Specs & ADRs
+        dir_name: Platform Documentation & Spec-Driven Development Records
+        title: Platform Documentation & Spec-Driven Development Records
         scope:
             - docs/
         source_files: []
@@ -241,8 +243,8 @@ modules:
         children: []
         depends_on: []
         related_to:
+            - path: agent_platform/runtime_kernel
             - path: agent_platform/services/execution_audit
-            - path: tool_gateway
     identity_broker:
         dir_name: Identity Broker Service
         title: Identity Broker Service
@@ -263,9 +265,7 @@ modules:
         depends_on: []
         related_to:
             - path: agent_platform/services/document_evidence
-            - path: platform_gateway/gateway_core
-            - path: platform_ops
-            - path: shared_contracts_and_sdk
+            - path: platform_gateway/route_proxies
     operator_portal:
         dir_name: Operator Portal Web UI
         title: Operator Portal Web UI
@@ -275,7 +275,7 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: platform_gateway
+            - path: platform_gateway/route_proxies
     platform_gateway:
         dir_name: Platform Gateway HTTP Service
         title: Platform Gateway HTTP Service
@@ -290,8 +290,7 @@ modules:
             - platform_gateway/route_proxies
             - platform_gateway/session_workspace
         depends_on: []
-        related_to:
-            - path: operator_portal
+        related_to: []
     platform_gateway/audit_observability:
         dir_name: Audit Emission & Observability Telemetry
         title: Audit Emission & Observability Telemetry
@@ -337,9 +336,6 @@ modules:
         depends_on: []
         related_to:
             - path: agent_platform/api_routes
-            - path: incident_service
-            - path: skills_hub
-            - path: tool_gateway
     platform_gateway/policy_engine:
         dir_name: Platform Gateway Policy Engine & Matrix
         title: Platform Gateway Policy Engine & Matrix
@@ -366,7 +362,10 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: incident_service
+            - path: operator_portal
+            - path: skills_hub
     platform_gateway/session_workspace:
         dir_name: Session, Document & Runtime API Routes
         title: Session, Document & Runtime API Routes
@@ -379,8 +378,8 @@ modules:
         depends_on: []
         related_to: []
     platform_ops:
-        dir_name: Platform Operations & Kubernetes Deployment Assets
-        title: Platform Operations & Kubernetes Deployment Assets
+        dir_name: Platform Ops Kustomize GitOps & Dev Cluster Deployment
+        title: 'Platform Ops: Kustomize GitOps & Dev Cluster Deployment'
         scope:
             - shared/platform-ops/
         source_files: []
@@ -388,13 +387,25 @@ modules:
         depends_on: []
         related_to:
             - path: agent_platform
-            - path: incident_service
+            - path: audit_service
             - path: skills_hub
+            - path: tool_gateway
     samples:
-        dir_name: Tutorial Sample Skills for Luban AIOps
-        title: Tutorial Sample Skills for Luban AIOps
+        dir_name: Skills-Hub Tutorial Samples
+        title: Skills-Hub Tutorial Samples
         scope:
             - samples/
+        source_files: []
+        children:
+            - samples/acme_admin
+        depends_on: []
+        related_to:
+            - path: shared_contracts_and_sdk
+    samples/acme_admin:
+        dir_name: ACME Admin Console Sample App
+        title: ACME Admin Console Sample App
+        scope:
+            - samples/acme-admin/
         source_files: []
         children: []
         depends_on: []
@@ -409,9 +420,8 @@ modules:
         children: []
         depends_on: []
         related_to:
-            - path: agent_platform/api_routes
-            - path: incident_service
-            - path: skills_hub
+            - path: agent_platform/providers
+            - path: samples
     skills_hub:
         dir_name: Skills Hub — Federated Skill Catalog Service
         title: Skills Hub — Federated Skill Catalog Service
@@ -422,12 +432,11 @@ modules:
         depends_on: []
         related_to:
             - path: agent_platform/services/skills_flow
-            - path: platform_gateway/gateway_core
+            - path: platform_gateway/route_proxies
             - path: platform_ops
-            - path: shared_contracts_and_sdk
     tool_gateway:
-        dir_name: Tool Gateway Service
-        title: Tool Gateway Service
+        dir_name: Tool Gateway (FastAPI AIOps Tool Surface)
+        title: Tool Gateway (FastAPI AIOps Tool Surface)
         scope:
             - products/tool-gateway/
         source_files: []
@@ -439,8 +448,7 @@ modules:
             - tool_gateway/tool_connectors
         depends_on: []
         related_to:
-            - path: execution_runtime
-            - path: platform_gateway/gateway_core
+            - path: platform_ops
     tool_gateway/api_layer:
         dir_name: Tool Gateway API Layer
         title: Tool Gateway API Layer
@@ -473,6 +481,7 @@ modules:
         depends_on: []
         related_to:
             - path: audit_service
+            - path: tool_gateway/tool_connectors
     tool_gateway/tests:
         dir_name: Tool Gateway Test Suite
         title: Tool Gateway Test Suite
@@ -490,4 +499,5 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: tool_gateway/gateway_services

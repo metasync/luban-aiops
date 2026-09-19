@@ -17,6 +17,12 @@
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated Runtime Profiles section to reflect that browser-dev profile no longer includes a sample browser-check target application and service (removed by SPEC-061)
+- Clarified that browser-dev profile now only provides browser posture configuration without shipping its own target
+- Updated references to browser-check-target to reflect its retirement
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -58,20 +64,20 @@ D --> R3
 **Diagram sources**
 - [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
-- [runtime profiles README.md:1-57](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L57)
+- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
 
 **Section sources**
 - [README.md:1-47](file://shared/platform-ops/README.md#L1-L47)
 - [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
-- [runtime profiles README.md:1-57](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L57)
+- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
 
 ## Core Components
 - Base layer: Declares namespace, services, deployments, RBAC, and generates ConfigMaps for runtime configuration and policy. It also includes sample skill content and database init SQL.
 - Runtime profiles:
   - default: Provides an agent-platform runtime profile ConfigMap with provider/model metadata.
   - mutating-dev: Enables bounded mutating tools posture via environment flags and RBAC for pod deletion.
-  - browser-dev: Enables browser web-check posture by adding a sidecar patch, a sample target app, network policy, and environment flags.
+  - browser-dev: Enables browser web-check posture by adding a sidecar patch, network policy, and environment flags. **Updated**: No longer ships a sample browser-check target application (retired by SPEC-061); instead permits exactly one origin (`acme-admin`) which is deployed out-of-band.
 - Automation:
   - deploy-overlay.sh: Renders and applies Kustomize overlays, updates images, restarts pods when ConfigMaps change, and waits for rollouts.
   - select-runtime-profile.sh: Rewrites dev-k8s overlay to switch the active LLM runtime profile while preserving committed dev postures.
@@ -84,7 +90,7 @@ D --> R3
 - [mutating-dev kustomization.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
-- [browser-dev env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
 - [select-runtime-profile.sh:1-55](file://shared/platform-ops/gitops/select-runtime-profile.sh#L1-L55)
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
@@ -146,8 +152,9 @@ Apps --> Svc["Expose Services"]
 - Mutating-Dev profile:
   - Adds RBAC enabling bounded mutating tools (e.g., pod deletion) and sets GATEWAY_MUTATING_TOOLS_ENABLED=true via merging into platform-runtime-config.
 - Browser-Dev profile:
-  - Adds a sample browser-check target application and service, a network policy for the sidecar, and environment flags enabling browser tools with a deny-by-default origin allowlist.
+  - **Updated**: No longer ships a sample browser-check target application and service (retired by SPEC-061). Instead provides browser posture configuration including a NetworkPolicy for the sidecar and environment flags enabling browser tools with a deny-by-default origin allowlist permitting only `acme-admin`.
   - The dev-k8s overlay patches the tool-gateway Deployment to include a chromium-headless-shell sidecar and mounts credential sets.
+  - The one permitted origin (`GATEWAY_BROWSER_ALLOW_ORIGINS=http://acme-admin:8080`) refers to the acme-admin sample application deployed out-of-band by `make deploy-sample-app`.
 
 ```mermaid
 classDiagram
@@ -160,10 +167,11 @@ class MutatingDevProfile {
 +GATEWAY_MUTATING_TOOLS_ENABLED=true
 }
 class BrowserDevProfile {
-+Sample target app/service
 +NetworkPolicy for sidecar
 +GATEWAY_BROWSER_* flags
 +Credential sets mount
++No sample target app (SPEC-061)
++Permits acme-admin origin only
 }
 DefaultProfile <.. MutatingDevProfile : "coexist in dev-k8s"
 DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
@@ -174,17 +182,17 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
 - [mutating-dev kustomization.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
-- [browser-dev env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
 
 **Section sources**
-- [runtime profiles README.md:1-57](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L57)
+- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
 - [default profile kustomization.yaml:1-5](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml#L1-L5)
 - [default profile configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 - [mutating-dev kustomization.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
-- [browser-dev env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
 
 ### Development, Staging, and Production Profiles
@@ -196,10 +204,8 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Replace dev-only features (e.g., browser-dev, mutating-dev) with hardened profiles and restrict feature flags accordingly.
   - Use separate namespaces and stricter policies per environment.
 
-[No sources needed since this section generalizes the pattern beyond the current dev-k8s implementation]
-
 ### Kubernetes Resource Management, Namespace Isolation, and Service Discovery
-- Namespace isolation: All resources are scoped to the overlay’s namespace (dev-luban-aiops in dev).
+- Namespace isolation: All resources are scoped to the overlay's namespace (dev-luban-aiops in dev).
 - Service discovery: Each service exposes a stable DNS name within the namespace; applications reference these names for inter-service communication.
 - RBAC: Platform and tool gateway RBAC are declared in the base layer to enforce least privilege.
 
@@ -252,8 +258,6 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
 - Validation after rollback:
   - Confirm rollout status and verify endpoints respond as expected.
 
-[No sources needed since this section provides operational guidance based on the deployment workflow]
-
 ### Validation Steps
 - Pre-deploy:
   - Ensure IMAGE_TAG is set and images are built.
@@ -285,6 +289,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - ConfigMap not taking effect: Restart affected deployments; the script handles this automatically when it detects changes.
   - Profile selection errors: select-runtime-profile.sh rejects non-switchable profiles; use supported LLM profiles.
   - Secrets missing: Ensure per-profile secret files exist before syncing; CI can inject secrets directly.
+  - Browser web-check failures: After SPEC-061, ensure the acme-admin sample application is deployed out-of-band since the static browser-check-target is no longer shipped.
 - Diagnostic steps:
   - Inspect rollout status and events for failing deployments.
   - Verify ConfigMaps and Secrets exist in the target namespace.
@@ -307,8 +312,6 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Monitor sidecar impact (e.g., browser sidecar) and adjust resources accordingly.
 - Database and cache:
   - Ensure Postgres and Redis have adequate resources and proper persistence settings.
-
-[No sources needed since this section provides general guidance]
 
 ## Dependency Analysis
 The dev-k8s overlay depends on:
@@ -349,14 +352,13 @@ Scripts["deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret
 - Ensure database and cache resources match workload demands.
 - Avoid frequent ConfigMap churn; batch changes and rely on automatic restarts when detected.
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
 - Verify overlay path and IMAGE_TAG before deploying.
 - Check rollout status and events for failures.
 - Confirm ConfigMaps and Secrets exist and contain expected keys.
 - Validate service endpoints and network policies.
 - Use selective rollout restarts if only specific services need reapplication of configuration.
+- **Updated**: For browser web-check issues, ensure the acme-admin sample application is properly deployed since the static browser-check-target was retired by SPEC-061.
 
 **Section sources**
 - [deploy-overlay.sh:10-23](file://shared/platform-ops/gitops/deploy-overlay.sh#L10-L23)
@@ -365,7 +367,7 @@ Scripts["deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret
 - [sync-runtime-secret.sh:10-22](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L10-L22)
 
 ## Conclusion
-The GitOps deployment model leverages Kustomize overlays to cleanly separate base platform resources from environment-specific behaviors. The dev-k8s overlay composes base manifests with runtime profiles to enable controlled feature toggles such as browser web-checks and bounded mutating tools. Automation scripts streamline deployment, image updates, configuration propagation, and validation. Following the outlined procedures ensures reliable rollouts, straightforward rollbacks, and robust troubleshooting for platform operations.
+The GitOps deployment model leverages Kustomize overlays to cleanly separate base platform resources from environment-specific behaviors. The dev-k8s overlay composes base manifests with runtime profiles to enable controlled feature toggles such as browser web-checks and bounded mutating tools. Following SPEC-061, the browser-dev profile no longer ships a sample browser-check target application but instead provides the browser posture configuration that permits exactly one origin (`acme-admin`). Automation scripts streamline deployment, image updates, configuration propagation, and validation. Following the outlined procedures ensures reliable rollouts, straightforward rollbacks, and robust troubleshooting for platform operations.
 
 ## Appendices
 
@@ -379,10 +381,8 @@ shared/platform-ops/gitops/
 ├── runtime-profiles/
 │   ├── default/                       # Agent platform runtime profile
 │   ├── mutating-dev/                  # Bounded mutating tools posture
-│   └── browser-dev/                   # Browser web-check posture
+│   └── browser-dev/                   # Browser web-check posture (no sample target)
 ├── deploy-overlay.sh                  # Main deployment automation
 ├── select-runtime-profile.sh          # Switch LLM runtime profile
 └── sync-*.sh                          # Secret and data sync helpers
 ```
-
-[No sources needed since this section summarizes structure already covered]

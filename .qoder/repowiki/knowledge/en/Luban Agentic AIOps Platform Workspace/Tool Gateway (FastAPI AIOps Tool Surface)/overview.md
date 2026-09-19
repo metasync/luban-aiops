@@ -1,0 +1,1 @@
+FastAPI gateway that exposes external systems as tools behind JWT auth, deny-by-default policy evaluation, and audit logging, wired together at process startup.

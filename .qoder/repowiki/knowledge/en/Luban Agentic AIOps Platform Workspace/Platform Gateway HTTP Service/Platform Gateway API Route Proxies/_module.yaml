@@ -12,4 +12,7 @@ scope:
     - products/platform-gateway/src/platform_gateway/api/router.py
 source_files: []
 depends_on: []
-related_to: []
+related_to:
+    - path: incident_service
+    - path: operator_portal
+    - path: skills_hub

@@ -1,0 +1,1 @@
+Python FastAPI application managed with uv (`pyproject.toml`, `uv.lock`), deployed via Dockerfile, using Pydantic for request/response validation and YAML for policy configuration.

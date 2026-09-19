@@ -13,9 +13,18 @@
 - [mutating.env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 - [browser-dev kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml)
 - [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
+- [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [runtime profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Browser-Dev Profile section to reflect removal of sample browser-check target application
+- Revised profile description to focus on network policy and environment configuration only
+- Updated references to SPEC-061 retirement of browser-check target
+- Clarified that the profile now provides browser posture through NetworkPolicy and environment variables only
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -73,7 +82,7 @@ Base --> AgentPlatformEnv["Agent platform env<br/>base/agent-platform/runtime-co
 - Runtime profiles:
   - Default: Provides the active LLM provider profile via a ConfigMap (e.g., provider, model name, base URL).
   - Mutating-dev: Enables bounded mutating tools in dev by merging an environment flag and applying RBAC for pod deletion.
-  - Browser-dev: Enables browser web-check tools in dev by merging environment flags, adding a sample target app, and patching the tool-gateway Deployment to include a Chromium sidecar.
+  - Browser-dev: Enables browser web-check tools in dev by merging environment flags, applying a NetworkPolicy for security, and patching the tool-gateway Deployment to include a Chromium sidecar. **Updated**: No longer includes a sample browser-check target application, which was retired by SPEC-061.
 
 Environment variables are consolidated into a single runtime ConfigMap consumed by services through envFrom or mounts. Secrets are provisioned separately by sync scripts and mounted as Secrets.
 
@@ -157,13 +166,17 @@ Key behaviors:
 - [tool-gateway runtime-config.env:1-67](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L1-L67)
 
 #### Browser-Dev Profile
+- **Updated**: Now focuses solely on browser posture configuration without shipping a sample target application.
 - Merges environment flags enabling browser web-check tools, CDP endpoint, origin allowlist, and credential sets path.
-- Adds a sample browser-check target application and network policy.
-- Patches the tool-gateway Deployment to include a Chromium sidecar.
+- Applies a NetworkPolicy for defense-in-depth security, denying ingress to the CDP port while allowing HTTP traffic.
+- Patches the tool-gateway Deployment to include a Chromium sidecar bound to loopback for secure communication.
+- **Retired**: The sample browser-check target application was removed by SPEC-061, leaving only the browser posture configuration.
 
 **Section sources**
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
-- [browser.env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
+- [browser-sidecar-network-policy.yaml:1-31](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L31)
+- [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
 - [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
 
 ### Environment Variable Management and Secret Injection
@@ -235,6 +248,7 @@ Base --> Services["Services & Deployments"]
 Base --> Infra["Infra (DB, Redis)"]
 MutatingDev --> RBAC["RBAC for mutating tools"]
 BrowserDev --> Sidecar["Chromium sidecar patch"]
+BrowserDev --> NetworkPolicy["NetworkPolicy for CDP security"]
 ```
 
 **Diagram sources**
@@ -259,7 +273,7 @@ BrowserDev --> Sidecar["Chromium sidecar patch"]
 Common issues and resolutions:
 - ConfigMap changes not taking effect: Restart affected deployments; the deployment script detects ConfigMap changes and performs rollouts automatically.
 - Missing secrets: Ensure sync scripts have provisioned required secrets (audit, execution handoff, incidents, skills, OTLP headers, browser credentials).
-- Browser tools not working: Verify browser-dev profile is included, CDP endpoint is reachable, origins are allowed, and sidecar is present.
+- Browser tools not working: Verify browser-dev profile is included, CDP endpoint is reachable, origins are allowed, and sidecar is present. **Updated**: Note that no sample target application is provided; external applications must be deployed separately.
 - Mutating tools blocked: Confirm mutating-dev profile is included, RBAC is applied, and policy grants exist; ensure HITL timeout is configured where required.
 
 Validation tips:
@@ -270,11 +284,11 @@ Validation tips:
 **Section sources**
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
 - [tool-gateway runtime-config.env:1-67](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L1-L67)
-- [browser.env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [mutating.env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 
 ## Conclusion
-The Kustomize overlays provide a modular, secure, and testable way to configure the Luban AIOps platform across environments. The dev overlay composes a robust base with optional runtime profiles for specialized capabilities like browser web-checks and bounded mutating tools. Secrets and sensitive configuration are managed out-of-band, ensuring safe separation of concerns. Staging and production overlays should build on these patterns with stricter security, performance tuning, and scaling policies. Operational scripts streamline deployment, validation, and rollout management, while clear feature gates enable rapid rollback and emergency response.
+The Kustomize overlays provide a modular, secure, and testable way to configure the Luban AIOps platform across environments. The dev overlay composes a robust base with optional runtime profiles for specialized capabilities like browser web-checks and bounded mutating tools. **Updated**: The browser-dev profile now focuses exclusively on browser posture configuration through NetworkPolicy and environment variables, with the sample browser-check target application retired by SPEC-061. Secrets and sensitive configuration are managed out-of-band, ensuring safe separation of concerns. Staging and production overlays should build on these patterns with stricter security, performance tuning, and scaling policies. Operational scripts streamline deployment, validation, and rollout management, while clear feature gates enable rapid rollback and emergency response.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -290,7 +304,7 @@ The Kustomize overlays provide a modular, secure, and testable way to configure 
 - [runtime.env:1-12](file://shared/platform-ops/gitops/dev-k8s/base/shared/runtime.env#L1-L12)
 - [tool-gateway runtime-config.env:1-67](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L1-L67)
 - [agent-platform runtime-config.env:1-50](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L1-L50)
-- [browser.env:1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
+- [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [mutating.env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 
 ### Deployment Workflow Sequence

@@ -10,12 +10,19 @@
 - [kustomization.yaml (browser-dev)](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml)
 - [browser.env (browser-dev)](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
 - [tool-gateway-browser-sidecar.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml)
-- [browser-check-target-deployment.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-deployment.yaml)
 - [browser-sidecar-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml)
 - [kustomization.yaml (mutating-dev)](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml)
 - [mutating.env (mutating-dev)](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated browser-dev profile section to reflect removal of browser-check-target sample application
+- Removed references to browser-check-target deployment and service configurations
+- Updated architecture diagrams to show current browser-dev posture-only configuration
+- Revised troubleshooting guidance for browser tools without sample targets
+- Updated dependency analysis to reflect reduced scope of browser-dev profile
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,13 +39,13 @@
 ## Introduction
 This document explains the runtime profiles system that customizes platform behavior for different operational scenarios. It covers:
 - The default profile for standard deployments, which sets a generic agent profile and provider configuration.
-- The browser-dev profile for web automation testing with a Playwright-compatible sidecar and a sample browser check target.
+- The browser-dev profile for web automation testing with a Playwright-compatible sidecar and posture configuration only (sample targets are deployed out-of-band).
 - The mutating-dev profile for testing write operations with elevated permissions scoped to bounded actions.
 
 It also documents how each profile configures security policies, network policies, resource allocations, and service integrations; how tool execution policies and approval workflows are affected; and how to use the select and verify scripts to switch and validate profiles. Finally, it provides guidance for creating custom profiles and understanding their security implications.
 
 ## Project Structure
-Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Two “posture” profiles (mutating-dev and browser-dev) are always wired into dev-k8s alongside the active LLM provider profile. A third profile (default) is the current LLM provider profile used by dev-k8s.
+Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Two "posture" profiles (mutating-dev and browser-dev) are always wired into dev-k8s alongside the active LLM provider profile. A third profile (default) is the current LLM provider profile used by dev-k8s.
 
 ```mermaid
 graph TB
@@ -67,12 +74,12 @@ D --> MUT
 
 ## Core Components
 - Default profile: Provides a ConfigMap that labels the deployment with a generic profile and selects an LLM provider and model.
-- Browser-dev posture: Adds a headless browser sidecar to the tool-gateway Deployment, mounts credential sets, exposes a sample browser-check target app, and restricts network access to the CDP port.
+- Browser-dev posture: Adds a headless browser sidecar to the tool-gateway Deployment, mounts credential sets, and restricts network access to the CDP port. Sample target applications are deployed out-of-band via `make deploy-sample-app`.
 - Mutating-dev posture: Grants a minimal RBAC Role/RoleBinding for deleting pods in the dev namespace and enables mutating tools via a ConfigMap flag.
 
 These components affect:
 - Security policies: Deny-by-default posture unless explicitly enabled by a profile.
-- Network policies: Restrict cross-pod access to the browser’s debugging port.
+- Network policies: Restrict cross-pod access to the browser's debugging port.
 - Resource allocations: Sidecar CPU/memory requests and limits.
 - Service integrations: Tool-gateway integration with the browser sidecar and optional credentials.
 
@@ -80,7 +87,6 @@ These components affect:
 - [configmap.yaml (default):1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 - [browser.env (browser-dev):1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
 - [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
-- [browser-check-target-deployment.yaml:1-70](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-deployment.yaml#L1-L70)
 - [browser-sidecar-network-policy.yaml:1-31](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L31)
 - [mutating.env (mutating-dev):1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
@@ -140,33 +146,39 @@ Security and policy impact:
 - [kustomization.yaml (default):1-5](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml#L1-L5)
 
 ### Browser-Dev Profile (Web Automation Testing)
+**Updated** The browser-dev profile now functions purely as a posture configuration without shipping sample target applications. Sample targets like `acme-admin` are deployed out-of-band using `make deploy-sample-app`.
+
 Purpose:
-- Enables browser-based web checks in dev by adding a headless browser sidecar to the tool-gateway pod and providing a sample target application.
+- Enables browser-based web checks in dev by adding a headless browser sidecar to the tool-gateway pod and providing posture configuration for secure browser automation.
 
 Key configurations:
 - Environment variables merged into platform-runtime-config:
-  - Enable browser connector.
-  - Define CDP endpoint on loopback.
-  - Allow only the sample target origin.
+  - Enable browser connector (`GATEWAY_BROWSER_ENABLED=true`).
+  - Define CDP endpoint on loopback (`ws://localhost:9222`).
+  - Allow only the `acme-admin` origin (`http://acme-admin:8080`).
   - Mount named credential sets for web logins.
 - Strategic merge patch adds:
   - Chromium headless sidecar bound to loopback on a fixed port.
   - Credential secret volume mount on the gateway container.
   - Resource requests/limits for the sidecar.
-- Sample target:
-  - Unprivileged nginx serving static pages.
-  - Read-only ConfigMap-backed pages.
 - Network policy:
   - Explicitly allows HTTP ingress to the gateway.
   - Denies ingress to the CDP port from other pods (defense-in-depth).
 
+Sample targets:
+- Deployed out-of-band via `make deploy-sample-app` (SPEC-059).
+- The `acme-admin` application serves as the primary test target.
+- No longer ships static mock applications like `browser-check-target` (retired by SPEC-061).
+
 Tool execution and approvals:
 - Browser tools are gated by feature enablement and allowlist.
 - Named credential sets are mounted but optional; missing credentials fail closed at call time.
+- Only configured origins (currently just `acme-admin`) are allowed for navigation.
 
 Security boundaries:
 - CDP is bound to loopback and protected by a NetworkPolicy.
 - Only configured origins are allowed for navigation.
+- Sample targets must be deployed separately and are not part of the profile's scope.
 
 ```mermaid
 flowchart TD
@@ -177,7 +189,7 @@ CheckOrigin --> |Denied| Deny
 CheckOrigin --> |Allowed| ConnectCDP["Connect to CDP on loopback:9222"]
 ConnectCDP --> Credentials{"Credential set available?"}
 Credentials --> |No| FailClosed["Fail closed at call time"]
-Credentials --> |Yes| Navigate["Navigate and interact"]
+Credentials --> |Yes| Navigate["Navigate to acme-admin or configured origin"]
 Navigate --> End(["Result returned"])
 Deny --> End
 FailClosed --> End
@@ -193,7 +205,6 @@ FailClosed --> End
 - [kustomization.yaml (browser-dev):1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 - [browser.env (browser-dev):1-11](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L11)
 - [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
-- [browser-check-target-deployment.yaml:1-70](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-deployment.yaml#L1-L70)
 - [browser-sidecar-network-policy.yaml:1-31](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L31)
 
 ### Mutating-Dev Profile (Write Operations)
@@ -206,7 +217,7 @@ Key configurations:
 
 Tool execution and approvals:
 - Mutating invokes remain triple-gated: risk-tier admission, policy grant, and HITL confirmation.
-- Activation requires the profile’s environment variable, policy grants, RBAC applied, and HITL timeout configured.
+- Activation requires the profile's environment variable, policy grants, RBAC applied, and HITL timeout configured.
 
 Security boundaries:
 - Minimal surface: only delete on pods in the dev namespace.
@@ -278,8 +289,8 @@ Profiles compose through Kustomize:
 - dev-k8s includes the active LLM profile and both posture overlays.
 - browser-dev depends on:
   - tool-gateway Deployment (patched by dev-k8s).
-  - browser-check target Deployment and Service.
   - NetworkPolicy restricting CDP ingress.
+  - Out-of-band sample applications (deployed via `make deploy-sample-app`).
 - mutating-dev depends on:
   - tool-gateway ServiceAccount in the dev namespace.
   - RBAC Role/RoleBinding for bounded pod deletion.
@@ -291,16 +302,16 @@ Def["default/"]
 Br["browser-dev/"]
 Mut["mutating-dev/"]
 TG["tool-gateway Deployment"]
-BCT["browser-check-target Deployment"]
 NP["NetworkPolicy"]
 RB["Role/RoleBinding"]
+SA["ServiceAccount"]
 DevK8s --> Def
 DevK8s --> Br
 DevK8s --> Mut
 Br --> TG
-Br --> BCT
 Br --> NP
 Mut --> RB
+Mut --> SA
 ```
 
 **Diagram sources**
@@ -308,7 +319,6 @@ Mut --> RB
 - [kustomization.yaml (browser-dev):22-28](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L22-L28)
 - [kustomization.yaml (mutating-dev):18-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L18-L21)
 - [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
-- [browser-check-target-deployment.yaml:1-70](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-deployment.yaml#L1-L70)
 - [browser-sidecar-network-policy.yaml:1-31](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L31)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 
@@ -336,6 +346,7 @@ Common issues and resolutions:
   - Ensure GATEWAY_BROWSER_ENABLED is true and the allowlist includes the target origin.
   - Confirm the sidecar is running and reachable on loopback.
   - Check that credential sets are synced to the expected secret and mounted.
+  - Verify that sample applications (like `acme-admin`) are deployed out-of-band using `make deploy-sample-app`.
 - Mutating tools denied:
   - Verify GATEWAY_MUTATING_TOOLS_ENABLED is true.
   - Confirm RBAC Role/RoleBinding exists and matches the tool-gateway ServiceAccount.
@@ -344,6 +355,7 @@ Common issues and resolutions:
 Operational steps:
 - Re-run select-runtime-profile.sh with the desired profile.
 - Re-run verify-runtime-profile.sh to validate overlay rendering.
+- Deploy sample applications using `make deploy-sample-app` if browser tools cannot connect to targets.
 - Inspect logs of tool-gateway and browser sidecar if connectivity issues persist.
 
 **Section sources**
@@ -356,10 +368,10 @@ Operational steps:
 ## Conclusion
 Runtime profiles provide a layered, deny-by-default approach to configuring platform behavior:
 - The default profile sets a generic agent profile and provider selection.
-- The browser-dev posture enables safe, scoped browser automation with strict network and credential controls.
+- The browser-dev posture enables safe, scoped browser automation with strict network and credential controls, relying on out-of-band sample applications.
 - The mutating-dev posture enables bounded write operations with minimal RBAC and enforced approvals.
 
-Use the select script to switch the active LLM profile while keeping posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments.
+Use the select script to switch the active LLM profile while keeping posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments. Remember that sample applications must be deployed separately using `make deploy-sample-app` when testing browser functionality.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -368,7 +380,7 @@ Use the select script to switch the active LLM profile while keeping posture ove
 ### Creating Custom Profiles
 Guidance:
 - Create a new directory under runtime-profiles with a kustomization.yaml listing resources to include.
-- If you need environment variables, add an env file and merge it via the dev-k8s overlay’s configMapGenerator.
+- If you need environment variables, add an env file and merge it via the dev-k8s overlay's configMapGenerator.
 - For posture-like features (sidecars, network policies, RBAC), follow the patterns in browser-dev and mutating-dev.
 - Keep defaults deny-by-default; only enable capabilities explicitly through your profile.
 - Update dev-k8s to include your profile if it replaces the active LLM profile, or keep it as an additional posture overlay if appropriate.
@@ -378,5 +390,6 @@ Security considerations:
 - Bind sensitive services (like CDP) to loopback and protect with NetworkPolicy.
 - Use allowlists for external access (origins, endpoints).
 - Ensure secrets are provisioned out-of-band and mounted as optional where possible to avoid blocking startup.
+- For browser-related profiles, remember that sample applications should be deployed out-of-band rather than included in the profile resources.
 
 [No sources needed since this section provides general guidance]

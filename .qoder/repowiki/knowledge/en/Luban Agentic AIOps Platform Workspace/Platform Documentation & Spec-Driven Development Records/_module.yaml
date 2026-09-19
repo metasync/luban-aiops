@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: docs
-title: Platform Documentation, Specs & ADRs
+title: Platform Documentation & Spec-Driven Development Records
 scope:
     - docs/
 source_files: []

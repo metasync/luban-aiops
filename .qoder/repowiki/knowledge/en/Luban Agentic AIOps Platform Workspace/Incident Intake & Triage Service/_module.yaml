@@ -7,6 +7,4 @@ source_files: []
 depends_on: []
 related_to:
     - path: agent_platform/services/document_evidence
-    - path: platform_gateway/gateway_core
-    - path: platform_ops
-    - path: shared_contracts_and_sdk
+    - path: platform_gateway/route_proxies

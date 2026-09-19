@@ -1,1 +1,0 @@
-FastAPI-based gateway that exposes external systems (Elastic, Kubernetes, Browser, Incidents, Skills) as tools behind JWT auth, deny-by-default policy evaluation, and audit logging.

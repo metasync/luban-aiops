@@ -1,11 +1,12 @@
 schema_version: 1
 module_path: platform_ops
-title: Platform Operations & Kubernetes Deployment Assets
+title: 'Platform Ops: Kustomize GitOps & Dev Cluster Deployment'
 scope:
     - shared/platform-ops/
 source_files: []
 depends_on: []
 related_to:
     - path: agent_platform
-    - path: incident_service
+    - path: audit_service
     - path: skills_hub
+    - path: tool_gateway

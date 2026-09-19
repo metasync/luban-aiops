@@ -7,6 +7,5 @@ scope:
 source_files: []
 depends_on: []
 related_to:
-    - path: agent_platform/api_routes
-    - path: incident_service
-    - path: skills_hub
+    - path: agent_platform/providers
+    - path: samples

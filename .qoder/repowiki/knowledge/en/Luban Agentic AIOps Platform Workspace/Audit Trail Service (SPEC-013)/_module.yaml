@@ -7,4 +7,5 @@ source_files: []
 depends_on: []
 related_to:
     - path: platform_gateway/audit_observability
+    - path: platform_ops
     - path: tool_gateway/gateway_services

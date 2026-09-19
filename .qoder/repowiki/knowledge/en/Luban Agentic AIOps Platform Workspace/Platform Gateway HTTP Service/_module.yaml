@@ -5,5 +5,4 @@ scope:
     - products/platform-gateway/
 source_files: []
 depends_on: []
-related_to:
-    - path: operator_portal
+related_to: []

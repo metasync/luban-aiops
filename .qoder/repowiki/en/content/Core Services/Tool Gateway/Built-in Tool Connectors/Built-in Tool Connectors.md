@@ -10,10 +10,23 @@
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
+- [http_connector.py](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py)
+- [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
+- [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new HTTP connector with `http.get` and `http.post` tools
+- Updated project structure section to include HTTP connector
+- Enhanced architecture overview with HTTP connector integration
+- Added detailed HTTP connector component analysis covering security controls, configuration options, and approval system integration
+- Updated dependency analysis to include HTTP connector dependencies
+- Enhanced troubleshooting guide with HTTP-specific error codes and issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -33,6 +46,7 @@ This document describes all built-in tool connectors provided by the Tool Gatewa
 - Elasticsearch observability queries
 - Incidents service queries
 - Skills hub queries
+- **HTTP service health checking** (http.get, http.post)
 
 Each connector registers tools with a registry, validates parameters, enforces risk tiers, and returns consistent results that include an evidence envelope.
 
@@ -54,12 +68,14 @@ K8S["KubernetesConnector"]
 ES["ElasticConnector"]
 INC["IncidentsConnector"]
 SK["SkillsConnector"]
+HTTP["HttpConnector"]
 end
 BR --> REG
 K8S --> REG
 ES --> REG
 INC --> REG
 SK --> REG
+HTTP --> REG
 REG --> BASE
 ```
 
@@ -69,8 +85,9 @@ REG --> BASE
 - [browser_connector.py:315-399](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L315-L399)
 - [k8s_connector.py:41-92](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L41-L92)
 - [elastic_connector.py:40-103](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py#L40-L103)
-- [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-L84)
+- [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-84)
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L88)
+- [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 
 **Section sources**
 - [README.md:1-64](file://products/tool-gateway/README.md#L1-L64)
@@ -184,7 +201,7 @@ Configuration highlights:
 
 Usage patterns:
 - List pods filtered by labels.
-- Get a specific pod’s details and conditions.
+- Get a specific pod's details and conditions.
 - Query events for troubleshooting.
 - Retrieve logs with controlled tail size.
 - Delete a pod to trigger controller-managed restarts (write-tier).
@@ -312,6 +329,60 @@ Common responses:
 - [skills_connector.py:154-419](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L154-L419)
 - [README.md:113-118](file://products/tool-gateway/README.md#L113-L118)
 
+### HTTP Connector
+**New** - Service health checking and API interaction capabilities:
+
+Capabilities:
+- **Read tier**: `http.get` - Fetch URLs over HTTP/HTTPS for health checks and API inspection
+- **Write tier**: `http.post` - POST JSON payloads to allowlisted origins for bounded mutations
+
+Key security features:
+- **Server-side origin allowlist**: Deny-by-default with explicit origin authorization
+- **Redirect protection**: GET follows redirects within allowlist (max 3 hops); POST never follows redirects
+- **Credential management**: Reference-based authentication via `credential_set` parameter only
+- **Body bounds**: POST requests limited to depth ≤ 2, ≤ 32 keys, and configurable byte limits
+- **Secret masking**: Query parameters with sensitive names are automatically masked in responses
+- **Header projection**: Only safe headers are returned (content-type, content-length, location, server, date, cache-control)
+
+Configuration highlights:
+- Enable connector: `GATEWAY_HTTP_ENABLED`
+- Origin allowlist: `GATEWAY_HTTP_ALLOW_ORIGINS` (comma-separated origins)
+- Timeout: `GATEWAY_HTTP_TIMEOUT_MS` (default 10000ms, max 30000ms)
+- Response size: `GATEWAY_HTTP_MAX_RESPONSE_BYTES` (default 65536 bytes)
+- Request size: `GATEWAY_HTTP_MAX_REQUEST_BYTES` (default 4096 bytes)
+- Credentials: `GATEWAY_HTTP_CREDENTIAL_SETS` (path to credential file)
+
+Usage patterns:
+- Health checking: `http.get` to verify service availability and response format
+- API inspection: `http.get` to examine API responses and status codes
+- Bounded mutations: `http.post` with small JSON payloads for controlled state changes
+- Authenticated requests: Use `credential_set` parameter for Basic authentication
+
+Security considerations:
+- Model-supplied URLs are validated server-side before any network connection
+- Loopback, link-local, and multicast addresses are always refused
+- URL userinfo (user:password@host) is rejected to prevent literal secrets
+- POST URLs cannot contain secret-bearing query parameters
+- Non-2xx POST responses include `mutation_confirmed: false` marker
+- All credentials resolved from reference-only configuration files
+
+Practical example outline:
+- Call `http.get` with URL to check service health and response format
+- Call `http.get` with `credential_set` for authenticated service checks
+- Call `http.post` with URL and small JSON body for bounded mutations
+- Handle structured error responses for validation failures and network issues
+
+Common responses:
+- success with data containing status, headers, body, and timing information
+- denied with code `HTTP_ORIGIN_NOT_ALLOWED` for unauthorized origins
+- error with codes: `INVALID_PARAMETERS`, `HTTP_SCHEME_NOT_ALLOWED`, `HTTP_REDIRECT_NOT_ALLOWED`, `HTTP_TIMEOUT`, `HTTP_BODY_TOO_LARGE`, `CREDENTIAL_SET_NOT_FOUND`, `TOOL_EXECUTION_ERROR`, `UPSTREAM_ERROR`
+
+**Section sources**
+- [http_connector.py:1-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L1-L699)
+- [test_http_connector.py:1-789](file://products/tool-gateway/tests/test_http_connector.py#L1-L789)
+- [config.py:25-90](file://products/tool-gateway/src/tool_gateway/core/config.py#L25-L90)
+- [app.py:97-112](file://products/tool-gateway/src/tool_gateway/app.py#L97-L112)
+
 ## Dependency Analysis
 Connectors depend on:
 - Base abstractions for tool definitions, results, and evidence.
@@ -319,7 +390,7 @@ Connectors depend on:
 - External clients:
   - Kubernetes client for cluster operations
   - Elasticsearch client for observability queries
-  - HTTPX for skills and incidents services
+  - HTTPX for skills, incidents, and HTTP services
   - Playwright via CDP for browser automation
 
 ```mermaid
@@ -331,17 +402,20 @@ K8S["KubernetesConnector"]
 ES["ElasticConnector"]
 INC["IncidentsConnector"]
 SK["SkillsConnector"]
+HTTP["HttpConnector"]
 BR --> BASE
 K8S --> BASE
 ES --> BASE
 INC --> BASE
 SK --> BASE
+HTTP --> BASE
 REG --> BASE
 BR --> REG
 K8S --> REG
 ES --> REG
 INC --> REG
 SK --> REG
+HTTP --> REG
 ```
 
 **Diagram sources**
@@ -352,6 +426,7 @@ SK --> REG
 - [elastic_connector.py:40-103](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py#L40-L103)
 - [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-L84)
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L88)
+- [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 
 **Section sources**
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
@@ -361,9 +436,8 @@ SK --> REG
 - Browser sessions: idle TTL and max sessions prevent resource leaks; screenshots compressed to fit byte caps.
 - Kubernetes logs: tail_lines clamped to a maximum to avoid large payloads.
 - Elastic queries: time ranges and result counts are bounded to protect performance.
+- HTTP requests: timeouts enforced, response sizes capped, redirect chains limited to 3 hops.
 - Asynchronous execution: connector sync calls run in executors to avoid blocking the event loop.
-
-[No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -371,14 +445,24 @@ Common issues and resolutions:
   - Kubernetes: ensure in-cluster config or kubeconfig is available; otherwise tools return K8S_NOT_CONFIGURED.
   - Elastic: ensure URL and authentication are set; otherwise tools return ELASTIC_NOT_CONFIGURED.
   - Incidents/Skills: ensure service URLs and client credentials are configured; otherwise tools return TOOL_EXECUTION_ERROR on transport failure.
+  - **HTTP connector**: ensure `GATEWAY_HTTP_ENABLED=true` and `GATEWAY_HTTP_ALLOW_ORIGINS` contains target origins.
 - Permission denied:
   - Kubernetes delete: missing RBAC yields K8S_PERMISSION_DENIED; grant pod-delete permissions to the service account.
-- Origin not allowed (browser):
+  - **HTTP post**: requires `GATEWAY_MUTATING_TOOLS_ENABLED=true` and `tools:mutate` permission.
+- Origin not allowed (browser/HTTP):
   - Ensure target origin is on the allowlist; navigate to an allowed URL first.
+  - For HTTP: origins must match scheme + host + port exactly.
 - Invalid parameters:
   - Validate required fields and enums; connectors return INVALID_PARAMETERS with descriptive messages.
+  - **HTTP connector**: check URL format, body size limits, and timeout values.
 - Redaction overflow:
   - If too much output would be redacted, the gateway withholds output with REDACTION_OVERFLOW; reduce sensitive content or adjust thresholds.
+- **HTTP-specific issues**:
+  - `HTTP_SCHEME_NOT_ALLOWED`: Only http/https schemes supported
+  - `HTTP_ORIGIN_NOT_ALLOWED`: Target origin not in allowlist
+  - `HTTP_REDIRECT_NOT_ALLOWED`: Too many redirects or redirect to unauthorized origin
+  - `HTTP_BODY_TOO_LARGE`: POST body exceeds configured limits
+  - `CREDENTIAL_SET_NOT_FOUND`: Named credential set not found in configuration
 
 **Section sources**
 - [k8s_connector.py:474-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L474-L518)
@@ -386,9 +470,8 @@ Common issues and resolutions:
 - [incidents_connector.py:208-272](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L208-L272)
 - [skills_connector.py:198-245](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L198-L245)
 - [browser_connector.py:765-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L765-L800)
+- [http_connector.py:471-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L471-L491)
 - [README.md:89-92](file://products/tool-gateway/README.md#L89-L92)
 
 ## Conclusion
-The Tool Gateway provides a secure, standardized interface to multiple backends through typed tools with consistent metadata, evidence, and error handling. Use the connectors to automate web checks, observe clusters, query observability data, and collaborate via incidents and skills. Always configure connectors explicitly, respect risk tiers, and handle structured errors returned by each tool.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The Tool Gateway provides a secure, standardized interface to multiple backends through typed tools with consistent metadata, evidence, and error handling. Use the connectors to automate web checks, observe clusters, query observability data, perform HTTP service health checks, and collaborate via incidents and skills. Always configure connectors explicitly, respect risk tiers, and handle structured errors returned by each tool. The new HTTP connector enables direct API health checking and bounded mutations with robust security controls, making it ideal for service monitoring and controlled administrative operations.

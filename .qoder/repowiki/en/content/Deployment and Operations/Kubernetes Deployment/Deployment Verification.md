@@ -3,11 +3,12 @@
 <cite>
 **Referenced Files in This Document**
 - [README.md](file://README.md)
-- [browser-check-demo.sh](file://shared/platform-ops/e2e/browser-check-demo.sh)
+- [http-check-demo.sh](file://shared/platform-ops/e2e/http-check-demo.sh)
 - [documents-demo.sh](file://shared/platform-ops/e2e/documents-demo.sh)
 - [incident-demo.sh](file://shared/platform-ops/e2e/incident-demo.sh)
 - [mutating-demo.sh](file://shared/platform-ops/e2e/mutating-demo.sh)
 - [skills-demo.sh](file://shared/platform-ops/e2e/skills-demo.sh)
+- [SPEC-061 spec](file://docs/specs/SPEC-061-retire-browser-check-target/spec.md)
 - [platform-gateway health routes](file://products/platform-gateway/src/platform_gateway/api/routes/health.py)
 - [tool-gateway health routes](file://products/tool-gateway/src/tool_gateway/api/routes/health.py)
 - [execution-runtime health routes](file://products/execution-runtime/src/execution_runtime/api/routes/health.py)
@@ -21,6 +22,14 @@
 - [redis service](file://shared/platform-ops/gitops/dev-k8s/base/infra/redis-service.yaml)
 - [Debug Services runbook](file://shared/platform-ops/skills/platform-runbooks/guides/DebugServices.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Removed references to deleted `browser-check-demo.sh` script
+- Updated Browser Checks Flow section to reflect current testing procedures using HTTP checks instead
+- Updated End-to-End Test Suite Overview to reflect current available e2e scripts
+- Added reference to SPEC-061 retirement specification
+- Updated browser-related testing guidance to use HTTP service checks
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,7 +47,7 @@
 This document explains how to verify a successful deployment of the Luban AIOPS platform on Kubernetes. It covers:
 - Health check endpoints for each service and how to validate them with kubectl.
 - Expected pod states and readiness signals.
-- How to run the end-to-end test suite under shared/platform-ops/e2e to validate core platform functionality, including browser checks, documents operations, incidents, mutating operations, and skills workflows.
+- How to run the end-to-end test suite under shared/platform-ops/e2e to validate core platform functionality, including HTTP service checks, documents operations, incidents, mutating operations, and skills workflows.
 - How to interpret results, troubleshoot common issues, and validate service connectivity.
 - Monitoring setup via Prometheus annotations and log aggregation using the durable audit trail.
 - Procedures for rolling back deployments, scaling components, and performing maintenance while preserving stability.
@@ -108,7 +117,7 @@ Health endpoints are unauthenticated and readiness-first. Prometheus metrics are
 - [incident-service deployment](file://shared/platform-ops/gitops/dev-k8s/base/incident-service/incident-service-deployment.yaml:1-57)
 
 ## Architecture Overview
-The typical request flow for user or automation interactions goes through the Platform Gateway, which delegates to internal services as needed. Tool calls go through Tool Gateway, which may invoke connectors (e.g., Kubernetes, browser sidecar, external systems). The Audit Service records durable events from multiple producers.
+The typical request flow for user or automation interactions goes through the Platform Gateway, which delegates to internal services as needed. Tool calls go through Tool Gateway, which may invoke connectors (e.g., Kubernetes, HTTP services, external systems). The Audit Service records durable events from multiple producers.
 
 ```mermaid
 sequenceDiagram
@@ -169,11 +178,13 @@ Expected outcomes:
 The e2e scripts under shared/platform-ops/e2e provide deterministic smoke tests after deployment. They assert authentication, authorization, feature toggles, and functional flows across the platform.
 
 Key scripts and what they validate:
-- browser-check-demo.sh: Browser web-check tools discovery, origin allowlist, navigation/snapshot success, CDP sidecar reachability, and optional chat leg with HITL approval.
+- http-check-demo.sh: HTTP service-check tools discovery, origin allowlist, read/write tier separation, and optional HITL approval flow.
 - documents-demo.sh: Operations document repository lifecycle (draft/publish), role-based access, summary/digest assertions, and durable audit events.
 - incident-demo.sh: Alertmanager webhook intake, dedupe/resolution, visibility via query API, operator-initiated triage, and audit event dispatch.
 - mutating-demo.sh: Bounded mutating capability (k8s.delete_pod) with deny-by-default vs opt-in, policy gates, RBAC checks, and optional HITL approval flow with signed execution receipts.
 - skills-demo.sh: Skills hub status, search ranking, and agent invocation of skills.search during chat.
+
+**Updated**: The browser-check-demo.sh script was removed as part of SPEC-061 retirement. Browser functionality is now validated through the HTTP service checks and the acme-admin sample application suite.
 
 How to run:
 - Ensure kubectl context points at the dev cluster.
@@ -185,32 +196,33 @@ Interpretation:
 - Success indicates the corresponding feature set is functioning end-to-end in the current deployment posture.
 
 **Section sources**
-- [browser-check-demo.sh:1-352](file://shared/platform-ops/e2e/browser-check-demo.sh#L1-L352)
+- [http-check-demo.sh:1-354](file://shared/platform-ops/e2e/http-check-demo.sh#L1-L354)
 - [documents-demo.sh:1-235](file://shared/platform-ops/e2e/documents-demo.sh#L1-L235)
 - [incident-demo.sh:1-195](file://shared/platform-ops/e2e/incident-demo.sh#L1-L195)
 - [mutating-demo.sh:1-512](file://shared/platform-ops/e2e/mutating-demo.sh#L1-L512)
 - [skills-demo.sh:1-125](file://shared/platform-ops/e2e/skills-demo.sh#L1-L125)
+- [SPEC-061 spec:159-175](file://docs/specs/SPEC-061-retire-browser-check-target/spec.md#L159-L175)
 
-### Browser Checks Flow
+### HTTP Service Checks Flow
 ```mermaid
 sequenceDiagram
 participant Client as "Test Script"
 participant TG as "Tool Gateway"
-participant CH as "Chromium Headless Sidecar"
+participant SH as "HTTP Service"
 participant PGW as "Platform Gateway"
 Client->>TG : "Discover tools (unauthenticated -> 401)"
-Client->>TG : "Invoke web.navigate (auth + allowlist)"
-TG->>CH : "Connect via CDP"
-CH-->>TG : "Page title/snapshot"
-TG-->>Client : "Success with page content"
-Note over Client,PGW : "Optional chat leg uses PGW for session/stream and HITL approval"
+Client->>TG : "Invoke http.get (auth + allowlist)"
+TG->>SH : "Make HTTP request to allowlisted origin"
+SH-->>TG : "Service response"
+TG-->>Client : "Success with service status"
+Note over Client,PGW : "Optional HITL leg uses PGW for session/stream and approval"
 ```
 
 **Diagram sources**
-- [browser-check-demo.sh:75-227](file://shared/platform-ops/e2e/browser-check-demo.sh#L75-L227)
+- [http-check-demo.sh:86-248](file://shared/platform-ops/e2e/http-check-demo.sh#L86-L248)
 
 **Section sources**
-- [browser-check-demo.sh:1-352](file://shared/platform-ops/e2e/browser-check-demo.sh#L1-L352)
+- [http-check-demo.sh:1-354](file://shared/platform-ops/e2e/http-check-demo.sh#L1-L354)
 
 ### Documents Operations Flow
 ```mermaid
@@ -256,11 +268,9 @@ end
 
 **Diagram sources**
 - [mutating-demo.sh:100-244](file://shared/platform-ops/e2e/mutating-demo.sh#L100-L244)
-- [test_k8s_connector.py:37-63](file://products/tool-gateway/tests/test_k8s_connector.py#L37-L63)
 
 **Section sources**
 - [mutating-demo.sh:1-512](file://shared/platform-ops/e2e/mutating-demo.sh#L1-L512)
-- [test_k8s_connector.py:37-199](file://products/tool-gateway/tests/test_k8s_connector.py#L37-L199)
 
 ### Skills Workflow Flow
 ```mermaid
@@ -324,8 +334,6 @@ AUD --> DB
 - Avoid enabling mutating tools unless necessary; default posture is deny-by-default to reduce risk and load.
 - Keep e2e scripts lightweight; they perform targeted assertions rather than full load tests.
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
 Common issues and remediation:
 - Service unreachable:
@@ -343,7 +351,7 @@ Common issues and remediation:
   - Confirm delegated tokens for tool-gateway audience are obtained via exchange.
   - Validate role grants (e.g., tools:mutate for mutating tools).
 - Feature toggles:
-  - GATEWAY_BROWSER_ENABLED controls browser tool exposure.
+  - GATEWAY_HTTP_ENABLED controls HTTP tool exposure.
   - GATEWAY_MUTATING_TOOLS_ENABLED controls write-tier tool exposure.
   - AGENT_HITL_CONFIRM_TIMEOUT must be non-zero for HITL bridging.
 
@@ -359,18 +367,15 @@ Useful commands:
 
 **Section sources**
 - [Debug Services runbook](file://shared/platform-ops/skills/platform-runbooks/guides/DebugServices.md:1-60)
-- [browser-check-demo.sh:43-58](file://shared/platform-ops/e2e/browser-check-demo.sh#L43-L58)
 - [mutating-demo.sh:246-252](file://shared/platform-ops/e2e/mutating-demo.sh#L246-L252)
 
 ## Conclusion
 To verify a successful deployment:
 - Confirm all pods are Running and Ready, and health endpoints respond appropriately.
-- Run the e2e scripts to validate core platform functionality across browser checks, documents, incidents, mutating operations, and skills.
+- Run the e2e scripts to validate core platform functionality across HTTP service checks, documents, incidents, mutating operations, and skills.
 - Use Prometheus metrics and the durable audit trail for monitoring and observability.
 - Follow troubleshooting steps for networking, readiness, and authorization issues.
 - Apply rollback, scaling, and maintenance procedures carefully to maintain platform stability.
-
-[No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
@@ -382,16 +387,12 @@ To verify a successful deployment:
 - Revert to a previous revision:
   - kubectl rollout undo deployment/<deployment-name> --to-revision=<revision> -n dev-luban-aiops
 
-[No sources needed since this section provides general guidance]
-
 ### Scaling Components
 - Scale a deployment:
   - kubectl scale deployment/<deployment-name> -n dev-luban-aiops --replicas=<N>
 - Verify scaling:
   - kubectl get pods -n dev-luban-aiops -l app=<app-label>
   - kubectl top pods -n dev-luban-aiops
-
-[No sources needed since this section provides general guidance]
 
 ### Maintenance Operations
 - Restart a service:
@@ -401,5 +402,3 @@ To verify a successful deployment:
 - Update secrets/configmaps:
   - kubectl apply -f <secret-or-configmap-file> -n dev-luban-aiops
   - kubectl rollout restart deployment/<affected-deployment> -n dev-luban-aiops
-
-[No sources needed since this section provides general guidance]

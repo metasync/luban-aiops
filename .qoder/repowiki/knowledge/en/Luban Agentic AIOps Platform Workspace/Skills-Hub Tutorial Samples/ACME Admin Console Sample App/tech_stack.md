@@ -1,0 +1,1 @@
+FastAPI 0.115+ with Pydantic v2 models, uvicorn ASGI server, Python 3.12+, built via `uv_build`; deployed as a container image with Kustomize manifests and a NetworkPolicy.

@@ -1,0 +1,6 @@
+The service is organized into four cooperating layers that communicate through explicit contracts rather than direct imports:
+- `api_layer` mounts FastAPI routers (`/tools`, `/health`) whose handlers depend on services via FastAPI dependency injection.
+- `gateway_services` implements the request pipeline: `token_verifier` resolves identity from JWTs, `policy_engine` evaluates deny-by-default rules against `policies/policy-default.yaml`, `audit_emitter` emits events fire-and-forget, and `gateway_service` orchestrates invocation by resolving a tool from the registry and dispatching it.
+- `tool_connectors` defines the `BaseTool` interface and a registry that admits tools by risk tier; domain connectors (Elastic, K8s, Browser, Incidents, Skills) implement it and are discovered only through the registry.
+- `core_runtime` bootstraps the app in `main.py`/`app.py`, loads config/observability/metrics, mounts the router, and injects services so routes call policy → connector without knowing infra.
+The boundary between layers is enforced by Pydantic schemas in `schemas/api.py` and the `BaseTool` interface, with tests under `tests/` covering each layer and cross-layer scenarios (policy diff, module parity, route inventory).
