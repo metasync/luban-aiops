@@ -7,7 +7,7 @@
 #
 # This sample ships NO skill document, and that is the point: the skill is
 # the artifact the demo produces. It walks the whole SPEC-055 story on the
-# same admin portal the other two web-check samples use —
+# same acme-admin console the other two browser samples use —
 #
 #   ACT 1  author    an operator works ad hoc against a DECLARED target with
 #                    no skill bound, so every write parks its own per-action
@@ -26,11 +26,18 @@
 # The contrast between act 1 and act 4 is the whole value proposition: N
 # approvals to do the work the first time, one approval every time after.
 #
+# SPEC-060 moved this sample off the static browser-check-target mock onto the
+# stateful acme-admin app, so acts 1 and 4 now end by proving the resets they
+# drove actually landed in the store (`/api/users/{alice,bob}` password_changed_at
+# + a revision that moves again between the two acts) rather than pointing at a
+# page that only echoes its own query string. The store is reseeded to a known
+# baseline before act 1 so that proof starts from revision 0.
+#
 # Deterministic legs (always run, no model and no cluster mutation beyond
 # two throwaway sessions):
 #   1. browser connector enabled, HITL bridging active, SPEC-055 knobs sane
-#   2. admin portal pages served by the browser-check-target nginx
-#   3. admin-portal credential set loaded on the tool-gateway
+#   2. acme-admin console pages served by the acme-admin app
+#   3. acme-admin credential set loaded on the tool-gateway
 #   4. fifteen web.* tools in discovery with correct risk tiers
 #   5. a declared target is first-wins, is reported as the scope in force
 #      rather than echoed, and is stripped of any query, fragment or
@@ -45,17 +52,18 @@
 #
 # Prerequisites:
 #   - kubectl context pointed at the dev cluster
-#   - `make deploy` completed (browser connector enabled, admin pages
-#     mounted, admin-portal credential set synced)
+#   - `make deploy` completed (browser connector enabled) and
+#     `make deploy-sample-app` completed (the acme-admin app the acts drive),
+#     with the acme-admin credential set synced
 #   - `make deploy-samples` completed (creates the `skills-samples`
 #     ConfigMap act 3 merges into; this sample contributes no file to it)
 #   - a port-forward for the identity broker (token issuance):
 #       kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000
 #   - a port-forward for the platform-gateway:
 #       kubectl -n dev-luban-aiops port-forward svc/platform-gateway 18083:8000
-#     Unlike the other two web-check samples, this one is NOT chat-leg-only:
-#     legs 5 and 6 declare targets and attempt graduations over the gateway,
-#     so the deterministic run needs it too.
+#     Unlike the other two acme-admin browser samples, this one is NOT
+#     chat-leg-only: legs 5 and 6 declare targets and attempt graduations over
+#     the gateway, so the deterministic run needs it too.
 #
 # Environment overrides:
 #   NAMESPACE             (default dev-luban-aiops)
@@ -65,8 +73,8 @@
 #   TEST_USER             (default luban-operator)
 #   APPROVER_USER         (default luban-approver, chat leg decider)
 #   OBSERVER_USER         (default luban-observer, leg 6 denial)
-#   TARGET_USER_A         (default alice@example.com)
-#   TARGET_USER_B         (default bob@example.com)
+#   TARGET_USER_A         (default alice)
+#   TARGET_USER_B         (default bob)
 #   NEW_PASSWORD          (default TempPass-2026!)
 #   SESSION_TITLE         (default "Batch Password Reset (Graduation Demo)")
 #   KEEP_GRADUATED_SKILL  (default empty: act 3's install is removed again on
@@ -80,8 +88,8 @@ GATEWAY_URL="${GATEWAY_URL:-http://localhost:18083}"
 TEST_USER="${TEST_USER:-luban-operator}"
 APPROVER_USER="${APPROVER_USER:-luban-approver}"
 OBSERVER_USER="${OBSERVER_USER:-luban-observer}"
-TARGET_USER_A="${TARGET_USER_A:-alice@example.com}"
-TARGET_USER_B="${TARGET_USER_B:-bob@example.com}"
+TARGET_USER_A="${TARGET_USER_A:-alice}"
+TARGET_USER_B="${TARGET_USER_B:-bob}"
 NEW_PASSWORD="${NEW_PASSWORD:-TempPass-2026!}"
 SESSION_TITLE="${SESSION_TITLE:-Batch Password Reset (Graduation Demo)}"
 
@@ -90,7 +98,15 @@ SESSION_TITLE="${SESSION_TITLE:-Batch Password Reset (Graduation Demo)}"
 SAMPLE_LEAF="skill-graduation"
 # The develop-as-you-go target: declared up front, before anything is
 # captured, so it is an authorization scope and not a post-hoc claim.
-ADMIN_TARGET="http://browser-check-target:8080/admin/"
+ADMIN_TARGET="http://acme-admin:8080/admin/"
+# The same app's in-cluster origin, used by the store-verification legs the
+# SPEC-060 move adds. `APP_ORIGIN/admin/` is ADMIN_TARGET; the split keeps the
+# declared scope a literal (it is asserted verbatim against the graduated
+# web_target) while the verification legs build /api and /internal paths off
+# APP_ORIGIN. The store reads are HTTP-Basic authed with the synced admin
+# credential, resolved lazily in the chat leg and never printed.
+APP_ORIGIN="http://acme-admin:8080"
+APP_CREDENTIAL_SECRET="acme-admin-credentials"
 CONFIGMAP="skills-samples"
 
 WORK=$(mktemp -d)
@@ -170,6 +186,122 @@ http() {
   HTTP_BODY=$(cat "$BODY_FILE")
 }
 
+# --- in-cluster app access (SPEC-060 store verification) -----------------
+#
+# The acts drive resets through the browser; these helpers read the same store
+# back over the app's JSON API to prove the mutations landed. They mirror
+# deploy.sh's transport exactly: `kubectl exec` into the real tool-gateway
+# container (which ships curl and is the pod the app's NetworkPolicy admits)
+# and talk to the app over in-cluster DNS. The acme-admin image is a minimal
+# uv/python runtime with no curl, so probing from inside it is not an option.
+# The admin password crosses on stdin as a curl config file, never in argv, so
+# it is not visible in a process listing on either side of the exec.
+APP_ADMIN_PASSWORD=""
+
+# app_probe <curl args...> — an unauthenticated in-cluster call; echoes
+# "<body>\n<http_code>".
+app_probe() {
+  kubectl -n "$NAMESPACE" exec -i deployment/tool-gateway -c tool-gateway -- \
+    curl -sS -w '\n%{http_code}' "$@" </dev/null
+}
+
+# app_probe_authed <path> — an HTTP-Basic GET against the app's JSON API.
+app_probe_authed() {
+  [ -n "$APP_ADMIN_PASSWORD" ] \
+    || fail "the admin credential was not resolved before an authed app read"
+  printf 'user = "admin:%s"\n' "$APP_ADMIN_PASSWORD" | \
+    kubectl -n "$NAMESPACE" exec -i deployment/tool-gateway -c tool-gateway -- \
+    curl -sS -K - -w '\n%{http_code}' "$APP_ORIGIN$1"
+}
+
+app_resolve_admin_password() {
+  APP_ADMIN_PASSWORD=$(kubectl -n "$NAMESPACE" get secret "$APP_CREDENTIAL_SECRET" \
+    -o go-template='{{index .data "ACME_ADMIN_PASSWORD" | base64decode}}' 2>/dev/null) \
+    || fail "secret '$APP_CREDENTIAL_SECRET' has no ACME_ADMIN_PASSWORD key"
+  [ -n "$APP_ADMIN_PASSWORD" ] \
+    || fail "ACME_ADMIN_PASSWORD is empty; run shared/platform-ops/gitops/sync-browser-credentials.sh"
+}
+
+# app_sign_in — log into the console over the human surface the way the browser
+# skill does, keeping the opaque session cookie in APP_SESSION_COOKIE. The
+# password travels in a curl config on stdin, never in argv.
+APP_SESSION_COOKIE=""
+app_sign_in() {
+  escaped=$(printf '%s' "$APP_ADMIN_PASSWORD" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  raw=$(printf 'header = "Content-Type: application/json"\ndata = "{\\"username\\":\\"admin\\",\\"password\\":\\"%s\\"}"\n' "$escaped" | \
+    kubectl -n "$NAMESPACE" exec -i deployment/tool-gateway -c tool-gateway -- \
+    curl -sS -K - -D - -o /dev/null -w 'HTTPCODE:%{http_code}' -X POST "$APP_ORIGIN/admin/login")
+  code=$(printf '%s' "$raw" | sed -n 's/^HTTPCODE://p')
+  [ "$code" = "200" ] \
+    || fail "POST /admin/login answered $code with the synced admin credential"
+  APP_SESSION_COOKIE=$(printf '%s\n' "$raw" | grep -i '^set-cookie:' \
+    | sed 's/^[Ss]et-[Cc]ookie: *//; s/;.*$//' | head -n1)
+  [ -n "$APP_SESSION_COOKIE" ] || fail "POST /admin/login set no session cookie"
+}
+
+# app_probe_session <path> — a GET carrying the console session cookie, for the
+# session-gated admin pages; echoes "<body>\n<http_code>".
+app_probe_session() {
+  printf 'header = "Cookie: %s"\n' "$APP_SESSION_COOKIE" | \
+    kubectl -n "$NAMESPACE" exec -i deployment/tool-gateway -c tool-gateway -- \
+    curl -sS -K - -w '\n%{http_code}' "$APP_ORIGIN$1"
+}
+
+# app_reseed — restore the deterministic seed (revision 0) so act 1 starts from
+# a known baseline. Header-gated: `http.post` ships no headers parameter, so the
+# agent cannot reach this endpoint even though its origin is allowlisted.
+app_reseed() {
+  raw=$(app_probe -X POST -H "X-Luban-Demo-Reset: 1" "$APP_ORIGIN/internal/reset-demo")
+  code=$(printf '%s' "$raw" | tail -n1)
+  body=$(printf '%s' "$raw" | sed '$d')
+  [ "$code" = "200" ] || fail "POST /internal/reset-demo answered $code: $body"
+  printf '%s' "$body" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert payload.get("status") == "reseeded", "status is %r" % payload.get("status")
+assert payload.get("store_revision") == payload.get("seed_revision") == 0, \
+    "reseed left store_revision=%r seed_revision=%r" % (
+        payload.get("store_revision"), payload.get("seed_revision"))' \
+    || fail "reset-demo did not restore the deterministic seed: $body"
+  echo "store reseeded to revision 0 before act 1 (a known baseline for the store proof)"
+}
+
+# app_store_revision — echoes the whole-store revision, so act 4 can prove it
+# moved again on top of act 1's resets.
+app_store_revision() {
+  raw=$(app_probe_authed "/api/users")
+  code=$(printf '%s' "$raw" | tail -n1)
+  body=$(printf '%s' "$raw" | sed '$d')
+  [ "$code" = "200" ] || fail "GET /api/users answered $code: $body"
+  printf '%s' "$body" | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("store_revision", ""))'
+}
+
+# app_verify_both_resets <label> — both target users must carry a recorded
+# password_changed_at and a bumped revision, proving the resets landed in the
+# store and not merely on a page that echoes its own query string.
+app_verify_both_resets() {
+  label="$1"
+  for u in "$TARGET_USER_A" "$TARGET_USER_B"; do
+    raw=$(app_probe_authed "/api/users/$u")
+    code=$(printf '%s' "$raw" | tail -n1)
+    body=$(printf '%s' "$raw" | sed '$d')
+    [ "$code" = "200" ] || fail "$label: GET /api/users/$u answered $code: $body"
+    printf '%s' "$body" | python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+assert payload.get("password_changed_at"), \
+    "no password_changed_at recorded for %s" % payload.get("username")
+assert payload.get("revision", 0) >= 1, \
+    "revision is %r for %s; the approved reset did not move it" % (
+        payload.get("revision"), payload.get("username"))
+print("  ok: %s carries password_changed_at %s at revision %s" % (
+    payload.get("username"), payload.get("password_changed_at"), payload.get("revision")))' \
+      || fail "$label: the store does not reflect the reset for $u"
+  done
+}
+
 echo "==> [1/6] prerequisites: browser connector, HITL bridging, SPEC-055 knobs"
 
 BROWSER_ENABLED=$(kubectl -n "$NAMESPACE" get configmap platform-runtime-config \
@@ -219,37 +351,43 @@ print('  trace cap=%d, idle GC=%dd, graduation budget=%d, replay budget=%d'
   || fail "the SPEC-055 authoring-trace / graduation knobs are not set sanely"
 echo "authoring-trace capture and graduation budget configured"
 
-echo "==> [2/6] admin portal pages served"
+echo "==> [2/6] acme-admin console pages served"
 
-kubectl -n "$NAMESPACE" exec deployment/browser-check-target -- \
-  curl -fsS http://localhost:8080/admin/ | grep -q 'Admin Portal' \
-  || fail "admin portal login page not served"
-echo "admin portal login page served at /admin/"
+# Probed from inside the tool-gateway pod (which ships curl and is the pod the
+# app's NetworkPolicy admits), not the acme-admin pod — its minimal uv/python
+# image has no curl. Same transport deploy.sh and demo-lib.sh use.
+kubectl -n "$NAMESPACE" exec -i deployment/tool-gateway -c tool-gateway -- \
+  curl -fsS "$APP_ORIGIN/admin/" | grep -q 'ACME Admin Console' \
+  || fail "acme-admin console login page not served"
+echo "console login page served at /admin/"
 
-kubectl -n "$NAMESPACE" exec deployment/browser-check-target -- \
-  curl -fsS http://localhost:8080/admin/users/ | grep -q 'User Management' \
-  || fail "admin user list page not served"
-echo "admin user list served at /admin/users/"
+# Unlike the static mock this sample replaced, the console gates the user list
+# and the reset form behind a session (302 to /admin/ when signed out). Sign in
+# over the human surface first — exactly what the browser skill does — then
+# probe them with the cookie, so "served" means served to an authenticated admin.
+app_resolve_admin_password
+app_sign_in
+app_probe_session "/admin/users/" | sed '$d' | grep -q 'User Management' \
+  || fail "admin user list page not served to a signed-in session"
+echo "admin user list served at /admin/users/ (session-gated)"
 
-kubectl -n "$NAMESPACE" exec deployment/browser-check-target -- \
-  curl -fsS "http://localhost:8080/admin/users/reset/?user=test" | grep -q 'Reset Password' \
-  || fail "admin reset page not served"
-echo "admin reset form served at /admin/users/reset/"
+app_probe_session "/admin/users/reset/?user=test" | sed '$d' | grep -q 'Reset Password' \
+  || fail "admin reset page not served to a signed-in session"
+echo "admin reset form served at /admin/users/reset/ (session-gated)"
 
-echo "==> [3/6] admin-portal credential set loaded"
+echo "==> [3/6] acme-admin credential set loaded"
 
 CRED_JSON=$(kubectl -n "$NAMESPACE" exec deployment/tool-gateway -- \
   cat /etc/luban/browser-credentials/credential-sets.json)
 printf '%s' "$CRED_JSON" | python3 -c "
 import json, sys
 sets = json.load(sys.stdin)
-assert 'admin-portal' in sets, 'admin-portal credential set missing'
-assert sets['admin-portal'].get('username') == 'admin', \
-    'admin-portal username is %r, expected admin' % sets['admin-portal'].get('username')
-assert sets['admin-portal'].get('password'), 'admin-portal password is empty'
-assert 'browser-check-target' in sets, 'browser-check-target set missing (regression)'" \
-  || fail "admin-portal credential set not loaded correctly"
-echo "admin-portal credential set loaded (username=admin, password present)"
+assert 'acme-admin' in sets, 'acme-admin credential set missing'
+assert sets['acme-admin'].get('username') == 'admin', \
+    'acme-admin username is %r, expected admin' % sets['acme-admin'].get('username')
+assert sets['acme-admin'].get('password'), 'acme-admin password is empty'" \
+  || fail "acme-admin credential set not loaded correctly"
+echo "acme-admin credential set loaded (username=admin, password present)"
 
 echo "==> [4/6] fifteen web.* tools with correct risk tiers"
 
@@ -369,7 +507,7 @@ echo "re-declaring the same scope reads as success, not as a missed deadline"
 # An address-bar paste is scoped before it is stored: the query and fragment
 # are inert at replay, and the userinfo is where a pasted URL carries a
 # credential — into a table that outlives every receipt.
-PASTED="http://admin:Sup3rSecret@browser-check-target:8080/admin/?token=abc123#top"
+PASTED="http://admin:Sup3rSecret@acme-admin:8080/admin/?token=abc123#top"
 http -X POST "$GATEWAY_URL/api/v1/sessions" \
   -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
   -H "Content-Type: application/json" \
@@ -453,6 +591,12 @@ if [ "${RUN_CHAT_LEG:-}" = "true" ]; then
   echo ""
   echo "==> [ACT 1] author: an ad-hoc batch reset against the declared target"
 
+  # Reseed to a known baseline (revision 0) so the store proof at the end of
+  # acts 1 and 4 starts from zero. APP_ADMIN_PASSWORD was already resolved in
+  # leg 2; the reseed drops that console session, which is fine — the browser
+  # logs in fresh during act 1.
+  app_reseed
+
   APPROVER_PLATFORM_TOKEN=$(platform_token "$APPROVER_USER" approver ops-approvers)
   [ -n "$APPROVER_PLATFORM_TOKEN" ] \
     || fail "broker issued no platform token for $APPROVER_USER"
@@ -506,7 +650,7 @@ if [ "${RUN_CHAT_LEG:-}" = "true" ]; then
   # therefore names the mechanism rather than leaving act 2's refusal — which
   # reads as "nothing proves the mutation landed on the declared target" — to
   # be mistaken for a problem with the target declaration.
-  AUTHOR_MESSAGE="Working ad hoc in the legacy admin panel, reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}'. There is no skill for this yet: do NOT pass skill_id to web.navigate, so this session stays UNBOUND and each write parks its own per-action card. Navigate to ${ADMIN_TARGET} and fill BOTH admin credentials with web.fill_credential from the admin-portal credential set — never web.type. Do NOT click the 'Sign in' button: that page's legacy-SSO auto-login submits itself as soon as both fields are filled and replaces the form, so the click would land on a detached element and fail, and a failed write makes this session un-graduable. After the credentials are in, let the page redirect to the user list on its own. Then, for each of the two users, navigate to /admin/users/reset/ with the user and newpw query parameters so the form pre-fills, snapshot, and click the 'Confirm reset' button. Do not use web.type or web.evaluate at all: a typed value is withheld at capture and would make this session un-graduable."
+  AUTHOR_MESSAGE="Working ad hoc in the acme-admin console, reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}'. There is no skill for this yet: do NOT pass skill_id to web.navigate, so this session stays UNBOUND and each write parks its own per-action card. Navigate to ${ADMIN_TARGET} and fill BOTH admin credentials with web.fill_credential from the acme-admin credential set — never web.type. Do NOT click the 'Sign in' button: that page's legacy-SSO auto-login submits itself as soon as both fields are filled and replaces the form, so the click would land on a detached element and fail, and a failed write makes this session un-graduable. After the credentials are in, let the page redirect to the user list on its own. Then, for each of the two users, navigate to /admin/users/reset/ with the user and newpw query parameters so the form pre-fills, snapshot, and click the 'Confirm reset' button. Do not use web.type or web.evaluate at all: a typed value is withheld at capture and would make this session un-graduable."
 
   STREAM=$(curl -fsS --max-time 300 -N \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
@@ -610,6 +754,15 @@ for idx, card in enumerate(cards):
 print(signed)") || fail "the authoring session detail lacks approved cards with signed write-tier executions"
   [ "$WRITES" -ge 1 ] || fail "no signed write-tier execution was captured while authoring"
   echo "the authoring session durably holds ${WRITES} succeeded, signed write-tier execution(s)"
+
+  # SPEC-060: prove act 1's approved resets actually landed in the store, and
+  # remember the revision so act 4 can show it moved again. This is the fact the
+  # static mock could never supply — a page that echoed its own query string
+  # proved nothing about state.
+  app_verify_both_resets "act 1"
+  REV_AFTER_AUTHOR=$(app_store_revision)
+  [ -n "$REV_AFTER_AUTHOR" ] || fail "act 1: could not read the store revision after authoring"
+  echo "act 1 landed both resets in the store (store revision now ${REV_AFTER_AUTHOR})"
 
   echo ""
   echo "==> [ACT 2] graduate: the trace becomes an executable-flow draft"
@@ -719,16 +872,24 @@ assert os.environ['NEW_PASSWORD'] not in markdown, \
 # ingestion scans per step, never the prose.
 assert '<credential-reference>' not in front, \
     'a step argument still carries an unresolved credential-reference hole'
-# Two regression guards, and labelled as such rather than passed off as live
-# coverage: neither string can reach this artifact today. The pasted userinfo
-# password belongs to a DIFFERENT session (leg 5 declares it, never graduates
-# it), and a credential-set name could only arrive through web.fill_credential,
-# which is read tier and therefore never captured at all. They stay because a
-# future change that captured a read-tier call, or that let one session read
-# another declaration, would leak exactly these — and the two checks above
-# (the new-password literal document-wide, and the credential-reference hole in
-# the frontmatter) are the ones carrying live weight.
-for needle in ('Sup3rSecret', 'admin-portal'):
+# One regression guard, labelled as such rather than passed off as live
+# coverage: the pasted userinfo password cannot reach this artifact today
+# because it belongs to a DIFFERENT session (leg 5 declares it, never graduates
+# it). It stays because a future change that let one session read another
+# declaration would leak exactly this — and the two checks above (the
+# new-password literal document-wide, and the credential-reference hole in the
+# frontmatter) are the ones carrying live weight.
+#
+# The credential-set-name guard the static-target version of this demo also ran
+# is deliberately gone. It asserted 'admin-portal' never appeared in the draft (a
+# credential-set name could only arrive through web.fill_credential, which is
+# read tier and therefore never captured). After the SPEC-060 move the credential
+# set is named 'acme-admin' — the same string as the target host, which the
+# graduated web_target legitimately carries — so a substring-absence check on it
+# is no longer expressible. The live '<credential-reference>' hole check above
+# already covers a captured credential reference, which is what that guard really
+# protected.
+for needle in ('Sup3rSecret',):
     assert needle not in markdown, 'the draft carries %r' % (needle,)
 
 # Provenance is body content, so a team may keep or strip it on merge.
@@ -898,7 +1059,7 @@ print('  kind=%s risk_class=%s steps=%d web_target=%s'
   # execution under the single gate both succeeded and carries a signed
   # receipt, and a click that fails on the auto-login's already-replaced form
   # is a write the graduated flow never declared.
-  REPLAY_MESSAGE="Use skill ${GRADUATED_SKILL_ID} to reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}' in the legacy admin panel. Bind the flow by passing skill_id to web.navigate. Fill both admin credentials with web.fill_credential from the admin-portal credential set (never web.type) and do NOT click 'Sign in': that page's legacy-SSO auto-login submits itself once both fields are filled, so the click would fail on a detached element and is a write the flow you are replaying never declared. Then pass the new password as the newpw URL parameter on each reset page so the form pre-fills."
+  REPLAY_MESSAGE="Use skill ${GRADUATED_SKILL_ID} to reset the password for BOTH '${TARGET_USER_A}' and '${TARGET_USER_B}' to '${NEW_PASSWORD}' in the acme-admin console. Bind the flow by passing skill_id to web.navigate. Fill both admin credentials with web.fill_credential from the acme-admin credential set (never web.type) and do NOT click 'Sign in': that page's legacy-SSO auto-login submits itself once both fields are filled, so the click would fail on a detached element and is a write the flow you are replaying never declared. Then pass the new password as the newpw URL parameter on each reset page so the form pre-fills."
 
   REPLAY_STREAM=$(curl -fsS --max-time 300 -N \
     -H "Authorization: Bearer $OPERATOR_PLATFORM_TOKEN" \
@@ -987,13 +1148,27 @@ print('  %d write-tier execution(s), every one succeeded and signed under the si
     || fail "the replay session detail lacks the single approved flow card with signed executions"
   echo "every replayed write rode the one approval, landed, and carries a signed receipt"
 
+  # SPEC-060: the replayed flow really mutated the store again — both users carry
+  # a fresh password_changed_at and the whole-store revision moved past where act
+  # 1 left it. Proving the revision increased (not merely that a timestamp
+  # exists) is what distinguishes act 4's replay from act 1's leftover state: the
+  # same two resets, driven this time under ONE gate.
+  app_verify_both_resets "act 4"
+  REV_AFTER_REPLAY=$(app_store_revision)
+  [ -n "$REV_AFTER_REPLAY" ] || fail "act 4: could not read the store revision after replay"
+  [ "$REV_AFTER_REPLAY" -gt "$REV_AFTER_AUTHOR" ] \
+    || fail "act 4: the store revision did not advance past act 1 (${REV_AFTER_REPLAY} <= ${REV_AFTER_AUTHOR}); the replay did not land a fresh mutation"
+  echo "act 4 landed both resets again under the one gate (store revision ${REV_AFTER_AUTHOR} -> ${REV_AFTER_REPLAY})"
+
   echo ""
   echo "==> the contrast this sample exists to show:"
   echo "    authored ad hoc  -> ${CARDS} per-action card(s) for ${WRITES} mutation(s)"
   echo "    replayed as a graduated flow -> 1 card for the same work"
   echo ""
-  echo "==> verification URLs (open in your browser to see the reset result):"
-  echo "    Admin portal user list: http://localhost:9090/admin/users/?reset=${TARGET_USER_B}"
+  echo "==> verification (the store is authoritative, not a query-string echo):"
+  echo "    port-forward:      kubectl -n $NAMESPACE port-forward svc/acme-admin 8080:8080 &"
+  echo "    Console user list: http://localhost:8080/admin/users/  (revision + Last modified for ${TARGET_USER_A}, ${TARGET_USER_B})"
+  echo "    JSON store:        http://localhost:8080/api/users/${TARGET_USER_B}  (password_changed_at + revision; HTTP Basic as admin)"
   echo "    Portal session (authoring): open session ${AUTHOR_SESSION} and press 'Graduate as skill'"
   echo "    Portal session (replay):    open session ${REPLAY_SESSION} and read the single flow card"
 else
@@ -1007,8 +1182,8 @@ fi
 echo ""
 echo "Skill-graduation tutorial demo passed:"
 echo "  - browser connector enabled, HITL bridging active, SPEC-055 knobs sane"
-echo "  - admin portal pages served (login, users, reset form)"
-echo "  - admin-portal credential set loaded"
+echo "  - acme-admin console pages served (login, session-gated users + reset form)"
+echo "  - acme-admin credential set loaded"
 echo "  - fifteen web.* tools registered with correct risk tiers"
 echo "  - a declared target is first-wins, reported in force, and scoped"
 echo "  - graduation is separately authorized and refuses an empty trace"
@@ -1016,4 +1191,5 @@ if [ "${RUN_CHAT_LEG:-}" = "true" ]; then
   echo "  - an ad-hoc session of approved mutations graduated into an executable flow"
   echo "  - the merged draft ingested with its kind, risk class and step list"
   echo "  - the graduated flow replayed under one gate, every write landed and signed"
+  echo "  - both resets verified in the store after act 1 and again after act 4 (revision advanced)"
 fi

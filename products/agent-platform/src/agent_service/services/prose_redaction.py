@@ -240,7 +240,7 @@ def is_credential_literal(token: str) -> bool:
     ))
     # Mixed alnum (``TempPass123``) or three-plus character classes
     # (``Crrct!Horse``). Requiring one of the two is what keeps the hyphenated
-    # and dotted identifiers this product is full of — ``browser-check-target``,
+    # and dotted identifiers this product is full of — ``tool-gateway``,
     # ``dev-luban-aiops``, ``web-ui`` — out of the match: they carry two
     # classes at most (lowercase plus punctuation) and no digit.
     return (has_alpha and has_digit) or classes >= 3

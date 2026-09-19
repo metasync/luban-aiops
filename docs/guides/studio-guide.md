@@ -222,7 +222,7 @@ artifact you get is one a reviewer can trust.
 > declared target, and that is what decides the outcome. An `operation` session
 > holding a genuinely single-target, on-origin trace can therefore still be
 > graduated through the API — which is exactly what the
-> `samples/web-checks/skill-graduation/` demo script does. The portal does not
+> `samples/acme-admin/skill-graduation/` demo script does. The portal does not
 > offer it, because in real operational use that shape is the exception and the
 > multi-origin refusal is the rule.
 
@@ -272,9 +272,9 @@ deals in operation sessions.
 ## Where to go next
 
 - To run the whole author → graduate → merge → replay story against a live
-  cluster, follow `samples/web-checks/skill-graduation/WALKTHROUGH.md`. It is
-  click-by-click, uses the same admin panel as the two password-reset samples,
-  and covers the human half of the merge that no script can do.
+  cluster, follow `samples/acme-admin/skill-graduation/WALKTHROUGH.md`. It is
+  click-by-click, uses the same `acme-admin` console as the two password-reset
+  samples, and covers the human half of the merge that no script can do.
 - To understand what happens to the draft afterwards, see the
   [Skills and Guidance Guide](skills-guide.md).
 - For a target to author against, and four reference skills showing what each

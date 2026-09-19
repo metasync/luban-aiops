@@ -1,12 +1,18 @@
-# `acme-admin` — the sample application and its four-skill suite
+# `acme-admin` — the sample application and its skill suite
 
-A small FastAPI user-administration console, and four samples written against
-it. It is the **first sample in this repository to own a container image**: the
-three shipped samples under `samples/web-checks/` point at
-`browser-check-target`, a static page bundle in platform GitOps, which can
-render a form but cannot answer "did that actually change anything?".
+A small FastAPI user-administration console, and the samples written against it.
+It is the **first sample in this repository to own a container image**, and since
+SPEC-060 the sole target of the browser samples too: the three that once lived
+under `samples/web-checks/` and drove `browser-check-target` — a static page
+bundle in platform GitOps that can render a form but cannot answer "did that
+actually change anything?" — were rebased onto this app (and the static
+`password-reset` one retired outright), so every browser sample here now mutates
+a real store.
 
-This app can. It holds state, validates a login, refuses mutations that would
+> **Naming:** `acme` is the conventional fictional-company placeholder (Acme
+> Corp), **not** the ACME certificate protocol (RFC 8555).
+
+The app holds state, validates a login, refuses mutations that would
 change nothing, and answers its own confirmation page *from that state* rather
 than from the query string it was handed. That last property is what makes the
 fourth rung below honest, and the reason this directory exists.
@@ -15,7 +21,9 @@ Working on the application code itself (build, test, run locally, deliberate
 boundaries) is [`app/README.md`](app/README.md). This file is the
 operator-facing document.
 
-## The four samples, and the ladder they make
+## The samples: a four-rung ladder plus two approval models
+
+Four samples form a progressive ladder on the card count:
 
 | # | Sample | Surface | Effect | Cards | `approval_kind` |
 |---|---|---|---|---|---|
@@ -30,10 +38,20 @@ to the JSON API and differ; rungs 2 and 4 both drive a browser and differ. A
 reader who has seen all four stops inferring "browser means dangerous" and "API
 means safe".
 
+Two more samples share the same console to contrast the *approval models* — where
+rung 4's bound flow comes from, and what the work costs before one exists:
+
+| Sample | Skill | Approval shape |
+|---|---|---|
+| [adhoc-password-reset](adhoc-password-reset/) | hand-written runbook, **no `web_target`** | N `action` cards for N writes (SPEC-054) |
+| [skill-graduation](skill-graduation/) | **none** — the skill is the artifact the demo produces | N `action` cards to author, then 1 `flow` card to replay (SPEC-055) |
+
 Each sample directory carries a `README.md` (what the pattern is and why it is
 shaped that way), a `WALKTHROUGH.md` (a live, click-by-click run against a
 cluster), a `skill/` document (installed by `make deploy-samples`) and a
-`demo/demo.sh` (the same run, unattended and asserted).
+`demo/demo.sh` (the same run, unattended and asserted) — except
+`skill-graduation`, which ships no `skill/` because its skill is what the demo
+produces.
 
 ## Deploying it
 
@@ -43,7 +61,7 @@ arrow is always tutorial → platform. Deploy out-of-band, after `make deploy`:
 ```sh
 make deploy                # platform, with the browser-dev + mutating-dev profiles
 make deploy-sample-app     # build the image, apply deploy/, then ASSERT it works
-make deploy-samples        # install all six skill documents (four ACME, two existing)
+make deploy-samples        # install all five skill documents (four rungs + adhoc-password-reset)
 ```
 
 `make deploy-sample-app` runs [`deploy.sh`](deploy.sh), which is a deploy *and*
@@ -261,12 +279,13 @@ kubectl -n dev-luban-aiops port-forward svc/platform-gateway 18083:8000 &   # ch
 
 ## Writing a new walkthrough against this app
 
-The four existing ones are the template. The shape they share:
+The existing walkthroughs are the template. The shape they share:
 
-1. **Say which portal surface it uses, and which it does not.** All four are
-   operational sessions, so they live in **Chat**; **Studio** is the
-   skill-development workspace (SPEC-056) and is named explicitly as unused,
-   pointing at `samples/web-checks/skill-graduation/WALKTHROUGH.md`.
+1. **Say which portal surface it uses, and which it does not.** The operational
+   samples — the four rungs plus `adhoc-password-reset` — live in **Chat**;
+   **Studio** is the skill-development workspace (SPEC-056), used only by
+   `skill-graduation`, and each Chat walkthrough names it explicitly as unused,
+   pointing at `samples/acme-admin/skill-graduation/WALKTHROUGH.md`.
 2. **Prerequisites as a table**: component, what must be true, and the command
    that checks it. Name the ConfigMap keys the reader has to confirm —
    `GATEWAY_HTTP_ENABLED`, `GATEWAY_BROWSER_ENABLED`, both allowlists,

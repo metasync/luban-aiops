@@ -1,13 +1,16 @@
-# Browser web-check dev posture (SPEC-049 R-7).
+# Browser web-check dev posture (SPEC-049 R-7; static target retired by
+# SPEC-061).
 #
 # Like mutating-dev (SPEC-022 R-3) this is not an LLM provider profile:
-# it is the committed browser-check posture for dev environments. It
-# ships the sample target application the browser tools are allowed to
-# visit (browser-check-target, the only origin in browser.env's
-# GATEWAY_BROWSER_ALLOW_ORIGINS), and browser.env provides the
+# it is the committed browser posture for dev environments. It ships the
+# browser sidecar's NetworkPolicy and browser.env, which provides the
 # GATEWAY_BROWSER_* values that dev-k8s merges into the
-# platform-runtime-config ConfigMap. The merge and the sidecar patch are
-# declared by the dev-k8s overlay (where the ConfigMap is accumulated
+# platform-runtime-config ConfigMap. The one permitted origin
+# (GATEWAY_BROWSER_ALLOW_ORIGINS) is `acme-admin`, the SPEC-059 sample
+# application deployed out-of-band by `make deploy-sample-app`; this
+# profile no longer ships a target of its own, SPEC-061 having retired
+# the static `browser-check-target` mock. The merge and the sidecar patch
+# are declared by the dev-k8s overlay (where the ConfigMap is accumulated
 # and the tool-gateway Deployment lives) because kustomize
 # `behavior: merge` generators and Deployment patches need their targets
 # in scope.
@@ -22,7 +25,4 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - browser-check-target-deployment.yaml
-  - browser-check-target-service.yaml
-  - browser-check-target-pages.yaml
   - browser-sidecar-network-policy.yaml

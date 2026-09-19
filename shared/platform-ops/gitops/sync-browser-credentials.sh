@@ -27,12 +27,12 @@
 # the application cannot disagree about the password.
 #
 # Provide your own sets via BROWSER_CREDENTIAL_SETS_FILE (a JSON object
-# mapping set name -> {"username": ..., "password": ...}); otherwise dev
-# sets for the sample target apps are generated with random passwords
-# (never echoed, never committed). The override path still produces the
-# app-side secret, taken from your file's `acme-admin` entry — an
-# operator supplying their own sets supplies the app's password too, or
-# the app cannot start.
+# mapping set name -> {"username": ..., "password": ...}); otherwise a
+# dev set for the `acme-admin` sample app is generated with a random
+# password (never echoed, never committed). The override path still
+# produces the app-side secret, taken from your file's `acme-admin`
+# entry — an operator supplying their own sets supplies the app's
+# password too, or the app cannot start.
 #
 # Usage:
 #   shared/platform-ops/gitops/sync-browser-credentials.sh [namespace]
@@ -67,25 +67,15 @@ if [ -n "$SOURCE_FILE" ]; then
   fi
   CRED_FILE="$SOURCE_FILE"
 else
-  # Dev default: three credential sets — two for the static sample
-  # target shipped by runtime-profiles/browser-dev, one for the
-  # acme-admin sample app. Random passwords; stay inside the cluster
+  # Dev default: one credential set, for the acme-admin sample app
+  # (SPEC-061 retired the static browser-check-target mock and the two
+  # sets that served it). Random password; stays inside the cluster
   # secrets.
   CRED_FILE=$(mktemp)
   CLEANUP="$CRED_FILE"
-  PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-  ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
   ACME_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
   cat > "$CRED_FILE" <<EOF
 {
-  "browser-check-target": {
-    "username": "svc-check",
-    "password": "${PASSWORD}"
-  },
-  "admin-portal": {
-    "username": "admin",
-    "password": "${ADMIN_PASSWORD}"
-  },
   "acme-admin": {
     "username": "admin",
     "password": "${ACME_PASSWORD}"

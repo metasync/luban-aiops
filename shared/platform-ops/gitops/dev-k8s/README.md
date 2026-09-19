@@ -665,28 +665,28 @@ approval requirements, is covered by `docs/guides/approval-and-hitl.md`.
 The `runtime-profiles/browser-dev/` profile is wired into this overlay
 permanently, like `mutating-dev`: the overlay merges the profile's
 `GATEWAY_BROWSER_ENABLED=true` and the dev origin allowlist into the
-`platform-runtime-config` ConfigMap, applies the strategic merge patch
+`platform-runtime-config` ConfigMap and applies the strategic merge patch
 that adds the `chromium-headless-shell` sidecar (plus the credential-set
-volume mount) to the tool-gateway Deployment, and ships the sample
-`browser-check-target` app (a static login page and a status page — the
-only origin on the dev allowlist). The base commits
+volume mount) to the tool-gateway Deployment. The profile no longer ships
+a target of its own — SPEC-061 retired the static `browser-check-target`
+mock — so the one origin on the dev allowlist is `acme-admin`, the sample
+app deployed out-of-band by `make deploy-sample-app`. The base commits
 `GATEWAY_BROWSER_ENABLED=false` and an empty allowlist, so any overlay
 without the profile stays deny-by-default.
 
 `deploy.sh` provisions the credential-set secret
 (`tool-gateway-browser-credentials`, key `credential-sets.json`) via
-`sync-browser-credentials.sh`; a dev set for the sample target is
-generated with a random password, or provide
-`BROWSER_CREDENTIAL_SETS_FILE=<path>` / skip with
-`SKIP_BROWSER_CREDENTIALS=true`.
+`sync-browser-credentials.sh`; a dev `acme-admin` set is generated with a
+random password, or provide `BROWSER_CREDENTIAL_SETS_FILE=<path>` / skip
+with `SKIP_BROWSER_CREDENTIALS=true`.
 
 ```bash
 # Deploy the opted-in dev posture (profile already wired into dev-k8s)
 make deploy
 
-# Run the deterministic smoke test (disabled + enabled branches,
-# allowlist denial, sidecar liveness; opt-in chat leg with RUN_CHAT_LEG=true)
-shared/platform-ops/e2e/browser-check-demo.sh
+# Exercise the browser flow gate end to end against the stateful sample
+# app (part of `make e2e`; opt-in chat leg with RUN_CHAT_LEG=true)
+samples/acme-admin/demo-suite.sh
 ```
 
 ## Apply

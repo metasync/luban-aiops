@@ -21,7 +21,7 @@ Everything below is also exercised unattended by
 **Portal surface: Chat** — for both identities. The operator asks in Chat; the
 approver decides in **Approvals**. Nothing here uses **Studio** (SPEC-056); for
 the authoring workspace see
-[`samples/web-checks/skill-graduation/WALKTHROUGH.md`](../../web-checks/skill-graduation/WALKTHROUGH.md).
+[`samples/acme-admin/skill-graduation/WALKTHROUGH.md`](../skill-graduation/WALKTHROUGH.md).
 
 ## Prerequisites
 
@@ -326,11 +326,17 @@ platform-gateway port-forward on `18083`.
 
 - Run [`../demo-suite.sh`](../demo-suite.sh) for all four rungs in order plus the
   cross-skill verification, or `make e2e` for the whole verification path.
-- [`samples/web-checks/password-reset/WALKTHROUGH.md`](../../web-checks/password-reset/WALKTHROUGH.md)
-  is the same shape against the static target. Comparing the two step 7s is the
-  fastest way to see what a real store buys.
-- Rebasing the three shipped samples onto this app is a separate slice
-  (SPEC-060); this one deliberately leaves them untouched.
+- The other two `acme-admin` browser samples drive this *same* console under the
+  two other approval models; together the three are the entry points to the
+  browser surface, and this walkthrough is the **flow** model — the bound,
+  one-gate artifact the graduation sample produces:
+  - [`../adhoc-password-reset/WALKTHROUGH.md`](../adhoc-password-reset/WALKTHROUGH.md)
+    — the **action** model: no bound flow, so every write parks its own
+    per-action card (SPEC-054).
+  - [`../skill-graduation/WALKTHROUGH.md`](../skill-graduation/WALKTHROUGH.md)
+    — **author, then graduate**: do the work ad hoc, then turn the approved
+    mutations into the bound flow this walkthrough replays, collapsing N cards
+    to one gate (SPEC-055).
 
 ## Troubleshooting
 

@@ -107,8 +107,6 @@ spec:
                 path: guides/CrashLoopsAndOOM.md
               - key: guides-PodSchedulingFailures.md
                 path: guides/PodSchedulingFailures.md
-              - key: web-checks-InventoryHealth.md
-                path: web-checks/InventoryHealth.md
         # Tutorial sample skills (SPEC-050 R-11): optional ConfigMap created
         # out-of-band by `make deploy-samples`. Keys mount flat (no `items`)
         # so the base stays sample-agnostic; absent by default, which leaves

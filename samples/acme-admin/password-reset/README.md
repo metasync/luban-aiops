@@ -22,14 +22,17 @@ rather than a sentence the page always printed.
 
 Skill id: **`samples/password-reset-resetacmepassword`**.
 
-The filename is deliberate. `deploy-samples.sh` derives an id from the sample
-directory's leaf name plus the file name, so a
-`password-reset/skill/ResetUserPassword.md` here would produce
-`samples/password-reset-resetuserpassword` — byte-identical to the id the
-existing [`samples/web-checks/password-reset/`](../../web-checks/password-reset/)
-already owns, and two `--from-file` arguments with the same ConfigMap key is a
-hard failure. All six ids in the repository are asserted pairwise distinct by
-[`../demo-suite.sh`](../demo-suite.sh) (and, from the source tree, by
+The filename is deliberate, and its rationale is now historical.
+`deploy-samples.sh` derives an id from the sample directory's leaf name plus the
+file name, so a `password-reset/skill/ResetUserPassword.md` here would produce
+`samples/password-reset-resetuserpassword` — which is why SPEC-059 named this
+document `ResetAcmePassword.md`: the static `samples/web-checks/password-reset/`
+sample already owned that id, and two `--from-file` arguments with the same
+ConfigMap key is a hard failure. SPEC-060 retired that static sample, so the
+collision it was named around no longer exists — but the name stays, because
+renaming a delivered skill would re-id it. All five ids in the repository are
+asserted pairwise distinct by [`../demo-suite.sh`](../demo-suite.sh) (and, from
+the source tree, by
 `app/tests/test_packaging.py::test_derived_skill_ids_are_unique`).
 
 ## Prerequisites

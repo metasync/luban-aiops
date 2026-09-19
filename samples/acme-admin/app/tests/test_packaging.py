@@ -24,11 +24,17 @@ REPO_ROOT = SAMPLES_DIR.parent
 # The base image every product builds on, and the toolchain it pins.
 BASE_IMAGE = "luban-aiops/base-uv:al2023"
 
-# Skill directories `samples/deploy-samples.sh` already ships. The four this
-# slice adds are asserted alongside them in test_skill_discovery below.
+# Every sample directory that ships a `skill/`. SPEC-060 consolidated the
+# browser samples under `acme-admin/` and retired the static `web-checks/`
+# category, so all five live under one category now. `skill-graduation` is
+# absent by design: it ships no `skill/` (it graduates one at runtime), so
+# `deploy-samples.sh`'s `find -type d -name skill` never sees it.
 SHIPPED_SKILL_DIRS = {
-    "web-checks/adhoc-password-reset",
-    "web-checks/password-reset",
+    "acme-admin/health-check",
+    "acme-admin/user-status",
+    "acme-admin/lock-unlock-user",
+    "acme-admin/password-reset",
+    "acme-admin/adhoc-password-reset",
 }
 
 
@@ -57,10 +63,11 @@ def _skill_id(sample_dir: str, filename: str) -> str:
     `deploy-samples.sh` mounts each document as `<sample-leaf>-<filename>`;
     `skills_hub.services.ingestion.slug_from_path` then lowercases it, drops the
     `.md`, and collapses every run of non-alphanumerics to a single `-`. The
-    category directory is **not** part of the id — which is exactly why this
-    slice's password-reset document is `ResetAcmePassword.md` and not
-    `ResetUserPassword.md`: the latter would collide byte-identically with the
-    shipped sample's id.
+    category directory is **not** part of the id — which is why the acme-admin
+    password-reset document is `ResetAcmePassword.md`: SPEC-059 shipped it
+    beside a static `password-reset` sample whose `ResetUserPassword.md` would
+    otherwise collide byte-identically. SPEC-060 retired that static sample but
+    kept the name, since renaming a delivered skill would re-id it.
     """
     leaf = Path(sample_dir).name
     key = f"{leaf}-{filename}"
@@ -224,19 +231,24 @@ def test_derived_skill_ids_are_unique() -> None:
     assert ids, "no sample skills discovered at all"
 
 
-def test_the_shipped_password_reset_id_is_unchanged() -> None:
-    """The naming rule this slice works around, pinned so it cannot drift."""
+def test_the_acme_password_reset_id_is_stable() -> None:
+    """The rung-4 id, pinned so a rename cannot silently re-id a shipped skill.
+
+    The category directory drops out of the id, so this is byte-identical to the
+    id the sample carried under the retired `web-checks/` category — which is
+    exactly what SPEC-060's "leaf names preserved, ids stable" promise means.
+    """
     assert (
-        _skill_id("web-checks/password-reset", "ResetUserPassword.md")
-        == "samples/password-reset-resetuserpassword"
+        _skill_id("acme-admin/password-reset", "ResetAcmePassword.md")
+        == "samples/password-reset-resetacmepassword"
     )
 
 
 @pytest.mark.parametrize(
     "sample_dir,filename",
     [
-        ("web-checks/password-reset", "ResetUserPassword.md"),
-        ("web-checks/adhoc-password-reset", "ResetPasswordAdHoc.md"),
+        ("acme-admin/password-reset", "ResetAcmePassword.md"),
+        ("acme-admin/adhoc-password-reset", "ResetPasswordAdHoc.md"),
     ],
 )
 def test_shipped_ids_keep_their_shape(sample_dir: str, filename: str) -> None:

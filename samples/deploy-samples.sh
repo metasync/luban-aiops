@@ -15,13 +15,13 @@
 #
 # Resulting skill ids are `samples/<slug>`, where <slug> is the mounted file
 # name lowercased with every run of non-alphanumerics collapsed to '-':
-#   samples/web-checks/password-reset/skill/ResetUserPassword.md
-#     -> ConfigMap key  password-reset-ResetUserPassword.md
-#     -> skill_id       samples/password-reset-resetuserpassword
+#   samples/acme-admin/password-reset/skill/ResetAcmePassword.md
+#     -> ConfigMap key  password-reset-ResetAcmePassword.md
+#     -> skill_id       samples/password-reset-resetacmepassword
 #
 # Usage:
 #   samples/deploy-samples.sh [namespace]                 # install ALL samples
-#   SAMPLE=web-checks/password-reset \
+#   SAMPLE=acme-admin/password-reset \
 #     samples/deploy-samples.sh [namespace]               # install ONE sample
 #   ACTION=undeploy samples/deploy-samples.sh [namespace] # remove ALL samples
 #
@@ -35,7 +35,7 @@
 # Environment overrides:
 #   NAMESPACE / $1  (default dev-luban-aiops)
 #   ACTION          (deploy | undeploy; default deploy)
-#   SAMPLE          (path under samples/, e.g. web-checks/password-reset;
+#   SAMPLE          (path under samples/, e.g. acme-admin/password-reset;
 #                    empty = all samples)
 
 set -eu

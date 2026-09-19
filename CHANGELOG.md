@@ -11,6 +11,89 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.39.0 — 2026-09-19
+
+Release train delivering **SPEC-060 — rebasing the `web-checks` browser samples
+onto `acme-admin`** and **SPEC-061 — retiring `browser-check-target`,
+`InventoryHealth`, and the orphaned credential sets** (the twenty-second and
+twenty-third R5 slices), shipped together as one `web-checks` consolidation:
+SPEC-060 migrates the surviving samples onto the stateful console, and SPEC-061
+removes the now-redundant static target and every one of its consumers. Neither
+slice changes product behavior, contracts, policy, or audit, so the train carries
+no schema or migration work.
+
+### Changed
+
+- **SPEC-060 — rebased the `web-checks` browser samples onto `acme-admin`**
+  (samples + docs only; **no** product code, contract, policy-bundle, or GitOps
+  change, so no `VERSION` bump). Executes the retarget SPEC-059 R-2 deliberately
+  engineered for: because `acme-admin` serves the same six URL shapes and 28
+  element ids the static target did, migrating the surviving samples is an origin
+  + credential-set swap plus prose rather than a rewrite. `adhoc-password-reset`
+  and `skill-graduation` move under `samples/acme-admin/` (leaf directory names
+  preserved, so their skill ids are unchanged) and now drive the stateful
+  console. `skill-graduation` is **upgraded** to reseed the store before act 1
+  and to prove both resets landed against real store state
+  (`/api/users/{alice,bob}` `revision` + `password_changed_at`), with act 4's
+  revision asserted higher than act 1's so a genuine replay is told apart from
+  leftover authoring state. The approval-model triad (flow ↔ action ↔
+  author/graduate) now shares one target that really mutates. The catalog
+  (`samples/README.md`, `samples/acme-admin/README.md`), `demo-suite.sh` (six →
+  five distinct ids), `demo-lib.sh`, `deploy-samples.sh`, `test_packaging.py` and
+  the Studio guide are reframed to match, and the walkthrough cross-links between
+  the six samples are repointed. Records that `acme` is the fictional-company
+  placeholder (Acme Corp), not the ACME certificate protocol (RFC 8555).
+- **SPEC-061 — retired `browser-check-target`, `InventoryHealth`, and the
+  orphaned credential sets** (GitOps/config reduction + test fixtures; **no**
+  product behavior, contract, policy, or audit change, so no `VERSION` bump).
+  Makes the follow-up decision SPEC-060 deferred: now that every browser
+  tutorial runs against the stateful `acme-admin` console and the HTTP surface
+  is shipped, the static `browser-check-target` mock, its one platform runbook
+  (`InventoryHealth`, a `risk_class: write` browser health check whose
+  "complements the API-level checks" promise is fulfilled elsewhere by the
+  `acme-admin/health-check` sample `CheckServiceHealth`), and its dedicated
+  `browser-check-demo.sh` e2e (never in the `make e2e` list) are redundant with
+  the `acme-admin` suite that *is* gated. The `browser-dev` profile survives as
+  the browser *posture* profile (sidecar patch + CDP-deny NetworkPolicy + env),
+  now permitting exactly one origin, `acme-admin`. Five
+  `products/agent-platform/tests/` fixtures and one incidental `src/` comment
+  example are repointed off the retired origin string (behavior unchanged).
+  Reverses SPEC-060's *keep* decision; rides the same v0.39.0 train.
+
+### Removed
+
+- **`samples/web-checks/password-reset/`** — the static-mock reset sample whose
+  confirmation page "reports success for any user" is retired, superseded by the
+  delivered `acme-admin/password-reset` (which already verifies via
+  `http.get /api/users/{u}`). Removes skill id
+  `samples/password-reset-resetuserpassword`; the surviving `ResetAcmePassword.md`
+  keeps its name (renaming would re-id a shipped skill), its collision rationale
+  now historical. The whole `samples/web-checks/` category is gone.
+  **`browser-check-target` stays shipped and untouched** for its platform
+  consumers — the `platform-runbooks/web-checks/InventoryHealth.md` runbook,
+  `shared/platform-ops/e2e/browser-check-demo.sh`, the `browser-dev` allowlist and
+  the `admin-portal`/`browser-check-target` credential fixtures — none of which is
+  a tutorial sample. *(SPEC-061, in this same unreleased train, subsequently
+  retires the target and every one of these consumers — see below.)*
+- **`platform-runbooks/web-checks/InventoryHealth.md`** (SPEC-061) — and the
+  now-empty `web-checks/` directory — plus its skills-hub ConfigMap generator
+  entry and volume mount; removes platform skill id
+  `platform-runbooks/web-checks/inventoryhealth`. The `platform-runbooks` README
+  keeps its web-check authoring guidance, repointed at the `samples/acme-admin/`
+  worked examples.
+- **`browser-check-target` static app** (SPEC-061) — the three
+  `runtime-profiles/browser-dev/browser-check-target-*.yaml` resources
+  (Deployment, Service, pages ConfigMap) and the `http://browser-check-target:8080`
+  entry in `GATEWAY_BROWSER_ALLOW_ORIGINS`. `browser-sidecar-network-policy.yaml`
+  and the sidecar patch are untouched.
+- **`shared/platform-ops/e2e/browser-check-demo.sh`** (SPEC-061) — the manual
+  smoke test (not in the `make e2e` list); its browser flow-gate coverage is
+  provided by `samples/acme-admin/demo-suite.sh` rung 4, which *is* gated.
+- **Two orphaned dev credential sets** (SPEC-061) — `sync-browser-credentials.sh`
+  now generates only the `acme-admin` set, dropping `browser-check-target`
+  (`svc-check`) and `admin-portal` (`admin`, already emptied of consumers by
+  SPEC-060).
+
 ## 0.38.0 — 2026-09-17
 
 Release train delivering **SPEC-058 — HTTP service-check tools** and

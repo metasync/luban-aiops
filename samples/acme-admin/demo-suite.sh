@@ -93,10 +93,12 @@ done
 # drops the category directory, so two samples in different categories can
 # collide on a name that looks distinct in the tree — and two `--from-file`
 # arguments with the same ConfigMap key is a hard failure, not a silent
-# overwrite. This is why rung 4's document is `ResetAcmePassword.md` and not
-# `ResetUserPassword.md`, which the shipped `web-checks/password-reset` already
-# owns. `web-checks/skill-graduation` ships no document at all (it graduates
-# one at runtime), so the mounted set is the four new ids plus two shipped ones.
+# overwrite. This is why rung 4's document is `ResetAcmePassword.md`: SPEC-059
+# shipped it beside a static `password-reset` sample that owned
+# `ResetUserPassword.md`, and SPEC-060 retired that static sample but kept the
+# name (renaming a delivered skill would re-id it). `skill-graduation` ships no
+# document at all (it graduates one at runtime), so the mounted set is the four
+# ladder ids plus `adhoc-password-reset`'s — five in all.
 mounted=$(kubectl -n "$NAMESPACE" exec deployment/skills-hub -- ls -1 /skills/samples) \
   || fail "could not list /skills/samples in skills-hub"
 printf '%s\n' "$mounted" | python3 -c '
@@ -108,7 +110,6 @@ expected = {
     "samples/user-status-checkuserstatus",
     "samples/lock-unlock-user-lockunlockuser",
     "samples/password-reset-resetacmepassword",
-    "samples/password-reset-resetuserpassword",
     "samples/adhoc-password-reset-resetpasswordadhoc",
 }
 ids = {}
@@ -122,7 +123,7 @@ assert not missing, "these sample skill ids are not ingested: %s" % ", ".join(so
 for slug in sorted(ids):
     print("  ok: %-46s <- %s" % (slug, ids[slug]))
 print("  ok: %d sample skill ids, pairwise distinct" % len(ids))' \
-  || fail "the mounted sample skills do not produce the six distinct ids this suite requires"
+  || fail "the mounted sample skills do not produce the five distinct ids this suite requires"
 
 # --- the four demos, in ladder order -------------------------------------
 

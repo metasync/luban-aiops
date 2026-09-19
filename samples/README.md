@@ -8,18 +8,17 @@ with `make deploy-samples`; the platform never hard-wires a specific sample.
 
 ## Available samples
 
-### Web checks
-
-| Sample | Description |
-|---|---|
-| [web-checks/password-reset](web-checks/password-reset/) | Automate a password reset in a legacy admin panel using browser web-check tools with a single HITL gate (a **bound flow**, `approval_kind: flow`) |
-| [web-checks/adhoc-password-reset](web-checks/adhoc-password-reset/) | The same admin reset driven **ad-hoc with no bound flow**, so each mutating browser action parks its own per-action change-request card (`approval_kind: action`) — the unbound counterpart to `password-reset`, demonstrating SPEC-054 |
-| [web-checks/skill-graduation](web-checks/skill-graduation/) | Author that same reset **ad hoc**, then **graduate** the approved mutations into an executable-flow skill and replay it under one gate — N `action` cards to author, 1 `flow` card thereafter, demonstrating SPEC-055. Ships **no `skill/`**: the skill is the artifact the demo produces |
-
-All three target `browser-check-target`, a static page bundle in platform GitOps.
-It can render a form, but it cannot answer "did that actually change anything?".
-
 ### ACME Admin
+
+All six samples drive **one** application — `acme-admin`, a stateful FastAPI
+console with a real JSON store — so each can prove its writes actually landed
+rather than trusting a rendered URL. Four form a progressive ladder on the *card
+count*; the other two share the same target to contrast the *approval models*.
+
+**The four-rung ladder.** Read together these make a claim none of them makes
+alone: **the card count tracks the *effect* of a skill, not the surface it
+uses.** Rungs 1 and 3 both talk to the JSON API and differ; rungs 2 and 4 both
+drive a browser and differ.
 
 | Sample | Description |
 |---|---|
@@ -28,42 +27,56 @@ It can render a form, but it cannot answer "did that actually change anything?".
 | [acme-admin/lock-unlock-user](acme-admin/lock-unlock-user/) | Lock or unlock an account with one `http.post` — **1 card**, `approval_kind: action`, decided by a second identity |
 | [acme-admin/password-reset](acme-admin/password-reset/) | Reset a password through the console UI — **1 card**, `approval_kind: flow`, headed by the skill's authored `flow_intent` |
 
-These four are one suite against one application, and read together they make a
-claim none of them makes alone: **the card count tracks the *effect* of a skill,
-not the surface it uses.** Rungs 1 and 3 both talk to the JSON API and differ;
-rungs 2 and 4 both drive a browser and differ. See
-[acme-admin/README.md](acme-admin/README.md).
+**The two approval-model samples** take the same console password reset and show
+where rung 4's bound flow comes from — and what the work costs before one
+exists:
+
+| Sample | Description |
+|---|---|
+| [acme-admin/adhoc-password-reset](acme-admin/adhoc-password-reset/) | The console reset driven **ad-hoc with no bound flow**, so each mutating browser action parks its own per-action change-request card (`approval_kind: action`) — the unbound counterpart to `password-reset`, demonstrating SPEC-054 |
+| [acme-admin/skill-graduation](acme-admin/skill-graduation/) | Author that same reset **ad hoc**, then **graduate** the approved mutations into an executable-flow skill and replay it under one gate — N `action` cards to author, 1 `flow` card thereafter, demonstrating SPEC-055. Ships **no `skill/`**: the skill is the artifact the demo produces |
+
+See [acme-admin/README.md](acme-admin/README.md) for the app and the suite.
 
 `acme-admin` is the **first sample to own a container image**, and the first
 category to hold infrastructure shared by all its samples rather than one:
 
 ```
 samples/acme-admin/
-├── README.md          # the app's own operator-facing document
-├── app/               # the FastAPI application (image, tests, its own Makefile)
-├── deploy/            # kustomization, deployment, service, networkpolicy
-├── deploy.sh          # build + apply + ASSERT (make deploy-sample-app)
-├── demo-lib.sh        # plumbing all four demos source
-├── demo-suite.sh      # the four in ladder order + the cross-skill leg
-├── health-check/      # ┐
-├── user-status/       # │ the usual per-sample layout:
-├── lock-unlock-user/  # │ README, WALKTHROUGH, skill/, demo/
-└── password-reset/    # ┘
+├── README.md              # the app's own operator-facing document
+├── app/                   # the FastAPI application (image, tests, its own Makefile)
+├── deploy/                # kustomization, deployment, service, networkpolicy
+├── deploy.sh              # build + apply + ASSERT (make deploy-sample-app)
+├── demo-lib.sh            # shared plumbing the demos source
+├── demo-suite.sh          # the four rungs in ladder order + the cross-skill leg
+├── health-check/          # ┐
+├── user-status/           # │ the four ladder rungs: the usual
+├── lock-unlock-user/      # │ per-sample layout — README,
+├── password-reset/        # ┘ WALKTHROUGH, skill/, demo/
+├── adhoc-password-reset/  # ┐ the two approval-model samples
+└── skill-graduation/      # ┘ (graduation ships no skill/)
 ```
 
 Deploy it out-of-band, after the platform:
 
 ```sh
 make deploy-sample-app     # build the image, apply deploy/, then assert it works
-make deploy-samples        # install the four skill documents
+make deploy-samples        # install the five skill documents
 make undeploy-sample-app   # remove it again
 ```
 
-**Both targets exist and both stay shipped.** `browser-check-target` still
-serves the three `web-checks` samples; `acme-admin` serves these four. Rebasing
-the older three onto the app — and deciding whether the static target is then
-retired — is a separate slice (SPEC-060), deliberately unbundled from this one
-so that neither change is unreviewable.
+**`browser-check-target` is retired.** The static page bundle in platform GitOps
+was the target these browser samples once drove; SPEC-060 rebased all three onto
+the stateful `acme-admin` app above and retired the static
+`web-checks/password-reset` sample outright, so the `samples/web-checks/`
+category is gone. SPEC-061 then removed the static target itself along with its
+last *platform* consumers — the `platform-runbooks/web-checks/InventoryHealth.md`
+runbook, the `shared/platform-ops/e2e/browser-check-demo.sh` smoke test, and the
+`browser-dev` allowlist origin and credential fixtures — because the
+`acme-admin` suite (which *is* in `make e2e`) already demonstrates the same
+browser flow gate against a target that really mutates. The `browser-dev`
+profile remains as the browser *posture* profile, now permitting the one
+`acme-admin` origin.
 
 ## Directory structure
 
@@ -81,13 +94,13 @@ samples/
 ```
 
 Not every sample needs all subdirectories. `skill/` may even be absent by
-design: `web-checks/skill-graduation` ships none because its skill is the
+design: `acme-admin/skill-graduation` ships none because its skill is the
 artifact the demo *produces*, and `deploy-samples.sh` discovers samples by
 `find -type d -name skill`, so such a sample is simply invisible to the
 installer (and `SAMPLE=<that-sample>` exits non-zero saying so). A category may
 also hold more than samples: `acme-admin/` carries the application, its deploy
-manifests and the shared demo plumbing its four samples all use, because they
-are one suite against one store rather than four independent stories.
+manifests and the shared demo plumbing its samples all use, because they are one
+suite against one store rather than six independent stories.
 
 Infrastructure shared with the platform or other samples (browser target pages,
 NetworkPolicy, credential sets) lives in the platform's GitOps directory and is
@@ -113,7 +126,7 @@ ships no tutorial content. After the cluster is up, install samples with:
 
 ```sh
 make deploy-samples                                    # install every sample
-make deploy-samples SAMPLE=web-checks/password-reset   # install just one
+make deploy-samples SAMPLE=acme-admin/password-reset   # install just one
 make undeploy-samples                                  # remove them all again
 ```
 
@@ -143,7 +156,11 @@ Two things that do not happen automatically:
 - **`make e2e` has a hardcoded script list.** A new `demo.sh` does not join it
   by existing; add the path to the `e2e` target's loop in the root `Makefile`.
 - **Skill ids are derived from the mounted file name**, which
-  `deploy-samples.sh` builds as `<sample-dir>-<file-name>.md`. Two samples whose
-  derived names collide silently re-id each other — `acme-admin/password-reset`
-  names its document `ResetAcmePassword.md` for exactly this reason, since
-  `web-checks/password-reset` already ships `ResetUserPassword.md`.
+  `deploy-samples.sh` builds as `<sample-dir>-<file-name>.md` — the *category*
+  directory drops out. Two samples whose derived names collide silently re-id
+  each other, and two `--from-file` arguments with the same ConfigMap key is a
+  hard failure. `acme-admin/password-reset` names its document
+  `ResetAcmePassword.md` for exactly this reason: SPEC-059 shipped it beside a
+  static `password-reset` sample whose `ResetUserPassword.md` would otherwise
+  collide byte-identically. SPEC-060 retired that static sample, but the name
+  stays — renaming a delivered skill would re-id it.

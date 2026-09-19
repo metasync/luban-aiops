@@ -633,7 +633,7 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         from agentscope.tool import ToolChunk, ToolResponse
 
         secret_url = (
-            "https://browser-check-target/reset?user=alice&newpw=TempPass123%21"
+            "https://acme-admin/reset?user=alice&newpw=TempPass123%21"
         )
         result = self._gateway_result()
         tool = _StubTool("web_navigate", gateway_tool_name="web.navigate")
@@ -652,7 +652,7 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         self.assertEqual(frame["type"], "tool_call")
         self.assertEqual(
             frame["parameters"],
-            {"url": "https://browser-check-target/reset?user=alice&newpw=***"},
+            {"url": "https://acme-admin/reset?user=alice&newpw=***"},
         )
         self.assertNotIn("TempPass123", json.dumps(events, default=str))
         # The projection is a copy: the raw ``tool_call`` the resume path

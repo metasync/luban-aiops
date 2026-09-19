@@ -7,6 +7,19 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-19-web-checks-consolidation.md`
+  - delivers SPEC-060 and SPEC-061 together in v0.39.0: one `web-checks`
+    consolidation train. SPEC-060 rebases the surviving browser samples
+    (`adhoc-password-reset`, `skill-graduation`) onto the stateful `acme-admin`
+    console and upgrades `skill-graduation` to verify both resets against real
+    store state; SPEC-061 then retires the redundant static `browser-check-target`
+    app, its `InventoryHealth` runbook, its `browser-check-demo.sh` e2e, and two
+    orphaned dev credential sets, narrowing `browser-dev` to the single
+    `acme-admin` origin. Review corrections inline the sample-app 28-id contract
+    guard, fix a stale living-guide claim, and fully remove the emptied
+    `samples/web-checks/` category. Samples, docs, GitOps config, and test
+    fixtures only — no product behavior, contract, policy, audit, schema, or
+    database migration change.
 - `2026-09-17-http-tools-and-acme-admin-skill-suite.md`
   - delivers SPEC-058 and SPEC-059 together in v0.38.0: deny-by-default HTTP
     checks with server-side credential references, signed per-action POST

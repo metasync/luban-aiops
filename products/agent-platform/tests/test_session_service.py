@@ -341,7 +341,7 @@ def test_delete_session_clears_browser_flow_stores(monkeypatch):
         created.session_id,
         {
             "skill_id": "samples/password-reset-resetuserpassword",
-            "origin": "http://browser-check-target:8080",
+            "origin": "http://acme-admin:8080",
             "title": "Reset User Password in Admin Portal",
             "risk_class": "write",
         },
@@ -352,7 +352,7 @@ def test_delete_session_clears_browser_flow_stores(monkeypatch):
         owner_user_id="alice",
         decider_user_id="bob-approver",
         skill_id="samples/password-reset-resetuserpassword",
-        origin="http://browser-check-target:8080",
+        origin="http://acme-admin:8080",
         ttl=900,
     )
     assert contexts.get(created.session_id) is not None

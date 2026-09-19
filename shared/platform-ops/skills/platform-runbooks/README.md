@@ -17,11 +17,14 @@ Content adapted from the
 2. Add YAML frontmatter per `shared/shared-contracts/skill-format.md`:
    `title` and `description` are required; set `source_url` for adapted
    upstream content.
-3. Web-check skills (SPEC-049) live under `web-checks/` instead of
-   `guides/`. They additionally set `web_target` (the allowlisted origin
-   the check runs against) and `risk_class` (`read` for snapshot-only
-   probes, `write` when the flow clicks or types, which requires the HITL
-   gate). See `web-checks/InventoryHealth.md` for the sample.
+3. A browser web-check skill (SPEC-049) additionally sets `web_target`
+   (the allowlisted origin the check runs against) and `risk_class` (`read`
+   for snapshot-only probes, `write` when the flow clicks or types, which
+   requires the HITL gate). This library ships no web-check runbook: the
+   worked examples live under `samples/acme-admin/` (a bound browser
+   `web_target` reset flow and a card-free `http.get` API-level health
+   check), keeping SPEC-050 R-11's tutorial→platform dependency direction —
+   a *platform* runbook does not point at a *sample* app.
 4. Pre-flight locally before opening a PR:
 
    ```sh

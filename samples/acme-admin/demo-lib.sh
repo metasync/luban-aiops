@@ -1,18 +1,19 @@
 #!/bin/sh
 
-# Shared plumbing for the four acme-admin demo scripts (SPEC-059 R-8).
+# Shared plumbing for the acme-admin demo scripts (SPEC-059 R-8).
 #
 # Sourced, never executed:
 #
 #     . "$(dirname "$0")/../../demo-lib.sh"
 #     acme_demo_init "health-check"
 #
-# Unlike the three shipped samples under samples/web-checks/ — which are
-# independent stories against independent targets and therefore each carry
-# their own copy of the token/delegation plumbing — these four demos are one
-# suite against one application. They share a reseed step, one credential
-# arrangement, one allowlisted origin and a ladder of card counts that only
-# means something read together, so the plumbing lives here once.
+# These demos are one suite against one application: they share a reseed step,
+# one credential arrangement, one allowlisted origin and a ladder of card counts
+# that only means something read together, so the plumbing lives here once. The
+# four ladder rungs source it, and so does the migrated adhoc-password-reset
+# demo SPEC-060 folded into this category. skill-graduation is the exception —
+# its demo is standalone, because it drives an author/graduate/replay flow rather
+# than a ladder rung, and carries its own in-cluster app-access helpers.
 #
 # Every helper follows the house rule the other demos established: an
 # assertion that cannot be made deterministically is not made at all, and a

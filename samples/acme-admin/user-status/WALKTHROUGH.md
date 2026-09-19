@@ -16,7 +16,7 @@ Everything below is also exercised unattended by
 **Portal surface: Chat.** This is an operational session, not skill
 development, so it lives in **Chat** and never in **Studio** (SPEC-056). The
 authoring workspace is demonstrated by
-[`samples/web-checks/skill-graduation/WALKTHROUGH.md`](../../web-checks/skill-graduation/WALKTHROUGH.md);
+[`samples/acme-admin/skill-graduation/WALKTHROUGH.md`](../skill-graduation/WALKTHROUGH.md);
 nothing here uses it.
 
 ## Prerequisites

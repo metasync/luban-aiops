@@ -1,16 +1,18 @@
 """SPEC-059 R-2: the six URL shapes and the element-id contract.
 
-The id contract is **read out of the shipped static target's ConfigMap** rather
-than transcribed into this file, so a template edit that renames an id a shipped
-skill's `web.extract` selector addresses fails here — mechanically, not by
-somebody remembering to update a list.
+The id contract is **transcribed below** rather than read out of a shipped
+ConfigMap. It originally lived in the static `browser-check-target` target's
+pages ConfigMap, which SPEC-061 retired along with the mock app; what that
+ConfigMap carried is the set of element ids the `acme-admin` console must keep
+rendering, because shipped skills' `web.extract` / `web.click` selectors address
+them. Inlining the set keeps the guard mechanical — a template edit that renames
+an id still fails here — without depending on a retired artifact.
 """
 
 from __future__ import annotations
 
 import re
 from html.parser import HTMLParser
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,27 +20,50 @@ from fastapi.testclient import TestClient
 from acme_admin.auth import ADMIN_USERNAME, SESSION_COOKIE
 from acme_admin.store import SEED_REVISION, STORE
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-PAGES_YAML = (
-    REPO_ROOT
-    / "shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-check-target-pages.yaml"
-)
-
-# Static ConfigMap key -> the route that replaces it.
-PAGE_FOR_KEY = {
-    "index.html": "/",
-    "status-index.html": "/status",
-    "admin-index.html": "/admin/",
-    "admin-users-index.html": "/admin/users/",
-    "admin-reset-index.html": "/admin/users/reset/",
-    "admin-reset-done-index.html": "/admin/users/reset/done/",
+# The element-id contract, per route: the ids the `acme-admin` console must keep
+# rendering because shipped skills' `web.extract` / `web.click` selectors address
+# them. Originally read out of the static `browser-check-target` pages ConfigMap;
+# SPEC-061 retired that mock app, so the contract is transcribed here.
+# `test_the_contract_covers_28_ids` pins the count the spec quotes (28), derived
+# from this set minus `EXTRA_IDS`.
+CONTRACT: dict[str, set[str]] = {
+    "/": {"login-form", "login-status", "password", "sign-in", "username"},
+    "/status": {"api-status", "checked-at", "db-status", "queue-status"},
+    "/admin/": {
+        "admin-auth-status",
+        "admin-login-form",
+        "admin-login-status",
+        "admin-password",
+        "admin-sign-in",
+        "admin-username",
+    },
+    "/admin/users/": {
+        "last-reset-status",
+        "last-reset-time",
+        "last-reset-user",
+        "no-resets",
+        "user-table",
+    },
+    "/admin/users/reset/": {
+        "confirm-password",
+        "confirm-reset",
+        "new-password",
+        "reset-form",
+        "reset-status",
+        "target-user",
+    },
+    "/admin/users/reset/done/": {
+        "back-to-users",
+        "confirmation-message",
+        "reset-timestamp",
+    },
 }
 
-# Ids `acme-admin` renders that the static target did not. A superset costs
-# nothing and keeps the retarget honest: `reset-timestamp` is served by the
-# static target's done page but omitted from the spec's 28-id list, the
-# `user-row-*` ids are what `CheckUserStatus` reads a single row's state from,
-# and the revision ids expose the state the JSON API already reports.
+# Ids `acme-admin` renders beyond the contract above. A superset costs nothing
+# and keeps the retarget honest: `reset-timestamp` is served by the done page but
+# omitted from the spec's 28-id list, the `user-row-*` ids are what
+# `CheckUserStatus` reads a single row's state from, and the revision ids expose
+# the state the JSON API already reports.
 EXTRA_IDS = {
     "reset-timestamp",
     "store-revision",
@@ -51,9 +76,6 @@ EXTRA_IDS = {
 
 # The one-time value used throughout. It must never reach a served document.
 ONE_TIME = "a-one-time-value"
-
-_DATA_KEY = re.compile(r"^  ([a-z0-9.-]+\.html): \|$", re.MULTILINE)
-_ID_ATTR = re.compile(r'\bid="([^"]+)"')
 
 
 class IdCollector(HTMLParser):
@@ -75,27 +97,9 @@ def ids_in(markup: str) -> set[str]:
     return set(parser.ids)
 
 
-def contract_ids() -> dict[str, set[str]]:
-    """The id set the static target serves, per route, read from its ConfigMap."""
-    assert PAGES_YAML.is_file(), f"the id contract moved: {PAGES_YAML}"
-    text = PAGES_YAML.read_text(encoding="utf-8")
-    matches = list(_DATA_KEY.finditer(text))
-    assert matches, f"no page keys found in {PAGES_YAML}"
-
-    per_key: dict[str, set[str]] = {}
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        per_key[match.group(1)] = set(_ID_ATTR.findall(text[match.end() : end]))
-
-    assert set(per_key) == set(PAGE_FOR_KEY), (
-        "the static target's page set changed; update PAGE_FOR_KEY"
-    )
-    return {PAGE_FOR_KEY[key]: ids for key, ids in per_key.items()}
-
-
 @pytest.fixture(scope="module")
 def contract() -> dict[str, set[str]]:
-    return contract_ids()
+    return CONTRACT
 
 
 def _render(browser: TestClient, path: str) -> str:

@@ -552,10 +552,10 @@ def test_title_masking_leaves_an_ordinary_message_alone(workspace):
 
     gated = _mint(
         workspace,
-        "reset the password using runbook browser-check-target on "
+        "reset the password using runbook acme-admin on "
         "dev-luban-aiops",
     )
-    assert "browser-check-target" in gated
+    assert "acme-admin" in gated
     assert "dev-luban-aiops" in gated
     assert "runbook" in gated
 

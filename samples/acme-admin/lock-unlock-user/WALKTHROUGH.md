@@ -16,7 +16,7 @@ Everything below is also exercised unattended by
 **Portal surface: Chat** — for both identities. The operator asks in Chat; the
 approver decides in **Approvals**, the decider-only inbox. Nothing here uses
 **Studio** (SPEC-056), which is the skill-development workspace; see
-[`samples/web-checks/skill-graduation/WALKTHROUGH.md`](../../web-checks/skill-graduation/WALKTHROUGH.md)
+[`samples/acme-admin/skill-graduation/WALKTHROUGH.md`](../skill-graduation/WALKTHROUGH.md)
 for that.
 
 ## Prerequisites

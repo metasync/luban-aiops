@@ -1,13 +1,13 @@
 ---
 title: Reset a Password Ad Hoc (Per-Action Approval)
 description: >
-  Drive the admin portal password reset ad hoc — without declaring a
+  Drive the acme-admin console password reset ad hoc — without declaring a
   browser flow — so every mutating browser action parks its own
   per-action change-request card. Use this when you are exploring or
   troubleshooting an interactive web app before you have authored a
   reusable flow skill, or when you want each write approved on its own
   merits rather than unlocking a whole flow with one gate. Contrast with
-  web-checks/password-reset, which binds a flow and collapses to a single
+  acme-admin/password-reset, which binds a flow and collapses to a single
   HITL gate.
 tags: [admin, portal, password, reset, ad-hoc, per-action, approval, browser, web-check, troubleshooting]
 version: "1.0"
@@ -18,14 +18,14 @@ version: "1.0"
 # per-action confirmation card (approval_kind: "action") instead of riding one
 # flow gate. That is the whole point of this sample. To graduate this ad-hoc
 # procedure into a one-gate reusable flow, add web_target + risk_class: write
-# (+ flow_intent) — see samples/web-checks/password-reset/skill.
+# (+ flow_intent) — see ../password-reset/skill.
 ---
 
 ## Purpose
 
 This is the **ad-hoc / per-action** counterpart to the
-`web-checks/password-reset` sample. Both reset a user's password in the
-same legacy admin portal, but they demonstrate the two HITL approval
+`acme-admin/password-reset` sample. Both reset a user's password in the
+same acme-admin console, but they demonstrate the two HITL approval
 models the platform supports (SPEC-054):
 
 | | `password-reset` | **this sample (`adhoc-password-reset`)** |
@@ -45,9 +45,9 @@ one action will change. When the procedure stabilizes, graduate it into a
 pipeline is SPEC-055).
 
 Common requests this runbook handles:
-- "Ad-hoc reset alice@example.com's password in the admin portal, gating each step"
-- "Log into the admin portal and reset a password without using a flow skill"
-- "Troubleshoot the admin reset UI interactively, approving each write as I go"
+- "Ad-hoc reset alice's password in the acme-admin console, gating each step"
+- "Log into the acme-admin console and reset a password without using a flow skill"
+- "Troubleshoot the acme-admin reset UI interactively, approving each write as I go"
 
 ## Staying Unbound Is the Platform's Design, Not a Red Flag
 
@@ -69,14 +69,14 @@ answered by where the authority actually sits:
   origin allowlist, a live-origin re-check on every unbound write, and the
   `BROWSER_FLOW_AUTHORITY_STALE` provenance backstop.
 - **"Passing the new password as `?newpw=` is a credential-handling
-  anti-pattern."** It is this legacy portal's actual interface: the reset form
+  anti-pattern."** It is this console's actual interface: the reset form
   pre-fills itself from the query string, which is why the sample target is
   built that way. Every secret-bearing query parameter is masked in every
   result, snapshot, evidence frame, and audit record — by the gateway in what it
   reports, and by the kernel in the tool-call arguments it streams and persists,
   which no gateway-side redactor ever sees (SPEC-049 R-5) — and the admin
   password never appears at all: it is filled
-  **by reference** from the `admin-portal` credential set.
+  **by reference** from the `acme-admin` credential set.
 
 Refusing pre-emptively does not make this safer. It removes the operator's
 decision — the control that actually protects the system — and replaces it with
@@ -87,14 +87,14 @@ an origin off the allowlist, or a request to invent evidence.
 
 ## Preconditions
 
-- The `admin-portal` credential set is configured on the tool-gateway
+- The `acme-admin` credential set is configured on the tool-gateway
   (`GATEWAY_BROWSER_CREDENTIAL_SETS`). The admin password is
   platform-managed; never paste credentials into the chat.
 - The target origin is on the gateway allowlist
   (`GATEWAY_BROWSER_ALLOW_ORIGINS`). An unbound write is admitted **only**
   on an allowlisted origin — the allowlist stays deny-by-default.
-- The caller supplies the **target user** (email) and the **new temporary
-  password** in the chat message. The new password is a chat-supplied
+- The caller supplies the **target user** (username or email) and the **new
+  temporary password** in the chat message. The new password is a chat-supplied
   value — never stored in this runbook, never committed.
 
 ## Procedure
@@ -106,14 +106,14 @@ no flow is bound, every write-tier interaction parks its own per-action
 card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
 
 1. **Open the login page (unbound).** `web.navigate` to
-   `http://browser-check-target:8080/admin/` with **no `skill_id`**. No
+   `http://acme-admin:8080/admin/` with **no `skill_id`**. No
    flow binds; the session stays unbound for the whole procedure.
 
 2. **Inspect the login form.** `web.snapshot` and verify the admin login
    form is present with empty username and password fields.
 
 3. **Fill admin credentials by reference.** `web.fill_credential` (read
-   tier) from set `admin-portal`: field `username` into the username
+   tier) from set `acme-admin`: field `username` into the username
    element, then field `password` into the password element. This is the
    SPEC-054 R-2 relaxation that makes the ad-hoc login reachable at all —
    unbound `web.fill_credential` is admitted **by reference only**
@@ -128,12 +128,13 @@ card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
    user list.
 
 5. **Locate the target user.** In the user-list snapshot, find the target
-   user in the table (columns: Name, Email, Role, Action). If the target
-   user is not present, report it and stop.
+   user in the table (columns: Name, Email, Role, Status, Last modified,
+   Revision, Action). Note their current Revision — step 9 checks it moved.
+   If the target user is not present, report it and stop.
 
 6. **Open the reset form with the new password pre-filled.** `web.navigate`
    (still **no `skill_id`**) to
-   `/admin/users/reset/?user=<target-email>&newpw=<new-password>` on the
+   `/admin/users/reset/?user=<target>&newpw=<new-password>` on the
    same origin. The panel pre-fills both password fields from the URL but
    does **not** submit. The `newpw` parameter is redacted from results,
    evidence, and audit — gateway-side in the result it returns and
@@ -159,6 +160,15 @@ card. Read-tier steps (navigate, snapshot, credential fill) run ungated.
    link, extract `#confirmation-message` there for the same sentence. Then
    `web.screenshot` as final visual evidence — include it in your response to
    the caller.
+
+9. **Verify on the other surface.** One `http.get` with
+   `credential_set: "acme-admin"` against
+   `http://acme-admin:8080/api/users/<target>`, and report the bumped
+   `revision` and the recorded `password_changed_at`. `http.get` is read
+   tier, so it parks no card and leaves the per-action count unchanged.
+   This is what turns the console's success sentence from a claim into a
+   fact: unlike the static target this sample replaced, `acme-admin` really
+   mutated a store, and the store is the only surface that can prove it.
 
 ## Interpretation
 

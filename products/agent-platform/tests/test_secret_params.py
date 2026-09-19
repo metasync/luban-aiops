@@ -281,7 +281,7 @@ def test_the_two_projections_stay_independent() -> None:
 
 # --- The evidence-frame projection: shape kept, secret removed --------------
 
-RESET_URL = "https://browser-check-target/reset?user=alice&newpw=TempPass123%21"
+RESET_URL = "https://acme-admin/reset?user=alice&newpw=TempPass123%21"
 
 
 def test_the_query_redactor_masks_the_value_and_preserves_bytes() -> None:
@@ -289,7 +289,7 @@ def test_the_query_redactor_masks_the_value_and_preserves_bytes() -> None:
     so the URL shape is still visible, non-secret params survive untouched, and
     the percent-encoding is not re-encoded on the way through."""
     assert redact_secret_query(RESET_URL) == (
-        "https://browser-check-target/reset?user=alice&newpw=" + MASK
+        "https://acme-admin/reset?user=alice&newpw=" + MASK
     )
 
 
@@ -298,7 +298,7 @@ def test_the_query_redactor_is_a_no_op_without_a_secret_param() -> None:
     secret-bearing query must come back byte-identical — including strings
     that are not URLs at all."""
     for value in (
-        "https://browser-check-target/reset?user=alice",
+        "https://acme-admin/reset?user=alice",
         "https://portal/reset",
         "samples/password-reset-resetuserpassword",
         "#reset-status",
@@ -336,7 +336,7 @@ def test_the_evidence_projection_diverges_from_fail_closed_masking() -> None:
 
     assert redact_parameters("web.navigate", parameters) == {"url": MASK}
     assert redact_evidence_parameters("web.navigate", parameters) == {
-        "url": "https://browser-check-target/reset?user=alice&newpw=" + MASK,
+        "url": "https://acme-admin/reset?user=alice&newpw=" + MASK,
     }
 
 
@@ -376,11 +376,11 @@ def test_the_evidence_projection_descends_into_containers() -> None:
     ) == {
         "options": {
             "referer": (
-                "https://browser-check-target/reset?user=alice&newpw=" + MASK
+                "https://acme-admin/reset?user=alice&newpw=" + MASK
             ),
         },
         "urls": [
-            "https://browser-check-target/reset?user=alice&newpw=" + MASK,
+            "https://acme-admin/reset?user=alice&newpw=" + MASK,
             "plain",
         ],
     }
@@ -406,5 +406,5 @@ def test_the_evidence_projection_tolerates_a_non_dict_argument() -> None:
     assert redact_evidence_parameters("web.navigate", 7) == 7
     assert redact_evidence_parameters("web.navigate", []) == []
     assert redact_evidence_parameters("web.navigate", RESET_URL) == (
-        "https://browser-check-target/reset?user=alice&newpw=" + MASK
+        "https://acme-admin/reset?user=alice&newpw=" + MASK
     )

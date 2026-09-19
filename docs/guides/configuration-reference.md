@@ -705,8 +705,9 @@ shared/platform-ops/gitops/select-runtime-profile.sh <profile-name>
 Two non-LLM postures ride alongside the active profile permanently:
 `mutating-dev` (SPEC-022 R-3, pod-delete RBAC + `GATEWAY_MUTATING_TOOLS_ENABLED=true`)
 and `browser-dev` (SPEC-049 R-7, `GATEWAY_BROWSER_ENABLED=true` + the
-chromium-headless-shell sidecar on tool-gateway + the sample
-browser-check-target app). Neither is switchable; both merge their env
+chromium-headless-shell sidecar on tool-gateway; SPEC-061 retired the static
+sample target it once shipped, so its one allowlisted origin is now the
+out-of-band `acme-admin` sample app). Neither is switchable; both merge their env
 into `platform-runtime-config`, and the base stays deny-by-default.
 
 The profile's `runtime-secrets.example.env` documents the active provider key plus the

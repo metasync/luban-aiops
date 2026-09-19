@@ -43,10 +43,13 @@ profiles) and is never selected as the sole runtime profile.
 `browser-dev` is **not** an LLM provider profile: it is the committed
 browser web-check posture for dev environments (SPEC-049 R-7). It carries
 the `chromium-headless-shell` sidecar patch for the tool-gateway
-Deployment, the sample `browser-check-target` web app (static login +
-status pages), and `browser.env` — `GATEWAY_BROWSER_ENABLED=true`, the
-pod-local CDP endpoint, and the dev origin allowlist — which the `dev-k8s`
-overlay merges into the `platform-runtime-config` ConfigMap. The base keeps
+Deployment, its NetworkPolicy, and `browser.env` —
+`GATEWAY_BROWSER_ENABLED=true`, the pod-local CDP endpoint, and the dev
+origin allowlist — which the `dev-k8s` overlay merges into the
+`platform-runtime-config` ConfigMap. The profile ships no target of its
+own: SPEC-061 retired the static `browser-check-target` web app, so the
+one allowlisted origin is `acme-admin`, the sample app deployed
+out-of-band by `make deploy-sample-app`. The base keeps
 `GATEWAY_BROWSER_ENABLED=false` with no allowlist, so any overlay without
 the profile stays byte-identical to the deny-by-default posture. Like
 `mutating-dev`, it is wired into `dev-k8s` permanently

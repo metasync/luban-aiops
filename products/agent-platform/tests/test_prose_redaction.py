@@ -345,12 +345,12 @@ def test_never_harvests_the_address_or_the_identifiers_beside_the_secret():
     then the address and the hyphenated identifiers survive it. Harvesting
     one of those would exact-match it out of every subsequent reply."""
     prompt = (
-        "reset the password using runbook browser-check-target on "
+        "reset the password using runbook acme-admin on "
         "dev-luban-aiops for alice@example.com"
     )
     literals = credential_literals(prompt)
     assert "alice@example.com" not in literals
-    assert "browser-check-target" not in literals
+    assert "acme-admin" not in literals
     assert "dev-luban-aiops" not in literals
     assert literals == frozenset()
 
