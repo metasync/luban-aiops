@@ -486,7 +486,8 @@ def _log_mutating_auto_allow_exclusions(tool_definitions: list[dict]) -> None:
     The auto-allow surface is read-only by construction (SPEC-021 R-3):
     ``GatewayPermissionMiddleware`` only auto-approves tools that are BOTH
     vetted and ``is_read_only``, so a mutating tool named in
-    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` can never auto-execute — it always
+    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` (or the additive
+    ``AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA``) can never auto-execute — it always
     parks for HITL confirmation. The exclusion is logged here so the
     misconfiguration stays visible instead of silently ignored.
     """

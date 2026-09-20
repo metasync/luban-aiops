@@ -7,6 +7,24 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-20-post-web-checks-egress-hardening.md`
+  - patch (v0.39.1) hardening the agent kernel's tool auto-allow posture after
+    the v0.39.0 `web-checks` consolidation, written from an L3 deep security
+    review that surfaced one medium-severity SSRF finding (CWE-918) against the
+    SPEC-058 R-1 entry placing outbound-egress `http.get` in the built-in
+    `DEFAULT_AUTO_ALLOWED_TOOLS`. The finding is defence-in-depth, not a live
+    vulnerability — the tool-gateway `http_connector` origin allowlist,
+    loopback/link-local/multicast refusal, scheme and userinfo validation, and
+    redirect re-validation all run on every call regardless of the kernel
+    allow-list. This patch removes `http.get` from the vetted default so a
+    read-tier network-egress tool no longer bypasses the operator card on the
+    same footing as in-cluster reads, and adds the additive
+    `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` variable (unioned with the resolved
+    set, unlike the replacing `AGENT_GATEWAY_TOOL_AUTO_ALLOW`) so an environment
+    can opt a single tool back in without restating the whole list. The dev-k8s
+    overlay opts back in to preserve the local demo behaviour. Kernel default,
+    one config variable, tests, and living-doc updates only — no contract,
+    policy, schema, audit, or database-migration change.
 - `2026-09-19-web-checks-consolidation.md`
   - delivers SPEC-060 and SPEC-061 together in v0.39.0: one `web-checks`
     consolidation train. SPEC-060 rebases the surviving browser samples

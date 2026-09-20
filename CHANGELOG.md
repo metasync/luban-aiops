@@ -11,6 +11,46 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.39.1 — 2026-09-20
+
+Patch hardening the agent kernel's tool auto-allow posture after the v0.39.0
+release. An L3 deep security review of the v0.39.0 train flagged the SPEC-058
+R-1 entry that placed the outbound-egress read `http.get` in the kernel's
+built-in `DEFAULT_AUTO_ALLOWED_TOOLS`, letting an agent-initiated HTTP GET
+bypass the human-in-the-loop card. The finding is defence-in-depth, not a live
+vulnerability — the tool-gateway's `http_connector` already enforces a
+deny-by-default origin allowlist, refuses loopback/link-local/multicast
+destinations even when allowlisted (blocking the `169.254.169.254` metadata
+path), validates the scheme, rejects userinfo-bearing URLs, and re-validates
+the allowlist against the final post-redirect origin on every call regardless
+of the kernel allow-list. This patch nonetheless tightens the default so that
+network egress — a different risk class from in-cluster reads — must be opted
+into explicitly for HITL bypass. No contract, policy, schema, or audit change.
+
+### Added
+
+- **`AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`** — a new additive companion to the
+  existing replacement-style `AGENT_GATEWAY_TOOL_AUTO_ALLOW`. Where the original
+  variable *replaces* the vetted default (the posture the HITL demo relies on to
+  drop `k8s.get_pod_logs` and force a card), the `_EXTRA` variable *unions* its
+  entries with the resolved set, so an environment can opt a single read-tier
+  tool back into auto-approval without restating the whole list and without a
+  manual-sync footgun. Naming a mutating tool in either variable remains a
+  logged no-op (read-only-by-construction invariant, SPEC-021 R-3). The dev-k8s
+  overlay sets `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`, preserving the
+  SPEC-058 R-1 "a read-tier `http.get` parks no card" behaviour on the local
+  demo cluster while the shipped default stays hardened.
+
+### Changed
+
+- **`http.get` is no longer in the kernel's built-in `DEFAULT_AUTO_ALLOWED_TOOLS`**
+  (`products/agent-platform/src/agent_service/services/kernel_middleware.py`). A
+  read-tier `http.get` now parks an `action` card for operator confirmation by
+  default, matching how every other network-egress surface is treated. `http.post`
+  is unchanged: it is write-tier, so the `is_read_only` half of the gate already
+  refused it and its single per-action card is the point of the tool. The
+  gateway-side SSRF controls are untouched and remain the primary egress boundary.
+
 ## 0.39.0 — 2026-09-19
 
 Release train delivering **SPEC-060 — rebasing the `web-checks` browser samples

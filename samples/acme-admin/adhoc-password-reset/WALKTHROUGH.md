@@ -191,8 +191,9 @@ returns the bumped `revision` and the recorded `password_changed_at`. That is th
 difference this migration buys — the static target this sample used to drive could
 only re-render its own query parameters (reporting success for *any* user, even one
 absent from the roster), so its success sentence was a claim; here the store is the
-surface that turns it into a fact. `http.get` is read tier, so it parks no card and
-leaves the per-action count unchanged.
+surface that turns it into a fact. `http.get` is read tier and the dev cluster
+opts it into auto-allow (`AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`, v0.39.1),
+so it parks no card and leaves the per-action count unchanged.
 
 The evidence chain masks the secret on both sides of the gateway boundary: the
 `web.navigate` **result** reports `newpw=***` (the gateway masks every

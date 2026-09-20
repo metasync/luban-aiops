@@ -122,10 +122,13 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
 ```
 
 and confirm `http.get` is listed with `"risk_level": "read"`. The tier is half
-of why nothing parks. The other half is agent-platform's curated auto-allow
-list (`DEFAULT_AUTO_ALLOWED_TOOLS` in `kernel_middleware.py`), which `http.get`
-is on and `http.post` is not: a read-tier tool *off* that list still gets an
-explicit ASK and parks an `action` card. The model has no vote in either half.
+of why nothing parks. The other half is agent-platform's auto-allow list. Since
+v0.39.1 `http.get` is no longer in the built-in `DEFAULT_AUTO_ALLOWED_TOOLS`
+(outbound-egress HITL bypass is opt-in); the dev cluster opts it back in with
+`AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`, so it still parks no card here,
+while `http.post` is write-tier and never auto-allows. A read-tier tool *off*
+the resolved list still gets an explicit ASK and parks an `action` card. The
+model has no vote in either half.
 
 ## Honest caveats
 

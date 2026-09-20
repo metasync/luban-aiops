@@ -93,35 +93,49 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "web.hover",
     "web.scroll",
     "web.switch_frame",
-    # SPEC-058 R-1: the HTTP service-check read is vetted on the same footing
-    # as the read-class browser probes — it is registered ``risk_level="read"``,
-    # so listing it here is what makes "a read-tier http.get parks no card"
-    # true end to end rather than only at the gateway. The gateway still
-    # enforces the origin allowlist, the response-byte bound and the
-    # secret-bearing-URL refusal on every call.
+    # SPEC-058 R-1 originally vetted ``http.get`` here on the same footing as
+    # the read-class browser probes. v0.39.1 (post-SPEC-061 hardening) removes
+    # it from the built-in default: outbound network egress is a different risk
+    # class from in-cluster reads, so its HITL bypass is now opt-in. An
+    # environment that wants a read-tier ``http.get`` to park no card names it
+    # in ``AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`` (additive) or
+    # ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` (replacement). The gateway still
+    # enforces the origin allowlist, the response-byte bound, the
+    # loopback/link-local/multicast refusal and the secret-bearing-URL refusal
+    # on every call regardless of the allow-list, so this is defence-in-depth
+    # over an already deny-by-default egress path, not the primary control.
     #
-    # ``http.post`` is intentionally absent: it is write-tier, so the
-    # ``is_read_only`` half of the gate below would refuse it even if an
-    # operator named it in AGENT_GATEWAY_TOOL_AUTO_ALLOW, and its single
-    # per-action card is the point of the tool.
-    "http.get",
+    # ``http.post`` is intentionally absent and can never be auto-allowed: it
+    # is write-tier, so the ``is_read_only`` half of the gate below refuses it
+    # even if an operator names it, and its single per-action card is the point
+    # of the tool.
 })
 AUTO_ALLOW_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW"
+AUTO_ALLOW_EXTRA_ENV = "AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA"
 
 
 def _load_auto_allowed_tools() -> frozenset[str]:
     """Resolve the auto-approve allow-list (env override or vetted default).
 
     ``AGENT_GATEWAY_TOOL_AUTO_ALLOW`` accepts a comma-separated list of
-    gateway tool names; an empty string auto-approves nothing. Entries are
+    gateway tool names and *replaces* the vetted default; an empty string
+    auto-approves nothing. ``AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`` is
+    *additive*: its entries are unioned with the resolved set, so an
+    environment can opt a single tool (e.g. ``http.get``) back into
+    auto-approval without restating the whole list. Entries in both are
     normalized to the sanitized tool names used by AgentScope (dots become
     underscores), matching ``FunctionTool.name``.
     """
     raw = os.environ.get(AUTO_ALLOW_ENV)
-    source = DEFAULT_AUTO_ALLOWED_TOOLS if raw is None else {
+    base = DEFAULT_AUTO_ALLOWED_TOOLS if raw is None else {
         part.strip() for part in raw.split(",") if part.strip()
     }
-    return frozenset(name.replace(".", "_") for name in source)
+    extra_raw = os.environ.get(AUTO_ALLOW_EXTRA_ENV)
+    extra = (
+        {part.strip() for part in extra_raw.split(",") if part.strip()}
+        if extra_raw is not None else set()
+    )
+    return frozenset(name.replace(".", "_") for name in base | extra)
 
 
 def _make_data_summary(
