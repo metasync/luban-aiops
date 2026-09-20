@@ -1,6 +1,0 @@
-- Every schema file declares a stable `$id` URI under `https://metasync.github.io/luban-aiops/schemas/<name>.schema.json` so consumers can reference it unambiguously.
-- Schema fields carry a `description` documenting the spec reference (e.g. SPEC-022, SPEC-030) and whether the field is metadata-only or affects policy/HITL outcomes.
-- Policy rules follow the `<resource>:<verb>` action naming convention and use `roles_any` + `actions_any` match blocks with explicit `priority` ordering to resolve allow/deny/require_approval precedence.
-- Each rule in `policy-default.yaml` has a unique `id`, a human-readable `description`, and an `enabled: true` flag; disabled rules are ignored by the engine.
-- Validation scripts exit non-zero on any error and print structured messages to stderr/stdout so they can be used as CI gates without parsing output.
-- The module stays dependency-light: no business logic lives here — only data definitions (schemas, YAML bundles) and their validators.

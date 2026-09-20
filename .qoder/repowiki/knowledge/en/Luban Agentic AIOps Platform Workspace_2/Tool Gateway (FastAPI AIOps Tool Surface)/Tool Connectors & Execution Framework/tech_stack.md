@@ -1,1 +1,0 @@
-Python async tools built on the official `elasticsearch` client, `kubernetes-client/python`, `httpx` for HTTP calls, and Playwright-driven Chromium headless-shell via CDP (browser connector). Optional imports are used so connectors gracefully degrade when their optional packages are absent.

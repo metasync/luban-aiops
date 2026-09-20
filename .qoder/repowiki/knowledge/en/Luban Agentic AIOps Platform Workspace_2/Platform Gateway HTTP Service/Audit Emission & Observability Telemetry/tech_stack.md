@@ -1,1 +1,0 @@
-Prometheus client library for local metrics scraping; OpenTelemetry Python SDK with OTLP HTTP/protobuf exporters (traces, metrics, logs) and FastAPI/httpx instrumentation; httpx for async audit event delivery; threading daemon threads for fire-and-forget emission.

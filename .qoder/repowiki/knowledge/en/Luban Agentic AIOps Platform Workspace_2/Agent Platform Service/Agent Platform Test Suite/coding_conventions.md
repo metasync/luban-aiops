@@ -1,6 +1,0 @@
-- Each test module targets a single subsystem and groups related assertions into `class TestXxx:` units with descriptive method names (e.g. `TestPostgresSessionStore`, `TestRedisWorkspaceBookkeeping`).
-- Async code paths are exercised by wrapping event collectors in an inner `async def collect(): ...` function and driving it with `asyncio.run(collect())`.
-- External dependencies are replaced by inline fake classes (e.g. `FakeKernel`, `FakeAgent`, `FakeSessionManager`, `FakeMsg`) constructed inside the test rather than via global fixtures.
-- Environment-driven settings are validated by patching `os.environ` with `monkeypatch.setenv` / `monkeypatch.delenv` and asserting defaults when keys are absent.
-- Feature coverage is cross-referenced to specification requirements via inline comments such as `# SPEC-016/017`, `# SPEC-022 R-1`, `# SPEC-056 R-1` placed next to the relevant assertion.
-- SQL and key-shape contracts are asserted by inspecting recorded calls on fake drivers (e.g. checking `calls[0]['sql']` contains expected fragments like `CREATE TABLE IF NOT EXISTS sessions` or `session:title:{id}`).

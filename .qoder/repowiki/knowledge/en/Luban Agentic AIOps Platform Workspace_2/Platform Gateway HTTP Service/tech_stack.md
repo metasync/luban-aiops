@@ -1,1 +1,0 @@
-FastAPI + Uvicorn as the HTTP server; Pydantic models shared via `schemas/api.py`; Prometheus metrics and optional OpenTelemetry traces/metrics/logs from `core/observability` and `core/telemetry`; JWT verification via JWKS in `services/token_verifier`; policy evaluation driven by a YAML bundle in `policies/policy-default.yaml` consumed by `services/policy_engine`.

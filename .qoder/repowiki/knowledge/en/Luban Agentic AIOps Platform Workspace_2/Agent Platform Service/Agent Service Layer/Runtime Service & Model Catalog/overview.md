@@ -1,1 +1,0 @@
-Exposes the runtime kernel for chat/streaming, provides process-wide kernel and confirmation registry access, and maintains a credential-gated, live-refreshable model catalog across providers.

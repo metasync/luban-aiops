@@ -1,5 +1,0 @@
-- Outbound failures are surfaced as a small typed exception hierarchy rooted at a module-specific base class (e.g. `SkillsClientError` subclasses), never raw transport exceptions.
-- Fenced-contract model output is parsed with a dedicated regex plus Pydantic validation, and any parse/validation error degrades to a deterministic fallback (skeleton draft) instead of raising.
-- Content safety is enforced deterministically after model output — redaction via shared regex patterns and byte-length truncation — independent of model obedience.
-- Per-session mutable state is exposed as process-wide singleton store classes (`FlowContextStore`, `FlowApprovalStore`) keyed by `session_id` with explicit `clear`/`clear_all` teardown methods for tests.
-- Bundle assembly functions strip sensitive fields explicitly (e.g. `triage_raw`, `session_id`) before passing data to the LLM, keeping prompts free of raw agent output or operator identifiers.

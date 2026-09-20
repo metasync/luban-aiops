@@ -1,1 +1,0 @@
-Verifies incoming JWTs via JWKS and exchanges them for short-lived delegated tokens used to call downstream agent-platform services on behalf of authenticated users.

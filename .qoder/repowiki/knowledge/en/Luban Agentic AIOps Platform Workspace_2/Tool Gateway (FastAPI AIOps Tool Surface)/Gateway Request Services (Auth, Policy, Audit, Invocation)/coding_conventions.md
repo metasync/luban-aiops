@@ -1,6 +1,0 @@
-- Module-level singletons cache expensive resources (policy bundle, JWKS client) keyed by configuration value and expose a `reset_*_state()` function for test isolation.
-- External dependencies are passed in as `GatewaySettings` parameters rather than read from globals, enabling injection of test fixtures and keeping services pure with respect to configuration.
-- Domain-specific exceptions (`PolicyLoadError`, `TokenVerificationError`) carry a `detail` string and are raised instead of returning error codes, letting callers map them to HTTP status codes and metrics uniformly.
-- Audit events are built via `build_audit_event` and emitted through `emit_audit_event`, which always runs on a daemon thread and swallows exceptions so the audit service cannot degrade the hot path.
-- Every decision point records metrics via `core.metrics` functions (`record_token_verification`, `record_policy_decision`, `record_redacted_spans`, `record_audit_emit`) before raising or returning, ensuring metrics and logs stay in sync with control flow.
-- Optional identity fields in audit payloads are omitted (not nulled) when absent, keeping payloads valid against the shared-contracts schema.

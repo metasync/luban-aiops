@@ -12,6 +12,14 @@
 - [test_sync.py](file://products/skills-hub/tests/test_sync.py)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the two-layer validation approach for compositions
+- Updated architecture diagrams to show structural vs cross-skill validation phases
+- Enhanced conflict resolution section with composition-specific validation details
+- Added new troubleshooting guidance for composition resolution failures
+- Updated monitoring section to include composition rejection metrics
+
 ## Table of Contents
 1. Introduction
 2. Project Structure
@@ -27,12 +35,15 @@
 ## Introduction
 This document explains how Skills Hub keeps skill content synchronized with source Git repositories and local directories. It covers the sync scheduler, conflict resolution strategy, incremental update processing, configuration for frequency and branch selection, authentication for private repos, error handling, monitoring, and performance considerations for large repositories and bulk updates.
 
+**Updated** The synchronization process now implements a two-layer validation approach for compositions: structural validation during ingestion ensures proper format and constraints, while cross-skill resolution during synchronization validates that referenced sub-skills exist in the catalog and meet single-target requirements.
+
 ## Project Structure
 Skills Hub implements per-source synchronization with:
 - A scheduler that runs one loop per configured source
 - A materialization step that checks out Git sources or reads local paths
 - An ingestion pipeline that validates Markdown skills against a strict contract
-- An atomic store swap that replaces a source’s slice without affecting other sources
+- A two-layer composition validation system (structural + cross-skill resolution)
+- An atomic store swap that replaces a source's slice without affecting other sources
 - An auth-exempt status endpoint to inspect sync health
 
 ```mermaid
@@ -43,8 +54,12 @@ C --> |local| D["Read directory"]
 C --> |git| E["_git_checkout<br/>clone/fetch + reset"]
 E --> F["Ingest documents<br/>validate frontmatter + body"]
 D --> F
-F --> G["SkillStore.replace_source<br/>atomic per-source swap"]
-G --> H["Status report<br/>/api/v1/skills/status"]
+F --> G["Two-Layer Composition Validation"]
+G --> H["Layer 1: Structural Validation<br/>(format, limits, schema)"]
+G --> I["Layer 2: Cross-Skill Resolution<br/>(catalog lookup, single-target check)"]
+H --> J["SkillStore.replace_source<br/>atomic per-source swap"]
+I --> J
+J --> K["Status report<br/>/api/v1/skills/status"]
 ```
 
 **Diagram sources**
@@ -62,6 +77,7 @@ G --> H["Status report<br/>/api/v1/skills/status"]
 - SyncManager: owns per-source async loops, schedules intervals with jitter, and records outcomes.
 - Materializer: resolves a readable root directory; for git, clones or fetches into a disposable checkout under SKILLS_DATA_PATH/sources/<source_id>, then selects an optional subpath.
 - Ingestion: walks files, parses YAML frontmatter, enforces size and schema limits, derives slugs from paths, and rejects duplicates within a source.
+- Two-Layer Composition Validator: performs structural validation during ingestion and cross-skill resolution during synchronization.
 - SkillStore: provides replace_source for atomic per-source snapshot replacement (in-memory or PostgreSQL).
 - Status API: exposes last sync timestamps, refs, accepted counts, and bounded rejection lists.
 
@@ -69,6 +85,7 @@ Key behaviors:
 - One failure never affects another source; previous snapshots are preserved on errors.
 - Git operations run off the event loop via asyncio.to_thread to avoid blocking.
 - Audit events are emitted per cycle with scrubbed credentials in error messages.
+- Compositions undergo dual validation: structural checks during ingestion and catalog-based resolution during sync.
 
 **Section sources**
 - [sync.py:41-51](file://products/skills-hub/src/skills_hub/services/sync.py#L41-L51)
@@ -79,7 +96,7 @@ Key behaviors:
 - [status.py:20-29](file://products/skills-hub/src/skills_hub/api/routes/status.py#L20-L29)
 
 ## Architecture Overview
-The sync architecture is event-driven and per-source:
+The sync architecture is event-driven and per-source with enhanced two-layer composition validation:
 
 ```mermaid
 sequenceDiagram
@@ -88,6 +105,7 @@ participant SM as "SyncManager"
 participant Mat as "_materialize"
 participant Git as "_git_checkout"
 participant Ing as "ingest_directory"
+participant Val as "Composition Validator"
 participant Store as "SkillStore"
 participant API as "/api/v1/skills/status"
 Env->>SM : start()
@@ -102,7 +120,13 @@ Mat-->>SM : (checkout_path, sha)
 end
 SM->>Ing : ingest_directory(source_id, root, ref, now)
 Ing-->>SM : IngestResult(records, rejections)
-SM->>Store : replace_source(source_id, records)
+Note over SM,Val : Layer 1 : Structural Validation (during ingestion)
+SM->>Val : _resolve_compositions(records)
+Note over Val : Layer 2 : Cross-Skill Resolution (against catalog)
+Val->>Store : get(skill_id) for each sub-skill
+Store-->>Val : Skill or None
+Val-->>SM : Resolved records + composition rejections
+SM->>Store : replace_source(source_id, resolved_records)
 Store-->>SM : success
 SM->>API : status_report() reflects latest
 end
@@ -172,6 +196,54 @@ I --> |No| K["raise FileNotFoundError"]
 - [sync.py:102-148](file://products/skills-hub/src/skills_hub/services/sync.py#L102-L148)
 - [sync.py:283-298](file://products/skills-hub/src/skills_hub/services/sync.py#L283-L298)
 
+### Two-Layer Composition Validation
+
+**Updated** The composition validation system operates in two distinct layers to ensure both structural integrity and catalog consistency:
+
+#### Layer 1: Structural Validation (During Ingestion)
+Performs pure document-level validation that doesn't require catalog access:
+- Validates `sub_skills` list structure and item keys (`skill_id`, `note`)
+- Enforces maximum sub-skill count (default 8)
+- Checks for duplicate skill_ids within a composition
+- Ensures no forbidden fields (`web_target`, `steps`, `risk_class`) are declared
+- Validates skill_id format matches namespace pattern
+- Verifies note length constraints
+
+#### Layer 2: Cross-Skill Resolution (During Synchronization)
+Performs catalog-dependent validation that requires store access:
+- Resolves each referenced sub-skill against the catalog (this source's fresh records + store lookup)
+- Rejects compositions with unresolved sub-skills (eventual consistency model)
+- Prevents nested compositions (no composition can reference another composition)
+- Derives display `risk_class` based on sub-skill types (write if any sub-skill writes)
+- Validates single-target requirement for browser flows
+
+```mermaid
+flowchart TD
+S["Start composition validation"] --> L1{"Layer 1:<br/>Structural"}
+L1 --> |Valid| L2{"Layer 2:<br/>Cross-Skill Resolution"}
+L1 --> |Invalid| Reject1["Reject: structural violation"]
+L2 --> Resolve{"Resolve sub-skill references"}
+Resolve --> CheckNested{"Is sub-skill<br/>a composition?"}
+CheckNested --> |Yes| Reject2["Reject: nested composition"]
+CheckNested --> |No| CheckExists{"Sub-skill exists<br/>in catalog?"}
+CheckExists --> |No| Reject3["Reject: unresolved reference"]
+CheckExists --> |Yes| DeriveRisk["Derive risk_class<br/>from sub-skills"]
+DeriveRisk --> Accept["Accept composition"]
+Reject1 --> End["Return rejections"]
+Reject2 --> End
+Reject3 --> End
+Accept --> End
+```
+
+**Diagram sources**
+- [sync.py:317-381](file://products/skills-hub/src/skills_hub/services/sync.py#L317-L381)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
+
+**Section sources**
+- [sync.py:317-381](file://products/skills-hub/src/skills_hub/services/sync.py#L317-L381)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
+- [test_sync.py:306-466](file://products/skills-hub/tests/test_sync.py#L306-L466)
+
 ### Ingestion and Conflict Resolution
 - Walks all Markdown files under the root (including Kubernetes projected ..data), skipping hidden segments and known base names.
 - Derives slug from path; first occurrence wins deterministically (sorted traversal). Duplicate slugs within a source are rejected.
@@ -182,6 +254,8 @@ Conflict resolution highlights:
 - Duplicate slug within a source: later file is rejected; earlier wins.
 - Size and schema violations: rejected with categorized reasons.
 - Missing or unreadable files: recorded as rejections without failing the whole source.
+- Composition structural violations: rejected during ingestion phase.
+- Composition resolution failures: rejected during sync phase with catalog context.
 
 ```mermaid
 flowchart TD
@@ -193,9 +267,12 @@ Slug --> ValidSlug{"Valid slug?"}
 ValidSlug --> |No| Reject1["Reject: path does not produce a slug"]
 ValidSlug --> |Yes| Read["Read UTF-8 text"]
 Read --> Parse["Parse frontmatter + validate"]
-Parse --> Dup{"Duplicate slug seen?"}
+Parse --> Comp{"Is composition?"}
+Comp --> |Yes| StructVal["Structural validation<br/>(Layer 1)"]
+Comp --> |No| Build["Build Skill record"]
+StructVal --> Dup{"Duplicate slug seen?"}
 Dup --> |Yes| Reject2["Reject: duplicate slug"]
-Dup --> |No| Build["Build Skill record"]
+Dup --> |No| Build
 Build --> Next["Next file"]
 Reject1 --> Next
 Reject2 --> Next
@@ -217,6 +294,7 @@ Next --> End["Return records + rejections"]
 - replace_source builds a new snapshot for the source and swaps it atomically (in-memory reference swap or DB transaction delete+insert).
 - Readers always see a complete slice; partial writes cannot leak.
 - Incremental behavior: each cycle re-ingests the entire checked-out source and replaces the slice; conflicts are resolved by slug uniqueness and deterministic ordering.
+- Composition resolution uses eventual consistency: cross-source references resolve only after their source has synced at least once.
 
 ```mermaid
 classDiagram
@@ -262,6 +340,7 @@ SkillStore <|.. PostgresSkillStore
 - Any exception during a sync cycle is caught; the previous snapshot remains served.
 - Error messages are scrubbed to remove configured tokens before being stored or reported.
 - Audit events are emitted with outcome success or error; details include source metadata and scrubbed messages.
+- Composition resolution failures are tracked separately from structural validation failures.
 
 ```mermaid
 flowchart TD
@@ -285,6 +364,7 @@ EmitErr --> KeepPrev
 ### Monitoring and Health Surface
 - Auth-exempt /api/v1/skills/status returns store backend, sync interval, and per-source reports including last_sync_at, ref, accepted count, and bounded rejections.
 - Prometheus metrics include sync totals, rejection categories, and store sizes.
+- Composition resolution failures are categorized separately from structural validation failures for better observability.
 
 **Section sources**
 - [status.py:20-29](file://products/skills-hub/src/skills_hub/api/routes/status.py#L20-L29)
@@ -296,7 +376,7 @@ EmitErr --> KeepPrev
   - SkillsSettings for sources, tokens, intervals, data path
   - Git tooling via subprocess (shallow clone/fetch/reset)
   - Ingestion for validation and record building
-  - SkillStore for atomic per-source replacement
+  - SkillStore for atomic per-source replacement and catalog lookups
   - Audit emitter for usage-trail events
   - Metrics and tracing hooks
 
@@ -305,7 +385,7 @@ graph LR
 Settings["SkillsSettings"] --> Manager["SyncManager"]
 Manager --> Git["_git_checkout"]
 Manager --> Ingest["ingest_directory"]
-Manager --> Store["SkillStore.replace_source"]
+Manager --> Store["SkillStore.get/replace_source"]
 Manager --> Audit["emit_audit_event"]
 Manager --> Metrics["metrics.record_*"]
 ```
@@ -326,8 +406,7 @@ Manager --> Metrics["metrics.record_*"]
 - Atomic swaps: readers never observe partial updates; reduces contention and inconsistency risk.
 - Resource caps: enforced limits on body size, tags, steps, and step bytes prevent oversized payloads from degrading performance.
 - Concurrency: one task per source; adjust SKILLS_SYNC_INTERVAL_SECONDS to balance freshness vs resource use.
-
-[No sources needed since this section provides general guidance]
+- Composition validation optimization: structural validation occurs during ingestion (no catalog access), while cross-skill resolution batches catalog lookups efficiently.
 
 ## Troubleshooting Guide
 Common symptoms and actions:
@@ -338,9 +417,16 @@ Common symptoms and actions:
 - Git source errors mention subpath: confirm the configured path exists in the repo checkout; adjust SKILLS_SOURCES accordingly.
 - Search returns no matches: verify catalog via /api/v1/skills; check whether the source has synced successfully.
 
+**Composition-specific troubleshooting:**
+- Composition rejected with "does not resolve to a published skill": the referenced sub-skill hasn't been synced yet; wait for its source to sync or verify the skill_id is correct.
+- Composition rejected with "is itself a composition": nested compositions are not supported in Phase 1; flatten the composition hierarchy.
+- Composition rejected with "sub_skills requires kind: composition": ensure the skill declares `kind: composition` when using `sub_skills`.
+- Composition shows wrong risk_class: verify sub-skill risk declarations; write sub-skills will derive write risk for the composition.
+
 Operational checks:
 - Use /api/v1/skills/status to review per-source last_sync_at, ref, accepted counts, and rejections.
 - Inspect Prometheus metrics for sync errors and rejection categories.
+- Monitor composition-specific rejection metrics to identify catalog consistency issues.
 
 **Section sources**
 - [skills-guide.md:338-373](file://docs/guides/skills-guide.md#L338-L373)
@@ -348,9 +434,7 @@ Operational checks:
 - [README.md:43-63](file://products/skills-hub/README.md#L43-L63)
 
 ## Conclusion
-Skills Hub synchronizes federated skill sources through robust, per-source loops that materialize content, validate it strictly, and atomically swap slices into the store. Failures are isolated, credentials are scrubbed from logs and status, and operators can monitor health via an auth-exempt status endpoint and metrics. Tuning sync frequency, branch selection, and repository authentication allows safe operation across diverse environments and large repositories.
-
-[No sources needed since this section summarizes without analyzing specific files]
+Skills Hub synchronizes federated skill sources through robust, per-source loops that materialize content, validate it strictly with a two-layer composition validation approach, and atomically swap slices into the store. Failures are isolated, credentials are scrubbed from logs and status, and operators can monitor health via an auth-exempt status endpoint and metrics. The enhanced validation system ensures both structural integrity and catalog consistency for compositions, providing reliable cross-skill references with eventual consistency guarantees. Tuning sync frequency, branch selection, and repository authentication allows safe operation across diverse environments and large repositories.
 
 ## Appendices
 
@@ -387,6 +471,7 @@ Skills Hub synchronizes federated skill sources through robust, per-source loops
   - skills_ingest_rejected_total{reason}
   - skills_store_skills{source}
   - skills_searches_total
+- Monitor composition-specific rejection categories for catalog consistency issues.
 
 **Section sources**
 - [status.py:20-29](file://products/skills-hub/src/skills_hub/api/routes/status.py#L20-L29)

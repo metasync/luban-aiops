@@ -1,6 +1,0 @@
-- Identity and correlation are carried exclusively in request headers (`X-User-ID`, `x-request-id`, forwarded `Authorization: Bearer`) and never in request/response bodies.
-- Route handlers are thin adapters that parse headers via helper functions (`_user_id`, `_bearer_token`, `_validated_skill_target`, `_resolve_model`, `_reject_if_parked`) before delegating to `agent_service.services.*` modules.
-- All request and response payloads are typed as Pydantic models from `schemas.v2`, keeping the HTTP boundary decoupled from internal kernel/service types.
-- Optional or additive fields on stream events and records are coerced defensively by dedicated `_coerce_*` helpers that drop unknown or malformed values instead of raising, so clients can ignore new fields without breaking.
-- Downstream store failures degrade gracefully by logging a warning and returning `None` or empty collections rather than propagating exceptions, preserving a stable 2xx/4xx surface.
-- Endpoint docstrings cite the governing specification reference (e.g. `SPEC-020 R-2`, `SPEC-024 R-3`) to tie each route's behavior to its contract.

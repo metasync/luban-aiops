@@ -1,6 +1,0 @@
-- Each store module exposes a `@runtime_checkable` Protocol defining the backend contract and multiple concrete classes implementing it, with a module-level singleton created by a `build_*_store()` factory.
-- Backend selection is read from `*_STORE_BACKEND` environment variables with a default of `memory`, and unknown values raise `ValueError` at startup while Postgres connection failures fall back to memory after recording a metric.
-- Postgres backends embed DDL strings and run them via an `initialize()` method inside a per-call context manager that opens/closes a `psycopg` connection, keeping connections short-lived.
-- Expired rows are reclaimed opportunistically via bounded `DELETE ... LIMIT sweep_limit` sweeps piggybacked on write paths rather than through a background sweeper.
-- Reads fold TTL refresh into the query (e.g. `UPDATE ... SET last_accessed_at = now() WHERE ... AND last_accessed_at > now() - interval`) so idle sessions become invisible without a separate touch call.
-- Title semantics are split into two methods — `set_session_title` (set-once, guarded by `title IS NULL` or Redis `NX`) versus `update_session_title` (owner rename, unconditionally overwrites) — enforced both in-memory and in each backend's SQL.

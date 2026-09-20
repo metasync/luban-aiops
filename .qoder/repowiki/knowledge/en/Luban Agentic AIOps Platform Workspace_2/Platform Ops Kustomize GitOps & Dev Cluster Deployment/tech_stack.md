@@ -1,1 +1,0 @@
-Kustomize overlays driven through `kubectl kustomize` and `kubectl apply`; PostgreSQL StatefulSet + Redis as shared backing stores; HTTPRoute for the operator portal ingress; environment-driven configuration aggregated into a single `platform-runtime-config` ConfigMap via `configMapGenerator envs` rather than Helm values.

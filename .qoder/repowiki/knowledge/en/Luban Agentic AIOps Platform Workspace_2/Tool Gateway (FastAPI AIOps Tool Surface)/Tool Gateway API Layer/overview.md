@@ -1,1 +1,0 @@
-FastAPI HTTP surface exposing tool discovery, invocation, and health endpoints for the Tool Gateway, with Pydantic request/response schemas.

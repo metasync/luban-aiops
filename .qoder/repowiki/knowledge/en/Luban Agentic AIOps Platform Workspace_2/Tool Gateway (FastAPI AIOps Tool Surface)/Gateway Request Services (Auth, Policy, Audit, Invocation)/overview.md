@@ -1,1 +1,0 @@
-Core request-processing services for the tool gateway: JWT identity resolution, deny-by-default policy evaluation, fire-and-forget audit emission, and end-to-end tool invocation orchestration.

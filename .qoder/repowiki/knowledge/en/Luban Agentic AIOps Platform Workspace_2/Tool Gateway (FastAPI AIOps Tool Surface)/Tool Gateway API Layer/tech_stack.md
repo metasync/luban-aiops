@@ -1,1 +1,0 @@
-FastAPI `APIRouter` for routing, Pydantic v2 (`BaseModel`, `ConfigDict(extra='forbid')`) for schema validation, and standard HTTP headers for correlation/request ID propagation.

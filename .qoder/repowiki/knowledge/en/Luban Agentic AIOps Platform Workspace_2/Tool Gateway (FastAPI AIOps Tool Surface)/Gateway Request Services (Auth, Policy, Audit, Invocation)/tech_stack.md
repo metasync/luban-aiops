@@ -1,1 +1,0 @@
-PyJWT with RS256 and JWKS key discovery (`jwt.PyJWKClient`), PyYAML for policy bundle parsing, httpx for asynchronous audit event delivery, and FastAPI `HTTPException`/`JSONResponse` for response shaping.

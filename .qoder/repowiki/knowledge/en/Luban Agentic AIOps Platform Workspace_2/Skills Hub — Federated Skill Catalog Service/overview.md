@@ -1,1 +1,0 @@
-FastAPI service that ingests Markdown skill documents from federated git/local sources, validates them against the skill contract, and serves a searchable, paginated skill catalog backed by in-memory or PostgreSQL storage.

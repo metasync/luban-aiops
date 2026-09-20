@@ -1,1 +1,0 @@
-Persists signed execution request/receipt lifecycles, hands mutating tool calls to a remote execution worker with fail-closed error handling, and implements AgentScope kernel middleware for permission gating and evidence emission.

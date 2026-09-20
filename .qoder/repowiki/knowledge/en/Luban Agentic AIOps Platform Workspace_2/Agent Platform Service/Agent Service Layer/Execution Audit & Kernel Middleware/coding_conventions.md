@@ -1,6 +1,0 @@
-- Backend selection is driven by the `AGENT_STATE_STORE_BACKEND` environment variable with a memory-first fallback, so production deployments opt into Postgres while dev/CI remain self-contained.
-- Durable state mutations use first-write-wins idempotency: inserts use `ON CONFLICT DO NOTHING` and updates guard on `status = 'requested'` so replayed resumes or racing closes are no-ops.
-- Cross-cutting kernel behavior is implemented as `MiddlewareBase` subclasses that inspect `tool.gateway_tool_name` and `tool.is_read_only` rather than reaching into private AgentScope internals.
-- Audit/evidence payloads are size-bounded: `data_summary` truncates to 2000 chars and full `data` is omitted beyond 128KB, with secret parameters redacted before emission.
-- External failures are normalized into typed exceptions carrying a structured `reason` string (e.g. `worker_unavailable`) instead of propagating raw transport errors up the call stack.
-- Sensitive values (handoff tokens, delegated tokens, audit parameters) are never logged; only exception class names and status codes are emitted.

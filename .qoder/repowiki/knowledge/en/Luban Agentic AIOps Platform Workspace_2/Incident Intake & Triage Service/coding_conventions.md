@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses parsed from `INCIDENT_*` environment variables and cached via `@lru_cache(maxsize=1)` singleton accessors.
-- Pluggable backends (stores, connectors) are exposed through `Protocol` interfaces plus a factory function that selects an implementation based on settings, enabling test-time swapping.
-- External I/O failures in connector dispatch are caught and recorded as failed outcomes rather than propagated, ensuring connector outages never abort the triage path.
-- Pydantic models use `ConfigDict(extra='forbid')` and explicit `Field` constraints to enforce the shared contract schemas exactly, with `envelope()` helpers producing the wire format.
-- Structured observability is emitted via `log_event(LOGGER, event_name, ...)` with a `service` tag instead of ad-hoc log lines, and request latency/status is captured in a FastAPI middleware.
-- Database access uses per-operation async connection contexts opened inside each store method, with parameterized queries and a shared `_DDL` string applied during `initialize()`.

@@ -1,1 +1,0 @@
-FastAPI route modules that expose the platform gateway's public HTTP surface, performing identity resolution, policy enforcement, and proxying requests to downstream services.

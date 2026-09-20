@@ -1,6 +1,0 @@
-- Every endpoint resolves a request-scoped ID via `resolve_request_id(x_request_id)` and an identity via `resolve_request_identity(settings, request, request_id)` before any business call.
-- Authorization is enforced by calling `enforce_policy(settings, identity, ACTION_*, request_id)` with a module-level constant from `services.policy_engine` rather than ad-hoc checks.
-- Each handler emits a structured log event through `log_event(LOGGER, '<verb>_<noun>', ...)` including `request_id`, `user_id`, `authenticated`, and `roles` fields derived from the resolved identity.
-- Mutating operations additionally construct and emit an audit event via `build_audit_event` + `emit_audit_event`, while cosmetic-only mutations (e.g. title updates) deliberately skip auditing.
-- Dual-gate authorizations combine two existing actions on a single route (e.g. `session:create` plus `session:skill_graduate` for development sessions, or `documents:create` plus `incident:read` for incident reports) instead of introducing new policy actions.
-- Route functions accept `settings: PlatformGatewaySettings = Depends(get_settings)` and forward it unchanged to downstream service calls, keeping configuration out of global state.

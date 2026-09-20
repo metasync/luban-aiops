@@ -1,1 +1,0 @@
-Adapters wrap the AgentScope SDK (`agentscope.credential`, `agentscope.model`) to produce vendor-specific chat models; no HTTP clients are used directly.

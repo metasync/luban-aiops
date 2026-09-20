@@ -1,1 +1,0 @@
-Python 3.11+ with FastAPI + Uvicorn; PyJWT + cryptography for RS256-signed JWTs and JWKS; httpx for OIDC token exchange and workload JWKS discovery; OpenTelemetry (OTLP HTTP exporter) with FastAPI/HTTPX/logging instrumentation; Prometheus client for metrics; Pydantic v2 for schema validation; built with uv and uv_build.

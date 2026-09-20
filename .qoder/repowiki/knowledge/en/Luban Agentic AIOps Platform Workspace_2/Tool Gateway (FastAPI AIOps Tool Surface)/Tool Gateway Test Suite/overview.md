@@ -1,1 +1,0 @@
-Unit and integration tests for the tool-gateway FastAPI service, covering policy evaluation, token verification, connector behavior, route inventory, observability, and cross-product module parity.

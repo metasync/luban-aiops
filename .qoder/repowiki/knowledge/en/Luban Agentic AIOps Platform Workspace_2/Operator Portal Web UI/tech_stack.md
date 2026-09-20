@@ -1,1 +1,0 @@
-React 19 + TypeScript SPA on Vite 8, styled with Ant Design 6 and @ant-design/x, tested with Vitest + @testing-library/react in jsdom, containerized as nginx-unprivileged serving hashed assets with immutable caching and SPA fallback.

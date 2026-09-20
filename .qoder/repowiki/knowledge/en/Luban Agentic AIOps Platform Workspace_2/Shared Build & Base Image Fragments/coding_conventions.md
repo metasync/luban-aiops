@@ -1,5 +1,0 @@
-- All overridable build settings are declared with `?=` in `mk/defaults.mk` so command-line invocations always win without editing the fragment.
-- Makefile fragments are idempotent includes guarded by an `ifndef` flag (e.g. `LUBAN_DEFAULTS_INCLUDED`) to prevent double inclusion when both root and product Makefiles include them.
-- Image and base-image versions are pinned to exact values (no `latest`) and exposed as `ARG`/`?=` variables so reproducible builds can be overridden per-invocation.
-- Products consume shared behavior by `include`-ing a fragment and declaring only their own variables (e.g. `IMAGE_NAME`, `IMAGE_CONTEXT`), keeping target logic centralized in `mk/`.
-- Python product targets run `uv sync --frozen` before invoking `uv run pytest`, and disable OTLP exporters via environment variables to keep test output clean while preserving tracing capability.

@@ -1,1 +1,0 @@
-Dev mode requires either a PEM private key at `settings.dev_signing_key_path` (auto-generated if missing) or relies on ephemeral in-memory keys; workload-token projection must be mounted at `settings.workload_token_path` for production delegation, otherwise the gateway falls back to static `service_client_id`/`service_client_secret`.

@@ -1,1 +1,0 @@
-Pytest-based test suite for the agent-platform product, exercising FastAPI endpoints, runtime kernel, session stores, skills, secrets, observability, and execution signing against in-memory or fake backends.

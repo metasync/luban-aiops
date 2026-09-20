@@ -1,1 +1,0 @@
-FastAPI-based platform gateway that authenticates requests, enforces policy, and proxies calls to agent-service, identity-service, incident-service, skills-hub, and tool-gateway.

@@ -1,5 +1,0 @@
-- Route handlers delegate authentication to `services.token_verifier` / `services.delegation_client` and authorization to `services.policy_engine` before calling any downstream client.
-- Every HTTP request is wrapped by the global middleware that injects a request ID and emits an `http_request` event via `core.observability.log_event`.
-- Downstream service calls are made exclusively through typed clients in `services/*_client.py` rather than ad-hoc HTTP calls inside routes.
-- Policy decisions are evaluated against the YAML bundle in `policies/policy-default.yaml` via `services.policy_engine` instead of inline permission checks.
-- Cross-cutting concerns (metrics, telemetry, logging) are initialized once in `app.create_app` and consumed by modules through the `core/` package.

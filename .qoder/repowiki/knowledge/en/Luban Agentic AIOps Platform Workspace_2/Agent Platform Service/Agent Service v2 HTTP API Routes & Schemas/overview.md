@@ -1,1 +1,0 @@
-FastAPI router and Pydantic contract models exposing the platform-owned /api/v2 surface for agent sessions, chat streaming, HITL confirmations, model catalog, and operational documents.

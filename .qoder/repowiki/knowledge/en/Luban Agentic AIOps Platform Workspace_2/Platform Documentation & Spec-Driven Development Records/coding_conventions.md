@@ -1,6 +1,0 @@
-- ADR files are named with zero-padded sequential numbers followed by a kebab-case slug (e.g., `0001-adopt-spec-driven-development.md`) and follow the provided `template.md` format.
-- Each feature spec lives in its own `SPEC-NNN-<slug>/` directory containing exactly three files: `spec.md` (requirements), `plan.md` (technical plan), and `tasks.md` (execution checklist).
-- Specs carry a status header advancing through the fixed lifecycle states `draft`, `approved`, `in-progress`, `delivered`, or `superseded`, and delivered specs are never rewritten — corrections go into the spec changelog or a new spec.
-- Release notes under `agentic-aiops-platform/release-notes/` are date-prefixed filenames (YYYY-MM-DD-release-slug.md) forming a chronological log of each delivery slice.
-- Documentation is partitioned into three tiers with distinct lifecycles: long-lived architecture records in `agentic-aiops-platform/`, short-lived feature specs in `specs/`, and always-current living state docs in `guides/`.
-- Cross-cutting architectural decisions are captured as ADRs rather than edited into long-form architecture documents, keeping those documents frozen except for corrections and supersession links.

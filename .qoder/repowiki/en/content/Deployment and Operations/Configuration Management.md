@@ -14,17 +14,21 @@
 - [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
 - [tool-gateway runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [agent-platform runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [skills-hub runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [skills_hub config.py](file://products/skills-hub/src/skills_hub/core/config.py)
+- [skills_hub ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added documentation for new `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` environment variable that enables additive tool auto-approval without restating the entire default allowlist
-- Updated agent-platform auto-allow list section with both hardened default behavior and dev-cluster opt-in pattern
-- Enhanced configuration examples to show the new additive pattern alongside replacement semantics
-- Updated troubleshooting guidance for tool auto-approval scenarios
-- Added reference to v0.39.1 hardening changes that removed `http.get` from built-in defaults
+- Added comprehensive documentation for the new `SKILLS_COMPOSITION_MAX_SUB_SKILLS` configuration option introduced in SPEC-057
+- Updated skills-hub configuration section with detailed explanation of composition limits and security implications
+- Enhanced configuration examples to include composition tuning scenarios
+- Added troubleshooting guidance for skill composition validation failures
+- Updated performance considerations to address composition-related resource management
+- Added reference to SPEC-057 skill composition runbooks feature
 
 ## Table of Contents
 1. Introduction
@@ -46,6 +50,7 @@ This document explains how the Luban AIOPS platform manages configuration and se
 - How to change configuration without redeploying images.
 - Environment-specific configuration, startup validation behavior, and troubleshooting techniques.
 - Best practices for managing configuration across development, staging, and production.
+- **New**: Skill composition configuration including the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` operator-tunable limit for controlling the maximum number of sub-skills in compositions.
 
 ## Project Structure
 The configuration is assembled with Kustomize. The dev overlay defines a configMapGenerator that merges multiple env files into one ConfigMap named platform-runtime-config. Runtime profiles add additional environment fragments (for example, default, mutating-dev, browser-dev). Product deployments reference these ConfigMaps and Secrets through their deployment manifests.
@@ -57,6 +62,7 @@ A --> C["Runtime profile<br/>default/configmap.yaml"]
 A --> D["Mutating profile env<br/>mutating-dev/mutating.env"]
 A --> E["Browser profile env<br/>browser-dev/browser.env"]
 B --> F["Platform services read ConfigMap at startup"]
+F --> G["Skills Hub<br/>Composition Limits"]
 ```
 
 **Diagram sources**
@@ -72,10 +78,12 @@ B --> F["Platform services read ConfigMap at startup"]
 - Per-product runtime secrets: Stored in Kubernetes Secrets mounted as environment variables. Sensitive values such as API keys, database credentials, OIDC client secrets, and delegation tokens are managed via Secrets.
 - Sync scripts: Shell utilities that generate or reuse secrets, write them into per-product runtime-secrets.env files, apply them to the cluster, and restart affected deployments.
 - Environment overlays: Profiles under runtime-profiles allow environment-specific configuration without changing application code.
+- **New**: Skills composition configuration: Operator-tunable limits for controlling the maximum number of sub-skills in skill compositions to prevent resource exhaustion and maintain security boundaries.
 
 Key responsibilities:
 - Non-secret configuration: Managed via ConfigMap; changes can be applied without image rebuilds.
 - Secret configuration: Managed via Secrets; provisioned by sync scripts; changes require Secret updates and workload restarts.
+- **New**: Composition limits: Configurable bounds on skill composition complexity to balance functionality with resource constraints.
 
 **Section sources**
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
@@ -87,6 +95,7 @@ The platform uses a layered configuration approach:
 - Runtime profiles contribute additional environment fragments.
 - Kustomize merges all env fragments into a single platform-runtime-config ConfigMap.
 - Secrets are provisioned separately by sync scripts and mounted into pods.
+- **New**: Skills composition limits are enforced at ingestion time through configurable bounds.
 
 ```mermaid
 graph TB
@@ -94,6 +103,7 @@ subgraph "Configuration Sources"
 P1["Default profile<br/>default/configmap.yaml"]
 P2["Mutating profile env<br/>mutating-dev/mutating.env"]
 P3["Browser profile env<br/>browser-dev/browser.env"]
+P4["Skills Hub config<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
 end
 subgraph "Kustomize Assembly"
 K["dev-k8s/kustomization.yaml<br/>configMapGenerator"]
@@ -108,12 +118,13 @@ PG["Platform Gateway"]
 TG["Tool Gateway"]
 IB["Identity Broker"]
 AS["Audit Service"]
-SH["Skills Hub"]
+SH["Skills Hub<br/>Composition Validation"]
 IS["Incident Service"]
 end
 P1 --> K
 P2 --> K
 P3 --> K
+P4 --> K
 K --> CM
 S1 --> AG
 S1 --> PG
@@ -265,10 +276,53 @@ The browser-dev profile serves as the browser posture profile for development en
 - [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 
+### Skills composition configuration
+**New Feature**: The skills-hub service now supports skill compositions through SPEC-057, allowing operators to create runbooks that sequence multiple single-target skills. The `SKILLS_COMPOSITION_MAX_SUB_SKILLS` configuration option provides operator control over the maximum number of sub-skills allowed in a composition.
+
+**Configuration Details:**
+- **Variable**: `SKILLS_COMPOSITION_MAX_SUB_SKILLS`
+- **Default**: `8`
+- **Source**: `runtime-config` (via Kustomize ConfigMap)
+- **Validation**: Must be an integer ≥ 1; invalid values cause startup failure with `SettingsError`
+- **Purpose**: Controls the maximum number of sub-skills in a `kind: composition` skill
+
+**Security Implications:**
+- Worst-case calculation: `cap × GATEWAY_BROWSER_FLOW_MAX_STEPS` = 8 × 20 = 160 unlocked browser writes per run
+- Each sub-skill remains individually signed, audited, receipted, and gated once per sub-skill
+- Compositions carry no authority - each sub-skill maintains its own human-in-the-loop gate
+- Prevents resource exhaustion while allowing complex multi-step workflows
+
+**Behavior Matrix:**
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `8` (default) | Balanced composition complexity | Standard production deployments |
+| `1-4` | Conservative limit | High-security environments |
+| `5-12` | Moderate complexity | Development/staging environments |
+| `13+` | Complex workflows | Specialized use cases requiring extensive sequencing |
+
+**Example Configuration:**
+```bash
+# Development environment - higher limit for testing complex runbooks
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=12
+
+# Production environment - conservative limit for security
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=8
+
+# High-security environment - minimal composition complexity
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
+```
+
+**Section sources**
+- [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
+- [skills_hub config.py:188-191](file://products/skills-hub/src/skills_hub/core/config.py#L188-L191)
+- [skills_hub config.py:211-213](file://products/skills-hub/src/skills_hub/core/config.py#L211-L213)
+- [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
+
 ### Environment-specific configurations
 - Default profile: Provides baseline provider configuration and optional catalog entries.
 - Mutating-dev profile: Adds environment-specific flags via mutating.env.
 - Browser-dev profile: Adds browser-related configuration via browser.env and patches tool-gateway with a sidecar. Also enables HTTP connectors for service health checks.
+- **New**: Skills composition limits can be tuned per environment based on security requirements and operational needs.
 
 To switch environments:
 - Select or create a runtime profile under runtime-profiles.
@@ -286,11 +340,13 @@ To switch environments:
 - HTTP connector validation: When `GATEWAY_HTTP_ENABLED=false`, no HTTP tools are registered. When enabled but origin allowlist is empty, all HTTP requests are denied.
 - Browser connector validation: When `GATEWAY_BROWSER_ENABLED=false`, no browser tools are registered. When enabled but origin allowlist is empty, all browser navigation is denied.
 - Agent auto-allow validation: Tools listed in auto-allow configuration must be read-only; mutating tools are logged as misconfiguration but remain available for HITL approval.
+- **New**: Skills composition validation: Invalid `SKILLS_COMPOSITION_MAX_SUB_SKILLS` values (non-integer or < 1) cause immediate startup failure with descriptive error messages.
 
 Operational guidance:
 - Validate that all required keys are present in the relevant runtime-secrets.env files before applying.
 - Use the SKIP_* environment variables in sync scripts to bypass provisioning when CI injects secrets externally.
 - Verify auto-allow list composition matches expected behavior for your environment.
+- **New**: Test composition limits during development to ensure they meet operational requirements before production deployment.
 
 [No sources needed since this section synthesizes behavior described by scripts and examples]
 
@@ -300,12 +356,14 @@ Operational guidance:
 - HTTP connector changes: Toggle `GATEWAY_HTTP_ENABLED` and adjust timeout/size limits through ConfigMap updates without requiring image rebuilds.
 - Browser configuration changes: Modify browser profile settings through ConfigMap updates without requiring image rebuilds.
 - Agent auto-allow changes: Update `AGENT_GATEWAY_TOOL_AUTO_ALLOW` or `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` through ConfigMap updates; changes take effect on service restart.
+- **New**: Skills composition limit changes: Update `SKILLS_COMPOSITION_MAX_SUB_SKILLS` through ConfigMap updates; changes take effect on skills-hub service restart.
 
 Best practice:
 - Keep non-secret configuration in profile env files and ConfigMaps.
 - Keep sensitive configuration in Secrets and manage them exclusively via sync scripts.
 - Test HTTP and browser connector configurations in development profiles before promoting to production.
 - Use additive auto-allow patterns (`_EXTRA` variables) for environment-specific opt-ins rather than replacing entire default lists.
+- **New**: Test composition limits thoroughly in development environments to validate workflow complexity requirements before production deployment.
 
 **Section sources**
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
@@ -401,6 +459,37 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 - [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
 - [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
 
+#### Tuning skill composition limits
+**New Scenario**: Configure the maximum number of sub-skills allowed in skill compositions based on your environment's security requirements and operational needs.
+
+**Development Environment (Higher Complexity):**
+```bash
+# Allow more complex runbooks for testing
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=12
+```
+
+**Production Environment (Balanced Security):**
+```bash
+# Standard production limit
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=8
+```
+
+**High-Security Environment (Conservative Limit):**
+```bash
+# Minimal composition complexity for high-security deployments
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
+```
+
+**Validation Testing:**
+```bash
+# Test composition validation with current limit
+echo "Testing composition with $(cat /proc/self/environ | tr '\0' '\n' | grep SKILLS_COMPOSITION_MAX_SUB_SKILLS)"
+```
+
+**Section sources**
+- [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
+- [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
+
 ### Conceptual overview
 ```mermaid
 flowchart TD
@@ -411,6 +500,10 @@ UpdateCM --> Apply["Apply Kustomize overlay"]
 UpdateSecret --> Apply
 Apply --> Restart["Restart affected deployments"]
 Restart --> Verify["Verify services start and endpoints respond"]
+Verify --> CompositionCheck{"Skills composition limit?"}
+CompositionCheck --> |Yes| ValidateLimits["Validate SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
+CompositionCheck --> |No| Complete["Configuration complete"]
+ValidateLimits --> Complete
 ```
 
 [No sources needed since this diagram shows conceptual workflow, not actual code structure]
@@ -425,6 +518,7 @@ The sync scripts coordinate dependencies across services and databases:
 - HTTP connectors depend on configured origin allowlists and optional credential sets.
 - Browser connectors depend on CDP endpoint availability and configured origin allowlists.
 - Agent auto-allow list depends on tool definitions being available at toolkit construction time.
+- **New**: Skills composition limits depend on proper validation of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` during service startup.
 
 ```mermaid
 graph LR
@@ -432,7 +526,7 @@ PGW["Platform Gateway"] --> IB["Identity Broker"]
 PGW --> TG["Tool Gateway"]
 PGW --> IS["Incident Service"]
 TG --> IS
-TG --> SH["Skills Hub"]
+TG --> SH["Skills Hub<br/>Composition Limits"]
 TG --> HTTP["HTTP Connectors"]
 TG --> BROWSER["Browser Connectors"]
 AG["Agent Service"] --> IS
@@ -441,10 +535,12 @@ AG --> EXEC["Execution Runtime"]
 AG --> AUTOALLOW["Auto-Allow List"]
 IS --> DBI["Postgres 'incidents'"]
 SH --> DBS["Postgres 'skills'"]
+SH --> LIMITS["Composition Limits<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
 AG --> DBA["Postgres 'sessions'"]
 HTTP --> External["External Services"]
 BROWSER --> ACME["Acme Admin Sample"]
 AUTOALLOW --> TOOLS["Gateway Tools"]
+LIMITS --> VALIDATION["Ingestion Validation"]
 ```
 
 **Diagram sources**
@@ -454,6 +550,7 @@ AUTOALLOW --> TOOLS["Gateway Tools"]
 - [sync-execution-signing-secret.sh:1-72](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh#L1-L72)
 - [sync-sessions-db.sh:1-46](file://shared/platform-ops/gitops/sync-sessions-db.sh#L1-L46)
 - [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
+- [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
 
 **Section sources**
 - [sync-delegation-secrets.sh:1-97](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L1-L97)
@@ -471,6 +568,9 @@ AUTOALLOW --> TOOLS["Gateway Tools"]
 - Monitor HTTP connector usage to tune timeout and size parameters based on actual service response patterns.
 - Browser connector performance depends on CDP endpoint responsiveness and session management settings.
 - Auto-allow list resolution occurs at service startup; frequent changes require service restarts.
+- **New**: Skills composition limits directly impact memory usage and processing time; higher limits increase resource consumption proportionally.
+- **New**: Composition validation occurs during skill ingestion; excessive sub-skill counts can slow down sync operations.
+- **New**: Consider the worst-case scenario: `SKILLS_COMPOSITION_MAX_SUB_SKILLS × GATEWAY_BROWSER_FLOW_MAX_STEPS` for resource planning.
 
 [No sources needed since this section provides general guidance]
 
@@ -489,6 +589,9 @@ Common issues and resolutions:
 - Browser navigation denied: Check that `GATEWAY_BROWSER_ALLOW_ORIGINS` includes `http://acme-admin:8080` and that the acme-admin sample is deployed.
 - Tool auto-approval not working: Verify auto-allow list configuration and check that tools are read-only; mutating tools cannot be auto-approved.
 - Unexpected tool parking: Check if tool is in the correct auto-allow list (built-in default vs. extra list) and verify environment-specific overrides.
+- **New**: Skills composition validation failed: Check `SKILLS_COMPOSITION_MAX_SUB_SKILLS` value and ensure it's a valid integer ≥ 1. Review error messages for specific validation failures.
+- **New**: Composition rejected during ingestion: Verify that the composition doesn't exceed the configured `SKILLS_COMPOSITION_MAX_SUB_SKILLS` limit. Check for duplicate sub-skill IDs or invalid references.
+- **New**: Skills-hub startup failure: Inspect logs for `SettingsError` related to `SKILLS_COMPOSITION_MAX_SUB_SKILLS` parsing or validation.
 
 **Updated** After SPEC-061, the browser-dev profile no longer includes the static browser-check-target app, so browser navigation is only permitted to the acme-admin sample application.
 
@@ -502,6 +605,8 @@ Verification steps:
 - Verify browser connectivity to acme-admin sample through the CDP endpoint.
 - Check agent-service logs for auto-allow list resolution and tool registration.
 - Verify tool auto-approval behavior matches expected environment posture.
+- **New**: Verify skills-hub logs for composition limit validation and successful ingestion of compositions.
+- **New**: Test composition creation with various sub-skill counts to validate limit enforcement.
 
 **Section sources**
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
@@ -519,9 +624,10 @@ Luban's configuration system separates non-secret and secret concerns:
 - HTTP connector configuration provides flexible service health checking capabilities with security controls.
 - Browser connector configuration enables web application testing through Chromium automation with strict origin controls.
 - Agent auto-allow list configuration supports both hardened defaults and environment-specific opt-ins through additive patterns.
+- **New**: Skills composition configuration provides operator control over composition complexity through the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` knob, balancing functionality with security and resource constraints.
 - Following the documented procedures ensures consistent, auditable, and recoverable configuration management across development, staging, and production.
 
-**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults.
+**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -623,3 +729,46 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 **Section sources**
 - [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
 - [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
+
+### Skills Composition Configuration Reference
+**New Feature**: Skill composition configuration for SPEC-057 runbooks.
+
+**Environment Variables:**
+- `SKILLS_COMPOSITION_MAX_SUB_SKILLS`: Maximum number of sub-skills in compositions (default: 8)
+
+**Configuration Options:**
+| Value Range | Environment | Security Level | Resource Impact |
+|-------------|-------------|----------------|-----------------|
+| 1-4 | High-security production | Maximum security | Minimal resource usage |
+| 5-8 | Standard production | Balanced security | Moderate resource usage |
+| 9-12 | Development/staging | Lower security | Higher resource usage |
+| 13+ | Specialized use cases | Custom security | Significant resource usage |
+
+**Security Implications:**
+- Worst-case calculation: `cap × GATEWAY_BROWSER_FLOW_MAX_STEPS` = cap × 20 unlocked browser writes/run
+- Each sub-skill remains individually signed, audited, receipted, and gated
+- Compositions carry no authority - each sub-skill maintains its own gate
+- Prevents resource exhaustion while allowing complex workflows
+
+**Validation Rules:**
+- Must be an integer ≥ 1
+- Invalid values cause immediate startup failure with `SettingsError`
+- During ingestion, compositions exceeding the limit are rejected with descriptive error messages
+
+**Example Configuration:**
+```bash
+# Development environment - higher limit for testing
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=12
+
+# Production environment - balanced security
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=8
+
+# High-security environment - conservative limit  
+SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
+```
+
+**Section sources**
+- [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
+- [skills_hub config.py:188-191](file://products/skills-hub/src/skills_hub/core/config.py#L188-L191)
+- [skills_hub config.py:211-213](file://products/skills-hub/src/skills_hub/core/config.py#L211-L213)
+- [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)

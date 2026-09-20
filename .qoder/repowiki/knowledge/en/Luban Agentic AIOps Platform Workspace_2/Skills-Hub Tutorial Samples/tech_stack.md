@@ -1,1 +1,0 @@
-Shell script (`deploy-samples.sh`) invoking `kubectl` to manage a Kubernetes ConfigMap mounted read-only by the `skills-hub` deployment at `/skills/samples`; skill documents are Markdown files with YAML frontmatter consumed by the platform's skills-hub gateway; the `acme-admin` app is a FastAPI server with in-memory state used as the tutorial target.

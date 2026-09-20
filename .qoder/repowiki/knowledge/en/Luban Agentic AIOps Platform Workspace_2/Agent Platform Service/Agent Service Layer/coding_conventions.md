@@ -1,3 +1,0 @@
-- Cross-cutting singletons (kernel, confirmation registry) are exposed via `@lru_cache(maxsize=1)` accessor functions rather than module-level globals.
-- Pluggable backends are selected through `agent_service.core.config.get_settings()` so each persistence layer reads one unified settings object.
-- External dependencies (incident-service, skills-service) are injected as client instances instead of being constructed inline inside business logic.

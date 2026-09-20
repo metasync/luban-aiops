@@ -1,1 +1,0 @@
-Evaluates role-action policy rules from a YAML bundle to enforce deny-by-default authorization with tiered approval for the platform gateway's protected actions.

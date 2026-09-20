@@ -1,1 +1,0 @@
-Python async HTTP via `httpx.AsyncClient` for the worker handoff; PostgreSQL persistence via `psycopg` with JSONB columns and ad-hoc DDL creation; AgentScope `MiddlewareBase` / `PermissionDecision` for kernel interception; environment-driven backend selection through `AGENT_STATE_STORE_BACKEND` and `AGENT_STATE_DB_URL`.

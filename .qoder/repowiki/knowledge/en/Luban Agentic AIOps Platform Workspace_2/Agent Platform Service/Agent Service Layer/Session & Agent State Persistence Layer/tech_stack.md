@@ -1,1 +1,0 @@
-Python typing Protocols for backend abstraction; Redis client for the Redis backend; `psycopg` (sync) for Postgres backends; Pydantic `SessionRecord` models serialized to JSON; environment-driven backend selection (`SESSION_STORE_BACKEND`, `AGENT_STATE_STORE_BACKEND`).

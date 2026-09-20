@@ -1,5 +1,0 @@
-- Each route file defines its own `APIRouter` instance and exposes it as a module-level `router` variable so it can be mounted by the root router via `include_router`.
-- Route handlers obtain configuration and services through FastAPI `Depends(get_settings)` / `Depends(get_tool_registry)` rather than importing singletons directly.
-- Every authenticated route derives identity from the verified bearer token via `resolve_request_identity` and then calls `enforce_policy` before performing any action.
-- Request correlation IDs are read from the `x-request-id` header (typed as `str | None = Header(default=None)`) and resolved through `resolve_request_id` at the entry of each handler.
-- Pydantic models use `model_config = ConfigDict(extra='forbid')` to enforce strict schema validation against unexpected fields.

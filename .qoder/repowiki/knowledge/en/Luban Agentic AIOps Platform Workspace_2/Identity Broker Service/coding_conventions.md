@@ -1,6 +1,0 @@
-- Configuration is modeled as frozen dataclasses loaded from environment variables via a `from_env` classmethod and cached globally through an `lru_cache(maxsize=1)` accessor used as a FastAPI `Depends`.
-- Route handlers accept `settings: IdentitySettings = Depends(get_settings)` and `x_request_id: str | None = Header(default=None)` to propagate request-scoped context consistently across endpoints.
-- Service-layer functions raise domain-specific exceptions (e.g. `ExchangeError`) carrying an HTTP status code that routes translate into `HTTPException`, keeping HTTP concerns out of core logic.
-- Every public endpoint logs structured events via `log_event(LOGGER, <event_name>, ...)` with `request_id` and relevant identifiers, and emits audit events through `emit_audit_event` for security-sensitive actions like token exchange success/deny.
-- Token issuance centralizes claim construction in `token_service.issue_token`, which always sets `iss`, `aud` (as a list), `iat`, `exp`, and conditionally `act`, ensuring consistent JWT shape across platform and delegated tokens.
-- Module-level mutable caches (JWKS clients, RSA key pair) are paired with explicit `reset_*_state()` helpers so tests can isolate state between runs.

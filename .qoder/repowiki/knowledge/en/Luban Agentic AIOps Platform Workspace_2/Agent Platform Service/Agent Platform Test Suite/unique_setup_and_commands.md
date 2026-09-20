@@ -1,1 +1,0 @@
-Tests run under the project's pytest configuration without requiring live Postgres or Redis — Postgres is simulated by a fake `connect` callable that records SQL strings and params, and Redis is simulated by `fakeredis.FakeRedis(decode_responses=False)`.

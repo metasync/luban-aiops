@@ -1,1 +1,0 @@
-`make deploy-samples` installs all samples; `make deploy-samples SAMPLE=<category>/<sample-name>` installs one; `make undeploy-samples` removes them. The script also supports `ACTION=undeploy` and takes an optional `$1` namespace (default `dev-luban-aiops`). It requires the `skills-hub` deployment to already exist (run `make deploy` first).

@@ -1,1 +1,0 @@
-Kustomize-based GitOps overlays, runtime profiles, secret-sync scripts, and e2e demos that deploy the Luban platform services into a development Kubernetes cluster.

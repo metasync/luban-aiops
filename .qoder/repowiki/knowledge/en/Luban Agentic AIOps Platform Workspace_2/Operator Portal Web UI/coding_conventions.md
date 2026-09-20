@@ -1,6 +1,0 @@
-- Feature areas are organized as sibling directories under `src/` (auth, api, chat, stream, sessions, voice, views/*) with each directory containing its own `__tests__/` mirror of unit tests colocated with source files.
-- Navigation and view visibility are gated by role constants exported from `roles.ts` (e.g. `APPROVAL_DECIDER_ROLES`, `AUDIT_ROLES`, `STUDIO_ROLES`) combined with the `hasAnyRole` helper rather than ad-hoc string checks.
-- Backend access is funneled through typed client modules under `src/api/` (one file per domain such as `approvals.ts`, `incidents.ts`, `documents.ts`) instead of inline fetch calls in components.
-- Streaming chat responses are handled via a dedicated `stream/` layer (`decoder.ts`, `transport.ts`, `useChatStream.ts`) that parses SSE frames and exposes a hook, keeping streaming logic out of view components.
-- Build-time constants are injected through `vite.config.ts` `define` replacements (`__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__`) read from the repo root `VERSION` and `package-lock.json`.
-- Each view component lives under `src/views/<feature>/` and is mounted from `App.tsx` via a `ViewId` switch, with the active view stored in local state and selected by key.

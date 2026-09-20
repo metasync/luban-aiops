@@ -1,1 +1,0 @@
-Async HTTP via `httpx` for incident-service calls; PostgreSQL via `psycopg` for persistent evidence storage; environment-driven backend selection (`AGENT_STATE_STORE_BACKEND=memory|postgres`) reusing the same DSN as the SPEC-017 state store.

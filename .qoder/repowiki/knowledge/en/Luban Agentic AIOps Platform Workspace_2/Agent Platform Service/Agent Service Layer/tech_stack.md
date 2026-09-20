@@ -1,1 +1,0 @@
-Python packages with `functools.lru_cache` for process-wide singleton kernels and registries; pluggable storage backends resolved from settings; HTTP clients for incident-service and skills-service integration.

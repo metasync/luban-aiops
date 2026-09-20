@@ -1,6 +1,0 @@
-- Every authenticated route follows the same four-step sequence: resolve `request_id` from `x_request_id`, resolve caller identity via `resolve_request_identity`, enforce policy via `enforce_policy` with a string or `ACTION_*` constant, then call the downstream service.
-- Routes accept `settings: PlatformGatewaySettings = Depends(get_settings)` as a dependency-injected configuration parameter rather than importing settings directly.
-- Request tracing uses the `x_request_id` header, resolved through `resolve_request_id` and propagated into both `log_event` and audit event payloads.
-- Delegated-token operations call `obtain_delegated_token` with the resolved identity subject and a helper `_bearer_token(request)` that parses the raw Authorization header; when delegation is mandatory (triage, tool catalog), missing tokens raise `HTTPException(503)` instead of falling back.
-- Read-only inventory routes (skills, tools, incidents list) forward pagination/filter query parameters into a dict and pass it verbatim to the downstream client.
-- Route-level logging emits a `log_event` after successful calls and `emit_audit_event` via `build_audit_event` for state-changing actions, consistently including `request_id`, `user_id`, `authenticated`, and `roles` fields.

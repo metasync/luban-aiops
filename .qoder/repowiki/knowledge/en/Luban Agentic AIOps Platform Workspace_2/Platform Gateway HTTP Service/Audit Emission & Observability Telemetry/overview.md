@@ -1,1 +1,0 @@
-Provides fire-and-forget audit event emission to a backend service, Prometheus metrics scraping, and optional OpenTelemetry push pipeline for traces, metrics, and logs.

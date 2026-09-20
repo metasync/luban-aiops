@@ -1,1 +1,0 @@
-Aggregates pluggable session, execution, skills, evidence, and runtime services behind a process-wide kernel and confirmation registry for the transitional agent service.

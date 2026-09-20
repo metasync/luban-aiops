@@ -1,1 +1,0 @@
-FastAPI-based identity broker that issues and exchanges platform JWTs, delegates tokens for service-to-service calls, and integrates with Keycloak OIDC for user authentication.

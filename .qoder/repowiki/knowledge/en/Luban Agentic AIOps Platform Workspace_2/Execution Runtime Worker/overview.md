@@ -1,1 +1,0 @@
-FastAPI-based isolated execution worker that verifies signed handoff envelopes, executes one approved tool invocation against the tool gateway, and returns a signed receipt.

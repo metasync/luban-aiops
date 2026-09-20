@@ -1,6 +1,0 @@
-- Configuration is loaded into frozen dataclasses via a `from_env()` classmethod that reads `AUDIT_*` environment variables, then cached globally through `@lru_cache(maxsize=1)`.
-- Pluggable backends implement a shared `Protocol` (`AuditStore`) and are selected by a factory function (`build_audit_store`) based on a string setting rather than subclassing.
-- Cursor-based pagination is implemented by encoding `(occurred_at, event_id)` pairs with `base64.urlsafe_b64encode` and decoding them consistently across both in-memory and Postgres query paths.
-- SQL filter predicates are built by a single `_filter_clause` helper used by both `query` and `summarize` read paths to keep envelope-column filtering identical between backends.
-- Authentication failures raise domain exceptions (`IngestAuthError`, `StoreError`) that map to HTTP 401/5xx at the boundary, keeping route handlers free of error-code logic.
-- Each API concern lives in its own `routes/*.py` module and is mounted onto a single `APIRouter` composed in `router.py`, keeping endpoint registration centralized.

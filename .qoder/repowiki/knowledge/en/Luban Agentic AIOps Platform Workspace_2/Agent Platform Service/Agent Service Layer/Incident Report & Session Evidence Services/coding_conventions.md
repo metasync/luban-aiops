@@ -1,6 +1,0 @@
-- External dependency failures are surfaced as a small typed exception hierarchy (e.g. `IncidentClientError` subclasses) instead of raw HTTP errors, allowing callers to map them to stable HTTP status codes.
-- Pluggable backends are exposed via a `Protocol` (`EvidenceStore`) with concrete subclasses (`InMemoryEvidenceStore`, `PostgresEvidenceStore`) sharing common logic in a base class that raises `NotImplementedError` for row-level primitives.
-- Backend selection is driven by environment variables (`AGENT_STATE_STORE_BACKEND`, `AGENT_STATE_DB_URL`, `AGENT_STATE_TTL_SECONDS`) and defaults to in-memory for dev/CI, falling back to memory when Postgres initialization fails.
-- Digest assembly is strictly read-only and never 500s on upstream content: missing or malformed fields produce sentinel markers (`not_triaged`, `missing`, `unavailable`, `foreign_denied`) rather than raising.
-- Size-bounded persistence uses two complementary caps — per-entry truncation with a visible `truncated` marker and per-session budget eviction that nulls oldest `tool_result.data` payloads while preserving metadata.
-- Provenance tracking is carried alongside digests as a separate block (`provenance_sessions` with `cited_record_ids`) so cited record IDs flow into the provenance envelope rather than being embedded in the digest itself.

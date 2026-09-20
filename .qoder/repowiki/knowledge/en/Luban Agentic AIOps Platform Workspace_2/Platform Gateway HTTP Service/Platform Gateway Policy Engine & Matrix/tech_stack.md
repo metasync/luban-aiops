@@ -1,1 +1,0 @@
-Pure Python with PyYAML for bundle parsing; uses `importlib.resources.files` to ship the default YAML bundle inside the package; frozen `dataclass` models for immutable rule/decision structures.

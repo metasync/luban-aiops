@@ -1,5 +1,0 @@
-- Configuration is exposed as frozen `dataclass` objects with a `from_env()` classmethod that reads `os.getenv` keys with documented defaults, then memoized via `@lru_cache(maxsize=1)`.
-- Optional external integrations are imported lazily inside conditional blocks keyed by `settings.*_enabled` flags so unused connectors never touch their dependencies at import time.
-- Cross-cutting state built once during app creation (tool registry, browser connector) is attached to `app.state` and retrieved through FastAPI dependency functions rather than global imports.
-- Boolean environment variables are normalized through a shared `_TRUTHY = {'1','true','yes','on'}` set before being cast to `bool`.
-- Request correlation identifiers are resolved in a single middleware using `resolve_request_id`, falling back from inbound header to OTel trace id to generated UUID.

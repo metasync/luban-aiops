@@ -1,1 +1,0 @@
-FastAPI route handlers exposing the gateway's session management, operations-document lifecycle, and runtime status endpoints, enforcing policy before delegating to the agent layer.

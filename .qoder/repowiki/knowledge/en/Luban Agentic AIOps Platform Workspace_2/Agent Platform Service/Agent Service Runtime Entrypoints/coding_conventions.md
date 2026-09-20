@@ -1,4 +1,0 @@
-- Configuration is exposed as frozen `dataclass` settings with a `from_env()` classmethod that reads values via `get_env_value` / `get_env_int` helpers with explicit defaults.
-- Optional heavy dependencies are imported lazily inside functions or guarded by try/except ImportError blocks so the module remains importable when those packages are absent.
-- Each entrypoint module exposes a top-level `run()` function that constructs settings, builds the app, and starts the server, serving as the programmatic CLI hook.
-- Streaming agent replies are emitted by yielding `(msg, last)` tuples from a generator, where `last=True` signals completion, enabling uniform SSE/WS consumption.

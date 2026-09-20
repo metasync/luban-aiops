@@ -1,1 +1,0 @@
-`Makefile` provides project-level entry points (build, run, test) for this standalone uv-managed Python package.

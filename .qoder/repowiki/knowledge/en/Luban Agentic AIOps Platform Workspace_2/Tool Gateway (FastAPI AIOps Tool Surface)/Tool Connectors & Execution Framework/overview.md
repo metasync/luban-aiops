@@ -1,1 +1,0 @@
-Defines the BaseTool abstraction, tool registry with risk-tier admission, and domain connectors (Elastic, Kubernetes, Browser, Incidents, Skills) that expose read/write tools over external systems.

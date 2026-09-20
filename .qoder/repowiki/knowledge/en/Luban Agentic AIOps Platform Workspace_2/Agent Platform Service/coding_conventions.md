@@ -1,4 +1,0 @@
-- Each external model backend is implemented as a provider class registered in `providers/registry.py` and selected from runtime settings rather than hard-coded branches.
-- Per-session state is persisted through interchangeable store implementations (Redis, Postgres) injected via the services layer instead of direct client usage.
-- HTTP contracts are defined once in `schemas/` (v1 and v2) and consumed by both route handlers and tests, keeping request/response shapes centralized.
-- Observability (metrics, traces, request correlation) is initialized once in `core_runtime` and propagated through `request_context` rather than passed per-call.

@@ -1,1 +1,0 @@
-Provides pluggable session and agent-state backends (in-memory, Redis, Postgres) behind a service layer that owns session lifecycle, ownership checks, title/model bookkeeping, and cascading cleanup.

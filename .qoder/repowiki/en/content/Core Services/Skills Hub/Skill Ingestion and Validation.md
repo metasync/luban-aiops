@@ -11,7 +11,16 @@
 - [skill_store.py](file://products/skills-hub/src/skills_hub/services/skill_store.py)
 - [skills.py](file://products/skills-hub/src/skills_hub/api/routes/skills.py)
 - [status.py](file://products/skills-hub/src/skills_hub/api/routes/status.py)
+- [skill.py](file://products/skills-hub/src/skills_hub/schemas/skill.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive coverage of composition skill type validation including sub_skills array structure
+- Documented two-layer validation approach with structural and cross-skill resolution
+- Updated bounds checking mechanisms for maximum sub-skills configuration
+- Enhanced error handling and validation failure reporting for composition skills
+- Added configuration options for customizing composition validation behavior
 
 ## Table of Contents
 1. Introduction
@@ -27,6 +36,8 @@
 
 ## Introduction
 This document explains the Skills Hub skill ingestion and validation pipeline end-to-end. It covers how skills are ingested from Git repositories or local directories, how branch tracking and change detection work, the skill format specification and schema validation rules, semantic validation checks during ingestion, error handling and reporting, rollback behavior when invalid skills are detected, configuration options for customizing validation behavior, security considerations for processing skill content, and monitoring ingestion performance.
+
+**Updated** Enhanced with composition skill type validation supporting sub_skills arrays, bounds checking, and two-layer validation approach.
 
 ## Project Structure
 The Skills Hub is implemented as a Python service with:
@@ -62,7 +73,7 @@ API --> STORE
 
 **Section sources**
 - [sync.py:1-324](file://products/skills-hub/src/skills_hub/services/sync.py#L1-L324)
-- [ingestion.py:1-559](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L559)
+- [ingestion.py:1-696](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L696)
 - [skill_store.py:1-498](file://products/skills-hub/src/skills_hub/services/skill_store.py#L1-L498)
 - [skills.py:1-215](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L1-L215)
 - [status.py:1-30](file://products/skills-hub/src/skills_hub/api/routes/status.py#L1-L30)
@@ -139,11 +150,13 @@ Configuration options relevant to ingestion:
 - SKILLS_GIT_TOKENS: JSON map of source_id to token.
 - SKILLS_SYNC_INTERVAL_SECONDS: polling interval with jitter.
 - SKILLS_DATA_PATH: base path for checked-out sources.
+- SKILLS_COMPOSITION_MAX_SUB_SKILLS: configurable limit for composition sub-skills (default: 8).
 
 **Section sources**
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [config.py:119-130](file://products/skills-hub/src/skills_hub/core/config.py#L119-L130)
 - [config.py:179-203](file://products/skills-hub/src/skills_hub/core/config.py#L179-L203)
+- [config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
 - [sync.py:102-148](file://products/skills-hub/src/skills_hub/services/sync.py#L102-L148)
 - [sync.py:283-298](file://products/skills-hub/src/skills_hub/services/sync.py#L283-L298)
 
@@ -167,6 +180,11 @@ Configuration options relevant to ingestion:
     - web.fill_credential must reference a named credential_set and field.
     - Unresolved credential holes are rejected.
   - Step-level validation enforces tool name, JSON-compatible args, and optional expect string.
+- Composition skill validation (v3):
+  - kind=composition carries an ordered sub_skills reference list.
+  - Sub_skills items must contain skill_id (required) and optional note (≤200 chars).
+  - No control flow keys allowed (additionalProperties:false prevents smuggling).
+  - Maximum sub_skills count enforced via configurable bound.
 - Deterministic ordering and duplicate handling:
   - Files visited in sorted order; first occurrence wins for duplicate slugs within a source.
 
@@ -185,7 +203,10 @@ FMOK --> |No| RejectFM["Reject: missing/unterminated frontmatter"]
 FMOK --> ValidateKeys["Validate allowed keys + lengths"]
 ValidateKeys --> FlowCheck{"kind/steps/risk_class/web_target?"}
 FlowCheck --> StepsOK{"Steps valid?"}
-StepsOK --> SizeOK{"Body/steps size OK?"}
+StepsOK --> CompCheck{"kind=composition?"}
+CompCheck --> |Yes| CompValidation["Validate sub_skills array"]
+CompCheck --> |No| SizeOK{"Body/steps size OK?"}
+CompValidation --> SizeOK
 SizeOK --> Dup{"Duplicate slug?"}
 Dup --> |Yes| RejectDup["Reject: duplicate slug"]
 Dup --> |No| BuildRecord["Build Skill record"]
@@ -200,12 +221,14 @@ NextFile --> End(["Return records + rejections"])
 - [ingestion.py:476-558](file://products/skills-hub/src/skills_hub/services/ingestion.py#L476-L558)
 - [ingestion.py:149-275](file://products/skills-hub/src/skills_hub/services/ingestion.py#L149-L275)
 - [ingestion.py:289-460](file://products/skills-hub/src/skills_hub/services/ingestion.py#L289-L460)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
 
 **Section sources**
 - [ingestion.py:1-98](file://products/skills-hub/src/skills_hub/services/ingestion.py#L1-L98)
 - [ingestion.py:149-275](file://products/skills-hub/src/skills_hub/services/ingestion.py#L149-L275)
 - [ingestion.py:289-460](file://products/skills-hub/src/skills_hub/services/ingestion.py#L289-L460)
 - [ingestion.py:476-558](file://products/skills-hub/src/skills_hub/services/ingestion.py#L476-L558)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
 
 ### Skill Format Specification and Schema Rules
 - Document layout: Markdown with YAML frontmatter; everything between the first two --- lines is parsed as a mapping; the rest is the body.
@@ -216,13 +239,20 @@ NextFile --> End(["Return records + rejections"])
   - web_target (optional absolute http(s) URL, ≤2048 chars).
   - risk_class (optional read/write; defaults to read when web_target present without it).
   - flow_intent (optional, requires web_target, display-only, ≤200 chars).
-  - kind (optional knowledge or executable_flow).
+  - kind (optional knowledge, executable_flow, or composition).
   - steps (optional ordered replay list for executable_flow).
+  - sub_skills (optional ordered reference list for composition).
 - Executable-flow rules:
   - steps requires kind=executable_flow and a non-empty list.
   - executable_flow requires risk_class=write.
   - Any web.* step requires web_target.
   - Credentials must be references; unresolved holes are rejected.
+- Composition skill rules:
+  - sub_skills requires kind=composition and a non-empty list.
+  - Each sub_skill item must have skill_id (namespaced <source_id>/<slug>) and optional note (≤200 chars).
+  - No control flow keys allowed (additionalProperties:false).
+  - Maximum sub_skills count enforced via configuration.
+  - Composition declares no web_target, steps, or author risk_class.
 - Identity rules:
   - skill_id = source_id/slug derived from file path.
   - Duplicate slugs within one source are errors; across sources are legal.
@@ -232,7 +262,53 @@ Schema enforcement is mirrored in the shared JSON Schema used by the service and
 
 **Section sources**
 - [skill-format.md:1-203](file://shared/shared-contracts/skill-format.md#L1-L203)
-- [skill.schema.json:1-125](file://shared/shared-contracts/schemas/skill.schema.json#L1-L125)
+- [skill.schema.json:1-146](file://shared/shared-contracts/schemas/skill.schema.json#L1-L146)
+- [skill.py:31-49](file://products/skills-hub/src/skills_hub/schemas/skill.py#L31-L49)
+
+### Two-Layer Validation Approach
+The enhanced ingestion pipeline implements a two-layer validation approach for composition skills:
+
+#### Layer 1: Structural Validation (Per-Document)
+- Validates the shape and constraints of sub_skills array within a single document.
+- Enforces maximum sub_skills count via configurable bound.
+- Validates each sub_skill item has required skill_id and optional note.
+- Prevents control flow smuggling through additionalProperties:false.
+- Ensures composition declares no web_target, steps, or risk_class.
+
+#### Layer 2: Cross-Skill Resolution (Catalog-Consulting)
+- Runs after structural validation in the sync process.
+- Resolves each sub_skill reference against the catalog (this source's fresh records + store.get()).
+- Validates that referenced sub-skills exist and are published.
+- Prevents nested compositions (no composition as sub_skill).
+- Derives display risk_class based on sub-skills' risk classes.
+
+```mermaid
+sequenceDiagram
+participant Doc as "Document"
+participant Struct as "Structural Validator"
+participant Catalog as "Cross-Skill Resolver"
+participant Store as "Skill Store"
+Doc->>Struct : "Validate sub_skills array"
+Struct->>Struct : "Check bounds, keys, format"
+Struct-->>Doc : "Structural validation result"
+alt Structural validation passes
+Doc->>Catalog : "Resolve sub_skill references"
+Catalog->>Store : "Query catalog for sub-skills"
+Store-->>Catalog : "Sub-skill records"
+Catalog->>Catalog : "Validate references exist, no nesting"
+Catalog-->>Doc : "Resolution result + derived risk_class"
+else Structural validation fails
+Doc-->>Doc : "Reject with structural error"
+end
+```
+
+**Diagram sources**
+- [sync.py:317-381](file://products/skills-hub/src/skills_hub/services/sync.py#L317-L381)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
+
+**Section sources**
+- [sync.py:317-381](file://products/skills-hub/src/skills_hub/services/sync.py#L317-L381)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
 
 ### Error Handling, Validation Failure Reporting, and Rollback
 - Per-document validation failures are collected as Rejection objects with path and reason.
@@ -242,6 +318,10 @@ Schema enforcement is mirrored in the shared JSON Schema used by the service and
   - On any exception during sync (including git failures), the previous snapshot remains served; the error is recorded and audited.
 - Audit events:
   - Successful and failed sync cycles emit audit events with details like source_id, type, ref, accepted/rejected counts, and error messages (with tokens scrubbed).
+- Composition-specific error handling:
+  - Structural validation errors reported with specific sub_skill index and field.
+  - Cross-skill resolution errors categorized separately from structural errors.
+  - Nested composition attempts explicitly rejected with clear messaging.
 
 ```mermaid
 sequenceDiagram
@@ -317,7 +397,7 @@ API --> SYNC
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [sync.py:181-281](file://products/skills-hub/src/skills_hub/services/sync.py#L181-L281)
 - [ingestion.py:149-473](file://products/skills-hub/src/skills_hub/services/ingestion.py#L149-L473)
-- [skill.schema.json:1-125](file://shared/shared-contracts/schemas/skill.schema.json#L1-L125)
+- [skill.schema.json:1-146](file://shared/shared-contracts/schemas/skill.schema.json#L1-L146)
 - [skill-format.md:1-203](file://shared/shared-contracts/skill-format.md#L1-L203)
 - [skill_store.py:30-67](file://products/skills-hub/src/skills_hub/services/skill_store.py#L30-L67)
 - [skills.py:68-215](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L68-L215)
@@ -336,9 +416,11 @@ API --> SYNC
 - Deterministic file traversal and early rejection minimize wasted work.
 - Resource ceilings:
   - Body ≤64 KiB, steps ≤200 items and ≤64 KiB serialized.
+  - Sub_skills ≤8 items (configurable) with individual notes ≤200 chars.
   - These caps protect storage and response sizes while staying above runtime policy bounds enforced elsewhere.
 - Atomic snapshot replacement avoids partial reads and ensures consistent catalog state.
 - Search pre-filtering and shared ranking keep queries efficient.
+- Two-layer validation optimizes performance by performing cheap structural checks before expensive catalog lookups.
 
 [No sources needed since this section provides general guidance]
 
@@ -356,6 +438,14 @@ Common validation errors and resolutions:
   - Any web.* step requires web_target.
   - Step tool names must be non-empty strings; args must be JSON-compatible; expect must be a string ≤500 chars.
   - web.fill_credential must include credential_set and field; no unresolved credential holes allowed.
+- Composition skill issues:
+  - sub_skills requires kind=composition.
+  - Each sub_skill must have skill_id (namespaced <source_id>/<slug>) and optional note (≤200 chars).
+  - No control flow keys allowed (if, loop, retry, on_fail).
+  - Maximum sub_skills count exceeded (default 8, configurable).
+  - Duplicate skill_id within sub_skills array.
+  - Unresolved sub_skill reference (cross-skill resolution failure).
+  - Nested composition attempt (composition as sub_skill).
 - Duplicate slug: rename or move files so each path maps to a unique slug within a source.
 - Body too large: reduce markdown body size to ≤64 KiB.
 - Steps too large: reduce number of steps or their serialized size to ≤64 KiB.
@@ -368,15 +458,18 @@ Operational checks:
 Security notes:
 - Tokens injected into Git URLs are scrubbed from logs and telemetry.
 - Credentials must never be embedded in skills; use credential-set references resolved at replay time.
+- Composition skills carry no authority of their own; each sub-skill maintains its own HITL gate.
 
 **Section sources**
 - [ingestion.py:149-473](file://products/skills-hub/src/skills_hub/services/ingestion.py#L149-L473)
+- [ingestion.py:491-586](file://products/skills-hub/src/skills_hub/services/ingestion.py#L491-L586)
+- [sync.py:317-381](file://products/skills-hub/src/skills_hub/services/sync.py#L317-L381)
 - [skills.py:149-181](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L149-L181)
 - [status.py:20-29](file://products/skills-hub/src/skills_hub/api/routes/status.py#L20-L29)
 - [sync.py:102-148](file://products/skills-hub/src/skills_hub/services/sync.py#L102-L148)
 
 ## Conclusion
-The Skills Hub implements a robust, deterministic ingestion and validation pipeline that safely integrates skills from Git repositories or local directories. It enforces a strict skill format and schema, performs semantic checks for executable flows and credentials, and guarantees atomic updates with rollback on failure. Operators can monitor ingestion health via the status endpoint, validate documents proactively through the API or CLI, and tune configuration to control synchronization behavior. Security is addressed by enforcing credential references and scrubbing secrets from logs and telemetry.
+The Skills Hub implements a robust, deterministic ingestion and validation pipeline that safely integrates skills from Git repositories or local directories. It enforces a strict skill format and schema, performs semantic checks for executable flows and credentials, and guarantees atomic updates with rollback on failure. The enhanced composition skill type validation provides a two-layer approach ensuring both structural integrity and cross-skill consistency. Operators can monitor ingestion health via the status endpoint, validate documents proactively through the API or CLI, and tune configuration to control synchronization behavior. Security is addressed by enforcing credential references, preventing control flow smuggling, and maintaining the principle that composition skills carry no authority of their own.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -390,12 +483,18 @@ The Skills Hub implements a robust, deterministic ingestion and validation pipel
   - kind=executable_flow, risk_class=write, non-empty steps list.
   - For browser flows, include web_target; any web.* step must have web_target.
   - Use web.fill_credential with credential_set and field; avoid literal secrets or unresolved holes.
+- Composition skill:
+  - kind=composition with ordered sub_skills array.
+  - Each sub_skill contains skill_id (namespaced reference) and optional note.
+  - Maximum 8 sub_skills (configurable); no control flow keys allowed.
+  - Composition declares no web_target, steps, or author risk_class.
 
 Reference the skill format specification for full key definitions and constraints.
 
 **Section sources**
 - [skill-format.md:14-160](file://shared/shared-contracts/skill-format.md#L14-L160)
-- [skill.schema.json:16-121](file://shared/shared-contracts/schemas/skill.schema.json#L16-L121)
+- [skill.schema.json:16-146](file://shared/shared-contracts/schemas/skill.schema.json#L16-L146)
+- [skill.py:31-49](file://products/skills-hub/src/skills_hub/schemas/skill.py#L31-L49)
 
 ### Configuration Options for Customizing Validation Behavior
 - SKILLS_SOURCES: define sources (local/git), paths, URLs, and refs.
@@ -403,6 +502,7 @@ Reference the skill format specification for full key definitions and constraint
 - SKILLS_SYNC_INTERVAL_SECONDS: adjust polling frequency.
 - SKILLS_DATA_PATH: set data directory for checked-out sources.
 - SKILLS_STORE_BACKEND and SKILLS_DB_URL: choose backend and database connection.
+- SKILLS_COMPOSITION_MAX_SUB_SKILLS: configure maximum sub_skills count for composition skills (default: 8).
 
 These options influence source materialization and persistence but do not alter the core validation rules enforced by ingestion.
 
@@ -410,3 +510,4 @@ These options influence source materialization and persistence but do not alter 
 - [config.py:50-116](file://products/skills-hub/src/skills_hub/core/config.py#L50-L116)
 - [config.py:119-130](file://products/skills-hub/src/skills_hub/core/config.py#L119-L130)
 - [config.py:179-203](file://products/skills-hub/src/skills_hub/core/config.py#L179-L203)
+- [config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)

@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: samples/acme_admin
-title: ACME Admin Console Sample App
-scope:
-    - samples/acme-admin/
-source_files: []
-depends_on: []
-related_to: []

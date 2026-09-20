@@ -1,1 +1,0 @@
-A FastAPI user-administration console with in-memory state that serves as the tutorial target for browser-based operator skills, exposing both a JSON API and server-rendered HTML pages.

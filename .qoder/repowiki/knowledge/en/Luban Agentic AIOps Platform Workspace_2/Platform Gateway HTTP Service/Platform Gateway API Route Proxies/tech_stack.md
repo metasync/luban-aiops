@@ -1,1 +1,0 @@
-FastAPI `APIRouter` with async handlers; streaming responses via `StreamingResponse` for SSE chat flows; structured audit events emitted through `services.audit_emitter` and observability via `core.observability.log_event`.

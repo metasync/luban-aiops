@@ -1,5 +1,0 @@
-- Each sample follows the fixed directory layout of `README.md`, optional `WALKTHROUGH.md`, `skill/`, `demo/`, and optional `target/` — new samples adopt this shape rather than inventing their own.
-- Skill documents use YAML frontmatter fields such as `title`, `description`, `tags`, `version`, `web_target`, `risk_class`, and `flow_intent` to declare metadata consumed by the skills-hub gateway.
-- Mutating flows keep exactly one write-tier interaction gated by a single HITL confirmation card, with all authentication and navigation performed as read-tier steps.
-- Credentials are supplied via `web.fill_credential` from a named credential set rather than typed into fields, keeping login read-tier and avoiding extra approval cards.
-- One-time secrets (e.g. temporary passwords) are passed as chat-supplied parameters or URL query parameters instead of being stored in skill bodies or credential sets.
