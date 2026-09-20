@@ -8,20 +8,22 @@
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [http_connector.py](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [chat-confirm.schema.json](file://shared/shared-contracts/schemas/chat-confirm.schema.json)
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 - [SPEC-058-http-service-check-tools/spec.md](file://docs/specs/SPEC-058-http-service-check-tools/spec.md)
+- [2026-09-20-post-web-checks-egress-hardening.md](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for HTTP POST operations with shape-preserving body rendering
-- Enhanced approval card generation for `http.post` tool with meaningful field display
-- Updated parameter masking implementation with fail-closed posture and KNOWN_SAFE_FIELDS
-- Added detailed coverage of secret query parameter handling and credential set support
-- Expanded testing examples for nested body structures and security validation
+- Updated HTTP GET tool security posture to require operator confirmation by default for outbound network egress operations
+- Added comprehensive documentation about the security rationale behind requiring explicit approval for outbound network egress
+- Enhanced approval workflow documentation to reflect the new hardened default behavior where http.get parks action cards
+- Updated configuration guidance to include AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA for opt-in scenarios
+- Expanded security considerations section with SSRF protection and defense-in-depth explanations
 
 ## Table of Contents
 1. Introduction
@@ -41,10 +43,12 @@ This document explains how the Agent Platform implements human-in-the-loop (HITL
 - Confirmation card generation and display hints for browser tools
 - Decision synchronization between agents, operators, and the policy engine
 - Flow approvals for multi-step browser flows with identity-scoped auto-signing
-- **Enhanced HTTP POST operations with shape-preserving body rendering and parameter masking**
+- **Enhanced HTTP operations with hardened security posture requiring explicit approval for outbound network egress**
 - Risk tier classification, tool categorization (read vs write), and escalation paths
 - Configuration examples, custom flow considerations, and auditing
 - Race condition handling, timeout management, and user experience guidance
+
+**Updated** The platform now implements a hardened security posture where `http.get` requires operator confirmation by default due to the elevated risk class of outbound network egress operations compared to in-cluster reads.
 
 ## Project Structure
 The HITL system spans several services and shared contracts:
@@ -52,7 +56,7 @@ The HITL system spans several services and shared contracts:
 - Platform gateway enforces policy outcomes including require_approval tiers on the confirm path
 - Shared schemas define request/response contracts for confirmations and policy decisions
 - Default policy bundle defines roles, actions, and approval tiers
-- **HTTP POST tool integration with structured body rendering and security validation**
+- **HTTP tools with enhanced security validation and approval requirements for outbound egress**
 
 ```mermaid
 graph TB
@@ -62,33 +66,36 @@ B["ConfirmationRegistry<br/>(in-memory)"]
 C["ConfirmationRecordStore<br/>(memory/postgres)"]
 D["FlowContextStore / FlowApprovalStore"]
 E["Secret Parameter Masking"]
+F["GatewayPermissionMiddleware<br/>Hardened Auto-Allow"]
 end
 subgraph "Platform Gateway"
-F["Policy Engine<br/>evaluate()"]
-G["Confirm Bridge<br/>POST /api/v1/chat/confirm"]
-H["HTTP POST Tool<br/>Connector"]
+G["Policy Engine<br/>evaluate()"]
+H["Confirm Bridge<br/>POST /api/v1/chat/confirm"]
+I["HTTP Connector<br/>Security Validation"]
 end
 subgraph "Shared Contracts"
-I["chat-confirm.schema.json"]
-J["policy-decision.schema.json"]
-K["policy-default.yaml"]
+J["chat-confirm.schema.json"]
+K["policy-decision.schema.json"]
+L["policy-default.yaml"]
 end
 A --> B
 B --> C
 A --> D
-F --> K
-G --> I
-F --> J
-H --> E
+F --> A
+G --> L
+H --> J
+G --> K
+I --> E
 ```
 
 **Diagram sources**
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
 - [hitl_confirmations.py:452-595](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L452-L595)
 - [confirmation_records.py:141-245](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L141-L245)
 - [flow_approvals.py:124-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L124-L274)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
-- [http_connector.py:654-686](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L686)
+- [http_connector.py:503-535](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L503-L535)
 
 **Section sources**
 - [approval-and-hitl.md:7-90](file://docs/guides/approval-and-hitl.md#L7-L90)
@@ -98,42 +105,49 @@ H --> E
 - ConfirmationRecordStore: durable persistence of parked and resolved confirmations (memory or Postgres)
 - FlowApprovals: session-scoped flow context and approval stores enabling auto-signing within a bounded flow identity and TTL
 - PolicyEngine: evaluates role/action against the policy bundle; supports allow/deny/require_approval with tiers
-- **Secret Parameter Masking: fail-closed posture with KNOWN_SAFE_FIELDS allow-list and shape-preserving rendering**
-- **HTTP POST Tool: structured body validation, credential set support, and security enforcement**
+- **GatewayPermissionMiddleware: hardened auto-allow list excluding http.get from built-in defaults due to egress risk**
+- Secret Parameter Masking: fail-closed posture with KNOWN_SAFE_FIELDS allow-list and shape-preserving rendering
+- HTTP Connector: structured body validation, credential set support, and comprehensive security enforcement
 - Schemas: chat-confirm schema for operator decisions; policy-decision schema for evaluation results
 
 Key behaviors:
 - Mutating tool calls are parked and surfaced as confirmation cards
+- **Outbound network egress operations (http.get) now require explicit operator approval by default**
 - The confirm bridge enforces policy tiers before resuming
 - Flow approvals scope auto-signed writes to a specific skill/origin binding while alive
 - Records survive restarts and support inbox/history views
-- **HTTP POST operations render structured bodies with masked secrets while preserving JSON structure**
+- HTTP operations include comprehensive security validation and approval requirements
 
 **Section sources**
 - [hitl_confirmations.py:47-181](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L47-L181)
 - [confirmation_records.py:52-92](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L52-L92)
 - [flow_approvals.py:78-122](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L78-L122)
 - [policy_engine.py:142-210](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L142-L210)
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
 - [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
-- [http_connector.py:654-686](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L686)
+- [http_connector.py:503-535](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L503-L535)
 
 ## Architecture Overview
-End-to-end flow from agent parking to operator decision and execution:
+End-to-end flow from agent parking to operator decision and execution, with enhanced security controls for outbound egress:
 
 ```mermaid
 sequenceDiagram
 participant Agent as "Agent Kernel"
+participant Perm as "GatewayPermissionMiddleware"
 participant Reg as "ConfirmationRegistry"
 participant Rec as "ConfirmationRecordStore"
 participant GW as "Platform Gateway"
 participant Pol as "Policy Engine"
 participant Op as "Operator Portal"
-participant HTTP as "HTTP POST Tool"
+participant HTTP as "HTTP Connector"
+Note over Agent,Perm : Outbound egress requires explicit approval
+Agent->>Perm : Check permission for http.get
+Perm-->>Agent : ASK (not auto-allowed by default)
 Agent->>Reg : register(session_id, tool_calls, timeout, risk_levels, ...)
 Reg-->>Agent : PendingConfirmation(confirm_id)
 Agent->>Rec : save_parked(record with pending_calls, action, flow_summary, approval_kind, message)
 Agent-->>Op : SSE confirmation_request frame {session_id, confirm_id, payload}
-Note over Op : For http.post : structured body with masked secrets
+Note over Op : Action card shows outbound egress details
 Op->>GW : POST /api/v1/chat/confirm {session_id, confirm_id, decision}
 GW->>Pol : evaluate(roles, action="tools : mutate")
 Pol-->>GW : {decision : allow|deny|require_approval, approval_tier, approval}
@@ -143,19 +157,48 @@ else allowed
 GW->>Reg : claim(session_id, confirm_id)
 Reg-->>GW : PendingConfirmation (single-flight)
 GW->>Rec : mark_resolved(status=approved/denied, decider_user_id, decision)
-GW->>HTTP : execute http.post with validated body
+GW->>HTTP : execute http.get with validated URL
 HTTP-->>GW : ToolResult with response data
 GW-->>Agent : resume with approved/denied outcome
 end
 ```
 
 **Diagram sources**
+- [kernel_middleware.py:221-305](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L221-L305)
 - [hitl_confirmations.py:468-534](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L468-L534)
 - [confirmation_records.py:543-604](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L543-L604)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
-- [http_connector.py:654-686](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L686)
+- [http_connector.py:556-592](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L556-L592)
 
 ## Detailed Component Analysis
+
+### Hardened Auto-Allow List and Outbound Egress Security
+**Updated** The platform now implements a hardened security posture where outbound network egress operations require explicit operator approval by default.
+
+- **Removed http.get from built-in defaults**: The `DEFAULT_AUTO_ALLOWED_TOOLS` no longer includes `http.get`, treating outbound egress as a different risk class than in-cluster reads
+- **New additive configuration**: `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` allows environments to opt individual tools back into auto-approval without restating the entire default list
+- **Defense-in-depth approach**: While the kernel allow-list is a HITL bypass switch, the actual egress boundary lives in the tool-gateway's `http_connector` which runs on every call regardless of the kernel allow-list
+- **SSRF protection**: The hardening addresses a medium-severity SSRF finding (CWE-918) by ensuring outbound egress receives appropriate human oversight
+
+```mermaid
+flowchart TD
+Start(["Tool Invocation"]) --> CheckAllow{"In DEFAULT_AUTO_ALLOWED_TOOLS?"}
+CheckAllow --> |No| ParkCard["Park for operator approval"]
+CheckAllow --> |Yes| CheckExtra{"In AUTO_ALLOW_EXTRA?"}
+CheckExtra --> |Yes| AutoAllow["Auto-allow"]
+CheckExtra --> |No| ParkCard
+ParkCard --> End(["Action Card Created"])
+AutoAllow --> End
+```
+
+**Diagram sources**
+- [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
+
+**Section sources**
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
+- [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
+- [2026-09-20-post-web-checks-egress-hardening.md:45-89](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L45-L89)
 
 ### Confirmation Registry and Durable Records
 - Parking: the kernel registers a PendingConfirmation with tool calls, risk levels, gateway names, browser element map, flow summary, and approval kind
@@ -225,7 +268,7 @@ ConfirmationRegistry --> ConfirmationRecordStore : "persists lifecycle"
 ### Flow Approvals (Browser Flow Identity and Auto-Signing)
 - FlowContext reflects the gateway-bound browser flow identity (skill_id, origin) and metadata used for card headlines and intent
 - FlowApproval scopes auto-signing authority to the approved flow identity with a TTL; subsequent writes in the same flow are admitted while identity matches and TTL holds
-- Write-tier tools include web.click, web.type, web.select, web.press_key, web.upload_file, web.evaluate, and **http.post**
+- Write-tier tools include web.click, web.type, web.select, web.press_key, web.upload_file, web.evaluate, and http.post
 - Flow-killing error codes drop both context and approval to prevent stale authority
 
 ```mermaid
@@ -289,45 +332,53 @@ AnyAllow --> |No| DefaultDeny["Return deny (no match)"]
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 
-### Enhanced HTTP POST Approval Cards with Shape-Preserving Rendering
-**Updated** The approval system now supports HTTP POST operations with sophisticated body rendering that preserves JSON structure while masking sensitive data.
+### Enhanced HTTP Tools with Security Validation
+**Updated** HTTP tools now implement comprehensive security measures with enhanced approval requirements for outbound egress operations.
 
-- **Shape-preserving masking**: Nested JSON bodies maintain their structure with only secret-bearing keys masked (e.g., `{"user": {"password": "***"}, "name": "alice"}`)
-- **Curated formatters**: The `http.post` tool has a dedicated formatter that projects destination URLs and body field names for meaningful approval decisions
-- **Fail-closed parameter masking**: Uses KNOWN_SAFE_FIELDS allow-list where only explicitly whitelisted fields render verbatim
-- **Credential set support**: Shows credential reference names without exposing actual credentials
-- **URL security**: Secret-bearing query parameters are masked even though they're refused at the connector level (defense in depth)
+- **Hardened security posture**: `http.get` removed from built-in auto-allow list due to outbound egress risk
+- **URL validation**: Refuses secret-bearing query parameters with HTTP_URL_SECRET_NOT_ALLOWED
+- **Body validation**: Enforces depth limits, key count limits, and byte size caps before transport
+- **Credential set support**: Requires explicit credential set configuration for authenticated requests
+- **Structured rendering**: Preserves JSON structure while masking secret-bearing keys
+- **Fail-closed masking**: Uses KNOWN_SAFE_FIELDS allow-list where only explicitly whitelisted fields render verbatim
+- **Defense in depth**: Multiple layers of protection including connector-level validation and approval-card masking
 
 ```mermaid
 flowchart TD
-Build["Build http.post change request"] --> ParseBody{"Has structured body?"}
-ParseBody --> |Yes| MaskSecrets["Apply _mask_secret_keys recursively"]
-MaskSecrets --> ProjectFields["Project field names and masked values"]
-ParseBody --> |No| SimpleCard["Simple URL-only card"]
-ProjectFields --> AddCredential{"Has credential_set?"}
-AddCredential --> |Yes| AddField["Add credential_set field"]
-AddCredential --> |No| SkipCred["Skip credential field"]
-AddField --> GenerateSummary["Generate 'POST to URL — N fields' summary"]
-SkipCred --> GenerateSummary
-SimpleCard --> GenerateSummary
-GenerateSummary --> ReturnCard["Return structured approval card"]
+Build["Build http.request change request"] --> ValidateURL{"Validate URL"}
+ValidateURL --> CheckOrigin{"Origin allowlisted?"}
+CheckOrigin --> |No| DenyOrigin["HTTP_ORIGIN_NOT_ALLOWED"]
+CheckOrigin --> |Yes| CheckSecret{"Secret in query?"}
+CheckSecret --> |Yes| DenySecret["HTTP_URL_SECRET_NOT_ALLOWED"]
+CheckSecret --> |No| CheckMethod{"GET or POST?"}
+CheckMethod --> |GET| ReadPath["Read-tier validation"]
+CheckMethod --> |POST| WritePath["Write-tier validation"]
+ReadPath --> Execute["Execute with security bounds"]
+WritePath --> Execute
+DenyOrigin --> ReturnError["Return structured error"]
+DenySecret --> ReturnError
+Execute --> ReturnResult["Return ToolResult with evidence"]
 ```
 
 **Diagram sources**
-- [hitl_confirmations.py:328-385](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L328-L385)
-- [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
+- [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
+- [http_connector.py:183-219](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L183-L219)
+- [http_connector.py:556-592](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L556-L592)
+- [http_connector.py:654-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L699)
 
 **Section sources**
-- [hitl_confirmations.py:328-385](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L328-L385)
+- [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
+- [http_connector.py:183-219](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L183-L219)
+- [http_connector.py:556-592](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L556-L592)
+- [http_connector.py:654-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L699)
 - [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
-- [test_hitl_confirmations.py:499-608](file://products/agent-platform/tests/test_hitl_confirmations.py#L499-L608)
 
 ### Confirmation Cards, Change Requests, and Browser Element Hints
 - Action cards project decision-relevant parameters into a change_request sibling of parameters so signed digests remain unchanged
 - Curated formatters produce effect sentences for critical mutating tools; generic fallback provides masked label/value fields
 - Browser tools referencing snapshot elements can show human-readable element descriptions instead of raw refs
 - Secrets are masked consistently using secret parameter masking rules
-- **HTTP POST cards provide structured field listings with appropriate masking based on field names and content type**
+- **HTTP tools provide structured field listings with appropriate masking based on field names and content type**
 
 ```mermaid
 flowchart TD
@@ -364,8 +415,9 @@ NoHint --> Next
 - ConfirmationRecordStore abstracts memory/postgres backends; Postgres backend includes migration and startup sweep
 - FlowApprovals maintains per-session FlowContext and FlowApproval with TTL checks and identity guards
 - PolicyEngine consumes the default policy bundle and returns structured decisions including approval blocks
-- **Secret parameter masking provides fail-closed posture with KNOWN_SAFE_FIELDS allow-list for secure parameter handling**
-- **HTTP POST tool integrates with approval system through structured body validation and credential set support**
+- **GatewayPermissionMiddleware enforces hardened auto-allow list with outbound egress restrictions**
+- Secret parameter masking provides fail-closed posture with KNOWN_SAFE_FIELDS allow-list for secure parameter handling
+- HTTP Connector implements comprehensive security validation and approval requirements
 - Schemas enforce request shapes and decision structures across components
 
 ```mermaid
@@ -379,7 +431,9 @@ PE --> PB["policy-default.yaml"]
 GW --> CS["chat-confirm.schema.json"]
 PE --> PD["policy-decision.schema.json"]
 SP["Secret Parameter Masking"] --> REG["Confirmation Registry"]
-HTTP["HTTP POST Tool"] --> SP
+HTTP["HTTP Connector"] --> SP
+Perm["GatewayPermissionMiddleware"] --> REG
+Perm --> HTTP
 ```
 
 **Diagram sources**
@@ -387,22 +441,25 @@ HTTP["HTTP POST Tool"] --> SP
 - [confirmation_records.py:141-245](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L141-L245)
 - [flow_approvals.py:124-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L124-L274)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
 - [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
-- [http_connector.py:654-686](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L686)
+- [http_connector.py:503-535](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L503-L535)
 
 **Section sources**
 - [hitl_confirmations.py:452-595](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L452-L595)
 - [confirmation_records.py:141-245](file://products/agent-platform/src/agent_service/services/confirmation_records.py#L141-L245)
 - [flow_approvals.py:124-274](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L124-L274)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
 
 ## Performance Considerations
 - In-memory registries provide low-latency single-flight control; durable records add persistence overhead but ensure resilience
 - Postgres queries are bounded by limits and history windows; opportunistic sweeps reclaim old resolved rows
 - Flow approvals are per-process and TTL-bounded to avoid long-lived authority; clearing on flow-killing errors prevents stale unlocks
 - Card payload construction avoids modifying signed parameters; projections are siblings to preserve digests
-- **HTTP POST body validation occurs before transport calls to prevent unnecessary network overhead**
-- **Shape-preserving masking operates efficiently on nested structures without deep copying entire payloads**
+- **HTTP tool validation occurs before transport calls to prevent unnecessary network overhead**
+- **Hardened auto-allow list reduces unnecessary approval cards for vetted in-cluster operations**
+- Shape-preserving masking operates efficiently on nested structures without deep copying entire payloads
 
 ## Troubleshooting Guide
 Common issues and resolutions:
@@ -411,13 +468,15 @@ Common issues and resolutions:
 - Stale flow authority: Flow-killing error codes drop both FlowContext and FlowApproval; next write re-parks
 - Missing signing key or worker unavailability: Approved resumes fail closed and audit rejection events; no unsigned fallback
 - Inbox pagination and history: Use limit/offset for history; pending queue is always complete and sorted newest first
-- **HTTP POST approval issues**: Verify URL doesn't contain secret query parameters; check credential set configuration; validate body structure and size limits
+- **HTTP tool approval issues**: Verify URL doesn't contain secret query parameters; check credential set configuration; validate body structure and size limits; ensure origin is allowlisted
+- **Outbound egress approval**: New http.get calls will park action cards by default - configure AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get to restore previous behavior
 
 Operational tips:
 - Verify policy bundle SHA-256 on readiness endpoints to confirm enforced configuration
 - Confirm AGENT_HITL_CONFIRM_TIMEOUT aligns with expected operator response time
 - Ensure approver roles have chat:confirm and approvals:list grants per policy bundle
-- **Monitor HTTP POST tool usage patterns and adjust body size limits based on operational needs**
+- **Monitor HTTP tool usage patterns and adjust body size limits based on operational needs**
+- **Review outbound egress policies to ensure appropriate human oversight for network operations**
 
 **Section sources**
 - [hitl_confirmations.py:496-558](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L496-L558)
@@ -426,36 +485,38 @@ Operational tips:
 - [approval-and-hitl.md:229-288](file://docs/guides/approval-and-hitl.md#L229-L288)
 
 ## Conclusion
-The Agent Platform's HITL approval system combines layered enforcement:
+The Agent Platform's HITL approval system combines layered enforcement with enhanced security posture:
 - Policy engine decisions gate who can decide and at what tier
 - Confirmation registry manages parking, single-flight decisions, and TTL
 - Durable records persist decisions and support inbox/history surfaces
 - Flow approvals enable safe auto-signing within bounded browser flows
-- **Enhanced HTTP POST support provides structured approval cards with meaningful field visibility while maintaining security**
-- **Fail-closed parameter masking ensures secrets never leak through approval interfaces**
+- **Hardened security posture requires explicit approval for outbound network egress operations**
+- **Defense-in-depth approach ensures multiple layers of protection for sensitive operations**
 - Schemas and bundles standardize behavior across components
 
-Together, these mechanisms ensure risky operations execute only with explicit, auditable, and policy-compliant human approval, including sophisticated HTTP POST operations with secure body rendering.
+Together, these mechanisms ensure risky operations execute only with explicit, auditable, and policy-compliant human approval, including sophisticated HTTP operations with comprehensive security validation and enhanced approval requirements for outbound egress.
 
 ## Appendices
 
 ### Risk Tier Classification and Tool Categorization
 - Read-tier tools auto-allow where configured; they never reach flow-unlock
-- Write-tier tools include web.click, web.type, web.select, web.press_key, web.upload_file, web.evaluate, and **http.post**
+- Write-tier tools include web.click, web.type, web.select, web.press_key, web.upload_file, web.evaluate, and http.post
 - web.fill_credential is read-tier and does not park a card; it names its credential set
 - web.evaluate takes only expression and no element ref; it is not a ref-taking tool
+- **http.get is now read-tier but requires explicit approval by default due to outbound egress risk**
 - **http.post requires tools:mutate permission and follows the same approval workflow as other write-tier tools**
 
 **Section sources**
 - [hitl_confirmations.py:101-104](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L104)
 - [flow_approvals.py:41-54](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L41-L54)
+- [kernel_middleware.py:96-112](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L96-L112)
 - [SPEC-058-http-service-check-tools/spec.md:122-115](file://docs/specs/SPEC-058-http-service-check-tools/spec.md#L122-L115)
 
 ### Approval Escalation Paths
 - tier_1: operator self-approval (default when no require_approval rule)
 - tier_2: designated approver distinct from requester; self-approval blocked by default
 - Shipped bundle requires tier_2 for tools:mutate with decided_by_roles approver and platform-admin
-- **http.post inherits the same escalation paths as other mutating tools**
+- **http.get and http.post inherit the same escalation paths as other tools, with http.get requiring explicit approval by default**
 
 **Section sources**
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
@@ -467,17 +528,19 @@ Together, these mechanisms ensure risky operations execute only with explicit, a
 - Deploy ConfigMap; confirm bundle SHA-256 on readiness endpoints
 - Adjust AGENT_GATEWAY_TOOL_AUTO_ALLOW for read-only auto-approval lists
 - Set AGENT_HITL_CONFIRM_TIMEOUT to control park lifetime
-- **Configure HTTP POST tool settings including body size limits and credential sets**
+- **Configure AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get to restore previous http.get auto-approval behavior**
+- Configure HTTP tool settings including body size limits and credential sets
 
 **Section sources**
 - [approval-and-hitl.md:118-188](file://docs/guides/approval-and-hitl.md#L118-L188)
+- [2026-09-20-post-web-checks-egress-hardening.md:59-89](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L59-L89)
 
 ### Handling Approval Decisions and Auditing
 - Operator submits POST /api/v1/chat/confirm with session_id, confirm_id, decision
 - Platform gateway evaluates policy and enforces tier constraints
 - Durable records capture status, decider, decision, and timestamps
 - Audit trail correlates confirmation_decided with execution_requested/completed/rejected
-- **HTTP POST approvals include structured body information in audit trails with appropriate masking**
+- **HTTP tool approvals include structured information in audit trails with appropriate masking**
 
 **Section sources**
 - [chat-confirm.schema.json:1-27](file://shared/shared-contracts/schemas/chat-confirm.schema.json#L1-L27)
@@ -489,7 +552,7 @@ Together, these mechanisms ensure risky operations execute only with explicit, a
 - Add browser element parsing for new snapshot formats if needed
 - Ensure new tools declare correct risk_level and integrate with auto-allow lists
 - For browser flows, rely on FlowContext/FlowApproval to scope auto-signing safely
-- **Follow the http.post pattern for implementing custom HTTP tools with structured body rendering**
+- **Follow the http tool pattern for implementing custom HTTP tools with structured validation and security enforcement**
 
 **Section sources**
 - [hitl_confirmations.py:195-359](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L195-L359)
@@ -500,7 +563,7 @@ Together, these mechanisms ensure risky operations execute only with explicit, a
 - Single-flight claim prevents double-resume; take_for_expiry claims for cleanup without interrupting in-flight decisions
 - TTL-based expiry closes parked calls; startup sweep expires stale pending rows in Postgres
 - Flow approvals expire based on captured TTL; zero disables flow-unlock entirely
-- **HTTP POST operations inherit the same race condition protections as other tools**
+- **HTTP tools inherit the same race condition protections as other tools**
 
 **Section sources**
 - [hitl_confirmations.py:520-558](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L520-L558)
@@ -512,23 +575,29 @@ Together, these mechanisms ensure risky operations execute only with explicit, a
 - Browser tools show human-readable element descriptions when available
 - Owner transcript cards anchor under the parking exchange and poll for live updates
 - Approver inbox splits pending and history with pagination and counts
-- **HTTP POST approval cards provide structured field listings with clear indication of which fields contain sensitive data**
+- **HTTP tool approval cards provide structured field listings with clear indication of which fields contain sensitive data**
+- **Outbound egress operations now clearly indicate the security rationale for requiring approval**
 
 **Section sources**
 - [hitl_confirmations.py:98-181](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L98-L181)
 - [approval-and-hitl.md:229-288](file://docs/guides/approval-and-hitl.md#L229-L288)
 
-### HTTP POST Security and Validation
-**New Section** The HTTP POST tool implements comprehensive security measures:
+### HTTP Tool Security and Validation
+**Updated** HTTP tools implement comprehensive security measures with enhanced approval requirements for outbound egress operations.
 
+- **Hardened security posture**: `http.get` removed from built-in auto-allow list due to outbound egress risk
 - **URL validation**: Refuses secret-bearing query parameters with HTTP_URL_SECRET_NOT_ALLOWED
 - **Body validation**: Enforces depth limits, key count limits, and byte size caps before transport
 - **Credential set support**: Requires explicit credential set configuration for authenticated requests
 - **Structured rendering**: Preserves JSON structure while masking secret-bearing keys
 - **Fail-closed masking**: Uses KNOWN_SAFE_FIELDS allow-list where only explicitly whitelisted fields render verbatim
 - **Defense in depth**: Multiple layers of protection including connector-level validation and approval-card masking
+- **SSRF protection**: Addresses medium-severity SSRF findings through enhanced human oversight
 
 **Section sources**
-- [http_connector.py:654-686](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-686)
-- [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-153)
-- [SPEC-058-http-service-check-tools/spec.md:272-312](file://docs/specs/SPEC-058-http-service-check-tools/spec.md#L272-L312)
+- [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
+- [http_connector.py:183-219](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L183-L219)
+- [http_connector.py:556-592](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L556-L592)
+- [http_connector.py:654-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L654-L699)
+- [secret_params.py:136-153](file://products/agent-platform/src/agent_service/services/secret_params.py#L136-L153)
+- [2026-09-20-post-web-checks-egress-hardening.md:11-44](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L11-L44)

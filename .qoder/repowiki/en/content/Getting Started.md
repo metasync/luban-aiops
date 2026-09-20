@@ -13,6 +13,9 @@
 - [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
 - [pyproject.toml](file://products/agent-platform/pyproject.toml)
 - [http_connector.py](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [egress-hardening release notes](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md)
 - [acme-admin README.md](file://samples/acme-admin/README.md)
 - [acme-admin deploy.sh](file://samples/acme-admin/deploy.sh)
 - [api.py](file://samples/acme-admin/app/src/acme_admin/api.py)
@@ -28,11 +31,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Available Endpoints section with comprehensive API and HTML surface documentation from actual source files
-- Enhanced Skill Demonstrations section with detailed descriptions of all four skill rungs and their approval models
-- Added specific endpoint tables for both JSON API and HTML surfaces based on actual implementation
-- Updated deployment instructions to reflect the consolidated acme-admin samples structure
-- Enhanced troubleshooting guidance with HTTP tool-specific issues and acme-admin sample problems
+- Updated HTTP Service-Check Tools section to document the new security posture where http.get now requires operator confirmation by default
+- Added comprehensive information about the AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA environment variable for maintaining card-free http.get behavior in development environments
+- Enhanced security model documentation with details about the hardened default configuration
+- Updated troubleshooting guidance to include HTTP tool confirmation issues and migration steps
+- Added deployment notes for upgrading clusters that need to maintain existing http.get behavior
 
 ## Table of Contents
 1. Introduction
@@ -49,7 +52,9 @@
 12. Appendices
 
 ## Introduction
-This guide helps you set up the Luban AIOps platform locally and deploy it to a Kubernetes cluster using the dev-k8s overlay. It covers prerequisites, environment setup, building images, deploying with Make targets, first-time configuration (OIDC identity provider, operator accounts), and verifying service health. The platform now includes HTTP service-check tools (`http.get`, `http.post`) and an ACME Admin sample application for quick platform exploration and skill demonstrations.
+This guide helps you set up the Luban AIOps platform locally and deploy it to a Kubernetes cluster using the dev-k8s overlay. It covers prerequisites, environment setup, building images, deploying with Make targets, first-time configuration (OIDC identity provider, operator accounts), and verifying service health. The platform includes HTTP service-check tools (`http.get`, `http.post`) with enhanced security controls and an ACME Admin sample application for quick platform exploration and skill demonstrations.
+
+**Updated** The HTTP tools now implement a hardened security posture where `http.get` requires operator confirmation by default, providing defense-in-depth for outbound egress operations.
 
 ## Project Structure
 The repository is organized into product-oriented services under products/, shared contracts and operations under shared/, samples under samples/, and documentation under docs/. The dev-k8s overlay in shared/platform-ops/gitops/dev-k8s defines the development deployment for all platform services and dependencies.
@@ -121,7 +126,7 @@ These components are deployed together by the dev-k8s overlay and coordinated vi
 - [acme-admin README.md:1-16](file://samples/acme-admin/README.md#L1-L16)
 
 ## Architecture Overview
-The typical request flow starts at the portal web UI, which proxies API calls to the platform gateway. The gateway authenticates users via the identity broker, then relays chat and session requests to the agent service. For tool execution, the agent service calls the tool gateway, which may invoke Kubernetes or other connectors. The new HTTP tools allow agents to make HTTP requests to allowlisted origins, while the ACME Admin sample provides a real target for demonstrating skill workflows.
+The typical request flow starts at the portal web UI, which proxies API calls to the platform gateway. The gateway authenticates users via the identity broker, then relays chat and session requests to the agent service. For tool execution, the agent service calls the tool gateway, which may invoke Kubernetes or other connectors. The HTTP tools now implement enhanced security controls requiring operator confirmation by default, while the ACME Admin sample provides a real target for demonstrating skill workflows.
 
 ```mermaid
 sequenceDiagram
@@ -139,9 +144,13 @@ G->>I : Verify JWT / exchange delegated token
 I-->>G : Delegated token
 G->>A : Chat/session relay
 A->>T : Invoke tool
-alt HTTP tool call
+alt HTTP tool call with confirmation required
 T->>H : http.get/post to allowlisted origin
 H-->>T : Response with status/body
+T-->>A : Confirmation request (parked)
+A-->>G : Confirmation pending
+G-->>U : Approval card in portal
+Note over U,G : Operator approves in portal
 else Other tool call
 T->>K : Execute connector action
 K-->>T : Result
@@ -159,31 +168,51 @@ G-->>U : Response in portal
 ## HTTP Service-Check Tools
 
 ### Overview
-The platform now includes two HTTP service-check tools that allow agents to interact with external HTTP services through a secure, bounded interface:
+The platform includes two HTTP service-check tools that allow agents to interact with external HTTP services through a secure, bounded interface:
 
 - **`http.get`**: Read-tier tool for fetching URLs, checking service health, and retrieving JSON/text responses
 - **`http.post`**: Write-tier tool for sending bounded JSON objects to external APIs with approval requirements
 
 ### Security Model
-Both tools implement strict security controls:
+Both tools implement strict security controls with enhanced hardening:
 - **Allowlist enforcement**: Only pre-approved origins can be accessed
 - **Credential management**: Authentication uses named credential sets, never inline secrets
 - **Request bounds**: POST bodies limited to 32 keys, depth 2, and configurable byte limits
 - **Redirect handling**: GET follows up to 3 validated redirects; POST refuses redirects
 - **Scheme validation**: Only HTTP/HTTPS schemes allowed; loopback/link-local/multicast addresses blocked
+- **Operator confirmation**: Both tools require operator approval by default for enhanced security
 
-### Configuration
-Enable HTTP tools through runtime profiles:
+### New Security Posture (v0.39.1+)
+Starting with v0.39.1, the platform implements a hardened security posture for HTTP tools:
+
+- **Default deny-by-default**: `http.get` is no longer automatically approved and requires operator confirmation
+- **Defense-in-depth**: Even read-tier operations now park confirmation cards for audit and control
+- **Opt-in for development**: Development environments can opt back into card-free behavior using environment variables
+
+### Configuration Options
+
+#### Production Hardened Default
+By default, both `http.get` and `http.post` require operator confirmation:
 ```bash
-# Enable HTTP connector and add allowlisted origins
+# No additional configuration needed - confirmation required by default
 export GATEWAY_HTTP_ENABLED=true
 export GATEWAY_HTTP_ALLOW_ORIGINS="http://acme-admin:8080,https://api.example.com"
 export GATEWAY_MUTATING_TOOLS_ENABLED=true  # Required for http.post
 ```
 
+#### Development Environment (Card-Free http.get)
+To maintain card-free behavior for `http.get` in development environments:
+```bash
+# Opt back into card-free http.get behavior (additive)
+export AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+export GATEWAY_HTTP_ENABLED=true
+export GATEWAY_HTTP_ALLOW_ORIGINS="http://acme-admin:8080,https://api.example.com"
+export GATEWAY_MUTATING_TOOLS_ENABLED=true
+```
+
 ### Usage Examples
 ```python
-# Health check example (read-only)
+# Health check example (read-only, parks confirmation card by default)
 http.get(url="http://acme-admin:8080/healthz")
 
 # User lock operation (write with approval)
@@ -194,11 +223,20 @@ http.post(
 )
 ```
 
+### Migration Notes
+For clusters upgrading from v0.39.0 that want agent-initiated `http.get` to stay card-free:
+- Set `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get` in your runtime configuration
+- Or include `http.get` in `AGENT_GATEWAY_TOOL_AUTO_ALLOW` to replace the default list
+- Without this configuration, `http.get` will park a confirmation card (the intended hardened default)
+
 **Section sources**
 - [http_connector.py:1-25](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L1-L25)
 - [http_connector.py:322-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L322-L359)
 - [http_connector.py:497-592](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L497-L592)
 - [http_connector.py:595-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L595-L699)
+- [kernel_middleware.py:100-139](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L100-L139)
+- [runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
+- [egress-hardening release notes:59-116](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L59-L116)
 - [http-check-demo.sh:10-34](file://shared/platform-ops/e2e/http-check-demo.sh#L10-L34)
 
 ## ACME Admin Sample Application
@@ -258,10 +296,12 @@ The sample includes a progressive four-rung ladder plus two additional approval 
 #### Four-Rung Ladder
 | # | Sample | Surface | Effect | Cards | Approval Kind |
 |---|---|---|---|---|---|
-| 1 | Health Check | `http.get` | Read | 0 | — |
+| 1 | Health Check | `http.get` | Read | 1 (by default) | — |
 | 2 | User Status | Bound browser flow | Read | 0 | — |
 | 3 | Lock/Unlock User | `http.post` | Write | 1 | `action` |
 | 4 | Password Reset | Bound browser flow | Write | 1 | `flow` |
+
+**Updated** Under the default hardened configuration, the health check now parks a confirmation card for `http.get`. To maintain the previous card-free behavior, set `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`.
 
 #### Additional Approval Models
 | Sample | Skill | Approval Shape |
@@ -312,11 +352,14 @@ Recommended local cluster: kind, with optional auto-loading of images via make b
    - For kind clusters, set AUTO_LOAD_KIND=true and KIND_CLUSTER_NAME to load images automatically.
 5. Deploy:
    - Run make deploy to apply the overlay, patch image tags, wait for rollout, provision secrets, and reconcile the Keycloak client.
-6. Deploy sample application (optional):
+6. Configure HTTP tools (optional):
+   - For card-free http.get in development, set `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`
+   - Enable HTTP connector and add allowlisted origins
+7. Deploy sample application (optional):
    - Run make deploy-sample-app to deploy the ACME Admin sample for skill demonstrations.
-7. Install sample skills (optional):
+8. Install sample skills (optional):
    - Run make deploy-samples to install skill documents that demonstrate HTTP tools and browser flows.
-8. Verify pods and services:
+9. Verify pods and services:
    - Check that all pods are Running and Ready.
 
 **Section sources**
@@ -384,9 +427,10 @@ Additional useful targets:
   - Edit the canonical policy file, validate, sync, and redeploy to enforce changes.
 - HTTP tool configuration:
   - Configure GATEWAY_HTTP_ENABLED, GATEWAY_HTTP_ALLOW_ORIGINS, and GATEWAY_MUTATING_TOOLS_ENABLED for HTTP tool functionality.
+  - For card-free http.get in development, set AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 
 **Section sources**
-- [dev-k8s README.md:243-259](file://shared/platform-ops/gitops/dev-k8s/README.md#L243-259)
+- [dev-k8s README.md:243-259](file://shared/platform-ops/gitops/dev-k8s/README.md#L243-L259)
 - [dev-k8s README.md:340-414](file://shared/platform-ops/gitops/dev-k8s/README.md#L340-L414)
 - [configuration-reference.md:282-327](file://docs/guides/configuration-reference.md#L282-L327)
 - [http_connector.py:204-233](file://products/tool-gateway/src/tool_gateway/core/config.py#L204-L233)
@@ -397,14 +441,14 @@ The platform relies on several cross-service dependency chains:
 - Tool relay chain from agent-service to tool-gateway.
 - Durable audit trail ingestion from multiple emitters to audit-service.
 - Skills and incidents retrieval chains with their own credential registries.
-- HTTP tool chain from tool-gateway to allowlisted external services.
+- HTTP tool chain from tool-gateway to allowlisted external services with enhanced security controls.
 
 ```mermaid
 graph LR
 PGW["platform-gateway"] --> |Delegated token| IDB["identity-service"]
 AGS["agent-service"] --> |Tool invocation| TGW["tool-gateway"]
 TGW --> |Connectors| EXT["External systems / Kubernetes"]
-TGW --> |HTTP tools| HTTP["HTTP Targets (allowlisted)"]
+TGW --> |HTTP tools (confirmation required)| HTTP["HTTP Targets (allowlisted)"]
 PGW --> |Audit events| AUD["audit-service"]
 TGW --> |Audit events| AUD
 IDB --> |Audit events| AUD
@@ -421,7 +465,7 @@ TGW --> |Sample app| ACM["acme-admin"]
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
 
 **Section sources**
-- [configuration-reference.md:33-88](file://docs/guides/configuration-reference.md#L33-L88)
+- [configuration-reference.md:33-88](file://docs/guides/configuration-reference.md#L33-88)
 - [configuration-reference.md:128-157](file://docs/guides/configuration-reference.md#L128-L157)
 - [configuration-reference.md:170-212](file://docs/guides/configuration-reference.md#L170-L212)
 - [configuration-reference.md:214-280](file://docs/guides/configuration-reference.md#L214-L280)
@@ -433,6 +477,7 @@ TGW --> |Sample app| ACM["acme-admin"]
 - Avoid raw kubectl apply -k for deployments; always use make deploy to ensure correct image tags and post-deploy steps.
 - HTTP tool performance: Configure appropriate timeout values and response size limits based on expected workloads.
 - ACME Admin sample: Single replica deployment with in-memory storage; restarts reset state for demo purposes.
+- **Confirmation overhead**: The new confirmation requirement adds latency for HTTP tool calls; consider using AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA for high-volume development scenarios.
 
 ## Troubleshooting Guide
 Common symptoms and resolutions:
@@ -456,6 +501,10 @@ Common symptoms and resolutions:
   - Ensure GATEWAY_HTTP_ENABLED=true and origins are allowlisted; check GATEWAY_MUTATING_TOOLS_ENABLED for http.post.
 - HTTP tool calls denied:
   - Verify origin is in GATEWAY_HTTP_ALLOW_ORIGINS; check NetworkPolicy enforcement; ensure credential sets are properly synced.
+- **HTTP tool confirmation cards appearing unexpectedly**:
+  - This is the new hardened default behavior starting with v0.39.1
+  - To restore card-free http.get behavior, set `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`
+  - For production environments, keep the confirmation requirement for security
 - ACME Admin sample not reachable:
   - Run make deploy-sample-app; verify secret synchronization with sync-browser-credentials.sh; check NetworkPolicy compliance.
 - ACME Admin endpoints return 401:
@@ -465,7 +514,7 @@ Common symptoms and resolutions:
 - Demo state appears corrupted:
   - Use the header-gated reset endpoint: curl -X POST -H 'X-Luban-Demo-Reset: 1' http://localhost:8080/internal/reset-demo
 
-For detailed diagnostics and commands, consult the troubleshooting guide.
+**Updated** The most common issue after upgrading to v0.39.1+ is unexpected confirmation cards for http.get calls. This is intentional security hardening. Review the migration notes above to configure your environment appropriately.
 
 **Section sources**
 - [troubleshooting.md:32-67](file://docs/guides/troubleshooting.md#L32-L67)
@@ -480,7 +529,9 @@ For detailed diagnostics and commands, consult the troubleshooting guide.
 - [acme-admin deploy.sh:135-163](file://samples/acme-admin/deploy.sh#L135-L163)
 
 ## Conclusion
-You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform now includes powerful HTTP service-check tools and an ACME Admin sample application with comprehensive endpoints and skill demonstrations for thorough platform exploration. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
+You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform includes powerful HTTP service-check tools with enhanced security controls requiring operator confirmation by default, and an ACME Admin sample application with comprehensive endpoints and skill demonstrations for thorough platform exploration. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
+
+**Updated** The enhanced security posture in v0.39.1+ provides defense-in-depth for HTTP tool usage, requiring operator confirmation even for read operations. Development environments can opt back into card-free behavior using the AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA environment variable while maintaining the hardened default for production deployments.
 
 ## Appendices
 
@@ -510,10 +561,12 @@ You now have the essentials to set up the Luban AIOps platform locally, deploy i
 - Set response limits: GATEWAY_HTTP_MAX_RESPONSE_BYTES=65536
 - Set request limits: GATEWAY_HTTP_MAX_REQUEST_BYTES=4096
 - Credential sets: GATEWAY_HTTP_CREDENTIAL_SETS=/path/to/credential-sets.json
+- **Card-free http.get (development only)**: AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 
 **Section sources**
 - [http_connector.py:204-233](file://products/tool-gateway/src/tool_gateway/core/config.py#L204-L233)
 - [http-check-demo.sh:136-145](file://shared/platform-ops/e2e/http-check-demo.sh#L136-L145)
+- [runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
 
 ### ACME Admin Sample Commands
 - Deploy sample: make deploy-sample-app
@@ -526,3 +579,28 @@ You now have the essentials to set up the Luban AIOps platform locally, deploy i
 - [acme-admin README.md:38-77](file://samples/acme-admin/README.md#L38-L77)
 - [acme-admin README.md:169-181](file://samples/acme-admin/README.md#L169-L181)
 - [Makefile:198-205](file://Makefile#L198-L205)
+
+### Migration Guide for v0.39.1+
+If you're upgrading from v0.39.0 and want to maintain existing behavior:
+
+**For Development Environments:**
+```bash
+# Add to your runtime configuration
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+```
+
+**For Production Environments:**
+- Keep the hardened default (confirmation required) for security
+- Review and approve HTTP tool usage through the operator portal
+- Monitor confirmation cards for audit and compliance
+
+**Migration Steps:**
+1. Update to v0.39.1+
+2. Review HTTP tool usage patterns in your environment
+3. Configure AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA for development if needed
+4. Train operators on the new confirmation workflow
+5. Monitor confirmation cards and adjust policies as needed
+
+**Section sources**
+- [egress-hardening release notes:108-116](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L108-L116)
+- [runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)

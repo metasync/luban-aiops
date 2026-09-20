@@ -13,16 +13,18 @@
 - [sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
 - [tool-gateway runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
+- [agent-platform runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
+- [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated browser-dev profile documentation to reflect retirement of browser-check-target app per SPEC-061
-- Clarified that browser-dev profile now only permits acme-admin origin after retirement
-- Updated HTTP connector configuration section with current state
-- Removed references to retired browser-check-target resources from browser-dev profile
-- Enhanced troubleshooting guidance for browser configuration scenarios
+- Added documentation for new `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` environment variable that enables additive tool auto-approval without restating the entire default allowlist
+- Updated agent-platform auto-allow list section with both hardened default behavior and dev-cluster opt-in pattern
+- Enhanced configuration examples to show the new additive pattern alongside replacement semantics
+- Updated troubleshooting guidance for tool auto-approval scenarios
+- Added reference to v0.39.1 hardening changes that removed `http.get` from built-in defaults
 
 ## Table of Contents
 1. Introduction
@@ -148,6 +150,50 @@ Operational implications:
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 
+### Agent auto-allow list configuration
+The agent-platform includes a sophisticated auto-allow list system that controls which tools can execute without operator confirmation. This system has two configuration surfaces:
+
+**Primary Auto-Allow List (`AGENT_GATEWAY_TOOL_AUTO_ALLOW`):**
+- **Replacement semantics**: When set, completely replaces the built-in vetted default list
+- **Empty string**: Disables all auto-approval (every tool parks for confirmation)
+- **Unset**: Uses the built-in vetted default list
+- **Format**: Comma-separated dotted tool names (e.g., `k8s.list_pods,k8s.get_pod`)
+
+**Additive Extra List (`AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`):**
+- **Additive semantics**: Adds tools to the resolved allow-list without restating the entire list
+- **Union behavior**: Entries are unioned with either the built-in default or the replacement set
+- **Opt-in pattern**: Enables adding specific tools back into auto-approval without maintaining full lists
+- **Format**: Comma-separated dotted tool names (e.g., `http.get`)
+
+**v0.39.1 Hardening Changes:**
+- `http.get` was removed from the built-in default due to outbound egress security concerns
+- Development clusters now use `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get` to preserve demo behavior
+- Production installations get hardened defaults where `http.get` requires explicit approval
+
+**Security Invariants:**
+- Mutating tools are never auto-approved regardless of configuration
+- Read-only invariant enforced at middleware level
+- Tool-gateway still enforces origin allowlists and structural refusals on every call
+
+**Development Configuration Example:**
+```bash
+# Dev cluster preserves http.get auto-approval behavior
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+
+# Alternative: Replace entire default list (not recommended)
+AGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s.list_pods,k8s.get_pod,skills.search
+```
+
+**Production Hardened Default:**
+```bash
+# No auto-allow configuration - uses hardened built-in defaults
+# http.get requires explicit operator approval
+```
+
+**Section sources**
+- [kernel_middleware.py:71-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L71-L138)
+- [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
+
 ### Secret management strategy
 Secrets are provisioned using dedicated sync scripts. Each script handles a specific concern:
 - Runtime secrets: sync-runtime-secret.sh provisions agent-platform runtime secrets from a profile-scoped runtime-secrets.env file.
@@ -239,10 +285,12 @@ To switch environments:
 - Secret provisioning scripts ensure required keys exist before restarting workloads. If a required secret is missing, services will fail open or closed according to their design (for example, signing_unavailable rejection paths).
 - HTTP connector validation: When `GATEWAY_HTTP_ENABLED=false`, no HTTP tools are registered. When enabled but origin allowlist is empty, all HTTP requests are denied.
 - Browser connector validation: When `GATEWAY_BROWSER_ENABLED=false`, no browser tools are registered. When enabled but origin allowlist is empty, all browser navigation is denied.
+- Agent auto-allow validation: Tools listed in auto-allow configuration must be read-only; mutating tools are logged as misconfiguration but remain available for HITL approval.
 
 Operational guidance:
 - Validate that all required keys are present in the relevant runtime-secrets.env files before applying.
 - Use the SKIP_* environment variables in sync scripts to bypass provisioning when CI injects secrets externally.
+- Verify auto-allow list composition matches expected behavior for your environment.
 
 [No sources needed since this section synthesizes behavior described by scripts and examples]
 
@@ -251,11 +299,13 @@ Operational guidance:
 - Secret changes: Update the appropriate runtime-secrets.env file and run the corresponding sync script. The script applies the Secret and restarts affected deployments.
 - HTTP connector changes: Toggle `GATEWAY_HTTP_ENABLED` and adjust timeout/size limits through ConfigMap updates without requiring image rebuilds.
 - Browser configuration changes: Modify browser profile settings through ConfigMap updates without requiring image rebuilds.
+- Agent auto-allow changes: Update `AGENT_GATEWAY_TOOL_AUTO_ALLOW` or `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` through ConfigMap updates; changes take effect on service restart.
 
 Best practice:
 - Keep non-secret configuration in profile env files and ConfigMaps.
 - Keep sensitive configuration in Secrets and manage them exclusively via sync scripts.
 - Test HTTP and browser connector configurations in development profiles before promoting to production.
+- Use additive auto-allow patterns (`_EXTRA` variables) for environment-specific opt-ins rather than replacing entire default lists.
 
 **Section sources**
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
@@ -329,6 +379,28 @@ Best practice:
 - [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 
+#### Opting in specific tools to auto-approval
+- Use `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` for additive opt-in of specific tools without restating the entire default list.
+- Use `AGENT_GATEWAY_TOOL_AUTO_ALLOW` for complete replacement of the default allow-list (advanced use cases).
+- Both variables support comma-separated dotted tool names with automatic normalization.
+- Mutating tools cannot be auto-approved regardless of configuration.
+
+**Development Pattern (Dev Cluster):**
+```bash
+# Preserve http.get auto-approval behavior for demos
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+```
+
+**Production Pattern (Hardened Default):**
+```bash
+# No auto-allow configuration - uses hardened built-in defaults
+# All tools require explicit operator approval
+```
+
+**Section sources**
+- [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
+- [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
+
 ### Conceptual overview
 ```mermaid
 flowchart TD
@@ -352,6 +424,7 @@ The sync scripts coordinate dependencies across services and databases:
 - Session store migration depends on Postgres being available and the sessions database existing.
 - HTTP connectors depend on configured origin allowlists and optional credential sets.
 - Browser connectors depend on CDP endpoint availability and configured origin allowlists.
+- Agent auto-allow list depends on tool definitions being available at toolkit construction time.
 
 ```mermaid
 graph LR
@@ -365,11 +438,13 @@ TG --> BROWSER["Browser Connectors"]
 AG["Agent Service"] --> IS
 AG --> SH
 AG --> EXEC["Execution Runtime"]
+AG --> AUTOALLOW["Auto-Allow List"]
 IS --> DBI["Postgres 'incidents'"]
 SH --> DBS["Postgres 'skills'"]
 AG --> DBA["Postgres 'sessions'"]
 HTTP --> External["External Services"]
 BROWSER --> ACME["Acme Admin Sample"]
+AUTOALLOW --> TOOLS["Gateway Tools"]
 ```
 
 **Diagram sources**
@@ -378,6 +453,7 @@ BROWSER --> ACME["Acme Admin Sample"]
 - [sync-skills-secrets.sh:1-197](file://shared/platform-ops/gitops/sync-skills-secrets.sh#L1-L197)
 - [sync-execution-signing-secret.sh:1-72](file://shared/platform-ops/gitops/sync-execution-signing-secret.sh#L1-L72)
 - [sync-sessions-db.sh:1-46](file://shared/platform-ops/gitops/sync-sessions-db.sh#L1-L46)
+- [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
 
 **Section sources**
 - [sync-delegation-secrets.sh:1-97](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L1-L97)
@@ -394,6 +470,7 @@ BROWSER --> ACME["Acme Admin Sample"]
 - Configure appropriate HTTP timeout and size limits to prevent resource exhaustion.
 - Monitor HTTP connector usage to tune timeout and size parameters based on actual service response patterns.
 - Browser connector performance depends on CDP endpoint responsiveness and session management settings.
+- Auto-allow list resolution occurs at service startup; frequent changes require service restarts.
 
 [No sources needed since this section provides general guidance]
 
@@ -410,8 +487,12 @@ Common issues and resolutions:
 - HTTP responses too large: Adjust `GATEWAY_HTTP_MAX_RESPONSE_BYTES` if legitimate responses exceed the default limit.
 - Browser connector not working: Verify `GATEWAY_BROWSER_ENABLED=true`, check CDP endpoint connectivity, and ensure origin allowlist includes acme-admin.
 - Browser navigation denied: Check that `GATEWAY_BROWSER_ALLOW_ORIGINS` includes `http://acme-admin:8080` and that the acme-admin sample is deployed.
+- Tool auto-approval not working: Verify auto-allow list configuration and check that tools are read-only; mutating tools cannot be auto-approved.
+- Unexpected tool parking: Check if tool is in the correct auto-allow list (built-in default vs. extra list) and verify environment-specific overrides.
 
 **Updated** After SPEC-061, the browser-dev profile no longer includes the static browser-check-target app, so browser navigation is only permitted to the acme-admin sample application.
+
+**Updated** v0.39.1 hardening removed `http.get` from built-in defaults; development clusters use `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get` to preserve demo behavior while production gets hardened defaults.
 
 Verification steps:
 - Confirm the platform-runtime-config ConfigMap contains expected keys.
@@ -419,6 +500,8 @@ Verification steps:
 - Check rollout status for affected deployments after applying changes.
 - Test HTTP connector endpoints directly to verify reachability and response sizes.
 - Verify browser connectivity to acme-admin sample through the CDP endpoint.
+- Check agent-service logs for auto-allow list resolution and tool registration.
+- Verify tool auto-approval behavior matches expected environment posture.
 
 **Section sources**
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
@@ -435,9 +518,10 @@ Luban's configuration system separates non-secret and secret concerns:
 - Environment-specific behavior is achieved through runtime profiles and overlays without rebuilding images.
 - HTTP connector configuration provides flexible service health checking capabilities with security controls.
 - Browser connector configuration enables web application testing through Chromium automation with strict origin controls.
+- Agent auto-allow list configuration supports both hardened defaults and environment-specific opt-ins through additive patterns.
 - Following the documented procedures ensures consistent, auditable, and recoverable configuration management across development, staging, and production.
 
-**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application.
+**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -503,3 +587,39 @@ Luban's configuration system separates non-secret and secret concerns:
 - [config.py:17-24](file://products/tool-gateway/src/tool_gateway/core/config.py#L17-L24)
 - [config.py:72-80](file://products/tool-gateway/src/tool_gateway/core/config.py#L72-L80)
 - [browser.env:1-15](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L15)
+
+### Agent Auto-Allow List Configuration Reference
+**Environment Variables:**
+- `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Replacement allow-list (comma-separated dotted tool names)
+- `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`: Additive allow-list (comma-separated dotted tool names)
+
+**Behavior Matrix:**
+| `AUTO_ALLOW` | `AUTO_ALLOW_EXTRA` | Resolved Behavior |
+|---|---|---|
+| unset | unset | Built-in hardened defaults (no `http.get`) |
+| unset | `http.get` | Defaults ∪ `{http_get}` |
+| `k8s.get_pod` | `http.get` | `{k8s_get_pod, http_get}` |
+| "" (empty) | unset | Nothing auto-approved |
+| "" (empty) | `http.get` | `{http_get}` |
+
+**Security Invariants:**
+- Mutating tools are never auto-approved regardless of configuration
+- Read-only invariant enforced at middleware level
+- Tool-gateway still enforces origin allowlists and structural refusals
+- Names normalized to sanitized form (dots → underscores)
+
+**Development Pattern:**
+```bash
+# Dev cluster preserves http.get auto-approval for demos
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+```
+
+**Production Pattern:**
+```bash
+# Hardened defaults - all tools require explicit approval
+# No auto-allow configuration
+```
+
+**Section sources**
+- [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
+- [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)

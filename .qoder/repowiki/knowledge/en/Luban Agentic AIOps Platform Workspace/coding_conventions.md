@@ -1,5 +1,6 @@
-- Each product lives under `products/<name>/` with its own `Makefile`, Dockerfile, and `src/` package, invoked from the root Makefile rather than edited directly.
-- Policy bundles are authored once as the canonical file in `shared/shared-contracts/policies/policy-default.yaml` and copied to consumers via `make sync-policy` instead of maintained per service.
-- Versioning is centralized: `VERSION` is the single source of truth and `make validate-version` enforces lockstep across products and the portal.
-- Cross-cutting validation (policy scenarios, secret vocabulary, overlay rendering) is expressed as root Makefile targets that delegate into `shared/shared-contracts/scripts/` rather than duplicated per product.
-- Tutorial samples are kept out-of-band from the base Kustomize overlay and installed separately via `make deploy-samples` per SPEC-050 R-11.
+- Each product follows a uniform layout of `src/<package>/` with `api/`, `core/`, `services/`, `schemas/`, `policies/`, and `tools/` subpackages plus `app.py`, `main.py`, and `metadata.py` entry points.
+- Product packages are uv-managed Python projects with their own `pyproject.toml`, `uv.lock`, and `.python-version`, enabling independent dependency resolution and container builds.
+- Cross-cutting policies are authored once in `shared/shared-contracts/policies/policy-default.yaml` and copied into each consumer via the `sync-policy` Make target rather than maintained per service.
+- Versioning is centralized in the root `VERSION` file and enforced at build time by `validate-version`, keeping every product's declared version in lockstep.
+- Documentation is organized as spec-driven slices under `docs/specs/SPEC-NNN-<title>/` containing `plan.md`, `spec.md`, and `tasks.md`, with architecture decisions captured as numbered ADRs under `docs/adr/`.
+- Samples and tutorial apps are kept out of the base Kustomize overlay and installed on demand via `make deploy-samples` / `make deploy-sample-app`, ensuring the default deployment surface stays minimal.

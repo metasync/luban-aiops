@@ -1,1 +1,1 @@
-Monorepo root that coordinates the Luban agentic AIOps platform's product services, shared contracts, GitOps overlays, and e2e demos through a single Makefile-driven build, verify, and deploy pipeline.
+Monorepo workspace for the Luban agentic AIOps platform, organizing nine product services, shared contracts and SDKs, GitOps overlays, specs, ADRs, and tutorial samples under a unified build and verification pipeline.

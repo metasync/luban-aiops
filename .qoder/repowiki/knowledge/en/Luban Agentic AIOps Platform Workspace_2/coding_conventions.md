@@ -1,0 +1,5 @@
+- Each product lives under `products/<name>/` with its own `Makefile`, Dockerfile, and `src/` package, invoked from the root Makefile rather than edited directly.
+- Policy bundles are authored once as the canonical file in `shared/shared-contracts/policies/policy-default.yaml` and copied to consumers via `make sync-policy` instead of maintained per service.
+- Versioning is centralized: `VERSION` is the single source of truth and `make validate-version` enforces lockstep across products and the portal.
+- Cross-cutting validation (policy scenarios, secret vocabulary, overlay rendering) is expressed as root Makefile targets that delegate into `shared/shared-contracts/scripts/` rather than duplicated per product.
+- Tutorial samples are kept out-of-band from the base Kustomize overlay and installed separately via `make deploy-samples` per SPEC-050 R-11.

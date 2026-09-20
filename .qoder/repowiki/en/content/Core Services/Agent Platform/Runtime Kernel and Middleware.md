@@ -13,6 +13,14 @@
 - [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated auto-allow list documentation to reflect removal of `http.get` from default vetted tools
+- Added documentation for new `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` environment variable
+- Enhanced security posture section with opt-in behavior for outbound HTTP requests
+- Updated configuration examples to show additive approval pattern
+- Revised permission middleware behavior to reflect hardened defaults
+
 ## Table of Contents
 1. Introduction
 2. Project Structure
@@ -26,7 +34,9 @@
 10. Appendices
 
 ## Introduction
-This document explains the Agent Platform’s runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating and evidence emission, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
+This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating and evidence emission, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
+
+**Updated** The security posture has been hardened to require explicit operator confirmation for outbound HTTP requests by default, representing a shift from automatic approval to opt-in behavior for network egress operations.
 
 ## Project Structure
 The runtime kernel lives under the agent-service package and is composed of:
@@ -75,7 +85,7 @@ RC --> TEL
 
 ## Core Components
 - AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, and evidence persistence.
-- GatewayPermissionMiddleware: Enforces a platform allow-list for auto-approved read-only tools, always allows kernel-local task tools, and routes other tool invocations to explicit ASK for operator confirmation; supports browser flow unlock for approved mutating flows.
+- GatewayPermissionMiddleware: Enforces a platform allow-list for auto-approved read-only tools, always allows kernel-local task tools, and routes other tool invocations to explicit ASK for operator confirmation; supports browser flow unlock for approved mutating flows. **Updated** Outbound HTTP requests now require explicit operator confirmation by default.
 - ToolEvidenceMiddleware: Emits tool_call and tool_result evidence frames for gateway-backed tools during streaming, with bounded data summaries and optional full payloads, and redacts sensitive parameters.
 - Request Context: Resolves x-request-id by preferring inbound header, then current OTel trace_id, then generating a UUID.
 - Telemetry: Optional OpenTelemetry push pipeline for traces, metrics, and logs; integrates FastAPI and HTTPX instrumentation.
@@ -182,7 +192,7 @@ PersistEvidence --> End(["Exit"])
 
 ### GatewayPermissionMiddleware
 Responsibilities:
-- Auto-approve vetted read-only gateway tools from a static allow-list; environment override supported.
+- Auto-approve vetted read-only gateway tools from a static allow-list; environment override supported. **Updated** `http.get` has been removed from the default allow-list due to security hardening.
 - Always allow kernel-local tools (task tools and structured-output delivery).
 - Route all other tools to explicit ASK to park for operator confirmation; avoids delegating to built-in PermissionEngine to prevent bypassing the allow-list.
 - Supports browser flow unlock: when a mutating web.* call occurs inside an already-approved flow, an optional flow_signer can return an envelope to ALLOW it once per flow.
@@ -263,7 +273,7 @@ end
 ### Request Context and Tracing Integration
 - Request ID resolution prefers inbound x-request-id, falls back to current OTel trace_id when tracing is enabled, otherwise generates a UUID.
 - Telemetry setup initializes providers and instrumentations when OTEL_ENABLED is true; fail-open on setup errors.
-- current_trace_id exposes the active span’s W3C trace_id for correlation.
+- current_trace_id exposes the active span's W3C trace_id for correlation.
 
 ```mermaid
 flowchart TD
@@ -354,7 +364,7 @@ Common issues and diagnostics:
 - Toolkit discovery failures: empty discovery is retried each turn; monitor agent toolkit counts and logs for warnings.
 - Evidence persistence failures: best-effort persistence; watch evidence_store_writes_total and related error counters.
 - Agent state restore/snapshot failures: degraded durability but turns continue; monitor agent_state_errors_total and fallback counters.
-- HITL parking: unexpected ASK indicates tool not in allow-list or flow-unlock not applicable; verify allow-list and flow authority.
+- HITL parking: unexpected ASK indicates tool not in allow-list or flow-unlock not applicable; verify allow-list and flow authority. **Updated** `http.get` now parks by default unless explicitly opted in via `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`.
 - Telemetry misconfiguration: OTel setup failures are logged but do not block requests; verify OTEL_ENABLED and endpoint configuration.
 
 **Section sources**
@@ -368,6 +378,8 @@ Common issues and diagnostics:
 ## Conclusion
 The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads), resilience (best-effort persistence, fail-open telemetry), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
 
+**Updated** The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
+
 [No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
@@ -375,7 +387,7 @@ The runtime kernel provides a robust, configurable foundation for agent executio
 ### Implementing Custom Middleware
 To add cross-cutting behavior:
 - Subclass MiddlewareBase and implement on_check_permission to influence tool admission or on_acting to observe/instrument tool execution.
-- Compose your middleware into the kernel’s stack via _build_middlewares or equivalent extension points.
+- Compose your middleware into the kernel's stack via _build_middlewares or equivalent extension points.
 - Ensure your middleware respects request-scoped contexts (e.g., TOOL_EVIDENCE_SINK) and does not introduce unbounded data in frames.
 
 Guidance grounded in existing patterns:
@@ -407,3 +419,48 @@ Guidance grounded in existing patterns:
 - [metrics.py:23-73](file://products/agent-platform/src/agent_service/core/metrics.py#L23-L73)
 - [test_kernel_middleware.py:161-360](file://products/agent-platform/tests/test_kernel_middleware.py#L161-L360)
 - [test_kernel_middleware.py:508-736](file://products/agent-platform/tests/test_kernel_middleware.py#L508-L736)
+
+### Managing the Auto-Allow List
+
+**Updated** Security hardening in v0.39.1 removed `http.get` from the default auto-allow list, requiring explicit operator confirmation for outbound HTTP requests by default.
+
+`AGENT_GATEWAY_TOOL_AUTO_ALLOW` controls Layer 3 only.
+
+Semantics:
+
+- **Unset** → the built-in vetted list (the read tools shipped with the platform). The authoritative copy is `DEFAULT_AUTO_ALLOWED_TOOLS` in `agent_service/services/kernel_middleware.py`; as shipped it includes `k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`, `skills.search`, `skills.get`, `skills.list`, `incidents.list`, `incidents.get`, and the read-class browser probes (`web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`, `web.extract`, `web.wait_for`, `web.hover`, `web.scroll`, `web.switch_frame`). **Note:** `http.get` is no longer included in the default list due to security hardening. Every write-tier tool is absent by construction — including `web.click`/`web.type`/`web.evaluate`, `http.post` and `k8s.delete_pod` — and naming one cannot change that (see the invariant below).
+- **Empty string** → auto-approve nothing; every gateway tool parks for confirmation.
+- **Comma-separated dotted names** → replaces the default entirely. Names are normalized to AgentScope's sanitized form (`k8s.get_pod` → `k8s_get_pod`). Unknown names are harmless (they simply match nothing).
+
+**New Additive Configuration**: `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides additive tool approval without restating the entire default list.
+
+- **Additive behavior**: Entries are unioned with the resolved set (built-in default or replacement set when `AGENT_GATEWAY_TOOL_AUTO_ALLOW` is also present).
+- **Normalization**: Both variables normalize dots to underscores for AgentScope compatibility.
+- **Composition**: The two variables compose together, allowing fine-grained control over auto-approval.
+
+Configuration examples:
+
+```bash
+# Opt out http.get from auto-approval (default hardened behavior)
+# No configuration needed - http.get parks by default
+
+# Opt in http.get for card-free operation (additive)
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+
+# Replace default with custom list (replacement semantics)
+AGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s.list_pods,k8s.get_pod,elastic.search_logs
+
+# Combine replacement with additive opt-ins
+AGENT_GATEWAY_TOOL_AUTO_ALLOW=k8s.get_pod
+AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+```
+
+**Security Posture**: Outbound HTTP requests now require explicit operator confirmation by default, representing a shift from automatic approval to opt-in behavior for network egress operations. This provides defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through the additive configuration approach.
+
+**Invariant**: Mutating tools are never auto-approved regardless of these settings. If a write/admin tool appears in any auto-allow variable, agent-platform logs a warning at toolkit construction and the tool still parks for confirmation.
+
+**Section sources**
+- [kernel_middleware.py:71-115](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L71-L115)
+- [kernel_middleware.py:117-139](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L139)
+- [test_kernel_middleware.py:178-205](file://products/agent-platform/tests/test_kernel_middleware.py#L178-L205)
+- [test_kernel_middleware.py:222-233](file://products/agent-platform/tests/test_kernel_middleware.py#L222-L233)
