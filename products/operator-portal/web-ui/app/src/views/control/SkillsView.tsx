@@ -7,6 +7,7 @@ import {
   Input,
   Spin,
   Table,
+  Tag,
   Typography,
   type TableColumnsType,
 } from "antd";
@@ -24,6 +25,10 @@ interface SkillRecord {
   tags?: string[];
   version?: string;
   updated_at?: string;
+  // SPEC-057 R-1/R-7: the derived display-only risk_class already flows from
+  // summary(); the list renders it as a badge (wired in R-7).
+  kind?: string;
+  risk_class?: string;
 }
 
 interface SkillsPayload {
@@ -91,6 +96,21 @@ export default function SkillsView() {
       render: (_value, skill) => skill.title || skill.skill_id,
     },
     { title: "source", dataIndex: "source_id", render: (v) => v ?? "—" },
+    {
+      // SPEC-057 R-7: the derived display-only risk_class. A composition's badge
+      // is computed at sync (write when any sub-skill writes, else read) and
+      // flows from summary(); a knowledge skill declares none and renders "—".
+      // Same read/write colour vocabulary as the chat confirmation cards, so the
+      // list badge and the gate agree. Display only — nothing gates on it.
+      title: "risk",
+      dataIndex: "risk_class",
+      render: (value?: string) =>
+        value ? (
+          <Tag color={value === "read" ? "default" : "warning"}>{value}</Tag>
+        ) : (
+          "—"
+        ),
+    },
     {
       title: "tags",
       render: (_value, skill) => (skill.tags ?? []).join(", ") || "—",

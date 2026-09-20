@@ -7,6 +7,29 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-09-20-spec-057-skill-composition-runbooks.md`
+  - delivers SPEC-057 in v0.40.0 (nineteenth R5 slice; roadmap row 346's item
+    **(b)**): a third, additive skill `kind: composition` — an ordered
+    `sub_skills[]` list of published single-target skills that reaches the agent as
+    grounded guidance for a multi-target runbook. Realizes **ADR-0011** (a
+    composition carries **no authority**; each sub-skill keeps its own gate through
+    the shipped `FlowContext` `(skill_id, origin)` identity guard plus ADR-0007
+    re-park-on-rebind, so multi-binding re-park needs **no new enforcement
+    machinery** and adds no kernel trust state). Skill Format goes **v2 → v3**
+    additively; validation is two-layer fail-closed (a pure structural
+    `_validate_composition` shared by the validate route + CLI, and a
+    store-consulting `_resolve_compositions` in `sync_once` that drops an
+    unresolved or nested reference (single-target is structurally guaranteed by
+    the scalar `web_target`) and derives + persists the
+    display `risk_class`); `get_skill` projects a resolved-sub-skill view; one new
+    `SKILLS_COMPOSITION_MAX_SUB_SKILLS` knob (default 8); the portal ships a derived
+    risk badge and a read-only Runbook sub-skill list (no composition editor in
+    Phase 1); and a mixed browser+infra `samples/acme-admin/composition/` demo
+    parks **2** cards on one session. No new policy action, audit event type,
+    stream-contract change, or database migration beyond one idempotent
+    `sub_skills JSONB` column. Validation evidence (`make verify` 2,738 tests,
+    `make policy-diff` zero transitions across 138 pairs, portal 408/32) and
+    limitations recorded in the note.
 - `2026-09-20-post-web-checks-egress-hardening.md`
   - patch (v0.39.1) hardening the agent kernel's tool auto-allow posture after
     the v0.39.0 `web-checks` consolidation, written from an L3 deep security

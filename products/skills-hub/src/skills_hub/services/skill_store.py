@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS skills (
     risk_class  TEXT,
     flow_intent TEXT,
     kind        TEXT,
-    steps       JSONB
+    steps       JSONB,
+    sub_skills  JSONB
 );
 -- SPEC-049 R-3: web-check declaration columns; the idempotent ALTERs
 -- migrate tables created before 0.31.0 (CREATE TABLE IF NOT EXISTS never
@@ -188,6 +189,11 @@ ALTER TABLE skills ADD COLUMN IF NOT EXISTS flow_intent TEXT;
 -- knowledge skill with no replay list, i.e. exactly the v1 shape.
 ALTER TABLE skills ADD COLUMN IF NOT EXISTS kind TEXT;
 ALTER TABLE skills ADD COLUMN IF NOT EXISTS steps JSONB;
+-- SPEC-057 R-1: composition class (Skill v3). ``sub_skills`` holds the
+-- ordered sub-skill reference list; the idempotent ALTER migrates tables
+-- created before it, and existing rows get NULL — a knowledge/executable_flow
+-- skill with no reference list, i.e. exactly the pre-v3 shape.
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS sub_skills JSONB;
 CREATE INDEX IF NOT EXISTS idx_skills_source_id
     ON skills (source_id);
 -- The GIN expression must only use IMMUTABLE functions; array_to_string /
@@ -203,12 +209,12 @@ _INSERT = """
 INSERT INTO skills (
     skill_id, source_id, source_path, source_ref, title, description,
     tags, version, source_url, updated_at, body, web_target, risk_class,
-    flow_intent, kind, steps
+    flow_intent, kind, steps, sub_skills
 ) VALUES (
     %(skill_id)s, %(source_id)s, %(source_path)s, %(source_ref)s,
     %(title)s, %(description)s, %(tags)s, %(version)s, %(source_url)s,
     %(updated_at)s, %(body)s, %(web_target)s, %(risk_class)s,
-    %(flow_intent)s, %(kind)s, %(steps)s
+    %(flow_intent)s, %(kind)s, %(steps)s, %(sub_skills)s
 )
 ON CONFLICT (skill_id) DO UPDATE SET
     source_path = EXCLUDED.source_path,
@@ -224,13 +230,14 @@ ON CONFLICT (skill_id) DO UPDATE SET
     risk_class = EXCLUDED.risk_class,
     flow_intent = EXCLUDED.flow_intent,
     kind = EXCLUDED.kind,
-    steps = EXCLUDED.steps
+    steps = EXCLUDED.steps,
+    sub_skills = EXCLUDED.sub_skills
 """
 
 _ROW_COLUMNS = (
     "skill_id, source_id, source_path, source_ref, title, description, "
     "tags, version, source_url, updated_at, body, web_target, risk_class, "
-    "flow_intent, kind, steps"
+    "flow_intent, kind, steps, sub_skills"
 )
 
 # The tsvector half mirrors idx_skills_search exactly so the GIN index can
@@ -256,6 +263,10 @@ def _row_to_skill(row: dict[str, Any]) -> Skill:
     # keeps a NULL column (and anything a driver hands back un-decoded) on the
     # knowledge-skill path instead of raising inside the read.
     steps = row["steps"]
+    # ``sub_skills`` (SPEC-057 R-1) is the same JSONB shape for a composition's
+    # reference list; the identical guard keeps a NULL column (a
+    # knowledge/executable_flow skill) omitted rather than raising.
+    sub_skills = row["sub_skills"]
     return Skill(
         skill_id=row["skill_id"],
         source_id=row["source_id"],
@@ -273,6 +284,7 @@ def _row_to_skill(row: dict[str, Any]) -> Skill:
         flow_intent=row["flow_intent"],
         kind=row["kind"],
         steps=steps if isinstance(steps, list) else None,
+        sub_skills=sub_skills if isinstance(sub_skills, list) else None,
     )
 
 
@@ -334,7 +346,10 @@ class PostgresSkillStore:
                     # wrapper (the SPEC-051 "cannot adapt type 'dict'"
                     # lesson). An absent step list stays SQL NULL rather than
                     # JSON ``null`` so both backends round-trip identically.
+                    # SPEC-057 R-1: ``sub_skills`` is the same JSONB shape and
+                    # takes the same wrapper + NULL-when-absent treatment.
                     steps = payload.get("steps")
+                    sub_skills = payload.get("sub_skills")
                     await cur.execute(
                         _INSERT,
                         {
@@ -355,6 +370,11 @@ class PostgresSkillStore:
                             "kind": payload.get("kind"),
                             "steps": (
                                 Jsonb(steps) if steps is not None else None
+                            ),
+                            "sub_skills": (
+                                Jsonb(sub_skills)
+                                if sub_skills is not None
+                                else None
                             ),
                         },
                     )

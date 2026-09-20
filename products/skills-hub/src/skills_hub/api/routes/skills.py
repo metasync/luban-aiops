@@ -65,6 +65,31 @@ def _emit_usage(
     )
 
 
+async def _project_sub_skills(store: SkillStore, content: dict) -> dict:
+    """Enrich a composition's ``sub_skills`` for the read path (SPEC-057 R-6).
+
+    A projection beside the stored envelope — the ``search_skills``
+    ``score``/``excerpt`` precedent. The authored/stored item keeps just
+    ``skill_id`` + ``note``; ``resolved_title`` and ``resolved_web_target`` are
+    looked up per read, so the rendered guidance names each sub-skill's own
+    title and declared target (an operator reading a transcript sees which
+    target each segment was scoped to) and nothing resolved is persisted — a
+    read-path projection is always current, where a stored copy would go stale
+    when a sub-skill is republished. A sub-skill missing at read time degrades
+    gracefully to its authored item. Both gateways pass this record through
+    verbatim, so the view reaches the model over the existing SPEC-014
+    grounded-guidance path; the platform never pre-binds a sub-skill and never
+    enforces the declared order.
+    """
+    for item in content.get("sub_skills", []):
+        resolved = await store.get(item["skill_id"])
+        if resolved is not None:
+            item["resolved_title"] = resolved.title
+            if resolved.web_target is not None:
+                item["resolved_web_target"] = resolved.web_target
+    return content
+
+
 @router.get("/skills")
 async def list_skills(
     request: Request,
@@ -175,7 +200,9 @@ async def validate_skill_document(
             "INVALID_PARAMETERS",
             f"document exceeds {MAX_VALIDATE_DOCUMENT_BYTES} bytes",
         )
-    valid, reason = validate_document(document)
+    valid, reason = validate_document(
+        document, settings.composition_max_sub_skills
+    )
     if valid:
         return JSONResponse(content={"valid": True})
     return JSONResponse(content={"valid": False, "reason": reason})
@@ -211,4 +238,11 @@ async def get_skill(
         {"skill_id": skill.skill_id, "source": skill.source_id},
         client_id,
     )
-    return JSONResponse(content=skill.model_dump(mode="json", exclude_none=True))
+    content = skill.model_dump(mode="json", exclude_none=True)
+    if skill.sub_skills:
+        # SPEC-057 R-6: a composition reaches the model as grounded guidance —
+        # its body plus each sub-skill's own title and declared target, in
+        # declared order. Read-path projection only; a non-composition skill has
+        # no sub_skills, so its record is returned byte-identical to before.
+        content = await _project_sub_skills(store, content)
+    return JSONResponse(content=content)

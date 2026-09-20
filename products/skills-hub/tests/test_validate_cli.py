@@ -22,6 +22,23 @@ description: A valid example.
 Body text.
 """
 
+# SPEC-057 R-2: the CLI resolves the configured composition cap and rides the
+# same structural layer sync does, so a composition is accepted or rejected at
+# the pre-flight exactly as it is at ingestion.
+COMPOSITION_DOC = """---
+title: Reset And Unlock
+description: Reset the password then unlock the user.
+kind: composition
+sub_skills:
+  - skill_id: samples/password-reset-resetacmepassword
+    note: Reset the password first.
+  - skill_id: samples/lock-unlock-user-lockunlockuser
+    note: Then unlock the account.
+---
+
+On failure, report which sub-skill failed and stop.
+"""
+
 
 class ValidateCliTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -47,6 +64,34 @@ class ValidateCliTests(unittest.TestCase):
 
     def test_empty_directory_passes(self) -> None:
         self.assertEqual(self._run_cli(), 0)
+
+    def test_valid_composition_passes(self) -> None:
+        (self.root / "composition.md").write_text(COMPOSITION_DOC)
+        self.assertEqual(self._run_cli(), 0)
+
+    def test_composition_sequencing_key_fails(self) -> None:
+        # R-3: a control-flow key on a sub_skills item is an unknown key, so the
+        # pre-flight rejects it with the same reason sync would.
+        (self.root / "composition.md").write_text(
+            COMPOSITION_DOC.replace(
+                "    note: Then unlock the account.\n",
+                "    note: Then unlock the account.\n    on_fail: rollback\n",
+            )
+        )
+        self.assertEqual(self._run_cli(), 1)
+
+    def test_composition_over_cap_fails(self) -> None:
+        # The CLI resolves the configured cap (default 8), so a 9-item list
+        # exceeds it and the pre-flight matches sync's rejection.
+        items = "".join(
+            f"  - skill_id: samples/skill-{index}\n" for index in range(9)
+        )
+        doc = (
+            "---\ntitle: Big Runbook\ndescription: Too many sub-skills.\n"
+            "kind: composition\nsub_skills:\n" + items + "---\n\nBody.\n"
+        )
+        (self.root / "composition.md").write_text(doc)
+        self.assertEqual(self._run_cli(), 1)
 
 
 if __name__ == "__main__":

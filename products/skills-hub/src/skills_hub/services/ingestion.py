@@ -71,7 +71,10 @@ CREDENTIAL_HOLE = "<credential-reference>"
 CREDENTIAL_FILL_TOOL = "web.fill_credential"
 BROWSER_TOOL_PREFIX = "web."
 EXECUTABLE_FLOW_KIND = "executable_flow"
-VALID_KINDS = ("knowledge", EXECUTABLE_FLOW_KIND)
+# SPEC-057 R-1: the third skill class — an ordered list of single-target
+# sub-skill references that carries no authority of its own (ADR-0011).
+COMPOSITION_KIND = "composition"
+VALID_KINDS = ("knowledge", EXECUTABLE_FLOW_KIND, COMPOSITION_KIND)
 STEP_KEYS = {"tool", "args", "expect"}
 ALLOWED_KEYS = {
     "title",
@@ -91,10 +94,25 @@ ALLOWED_KEYS = {
     # and the machine-readable replay step list it carries.
     "kind",
     "steps",
+    # SPEC-057 R-1: optional composition class — the ordered ``sub_skills``
+    # reference list a ``kind: composition`` skill carries.
+    "sub_skills",
 }
 VALID_RISK_CLASSES = ("read", "write")
 SKIPPED_BASENAMES = {"readme.md", "notice", "notice.md"}
 _SEGMENT_CLEANUP = re.compile(r"[^a-z0-9]+")
+# SPEC-057 R-1/R-2: composition sub-skill reference bounds. ``MAX_SUB_SKILLS``
+# is the module default for the composite-wide cap; sync/draft/CLI thread the
+# operator-configured ``SKILLS_COMPOSITION_MAX_SUB_SKILLS`` through so the
+# pre-flight matches sync. The item key set is what makes R-3 (no control flow)
+# true by construction: only ``skill_id`` + ``note`` are recognized, so any
+# sequencing key (``if``/``loop``/``retry``/``on_fail``) is an unknown key.
+MAX_SUB_SKILLS = 8
+MAX_SUB_SKILL_NOTE_CHARS = 200
+SUB_SKILL_ITEM_KEYS = {"skill_id", "note"}
+# Same namespaced ``<source_id>/<slug>`` pattern the contract's top-level
+# ``skill_id`` and a ``sub_skills[].skill_id`` reference both use.
+SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)+$")
 
 
 @dataclass(frozen=True)
@@ -147,7 +165,7 @@ def split_frontmatter(text: str) -> tuple[str, str] | None:
 
 
 def _validate_frontmatter(
-    source_id: str, rel_path: str, raw: str
+    source_id: str, rel_path: str, raw: str, max_sub_skills: int = MAX_SUB_SKILLS
 ) -> tuple[dict, str] | Rejection:
     """Validate the frontmatter mapping; return fields or a rejection."""
     parts = split_frontmatter(raw)
@@ -266,6 +284,16 @@ def _validate_frontmatter(
     # frontmatter because it is a *set* of declarations that have to agree —
     # ``kind`` + ``steps`` + the ``risk_class``/``web_target`` they imply.
     rejection = _validate_steps(source_id, rel_path, frontmatter)
+    if rejection is not None:
+        return rejection
+
+    # SPEC-057 R-2: the composition class's *structural* facts — the ones a
+    # single document can prove alone. The cross-skill facts (does each
+    # sub-skill resolve, is it single-target, is it itself a composition) need
+    # the catalog and are checked in sync's store-consulting resolution pass.
+    rejection = _validate_composition(
+        source_id, rel_path, frontmatter, max_sub_skills
+    )
     if rejection is not None:
         return rejection
 
@@ -460,14 +488,119 @@ def _validate_steps(
     return None
 
 
-def validate_document(raw: str) -> tuple[bool, str | None]:
+def _validate_composition(
+    source_id: str, rel_path: str, frontmatter: dict, max_sub_skills: int
+) -> Rejection | None:
+    """Validate the composition class's *structural* facts (SPEC-057 R-2/R-3).
+
+    Additive by construction: a document with neither ``kind: composition`` nor
+    ``sub_skills`` returns None immediately and validates exactly as before.
+    This pure layer covers only what a single document can prove alone — the
+    reference-list shape, the item key set, the count cap, the no-duplicate
+    rule, and the "a composition declares no web_target/steps/risk_class"
+    invariant — so ``validate_document`` (the draft path) and the
+    ``python -m skills_hub.validate`` CLI, which have no catalog, enforce it
+    too. The cross-skill facts (does each sub-skill resolve, is it single-target,
+    is it itself a composition) need the store and are checked in sync's
+    ``_resolve_compositions`` pass; a composition is *never* silently degraded
+    to a knowledge skill — a failure here rejects the document.
+    """
+    kind = frontmatter.get("kind")
+    sub_skills = frontmatter.get("sub_skills")
+
+    if sub_skills is not None and kind != COMPOSITION_KIND:
+        # ``sub_skills`` is the composition's reference list, so a list without
+        # the discriminator is a malformed document rather than an implicit
+        # composition — the class is declared, never inferred (the ``steps``
+        # rule's twin).
+        return Rejection(
+            source_id, rel_path, f"sub_skills requires kind: {COMPOSITION_KIND}"
+        )
+    if kind != COMPOSITION_KIND:
+        return None
+
+    # A composition declares no authorization target, no interpreter input, and
+    # no author risk_class: its scope is the union of its sub-skills' scopes and
+    # its display risk_class is derived at sync (SPEC-057 R-1/R-2). Declaring
+    # any of the three would falsely imply a single gated target or a platform
+    # sequencer that does not exist.
+    for forbidden in ("web_target", "steps", "risk_class"):
+        if frontmatter.get(forbidden) is not None:
+            return Rejection(
+                source_id,
+                rel_path,
+                f"a composition declares no {forbidden} "
+                f"(kind: {COMPOSITION_KIND})",
+            )
+
+    if not isinstance(sub_skills, list) or not sub_skills:
+        return Rejection(
+            source_id,
+            rel_path,
+            f"kind: {COMPOSITION_KIND} requires a non-empty sub_skills list",
+        )
+    if len(sub_skills) > max_sub_skills:
+        return Rejection(
+            source_id, rel_path, f"more than {max_sub_skills} sub_skills"
+        )
+
+    seen: set[str] = set()
+    for index, item in enumerate(sub_skills, start=1):
+        where = f"sub_skill {index}"
+        if not isinstance(item, dict):
+            return Rejection(source_id, rel_path, f"{where} must be a mapping")
+        unknown = sorted(str(key) for key in set(item) - SUB_SKILL_ITEM_KEYS)
+        if unknown:
+            # R-3: this is what rejects a sequencing key (``if`` / ``loop`` /
+            # ``retry`` / ``on_fail``) — there is no control-flow vocabulary, so
+            # any key but the two allowed is unknown and the document fails.
+            return Rejection(
+                source_id,
+                rel_path,
+                f"{where}: unknown sub_skill keys: {', '.join(unknown)}",
+            )
+        skill_id = item.get("skill_id")
+        if not isinstance(skill_id, str) or not SKILL_ID_PATTERN.match(skill_id):
+            return Rejection(
+                source_id,
+                rel_path,
+                f"{where}: 'skill_id' is required and must be a namespaced "
+                "<source_id>/<slug> id",
+            )
+        if skill_id in seen:
+            return Rejection(
+                source_id, rel_path, f"{where}: duplicate skill_id '{skill_id}'"
+            )
+        seen.add(skill_id)
+        note = item.get("note")
+        if note is not None and (
+            not isinstance(note, str)
+            or len(note) > MAX_SUB_SKILL_NOTE_CHARS
+        ):
+            return Rejection(
+                source_id,
+                rel_path,
+                f"{where}: note must be a string "
+                f"≤ {MAX_SUB_SKILL_NOTE_CHARS} chars",
+            )
+    return None
+
+
+def validate_document(
+    raw: str, max_sub_skills: int = MAX_SUB_SKILLS
+) -> tuple[bool, str | None]:
     """Validate one candidate skill document against the skill contract.
 
     Same code path ``ingest_directory`` uses at sync time (single source of
     truth for Skill Format v1 — SPEC-044 R-2). Returns ``(valid, reason)``
     where ``reason`` uses the ingestion report vocabulary verbatim.
+    ``max_sub_skills`` defaults to the module cap; the draft route threads the
+    operator-configured ``SKILLS_COMPOSITION_MAX_SUB_SKILLS`` so the pre-flight
+    matches sync (SPEC-057 R-2).
     """
-    validated = _validate_frontmatter("validate", "draft.md", raw)
+    validated = _validate_frontmatter(
+        "validate", "draft.md", raw, max_sub_skills
+    )
     if isinstance(validated, Rejection):
         return False, validated.reason
     return True, None
@@ -478,6 +611,7 @@ def ingest_directory(
     root: Path,
     source_ref: str,
     updated_at: datetime,
+    max_sub_skills: int = MAX_SUB_SKILLS,
 ) -> IngestResult:
     """Validate every skill document under ``root`` into one snapshot.
 
@@ -519,7 +653,9 @@ def ingest_directory(
                 Rejection(source_id, rel_path, f"unreadable document: {exc}")
             )
             continue
-        validated = _validate_frontmatter(source_id, rel_path, raw)
+        validated = _validate_frontmatter(
+            source_id, rel_path, raw, max_sub_skills
+        )
         if isinstance(validated, Rejection):
             result.rejections.append(validated)
             continue
@@ -551,6 +687,7 @@ def ingest_directory(
                 flow_intent=frontmatter.get("flow_intent"),
                 kind=frontmatter.get("kind"),
                 steps=frontmatter.get("steps"),
+                sub_skills=frontmatter.get("sub_skills"),
                 updated_at=updated_at,
                 body=body.lstrip("\n"),
             )

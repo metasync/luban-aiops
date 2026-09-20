@@ -1362,6 +1362,77 @@ class TestConfirmationFrameFlowHeadline:
         assert frame["pending_calls"][0]["tool_name"] == "web.click"
 
 
+class TestCompositionGateCount:
+    """SPEC-057 R-4: a mixed browser+infra composition's gate count is the *sum*
+    of its browser bindings and its infra writes — one ``flow`` card per distinct
+    browser binding, one ``action`` card per infra write — never a single
+    composite gate. The composition carries no authority (ADR-0011); the two
+    sub-skills' own gates park, each naming only its own tool. This is the unit
+    leg the R-8 live demo (password-reset browser write + lock-unlock-user
+    ``http.post`` infra write ⇒ 2 cards > any single sub-skill's 1) exercises
+    end to end. Both frames are built in ONE session, so the lingering
+    password-reset flow context must not leak a headline onto the infra card —
+    the ``approval_kind``/``flow_summary`` biconditional (SPEC-054 R-1) is what
+    keeps the two gates distinct.
+    """
+
+    def _kernel(self):
+        return AgentKernel(
+            settings=RuntimeSettings(api_key="test-key", hitl_confirm_timeout=600)
+        )
+
+    def test_mixed_browser_and_infra_composition_gates_once_per_sub_skill(self):
+        FLOW_CONTEXTS.clear_all()
+        session = "ses-composition-gates"
+        # Sub-skill 1: password-reset, a browser write flow bound to the session.
+        _record_context(session)  # samples/password-reset @ http://admin.local
+        kernel = self._kernel()
+
+        browser_toolkit = _fake_toolkit(("web_click", "web.click", "write"))
+        browser_event = RequireUserConfirmEvent(
+            reply_id="reply-1",
+            tool_calls=[
+                ToolCallBlock(id="call-browser", name="web_click", input='{"ref": 12}')
+            ],
+        )
+        flow_card = kernel._build_confirmation_frame(
+            browser_event, session, "alice", toolkit=browser_toolkit
+        )
+
+        # Sub-skill 2: lock-unlock-user, an infra ``http.post`` write. It binds
+        # no browser flow, so it parks as an individually-approved action even
+        # though sub-skill 1's flow context still lingers on the session.
+        infra_toolkit = _fake_toolkit(("http_post", "http.post", "write"))
+        infra_event = RequireUserConfirmEvent(
+            reply_id="reply-2",
+            tool_calls=[
+                ToolCallBlock(
+                    id="call-infra",
+                    name="http_post",
+                    input='{"url": "https://infra.internal/lock"}',
+                )
+            ],
+        )
+        action_card = kernel._build_confirmation_frame(
+            infra_event, session, "alice", toolkit=infra_toolkit
+        )
+
+        # Two sub-skills ⇒ two gates: one flow card, one action card. The count
+        # is the sum (2), exceeding any single sub-skill run (1 each), and the
+        # two are distinct parked confirmations.
+        assert flow_card is not None
+        assert action_card is not None
+        assert flow_card["approval_kind"] == "flow"
+        assert action_card["approval_kind"] == "action"
+        assert flow_card["confirm_id"] != action_card["confirm_id"]
+        # Each card names only its own sub-skill — no card claims authority over
+        # a sub-skill it does not name (R-4, asserted live by R-8).
+        assert flow_card["flow_summary"]["skill_id"] == "samples/password-reset"
+        assert flow_card["pending_calls"][0]["tool_name"] == "web.click"
+        assert "flow_summary" not in action_card
+        assert action_card["pending_calls"][0]["tool_name"] == "http.post"
+
+
 class TestSignFlowExecution:
     """SPEC-051 R-1/R-3: the kernel's ``flow_signer`` auto-signs a subsequent
     browser write under a live, identity-matched flow authority — injecting the

@@ -1,4 +1,4 @@
-# Skill Format (v2)
+# Skill Format (v3)
 
 Convention for team-authored skill documents consumed by `skills-hub`
 (SPEC-014 R-1). A skill is a Markdown file with YAML frontmatter; ingestion
@@ -10,6 +10,13 @@ v2 (SPEC-055 R-3) is **additive**: it adds an optional executable-flow class
 (`kind` + a machine-readable `steps` replay list) and decouples `risk_class`
 from `web_target`. A knowledge/guidance skill declares neither new key and
 validates exactly as it did under v1.
+
+v3 (SPEC-057 R-1) is likewise **additive**: it adds an optional composition
+class (`kind: composition` + an ordered `sub_skills` reference list) that
+carries **no authority of its own** (ADR-0011). A knowledge or executable-flow
+skill declares neither new key and validates exactly as it did under v2, and a
+v2 consumer that ignores `kind`/`sub_skills` still ingests a composition's
+`body` as grounded guidance.
 
 ## Document layout
 
@@ -38,10 +45,11 @@ mapping); the rest is the body.
 | `version` | no | string ≤ 64 chars; author-managed marker |
 | `source_url` | no | upstream attribution link for adapted open-source content |
 | `web_target` | no | web-check flow entry URL: absolute `http(s)` URL, ≤ 2048 chars; declares the skill a browser-driven check flow (SPEC-049) |
-| `risk_class` | no | `read` or `write` — declared effect of the flow's interactive steps; treated as `read` when `web_target` is present without it. **No longer requires `web_target`** (SPEC-055 R-3), so a non-browser mutating skill (`k8s.*` steps) can declare `write` |
+| `risk_class` | no | `read` or `write` — declared effect of the flow's interactive steps; treated as `read` when `web_target` is present without it. **No longer requires `web_target`** (SPEC-055 R-3), so a non-browser mutating skill (`k8s.*` steps) can declare `write`. A `composition` **never author-declares it** — it is derived for display only at sync (`write` when any resolved sub-skill is `write`, else `read`) and read by nothing in the deviation guard, identity guard, or policy engine (SPEC-057 R-1) |
 | `flow_intent` | no | author-written plain sentence, ≤ 200 chars, describing what the flow's gated mutating step achieves; requires `web_target`; shown as the confirmation card's lead decision line and display-only — never a security input (SPEC-053) |
-| `kind` | no | `knowledge` (default when absent) or `executable_flow` — the skill class discriminator (SPEC-055 R-3) |
+| `kind` | no | `knowledge` (default when absent), `executable_flow`, or `composition` — the skill class discriminator (SPEC-055 R-3; `composition` added by SPEC-057 R-1) |
 | `steps` | no | ordered replay step list for an `executable_flow`; requires `kind: executable_flow` and `risk_class: write` (SPEC-055 R-3) |
+| `sub_skills` | no | ordered sub-skill reference list for a `composition`; requires `kind: composition`, and a composition declares **no** `web_target`, **no** `steps`, and **no** author `risk_class` (SPEC-057 R-1) |
 
 Unknown keys are rejected: frontmatter must contain only the keys above.
 The `web_target` / `risk_class` pair is additive (SPEC-049 R-3): documents
@@ -138,6 +146,104 @@ Ingestion rules for the class (all rejections are reportable):
   configuration; this rule therefore fires for a hand-authored flow, or for a
   graduated draft a human completed with the credential reference at merge
   time (SPEC-055 R-4).
+
+## Composition skills (v3)
+
+A `composition` is an ordered, validated list of single-target sub-skill
+references (SPEC-057 R-1). It expresses a multi-target *workflow* — query A,
+health-check B, restart C — without widening any skill's authorization scope.
+It carries **no authority of its own** (ADR-0011): it never mints tokens,
+unlocks flows, or auto-approves gates. Each referenced sub-skill keeps its own
+HITL gate, enforced by the shipped browser flow identity guard and per-action
+infra gating — a composition adds no new gate machinery.
+
+```markdown
+---
+title: Account Recovery Runbook
+description: Reset a user's password, then re-enable their locked account.
+kind: composition
+sub_skills:
+  - skill_id: samples/password-reset-resetacmepassword
+    note: Reset the password on the admin portal first.
+  - skill_id: samples/lock-unlock-user-lockunlockuser
+    note: Then unlock the account via the infra API.
+---
+
+Runbook prose for the human reviewer, including the report-and-stop
+convention (see below) ...
+```
+
+Each `sub_skills` item is a mapping with exactly these keys:
+
+| Key | Required | Constraints |
+| --- | --- | --- |
+| `skill_id` | yes | the referenced sub-skill's namespaced id (`<source_id>/<slug>`, same pattern as a top-level `skill_id`) |
+| `note` | no | string ≤ 200 chars — a display-only sentence describing this segment; never a security input, and a string that is never interpreted |
+
+Order in the array **is** the runbook's declared sequence. Ingestion rules for
+the class (all rejections are reportable, and a rejected composition is
+**never** silently degraded to a knowledge skill):
+
+- `kind: composition` **requires** a non-empty `sub_skills` list.
+- A composition declares **no `web_target`**, **no `steps`**, and **no author
+  `risk_class`** — its scope is the union of its sub-skills' scopes, and
+  declaring any of the three would falsely imply a single authorization target
+  or a platform interpreter that does not exist.
+- Every `sub_skills[].skill_id` must **resolve** to a skill present in the
+  served catalog that is **single-target** (one `web_target` or none) and is
+  **not itself a `composition`** — no nesting in Phase 1, which removes cycles
+  and unbounded depth by construction rather than by detection.
+- **No duplicate** `skill_id` within one composition.
+- The count is bounded by `SKILLS_COMPOSITION_MAX_SUB_SKILLS` (default **8**).
+  The composite-wide worst case is `cap × GATEWAY_BROWSER_FLOW_MAX_STEPS`
+  (8 × 20 = 160) unlocked browser writes per run, each still individually
+  signed, audited and receipted, and each sub-skill still gated once.
+
+Because sub-skill resolution needs the catalog, it happens at sync (a
+store-consulting pass), not in the per-document draft pre-flight. Cross-source
+compositions are therefore **eventually consistent**: a composition whose
+sub-skill lives in a source that has not yet synced is rejected on this cycle
+and accepted on a later one — an unresolvable reference is never served.
+
+### No control flow (SPEC-057 R-3)
+
+A composition expresses **sequence and nothing else**. The contract provides no
+branch, loop, conditional, retry, or early-exit construct, and the item schema
+is `additionalProperties: false`, so no such key can be written or smuggled in
+via a `note` (a `note` is a string, never interpreted). The rationale is
+deliberate: an interpreter would need loops, and a loop defeats
+`GATEWAY_BROWSER_FLOW_MAX_STEPS`, currently the only bound on an unlocked
+browser flow.
+
+### Grounded guidance, not platform sequencing (SPEC-057 R-6)
+
+A composition reaches the model through the existing SPEC-014 grounded-guidance
+path: its `body` plus a rendered view of `sub_skills` in declared order, each
+with its `note` and its sub-skill's own title and declared target (projected by
+skills-hub's read path). The platform **never** pre-binds a sub-skill, never
+issues `web.navigate` on the model's behalf, and never enforces the declared
+order — order is guidance with the same standing as `steps[].expect`.
+
+### Not a transaction (SPEC-057 R-5)
+
+A composition is **not** a transaction. It has no rollback, no compensation and
+no saga semantics: a run that stops part-way leaves every target it already
+touched exactly as it is, and nothing claims otherwise. The convention is
+**report-and-stop** — on a sub-skill failure the agent reports *which* sub-skill
+failed and stops rather than continuing past a premise that no longer holds. The
+authored `body` carries this instruction as grounded guidance (the R-8 sample's
+body states it verbatim); it is a rendering property, not platform-enforced
+control flow (there is none — see *No control flow* above).
+
+**Re-entry derives from receipts, never from a new store.** There is no
+composite-progress record and no persisted runbook half-state. The completed
+prefix of a stopped run is reconstructable from the session's existing
+`execution_records` signed receipts, which are swept at **30 days**
+(`RETENTION_WINDOW_DAYS`, `execution_records.py:31`). Inside that window an
+operator can see which sub-skills already ran and restart from the next one;
+**outside it the operator restarts the runbook from the beginning.** Each
+sub-skill still gates on its own authority when re-run (R-4), so a restart never
+auto-signs a write the operator has not re-approved.
 
 ## Size caps
 

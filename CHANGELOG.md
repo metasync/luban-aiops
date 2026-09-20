@@ -11,6 +11,83 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.40.0 — 2026-09-20
+
+Minor release delivering **SPEC-057** (Skill Composition — Validated Runbooks of
+Single-Target Skills), the nineteenth R5 slice and roadmap row 346's item **(b)**.
+It adds a third, additive skill `kind: composition`: an ordered `sub_skills[]`
+list of existing published single-target skills that reaches the agent as
+grounded guidance for a multi-target runbook. A composition carries **no
+authority** (ADR-0011) — it never mints tokens, unlocks flows, or auto-approves a
+gate — and each named sub-skill keeps its own human-in-the-loop gate through the
+shipped `FlowContext.identity() == (skill_id, origin)` guard plus ADR-0007
+re-park-on-rebind, so multi-binding re-park needed **no new enforcement
+machinery** and adds no kernel trust state. Skill Format goes **v2 → v3**
+additively: a v2 consumer ignores `sub_skills` and is unaffected. There is **no
+control flow** (no interpreter, no branch/loop/conditional/retry) and a
+composition is **not a transaction** (report-and-stop, re-entry from a named step
+derived off existing `execution_records` signed receipts, swept at 30 days). No
+new policy action, no new audit event type, no stream-contract change; the
+tool-gateway deviation guard and both gateways' skill passthrough are untouched.
+
+### Added
+
+- **`kind: composition`** on the shared skill contract
+  (`shared/shared-contracts/schemas/skill.schema.json`, retitled `"Skill (v2)"` →
+  `"Skill (v3)"`), carrying an optional top-level `sub_skills[]` array whose
+  items are `{ skill_id (required), note (optional ≤ 200 chars) }` with
+  `additionalProperties: false`. A composition declares **no** `web_target`,
+  **no** `steps`, and **no** `risk_class` of its own, and `sub_skills` items carry
+  no sequencing vocabulary — a `note` is a string, never interpreted.
+- **`SKILLS_COMPOSITION_MAX_SUB_SKILLS`** (default `8`) — the composite-wide
+  sub-skill cap that bounds the per-bound-flow step budget a composition inherits
+  (8 × `GATEWAY_BROWSER_FLOW_MAX_STEPS` = 160 worst-case unlocked browser writes
+  per run, each still individually gated, signed, audited and receipted). Read in
+  `SkillsSettings.from_env` with a fail-fast `SettingsError` below 1, wired
+  through the dev-k8s `runtime-config.env` and documented in the configuration
+  reference.
+- **Two-layer fail-closed validation** in skills-hub: a pure structural
+  `_validate_composition` in ingestion (shared by the `/skills/validate` route and
+  the `python -m skills_hub.validate` CLI) and a store-consulting
+  `_resolve_compositions` pass in `SyncManager.sync_once` that drops a record on
+  an unresolved sub-skill or a **nested** composition reference (single-target
+  needs no active check — a sub-skill's `web_target` is a scalar, so a resolved
+  skill is single-target by construction), appending a `Rejection` to the existing
+  `skills_synced` rejected count (no new event type). Cross-source compositions are
+  eventually consistent —
+  rejected on the cycle before a sub-skill's own source syncs, accepted after.
+- **Derived display `risk_class`** for a composition — `write` when any resolved
+  sub-skill is `write`, else `read` — computed in the resolution pass and
+  **persisted** (reusing the existing top-level field, no new column), so
+  `summary()` carries it to the list badge without a per-read computation.
+- **Resolved-sub-skill read path**: skills-hub's `get_skill` projects each stored
+  `{ skill_id, note }` to a display view adding `resolved_title` and
+  `resolved_web_target` looked up from the store (the `search_skills`
+  `score`/`excerpt` projection precedent); read-path only, nothing resolved is
+  persisted, and both gateways forward the record verbatim.
+- **Portal read/viewer surface**: a derived **risk** badge column on the Skills
+  catalog (`SkillsView`) and an ordered, read-only **Runbook** sub-skill list
+  (title · declared target · note) above the body in `SkillContentViewer`. Phase 1
+  ships **no** bespoke composition editor — a composition is authored by hand and
+  merged to a skill source through Git like any other skill.
+- **`samples/acme-admin/composition/`** — a `kind: composition` runbook
+  (`RecoverAcmeAccount`) composing the published `password-reset` (browser write,
+  one `flow` card) and `lock-unlock-user` (infra `http.post` write, one `action`
+  card) into a mixed browser+infra workflow that parks **2** cards on one session
+  (> any single sub-skill's 1), with the house README, WALKTHROUGH, and a
+  `demo/demo.sh` (deterministic legs plus an opt-in `RUN_CHAT_LEG=true` live leg),
+  wired into `acme-admin/demo-suite.sh` (the mounted sample id set grows five → six).
+
+### Changed
+
+- **Skill Format documented at v3** (`shared/shared-contracts/skill-format.md`):
+  a `sub_skills` frontmatter row, a `kind: composition` value, and a "Composition
+  skills (v3)" section recording the ordered-reference model, the no-authority and
+  no-control-flow invariants, the derived display-only `risk_class`, the
+  report-and-stop / named-step re-entry convention, and additivity on a v2
+  consumer. The skills-hub schema, ingestion, and store mirrors move in lockstep so
+  the `test_contracts.py` property-set and `kind`-enum parity guards stay green.
+
 ## 0.39.1 — 2026-09-20
 
 Patch hardening the agent kernel's tool auto-allow posture after the v0.39.0

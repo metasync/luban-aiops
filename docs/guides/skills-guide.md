@@ -157,6 +157,47 @@ Verify either shape against a live cluster with its `WALKTHROUGH.md`, or
 unattended with its `demo/demo.sh` (the chat legs are opt-in behind
 `RUN_CHAT_LEG=true`).
 
+## Composition runbooks: ordering skills that already exist (SPEC-057)
+
+A third skill class, `kind: composition`, names an **ordered list of existing
+single-target skills** (`sub_skills`) so one document can express a multi-step
+runbook — reset the password, *then* unlock the account — without widening any
+skill's scope. The full contract lives in
+[`skill-format.md`](../../shared/shared-contracts/skill-format.md#composition-skills-v3);
+the day-2 facts an operator needs are these:
+
+- **A composition carries no authority of its own.** It never mints a token,
+  unlocks a flow, or auto-approves a gate. Each sub-skill keeps its **own** HITL
+  gate, so a run parks once per mutating sub-skill: a browser write flow parks a
+  `flow` card, an infra write parks an `action` card. Approving the first never
+  approves the second — when the session moves to the next sub-skill the prior
+  flow authority no longer matches and the next write re-parks.
+- **Its `risk_class` badge is derived, not declared.** The Skills list shows
+  `write` when any sub-skill writes, else `read`. You never author a `risk_class`
+  on a composition (ingestion rejects it), and nothing in the gate path reads
+  the derived value — it is display only.
+- **It is not a transaction — report-and-stop.** On a sub-skill failure the
+  agent reports *which* sub-skill failed and stops; there is no rollback or
+  compensation, and targets already touched stay touched. Author that
+  instruction into the runbook `body` (the shipped sample states it verbatim) so
+  it reaches the model as grounded guidance.
+- **Re-entry is a 30-day window.** There is no runbook-progress record. The
+  completed prefix of a stopped run is reconstructable from the session's signed
+  execution receipts, which are swept at **30 days** — inside that window an
+  operator can see which sub-skills already ran and restart from the next one;
+  outside it, restart the runbook from the beginning. Each sub-skill re-gates on
+  re-entry, so a restart never auto-signs a write nobody re-approved.
+
+A composition and its sub-skills must resolve within the served catalog: a
+sub-skill that is missing, or is itself a composition (no nesting in Phase 1),
+is **rejected** at sync — never silently served, never degraded to a plain
+knowledge doc. Cross-source compositions are eventually consistent: a sub-skill
+in a source that has not synced yet is rejected on this cycle and accepted on a
+later one. The count is capped by `SKILLS_COMPOSITION_MAX_SUB_SKILLS` (default
+8). See
+[`samples/acme-admin/composition`](../../samples/acme-admin/composition/) for a
+runnable example composing `password-reset` + `lock-unlock-user`.
+
 ## Pre-flight validation
 
 Always validate before publishing — the CLI uses the same code path as the

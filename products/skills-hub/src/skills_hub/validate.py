@@ -17,6 +17,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from skills_hub.core.config import get_settings
 from skills_hub.services.ingestion import ingest_directory
 
 
@@ -34,8 +35,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     root = Path(args.directory)
+    # Resolve the operator-configured composition cap so the local pre-flight
+    # matches sync (SPEC-057 R-2); the structural layer is shared, so a
+    # composition over the cap is rejected here exactly as it is at sync.
+    max_sub_skills = get_settings().composition_max_sub_skills
     result = ingest_directory(
-        args.source_id, root, "local", datetime.now(timezone.utc)
+        args.source_id,
+        root,
+        "local",
+        datetime.now(timezone.utc),
+        max_sub_skills,
     )
     for rejection in result.rejections:
         print(f"{rejection.path}: {rejection.reason}", file=sys.stderr)

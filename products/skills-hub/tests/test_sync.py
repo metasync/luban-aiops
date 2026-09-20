@@ -40,6 +40,63 @@ def _settings(*sources: SourceSpec) -> SkillsSettings:
     return SkillsSettings(sources=tuple(sources))
 
 
+# SPEC-057 R-2 resolution fixtures: the single-target sub-skills a composition
+# references. ``WRITE_SUB`` is a browser write web-check (risk_class: write);
+# ``INFRA_WRITE_SUB`` is an infra write (risk_class: write, no web_target);
+# ``READ_SUB`` is a read web-check (no risk_class); ``KNOWLEDGE_SUB`` is a plain
+# knowledge doc. Each is single-target by construction (``web_target`` is scalar).
+WRITE_SUB = """---
+title: Reset Password
+description: Reset a user's password in the admin portal.
+web_target: https://admin.internal/login
+risk_class: write
+---
+
+Reset the password.
+"""
+
+INFRA_WRITE_SUB = """---
+title: Lock Unlock User
+description: Lock or unlock a user account over the infra API.
+risk_class: write
+---
+
+Toggle the account lock.
+"""
+
+READ_SUB = """---
+title: Check Status
+description: Check a user's status page.
+web_target: https://admin.internal/status
+---
+
+Read the status.
+"""
+
+KNOWLEDGE_SUB = """---
+title: Reference Doc
+description: A plain knowledge document.
+---
+
+Background reading.
+"""
+
+
+def _composition_doc(sub_skill_ids: list[str]) -> str:
+    """A ``kind: composition`` document referencing the given sub-skill ids."""
+    items = "".join(
+        f"  - skill_id: {skill_id}\n    note: Step {index}.\n"
+        for index, skill_id in enumerate(sub_skill_ids, start=1)
+    )
+    return (
+        "---\ntitle: Remediation Runbook\n"
+        "description: Reset the password then unlock the account.\n"
+        "kind: composition\n"
+        f"sub_skills:\n{items}"
+        "---\n\nOn failure, report which sub-skill failed and stop.\n"
+    )
+
+
 class SyncOnceTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -246,6 +303,168 @@ class SyncOnceTests(unittest.TestCase):
         self.assertIn("***", event["details"]["error"])
 
 
+class CompositionResolutionTests(unittest.TestCase):
+    """SPEC-057 R-2 resolution layer: the store-consulting pass in ``sync_once``
+    that resolves each composition's ``sub_skills`` against the catalog, drops +
+    rejects an unresolved or nested reference (never silently served, never
+    degraded to knowledge), and derives + persists the surviving composition's
+    display ``risk_class``. The structural layer is asserted in
+    ``test_ingestion.py``; this covers only the facts that need the store.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.store = InMemorySkillStore()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _write(self, rel_path: str, content: str) -> None:
+        target = self.root / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    def _manager(self, *specs: SourceSpec) -> SyncManager:
+        return SyncManager(_settings(*specs), self.store)
+
+    def _local_spec(self, source_id: str = "samples", root: Path | None = None):
+        return SourceSpec(
+            source_id=source_id, type="local", path=str(root or self.root)
+        )
+
+    def test_a_resolved_composition_persists_with_its_sub_skills(self) -> None:
+        self._write("ResetPassword.md", WRITE_SUB)
+        self._write("LockUnlockUser.md", INFRA_WRITE_SUB)
+        self._write(
+            "Runbook.md",
+            _composition_doc(
+                ["samples/resetpassword", "samples/lockunlockuser"]
+            ),
+        )
+        spec = self._local_spec()
+        status = _run(self._manager(spec).sync_once(spec))
+        self.assertEqual(status.rejections, ())
+        self.assertEqual(status.accepted, 3)
+        runbook = _run(self.store.get("samples/runbook"))
+        self.assertIsNotNone(runbook)
+        self.assertEqual(runbook.kind, "composition")
+        self.assertEqual(
+            [ref.skill_id for ref in runbook.sub_skills],
+            ["samples/resetpassword", "samples/lockunlockuser"],
+        )
+
+    def test_derived_risk_class_is_write_when_any_sub_skill_writes(self) -> None:
+        # password-reset is a browser write, so the mixed composition derives
+        # ``write`` — persisted, and carried to the badge by ``summary()``.
+        self._write("ResetPassword.md", WRITE_SUB)
+        self._write("CheckStatus.md", READ_SUB)
+        self._write(
+            "Runbook.md",
+            _composition_doc(["samples/resetpassword", "samples/checkstatus"]),
+        )
+        spec = self._local_spec()
+        status = _run(self._manager(spec).sync_once(spec))
+        self.assertEqual(status.rejections, ())
+        runbook = _run(self.store.get("samples/runbook"))
+        self.assertEqual(runbook.risk_class, "write")
+        self.assertEqual(runbook.summary()["risk_class"], "write")
+
+    def test_derived_risk_class_is_read_when_no_sub_skill_writes(self) -> None:
+        self._write("CheckStatus.md", READ_SUB)
+        self._write("ReferenceDoc.md", KNOWLEDGE_SUB)
+        self._write(
+            "Runbook.md",
+            _composition_doc(["samples/checkstatus", "samples/referencedoc"]),
+        )
+        spec = self._local_spec()
+        status = _run(self._manager(spec).sync_once(spec))
+        self.assertEqual(status.rejections, ())
+        runbook = _run(self.store.get("samples/runbook"))
+        self.assertEqual(runbook.risk_class, "read")
+
+    def test_an_unresolved_sub_skill_is_dropped_and_rejected(self) -> None:
+        self._write("Runbook.md", _composition_doc(["samples/does-not-exist"]))
+        spec = self._local_spec()
+        status = _run(self._manager(spec).sync_once(spec))
+        # Dropped, not served and not degraded to a knowledge skill.
+        self.assertEqual(status.accepted, 0)
+        self.assertIsNone(_run(self.store.get("samples/runbook")))
+        self.assertEqual(len(status.rejections), 1)
+        self.assertIn("does not", status.rejections[0].reason)
+        self.assertIn("samples/does-not-exist", status.rejections[0].reason)
+        self.assertEqual(
+            _rejection_category(status.rejections[0].reason), "composition"
+        )
+
+    def test_a_nested_composition_sub_skill_is_rejected(self) -> None:
+        # The inner composition resolves (its own sub-skill is present), but the
+        # outer one references a composition, which Phase 1 forbids — removing
+        # cycles and unbounded depth by construction rather than by detection.
+        self._write("ResetPassword.md", WRITE_SUB)
+        self._write("Inner.md", _composition_doc(["samples/resetpassword"]))
+        self._write("Outer.md", _composition_doc(["samples/inner"]))
+        spec = self._local_spec()
+        status = _run(self._manager(spec).sync_once(spec))
+        # inner (resolved) + resetpassword accepted; outer rejected for nesting.
+        self.assertEqual(status.accepted, 2)
+        self.assertEqual(len(status.rejections), 1)
+        self.assertIn("is itself a", status.rejections[0].reason)
+        self.assertIn("samples/inner", status.rejections[0].reason)
+        self.assertEqual(
+            _rejection_category(status.rejections[0].reason), "composition"
+        )
+        self.assertIsNotNone(_run(self.store.get("samples/inner")))
+
+    def test_a_cross_source_sub_skill_resolves_after_its_source_syncs(self) -> None:
+        # Source A holds the composition; source B holds its sub-skill. On the
+        # cycle before B has ever synced the reference is unresolved and A's
+        # composition is rejected; after B syncs, a later A cycle resolves it
+        # (eventual consistency — Resolved At Plan Time 4).
+        a_root, b_root = self.root / "a", self.root / "b"
+        a_root.mkdir()
+        b_root.mkdir()
+        (a_root / "Runbook.md").write_text(
+            _composition_doc(["b-src/resetpassword"]), encoding="utf-8"
+        )
+        (b_root / "ResetPassword.md").write_text(WRITE_SUB, encoding="utf-8")
+        spec_a = self._local_spec("a-src", a_root)
+        spec_b = self._local_spec("b-src", b_root)
+        manager = self._manager(spec_a, spec_b)
+
+        # Cycle 1: A syncs before B -> unresolved -> rejected, never served.
+        first = _run(manager.sync_once(spec_a))
+        self.assertEqual(first.accepted, 0)
+        self.assertEqual(len(first.rejections), 1)
+        self.assertIn("does not", first.rejections[0].reason)
+
+        # B syncs, publishing the sub-skill into the shared catalog.
+        self.assertEqual(_run(manager.sync_once(spec_b)).accepted, 1)
+
+        # Cycle 2: A syncs again -> the cross-source id now resolves from store.
+        second = _run(manager.sync_once(spec_a))
+        self.assertEqual(second.accepted, 1)
+        self.assertEqual(second.rejections, ())
+        runbook = _run(self.store.get("a-src/runbook"))
+        self.assertIsNotNone(runbook)
+        self.assertEqual(runbook.risk_class, "write")
+
+    def test_a_composition_rejection_rides_the_skills_synced_event(self) -> None:
+        # No new audit event type: the resolution rejection increments the
+        # existing skills_synced rejected count and nothing else is emitted.
+        self._write("Runbook.md", _composition_doc(["samples/does-not-exist"]))
+        spec = self._local_spec()
+        manager = self._manager(spec)
+        with patch("skills_hub.services.sync.emit_audit_event") as emit:
+            _run(manager.sync_once(spec))
+        emit.assert_called_once()
+        event = emit.call_args.args[1]
+        self.assertEqual(event["event_type"], "skills_synced")
+        self.assertEqual(event["outcome"], "success")
+        self.assertEqual(event["details"]["accepted"], 0)
+        self.assertEqual(event["details"]["rejected"], 1)
+
+
 class GitUrlTests(unittest.TestCase):
     def test_token_injected_into_https_url(self) -> None:
         url = _with_token("https://github.com/team/repo.git", "tok")
@@ -421,6 +640,36 @@ class RejectionCategoryTests(unittest.TestCase):
             _rejection_category("source directory not found: /srv/skills"),
             "missing_source",
         )
+
+    def test_composition_resolution_rejections_get_their_own_bucket(self) -> None:
+        # SPEC-057 R-2: the resolution-layer rejections sync renders are a
+        # distinct failure mode from a structural frontmatter error.
+        for reason in (
+            "composition sub_skill 'samples/x' does not resolve to a "
+            "published skill",
+            "composition sub_skill 'samples/x' is itself a composition "
+            "(no nesting in Phase 1)",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(_rejection_category(reason), "composition")
+
+    def test_structural_composition_rejections_stay_frontmatter(self) -> None:
+        # The structural composition rejections ingestion renders never start
+        # with "composition", so they stay in the frontmatter bucket beside the
+        # other per-field bounds (tasks.md R-2: structural stays frontmatter).
+        for reason in (
+            "sub_skills requires kind: composition",
+            "a composition declares no web_target (kind: composition)",
+            "a composition declares no risk_class (kind: composition)",
+            "kind: composition requires a non-empty sub_skills list",
+            "more than 8 sub_skills",
+            "sub_skill 1: unknown sub_skill keys: on_fail",
+            "sub_skill 1: duplicate skill_id 'samples/x'",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    _rejection_category(reason), "frontmatter", reason
+                )
 
 
 if __name__ == "__main__":

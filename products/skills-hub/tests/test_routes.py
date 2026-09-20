@@ -363,6 +363,158 @@ class SkillsRouteTests(unittest.TestCase):
         self.assertEqual(body["total"], 2)
 
 
+# SPEC-057 R-6 fixtures: a mixed browser+infra composition and its two
+# single-target sub-skills. The browser leg declares a web_target; the infra leg
+# declares risk_class: write with none, so the projection's conditional
+# resolved_web_target has both a present and an absent case.
+DOC_RESET = """---
+title: Reset Password
+description: Reset a user's password in the admin portal.
+web_target: https://admin.internal/login
+risk_class: write
+---
+
+Log in and reset the password.
+"""
+
+DOC_UNLOCK = """---
+title: Lock Unlock User
+description: Lock or unlock a user account over the infra API.
+risk_class: write
+---
+
+Toggle the account lock.
+"""
+
+DOC_RUNBOOK = """---
+title: Remediation Runbook
+description: Reset the password then unlock the account.
+kind: composition
+sub_skills:
+  - skill_id: samples/resetpassword
+    note: Reset the password first.
+  - skill_id: samples/lockunlockuser
+---
+
+On failure, report which sub-skill failed and stop.
+"""
+
+
+class CompositionReadPathTests(unittest.TestCase):
+    """SPEC-057 R-6: ``get_skill`` projects a composition's ``sub_skills`` to a
+    display view (each sub-skill's own title + declared target) beside the
+    stored envelope — the ``search`` ``score``/``excerpt`` precedent. Read-path
+    only: the authored item keeps ``skill_id`` + ``note``, nothing resolved is
+    persisted, and a non-composition ``get_skill`` is byte-identical to before.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        (self.root / "ResetPassword.md").write_text(DOC_RESET)
+        (self.root / "LockUnlockUser.md").write_text(DOC_UNLOCK)
+        (self.root / "Runbook.md").write_text(DOC_RUNBOOK)
+        sources = json.dumps(
+            [{"source_id": "samples", "type": "local", "path": str(self.root)}]
+        )
+        self._patcher = patch.dict(
+            os.environ,
+            {
+                "SKILLS_STORE_BACKEND": "memory",
+                "SKILLS_SOURCES": sources,
+                "SKILLS_QUERY_CLIENTS": QUERY_CLIENTS,
+                "SKILLS_SYNC_INTERVAL_SECONDS": "3600",
+            },
+        )
+        self._patcher.start()
+        get_settings.cache_clear()
+        self._client_cm = TestClient(create_app())
+        self.client = self._client_cm.__enter__()
+        self._wait_synced()
+
+    def tearDown(self) -> None:
+        self._client_cm.__exit__(None, None, None)
+        get_settings.cache_clear()
+        self._patcher.stop()
+        self._tmp.cleanup()
+
+    def _wait_synced(self, expected: int = 3, timeout: float = 5.0) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            body = self.client.get("/api/v1/skills/status").json()
+            for source in body["sources"]:
+                if source["accepted"] >= expected or source["last_error"]:
+                    return
+            time.sleep(0.05)
+        raise AssertionError("source did not sync in time")
+
+    @property
+    def auth(self) -> dict[str, str]:
+        return {"authorization": _basic("tool-gateway", "tg-secret")}
+
+    def test_get_composition_projects_each_sub_skill(self) -> None:
+        response = self.client.get(
+            "/api/v1/skills/samples/runbook", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["kind"], "composition")
+        # The derived display risk_class (password-reset writes) rides along.
+        self.assertEqual(body["risk_class"], "write")
+        sub_skills = body["sub_skills"]
+        # Declared order is preserved.
+        self.assertEqual(
+            [item["skill_id"] for item in sub_skills],
+            ["samples/resetpassword", "samples/lockunlockuser"],
+        )
+        # Each item is enriched with its own sub-skill's title...
+        self.assertEqual(sub_skills[0]["resolved_title"], "Reset Password")
+        self.assertEqual(sub_skills[1]["resolved_title"], "Lock Unlock User")
+        # ...and declared target where it has one (the infra leg has none).
+        self.assertEqual(
+            sub_skills[0]["resolved_web_target"],
+            "https://admin.internal/login",
+        )
+        self.assertNotIn("resolved_web_target", sub_skills[1])
+
+    def test_get_composition_keeps_the_authored_item(self) -> None:
+        # The projection is read-path only: the authored note survives, the
+        # un-noted item carries no note key, and nothing resolved is persisted
+        # onto the sub-skill's own stored record.
+        sub_skills = self.client.get(
+            "/api/v1/skills/samples/runbook", headers=self.auth
+        ).json()["sub_skills"]
+        self.assertEqual(sub_skills[0]["note"], "Reset the password first.")
+        self.assertNotIn("note", sub_skills[1])
+        reset = self.client.get(
+            "/api/v1/skills/samples/resetpassword", headers=self.auth
+        ).json()
+        self.assertNotIn("sub_skills", reset)
+        self.assertNotIn("resolved_title", reset)
+
+    def test_get_non_composition_is_byte_identical(self) -> None:
+        # A single-target skill's record is returned verbatim — the exact key
+        # set, with no sub_skills and no resolved_* — exactly as before v3.
+        body = self.client.get(
+            "/api/v1/skills/samples/resetpassword", headers=self.auth
+        ).json()
+        self.assertEqual(
+            set(body),
+            {
+                "skill_id",
+                "source_id",
+                "source_path",
+                "source_ref",
+                "title",
+                "description",
+                "updated_at",
+                "body",
+                "web_target",
+                "risk_class",
+            },
+        )
+
+
 # Shared fixture set for the route/CLI parity guard: every case exercises a
 # frontmatter-contract rule so both code paths can answer identically.
 PARITY_FIXTURES = {

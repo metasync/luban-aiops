@@ -158,6 +158,26 @@ def parse_workload_clients(raw: str) -> tuple[WorkloadClient, ...]:
     return tuple(mappings)
 
 
+def parse_composition_max_sub_skills(raw: str) -> int:
+    """Parse ``SKILLS_COMPOSITION_MAX_SUB_SKILLS`` (SPEC-057 R-2 / OQ-4).
+
+    The composite-wide bound on a composition's ``sub_skills`` count. Fails
+    fast on a malformed or ``< 1`` value — a cap of zero would reject every
+    composition, and a negative one is meaningless, so neither may start.
+    """
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise SettingsError(
+            f"SKILLS_COMPOSITION_MAX_SUB_SKILLS must be an integer: {raw!r}"
+        ) from exc
+    if value < 1:
+        raise SettingsError(
+            "SKILLS_COMPOSITION_MAX_SUB_SKILLS must be >= 1"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class SkillsSettings:
     """Frozen settings loaded from environment variables (SPEC-014 R-2/R-3)."""
@@ -165,6 +185,10 @@ class SkillsSettings:
     sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
     git_tokens: dict[str, str] = field(default_factory=dict)
     sync_interval_seconds: int = 300
+    # SPEC-057 R-2 / OQ-4: composite-wide bound on a composition's sub_skills
+    # count. Default 8 (8 × GATEWAY_BROWSER_FLOW_MAX_STEPS = 160 worst-case
+    # unlocked browser writes per run, each still individually gated).
+    composition_max_sub_skills: int = 8
     data_path: str = "/var/lib/skills-hub"
     store_backend: str = "memory"
     db_url: str = ""
@@ -183,6 +207,9 @@ class SkillsSettings:
             git_tokens=parse_git_tokens(os.getenv("SKILLS_GIT_TOKENS", "")),
             sync_interval_seconds=int(
                 os.getenv("SKILLS_SYNC_INTERVAL_SECONDS", "300")
+            ),
+            composition_max_sub_skills=parse_composition_max_sub_skills(
+                os.getenv("SKILLS_COMPOSITION_MAX_SUB_SKILLS", "8")
             ),
             data_path=os.getenv("SKILLS_DATA_PATH", "/var/lib/skills-hub"),
             store_backend=os.getenv("SKILLS_STORE_BACKEND", "memory").strip().lower(),

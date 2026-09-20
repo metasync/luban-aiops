@@ -2,7 +2,8 @@
 
 # The acme-admin demo suite (SPEC-059 R-8).
 #
-# Runs the four demos in ladder order and then asserts the claim this whole
+# Runs the four ladder demos in order, then the composition (SPEC-057) that
+# orders two of them into one runbook, and then asserts the claim this whole
 # slice makes: a mutation performed over the **HTTP** surface is visible over
 # the **HTML** surface, because both really address one store. That is the
 # cross-skill verification step — `LockUnlockUser` changes something, and
@@ -14,12 +15,16 @@
 #   2. user-status        browser flow      read    0 cards
 #   3. lock-unlock-user   http.post         write   1 card, kind `action`
 #   4. password-reset     browser flow      write   1 card, kind `flow`
+#   5. composition        runbook (4 then 3) write  2 cards, a `flow` + an `action`
 #
-# Read together the four make a claim none of them makes alone: the card count
-# tracks the *effect* of a skill, not the surface it uses. Rungs 1 and 3 both
-# talk to the JSON API and differ; rungs 2 and 4 both drive a browser and
+# Read together the four rungs make a claim none of them makes alone: the card
+# count tracks the *effect* of a skill, not the surface it uses. Rungs 1 and 3
+# both talk to the JSON API and differ; rungs 2 and 4 both drive a browser and
 # differ. A reader who has seen all four stops inferring "browser means
-# dangerous" and "API means safe".
+# dangerous" and "API means safe". Rung 5 then composes rungs 4 and 3 into one
+# runbook and makes the composition claim (SPEC-057): ordering two mutating
+# skills does not merge their gates — the runbook parks two cards, one per
+# sub-skill, because a composition carries no authority of its own (ADR-0011).
 #
 # The cross-skill leg runs deterministically, with no model involved: it makes
 # the same `http.post` call `LockUnlockUser` makes, through the same gateway
@@ -45,11 +50,11 @@ SUITE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 # make. `carol` starts active, so `active -> locked` is a real change and the
 # rendered Revision cell has something to agree with.
 CROSS_TARGET="${CROSS_TARGET:-carol}"
-DEMOS="health-check user-status lock-unlock-user password-reset"
+DEMOS="health-check user-status lock-unlock-user password-reset composition"
 
 echo "=============================================================="
 echo " acme-admin demo suite (SPEC-059) — namespace=$NAMESPACE"
-echo " ladder: 0 cards / 0 cards / 1 action card / 1 flow card"
+echo " ladder: 0 / 0 / 1 action / 1 flow, then the 2-card composition runbook"
 echo " chat legs: ${RUN_CHAT_LEG:-<off>}"
 echo "=============================================================="
 
@@ -74,13 +79,14 @@ require_runtime_config GATEWAY_MUTATING_TOOLS_ENABLED true "deploy with the muta
 require_allowlisted GATEWAY_HTTP_ALLOW_ORIGINS "the browser-dev profile lists the sample app's origin"
 require_allowlisted GATEWAY_BROWSER_ALLOW_ORIGINS "the browser-dev profile lists the sample app's origin"
 
-# All four documents must be packed into the skills-hub `samples` source, and
-# their derived ids must be the four the demos name.
+# All five documents must be packed into the skills-hub `samples` source, and
+# their derived ids must be the five the demos name.
 for entry in \
   "health-check:CheckServiceHealth.md" \
   "user-status:CheckUserStatus.md" \
   "lock-unlock-user:LockUnlockUser.md" \
-  "password-reset:ResetAcmePassword.md"; do
+  "password-reset:ResetAcmePassword.md" \
+  "composition:RecoverAcmeAccount.md"; do
   leaf="${entry%%:*}"; file="${entry##*:}"
   kubectl -n "$NAMESPACE" exec deployment/skills-hub -- \
     cat "/skills/samples/$leaf-$file" >/dev/null 2>&1 \
@@ -98,7 +104,7 @@ done
 # `ResetUserPassword.md`, and SPEC-060 retired that static sample but kept the
 # name (renaming a delivered skill would re-id it). `skill-graduation` ships no
 # document at all (it graduates one at runtime), so the mounted set is the four
-# ladder ids plus `adhoc-password-reset`'s — five in all.
+# ladder ids plus the composition's plus `adhoc-password-reset`'s — six in all.
 mounted=$(kubectl -n "$NAMESPACE" exec deployment/skills-hub -- ls -1 /skills/samples) \
   || fail "could not list /skills/samples in skills-hub"
 printf '%s\n' "$mounted" | python3 -c '
@@ -110,6 +116,7 @@ expected = {
     "samples/user-status-checkuserstatus",
     "samples/lock-unlock-user-lockunlockuser",
     "samples/password-reset-resetacmepassword",
+    "samples/composition-recoveracmeaccount",
     "samples/adhoc-password-reset-resetpasswordadhoc",
 }
 ids = {}
@@ -123,9 +130,9 @@ assert not missing, "these sample skill ids are not ingested: %s" % ", ".join(so
 for slug in sorted(ids):
     print("  ok: %-46s <- %s" % (slug, ids[slug]))
 print("  ok: %d sample skill ids, pairwise distinct" % len(ids))' \
-  || fail "the mounted sample skills do not produce the five distinct ids this suite requires"
+  || fail "the mounted sample skills do not produce the six distinct ids this suite requires"
 
-# --- the four demos, in ladder order -------------------------------------
+# --- the five demos, in ladder order -------------------------------------
 
 for sample in $DEMOS; do
   echo ""
@@ -271,11 +278,12 @@ fi
 echo ""
 echo "=============================================================="
 echo " acme-admin demo suite passed. It proved:"
-echo "  - all four demos green in ladder order"
+echo "  - all five demos green in ladder order"
 echo "      health-check       http.get        read   0 cards"
 echo "      user-status        browser flow    read   0 cards"
 echo "      lock-unlock-user   http.post       write  1 action card"
 echo "      password-reset     browser flow    write  1 flow card"
+echo "      composition        runbook (4+3)   write  2 cards (flow + action)"
 echo "  - every sample skill id the mounted set produces is distinct, so"
 echo "    ResetAcmePassword.md cannot silently re-id a shipped sample"
 echo "  - a mutation made over HTTP through http.post is read back from the"

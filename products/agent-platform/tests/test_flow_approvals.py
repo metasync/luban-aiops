@@ -169,6 +169,78 @@ class FlowContextStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get("ses-2"))
 
 
+class CompositionRebindReParkTests(unittest.TestCase):
+    """SPEC-057 R-4: each sub-skill in a composition keeps its own gate.
+
+    Extends ``test_record_overwrites_previous_identity`` from "the context
+    overwrites" to "the armed authority therefore no longer applies". A
+    composition runs its sub-skills in declared order, and each browser
+    sub-skill binds its own flow when the model navigates to it. The operator's
+    flow-unlock authority is scoped to the *first* sub-skill's
+    ``(skill_id, origin)``; when the session rebinds to a *second* sub-skill,
+    ``FlowContextStore.record`` overwrites the single identity, so
+    ``context.identity() != approval.identity()`` — the exact predicate the
+    kernel checks (``runtime_kernel.py:1614``) before auto-signing. The
+    authority does not carry across sub-skills, so the second sub-skill's first
+    write re-parks for its own operator decision (ADR-0007 re-park-on-rebind).
+    No composition-level gate exists; the shipped identity guard is the whole
+    enforcement, and this pins it at the store layer the kernel reads.
+    """
+
+    def setUp(self) -> None:
+        self.contexts = FlowContextStore()
+        self.approvals = FlowApprovalStore()
+
+    def test_rebind_to_a_second_sub_skill_leaves_the_armed_approval_stale(self) -> None:
+        session = "ses-composition-1"
+        # Sub-skill 1 (a browser write flow) binds, and its first parked write
+        # is approved — the authority is scoped to sub-skill 1's identity.
+        self.contexts.record(session, _flow_dict())
+        self.approvals.record(
+            session,
+            confirm_id="conf-sub-1",
+            owner_user_id="alice",
+            decider_user_id="bob",
+            skill_id="samples/password-reset",
+            origin="http://admin.local",
+            ttl=900.0,
+        )
+        # While the reflection still matches the authority, sub-skill 1's later
+        # browser writes ride the unlock (the kernel auto-signs).
+        self.assertEqual(
+            self.contexts.get(session).identity(),
+            self.approvals.get(session).identity(),
+        )
+
+        # The composition advances to sub-skill 2: a web.navigate binds a
+        # different skill/origin, overwriting the single FlowContext.
+        self.contexts.record(
+            session,
+            _flow_dict(
+                skill_id="samples/second-sub-skill",
+                origin="http://second.local",
+            ),
+        )
+
+        # The armed approval still names sub-skill 1; the live context names
+        # sub-skill 2. The identities diverge, so the kernel's guard fails safe
+        # and sub-skill 2's first write re-parks rather than auto-signing under
+        # sub-skill 1's authority — one gate per sub-skill, no composite gate.
+        approval = self.approvals.get(session)
+        context = self.contexts.get(session)
+        self.assertIsNotNone(approval)
+        self.assertIsNotNone(context)
+        self.assertNotEqual(context.identity(), approval.identity())
+        self.assertEqual(
+            approval.identity(),
+            ("samples/password-reset", "http://admin.local"),
+        )
+        self.assertEqual(
+            context.identity(),
+            ("samples/second-sub-skill", "http://second.local"),
+        )
+
+
 class FlowApprovalExpiryTests(unittest.TestCase):
     def test_identity_is_skill_and_origin(self) -> None:
         self.assertEqual(

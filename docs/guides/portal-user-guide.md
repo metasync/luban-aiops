@@ -138,6 +138,16 @@ The split is about **what a session is for**, and that is decided at birth:
 - Opening a development session needs the skill-graduation grant beside
   ordinary session creation. The gateway enforces that on every request — no
   new policy action, and no way to reach it from a role that lacks it.
+- **Compositions are authored, not graduated** (SPEC-057). A
+  `kind: composition` runbook — an ordered `sub_skills` list of existing
+  single-target skills — is a development artifact, but the **Graduate** button
+  stays single-target and Phase 1 ships no composition editor: you write the
+  `sub_skills` list by hand (in a development session or directly) and merge it
+  to a skill source through Git like any other skill. It reads back in the
+  [Skills catalog](#tools-and-skills-catalogs-workspace) with its ordered
+  sub-skill list and a derived risk badge, and it carries **no authority of its
+  own** — each sub-skill keeps its own approval gate. See the
+  [Skills and Guidance Guide](skills-guide.md).
 
 ## Sessions
 
@@ -465,8 +475,14 @@ confirm hash) lives in the
   agent can cite as grounded guidance. Each row has a **View** action that
   opens a read-only rendered/raw viewer of the skill's authored body
   (SPEC-052), so you can read exactly what the agent will cite — and, for a
-  web-check skill, confirm where its single HITL gate lands. Content
-  operations (adding, revising, removing skills) are in the
+  web-check skill, confirm where its single HITL gate lands. The list carries a
+  **risk** column: for a **`composition`** runbook (SPEC-057) that badge is
+  *derived* — `write` when any sub-skill is `write`, else `read` — because a
+  composition declares no target and no risk class of its own. Its viewer
+  renders the ordered sub-skill list under a **Runbook** heading (each
+  sub-skill's title, its declared target and its `note`) above the body; the
+  composition carries **no authority**, so each named sub-skill still parks its
+  own gate. Content operations (adding, revising, removing skills) are in the
   [Skills and Guidance Guide](skills-guide.md).
 
 ## Settings (Workspace)

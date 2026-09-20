@@ -2,14 +2,15 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-16
 - approved: 2026-09-16
+- delivered: 2026-09-20 (v0.40.0)
 - release slice: R5 — Hardening and External Consumption (nineteenth R5 slice,
-  targeting v0.40.0 — moved off v0.38.0 at the 2026-09-17 SPEC-058 approval,
-  because a composition needs single-target skills to compose; SPEC-058 and
-  SPEC-059 delivered that repertoire together in v0.38.0)
+  v0.40.0 — moved off v0.38.0 at the 2026-09-17 SPEC-058 approval, because a
+  composition needs single-target skills to compose; SPEC-058 and SPEC-059
+  delivered that repertoire together in v0.38.0)
 - related ADRs: **ADR-0011** (a composition carries no authority; each
   sub-skill keeps its own gate — this spec is its Phase 1 realization),
   **ADR-0007** (one HITL gate per mutating browser flow — extended, never
@@ -374,3 +375,40 @@ recorded in the changelog (the `approved`-spec rule).
 - 2026-09-17: SPEC-059 shipped alongside SPEC-058 in **v0.38.0**, collapsing
   its planned v0.39.0 slot. The earlier entry records the approval-time plan;
   this spec remains approved and targeted at v0.40.0.
+- 2026-09-20: **delivered** in **v0.40.0** (nineteenth R5 slice). All eight
+  requirements shipped and mapped to asserting tests in `tasks.md`'s Delivery Gate
+  (ADR-0008): the v3 `composition` kind + `sub_skills` contract with lockstep
+  skills-hub schema/ingestion/store mirrors on **both** backends
+  (`test_contracts.py` property-set + `kind`-enum parity with a firing guard,
+  `test_skill_store.py` round-trip, `test_ingestion.py` additivity); two-layer
+  fail-closed validation — the structural `_validate_composition` shared by the
+  validate route + CLI and the store-consulting `_resolve_compositions` with the
+  derived **persisted** `risk_class`, the `composition` rejection bucket, and
+  cross-source eventual consistency (`test_config.py`, `test_ingestion.py`,
+  `test_sync.py`); no-control-flow (`test_ingestion.py` sequencing-key rejection,
+  `test_contracts.py` extra-item-key rejection); the no-authority trust posture
+  (`test_skill_composition_purity.py` grep/AST purity, `test_flow_approvals.py`
+  rebind re-park, the tool-gateway deviation-guard grep, and the mixed
+  browser+infra gate-count unit assertion); report-and-stop / 30-day named-step
+  re-entry with no new state store; the `get_skill` resolved-sub-skill projection
+  (`test_routes.py`); and the portal derived risk badge + read-only Runbook list
+  (`SkillsView.test.tsx`, `SkillContentViewer.test.tsx`). `make verify` green at
+  0.40.0 (**2,738** product tests, four overlays, 18 policy rules, 137 API + 19
+  tool scenarios, version lockstep, secret vocabulary unchanged), portal **408**
+  tests / 32 files green with `npm run build` clean, and `make policy-diff`
+  reporting **zero** outcome transitions across all **138** (role, action) pairs on
+  both engines against an identical bundle hash — the assertion the "no new policy
+  vocabulary" decision leaves behind. R-8's mixed browser+infra
+  `samples/acme-admin/composition/` demo (password-reset `flow` card +
+  lock-unlock-user `action` card = **2** cards on one session) ships with its
+  README/WALKTHROUGH and ran **green** in the `make e2e` path via
+  `acme-admin/demo-suite.sh` (`E2E_OK: all demos passed` on the deployed dev-k8s
+  cluster; mounted id set five → six, the composition resolved in the live
+  Postgres store at derived `risk_class=write`). No new policy action, no
+  new audit event type, no new ADR — ADR-0011 stays `accepted` (this is its Phase 1
+  realization) and ADR-0007/0008/0009/0010 stay `accepted` and unedited.
+  Requirement text R-1..R-8 and Non-Goals unchanged (frozen at approval).
+  Bookkeeping: `docs/specs/README.md` row `approved` → `delivered`, the
+  `delivery-roadmap.md` row 346 entry → `delivered` (v0.40.0), a `## 0.40.0`
+  `CHANGELOG.md` section, and the dated release note
+  `2026-09-20-spec-057-skill-composition-runbooks.md` + its README index bullet.

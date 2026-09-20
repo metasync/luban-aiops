@@ -14,6 +14,7 @@ from pathlib import Path
 from skills_hub.services.ingestion import (
     MAX_STEPS,
     MAX_STEPS_BYTES,
+    MAX_SUB_SKILLS,
     ingest_directory,
     slug_from_path,
     validate_document,
@@ -750,6 +751,300 @@ class ExecutableFlowTests(unittest.TestCase):
         )
         self.assertFalse(valid)
         self.assertIn("requires risk_class: write", reason or "")
+
+
+# SPEC-057 R-1: a composition's ordered sub-skill reference list as authored in
+# frontmatter. Each item is ``{ skill_id (required), note (optional ≤ 200) }``;
+# ``additionalProperties: false`` on the item is what makes R-3 (no control flow)
+# true by construction — any sequencing key is an unknown key. The ids are the
+# two published single-target skills R-8's demo composes.
+COMPOSITION_SUB_SKILLS_YAML = (
+    "sub_skills:\n"
+    "  - skill_id: samples/password-reset-resetacmepassword\n"
+    "    note: Reset the password first.\n"
+    "  - skill_id: samples/lock-unlock-user-lockunlockuser\n"
+    "    note: Then unlock the account.\n"
+)
+COMPOSITION_DECLARATION = "kind: composition\n"
+
+
+class CompositionStructuralTests(unittest.TestCase):
+    """SPEC-057 R-1/R-2/R-3: the ``kind: composition`` class's *structural*
+    layer — the facts a single document proves alone (reference-list shape, the
+    item key set, the count cap, no-duplicate, and "a composition declares no
+    web_target/steps/risk_class"). The cross-skill facts (does each sub-skill
+    resolve, is it single-target, is it itself a composition) need the catalog
+    and are asserted in ``test_sync.py``. Strictly additive over v2 — a knowledge
+    or executable_flow skill declares no ``sub_skills`` and validates exactly as
+    before — and enforced on the same ``_validate_frontmatter`` path the draft
+    check and the ``validate`` CLI ride, so a malformed composition is rejected
+    identically at sync, draft, and pre-flight time.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _ingest(self):
+        return ingest_directory("team-a", self.root, "local", NOW)
+
+    def _ingest_one(self, extra_frontmatter: str):
+        _write(
+            self.root,
+            "composition/ResetAndUnlock.md",
+            self._doc(extra_frontmatter),
+        )
+        return self._ingest()
+
+    @staticmethod
+    def _doc(extra_frontmatter: str) -> str:
+        return (
+            "---\ntitle: Reset And Unlock\ndescription: Reset then unlock.\n"
+            f"{extra_frontmatter}---\n\n"
+            "On failure, report which sub-skill failed and stop.\n"
+        )
+
+    def test_a_valid_composition_round_trips(self) -> None:
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION + COMPOSITION_SUB_SKILLS_YAML
+        )
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertEqual(skill.skill_id, "team-a/composition/resetandunlock")
+        self.assertEqual(skill.kind, "composition")
+        # Order in the array IS the runbook's declared sequence, so it survives
+        # as authored.
+        self.assertEqual(
+            [ref.skill_id for ref in skill.sub_skills],
+            [
+                "samples/password-reset-resetacmepassword",
+                "samples/lock-unlock-user-lockunlockuser",
+            ],
+        )
+        self.assertEqual(skill.sub_skills[0].note, "Reset the password first.")
+        # A composition declares no authorization target, no interpreter input,
+        # and no author risk_class (its risk_class is derived at sync, R-1).
+        self.assertIsNone(skill.web_target)
+        self.assertIsNone(skill.steps)
+        self.assertIsNone(skill.risk_class)
+        summary = skill.summary()
+        self.assertEqual(summary["kind"], "composition")
+        self.assertEqual(len(summary["sub_skills"]), 2)
+
+    def test_a_sub_skill_note_is_optional(self) -> None:
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "sub_skills:\n"
+            "  - skill_id: samples/password-reset-resetacmepassword\n"
+        )
+        self.assertEqual(result.rejections, [])
+        (skill,) = result.records
+        self.assertIsNone(skill.sub_skills[0].note)
+        # summary() excludes None, so an un-noted item carries just its id.
+        self.assertNotIn("note", skill.summary()["sub_skills"][0])
+
+    def test_sub_skills_without_the_discriminator_are_rejected(self) -> None:
+        # The class is declared, never inferred (the ``steps`` rule's twin): a
+        # reference list on an ordinary knowledge document is malformed rather
+        # than an implicit composition.
+        for kind in ("", "kind: knowledge\n"):
+            with self.subTest(kind=kind or "absent"):
+                result = self._ingest_one(kind + COMPOSITION_SUB_SKILLS_YAML)
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "sub_skills requires kind: composition",
+                    result.rejections[0].reason,
+                )
+
+    def test_a_composition_without_sub_skills_is_rejected(self) -> None:
+        for sub_skills_yaml in (
+            "",
+            "sub_skills: []\n",
+            "sub_skills: not-a-list\n",
+        ):
+            with self.subTest(sub_skills=sub_skills_yaml or "absent"):
+                result = self._ingest_one(
+                    COMPOSITION_DECLARATION + sub_skills_yaml
+                )
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "non-empty sub_skills list", result.rejections[0].reason
+                )
+
+    def test_a_composition_declaring_its_own_web_target_is_rejected(self) -> None:
+        # Its scope is the union of its sub-skills' scopes; declaring one would
+        # falsely imply a single authorization target SPEC-055 R-4 could not
+        # re-validate.
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "web_target: https://admin.internal/login\n"
+            + COMPOSITION_SUB_SKILLS_YAML
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            "a composition declares no web_target", result.rejections[0].reason
+        )
+
+    def test_a_composition_declaring_its_own_risk_class_is_rejected(self) -> None:
+        # The display risk_class is derived at sync, never author-declared.
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "risk_class: write\n"
+            + COMPOSITION_SUB_SKILLS_YAML
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            "a composition declares no risk_class", result.rejections[0].reason
+        )
+
+    def test_a_composition_declaring_its_own_steps_is_rejected(self) -> None:
+        # ``_validate_steps`` runs first and rejects a step list on any kind but
+        # ``executable_flow``, so a composition carrying ``steps`` fails there;
+        # ``_validate_composition``'s own no-steps rule is the defensive twin.
+        # Either way the document is rejected — never silently degraded.
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "steps:\n  - tool: web.navigate\n    args: {}\n"
+            + COMPOSITION_SUB_SKILLS_YAML
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("steps requires kind", result.rejections[0].reason)
+
+    def test_a_duplicate_sub_skill_id_is_rejected(self) -> None:
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "sub_skills:\n"
+            "  - skill_id: samples/password-reset-resetacmepassword\n"
+            "  - skill_id: samples/password-reset-resetacmepassword\n"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("duplicate skill_id", result.rejections[0].reason)
+
+    def test_an_over_cap_sub_skill_list_is_rejected(self) -> None:
+        too_many = "".join(
+            f"  - skill_id: samples/skill-{index}\n"
+            for index in range(MAX_SUB_SKILLS + 1)
+        )
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION + f"sub_skills:\n{too_many}"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn(
+            f"more than {MAX_SUB_SKILLS} sub_skills", result.rejections[0].reason
+        )
+
+    def test_the_configured_cap_is_threaded_through_ingestion(self) -> None:
+        # The operator knob (SKILLS_COMPOSITION_MAX_SUB_SKILLS) is threaded
+        # through ingest_directory, so a cap of 2 rejects a 3-item list the
+        # default cap of 8 accepts — the pre-flight matches sync (R-2).
+        three = "".join(
+            f"  - skill_id: samples/skill-{index}\n" for index in range(3)
+        )
+        _write(
+            self.root,
+            "composition/ResetAndUnlock.md",
+            self._doc(COMPOSITION_DECLARATION + f"sub_skills:\n{three}"),
+        )
+        self.assertEqual(
+            ingest_directory("team-a", self.root, "local", NOW, 8).rejections, []
+        )
+        result = ingest_directory("team-a", self.root, "local", NOW, 2)
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("more than 2 sub_skills", result.rejections[0].reason)
+
+    def test_a_malformed_sub_skill_item_is_rejected(self) -> None:
+        cases = {
+            "not a mapping": (
+                "sub_skills:\n  - samples/password-reset-resetacmepassword\n"
+            ),
+            "missing skill_id": "sub_skills:\n  - note: no id here\n",
+            "bad skill_id pattern": "sub_skills:\n  - skill_id: NotNamespaced\n",
+            "single-segment skill_id": "sub_skills:\n  - skill_id: nosource\n",
+        }
+        for label, sub_skills_yaml in cases.items():
+            with self.subTest(case=label):
+                result = self._ingest_one(
+                    COMPOSITION_DECLARATION + sub_skills_yaml
+                )
+                self.assertEqual(len(result.rejections), 1, label)
+                self.assertIn("sub_skill 1", result.rejections[0].reason)
+
+    def test_an_oversize_sub_skill_note_is_rejected(self) -> None:
+        result = self._ingest_one(
+            COMPOSITION_DECLARATION
+            + "sub_skills:\n"
+            "  - skill_id: samples/password-reset-resetacmepassword\n"
+            f"    note: {'n' * 201}\n"
+        )
+        self.assertEqual(len(result.rejections), 1)
+        self.assertIn("note must be a string", result.rejections[0].reason)
+
+    def test_a_sequencing_key_on_an_item_is_rejected(self) -> None:
+        # R-3: there is no control-flow vocabulary. ``additionalProperties:
+        # false`` on the item forbids every key but skill_id/note, so a
+        # sequencing construct cannot be written and cannot be smuggled in via a
+        # note (a note is a string, never interpreted).
+        for key in ("if", "loop", "retry", "on_fail"):
+            with self.subTest(key=key):
+                result = self._ingest_one(
+                    COMPOSITION_DECLARATION
+                    + "sub_skills:\n"
+                    "  - skill_id: samples/password-reset-resetacmepassword\n"
+                    f"    {key}: something\n"
+                )
+                self.assertEqual(len(result.rejections), 1)
+                self.assertIn(
+                    "unknown sub_skill keys", result.rejections[0].reason
+                )
+
+    def test_existing_classes_validate_exactly_as_before(self) -> None:
+        # No regression: neither shipped class declares sub_skills, and both
+        # ingest unchanged — the composition kind is added, the two that shipped
+        # are untouched (R-1 additivity).
+        _write(self.root, "alerts/KubePodNotReady.md", VALID_DOC)
+        _write(
+            self.root,
+            "flow/Reset.md",
+            "---\ntitle: Reset User Password\n"
+            "description: Reset a password.\n"
+            + FLOW_DECLARATION
+            + FLOW_STEPS_YAML
+            + "---\n\nReplay the reset.\n",
+        )
+        result = self._ingest()
+        self.assertEqual(result.rejections, [])
+        by_id = {skill.skill_id: skill for skill in result.records}
+        knowledge = by_id["team-a/alerts/kubepodnotready"]
+        self.assertIsNone(knowledge.sub_skills)
+        self.assertNotIn("sub_skills", knowledge.summary())
+        flow = by_id["team-a/flow/reset"]
+        self.assertEqual(flow.kind, "executable_flow")
+        self.assertIsNone(flow.sub_skills)
+        self.assertNotIn("sub_skills", flow.summary())
+
+    def test_validate_document_parity(self) -> None:
+        # The draft check shares ``_validate_frontmatter``, so a composition
+        # draft is refused by the same structural rules — and the same reason
+        # vocabulary — it would be ingested under.
+        self.assertEqual(
+            validate_document(
+                self._doc(COMPOSITION_DECLARATION + COMPOSITION_SUB_SKILLS_YAML)
+            ),
+            (True, None),
+        )
+        valid, reason = validate_document(
+            self._doc(
+                COMPOSITION_DECLARATION
+                + "sub_skills:\n"
+                "  - skill_id: samples/password-reset-resetacmepassword\n"
+                "  - skill_id: samples/password-reset-resetacmepassword\n"
+            )
+        )
+        self.assertFalse(valid)
+        self.assertIn("duplicate skill_id", reason or "")
 
 
 if __name__ == "__main__":

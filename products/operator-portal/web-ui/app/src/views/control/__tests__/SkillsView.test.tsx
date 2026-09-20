@@ -50,6 +50,34 @@ const DETAIL = {
   body: "# Steps\n\nClick **Confirm reset**.",
 };
 
+// SPEC-057 R-7: a composition's derived risk_class flows from summary() and
+// renders as a list badge. Both rows carry source/tags/version so the only "—"
+// in the table is the knowledge skill's empty risk cell.
+const LIST_WITH_RISK = {
+  skills: [
+    {
+      skill_id: "samples/composition-account-recovery",
+      title: "Account Recovery Runbook",
+      source_id: "samples",
+      tags: ["runbook"],
+      kind: "composition",
+      risk_class: "write",
+      version: "1.0.0",
+      updated_at: "2026-09-03T00:00:00Z",
+    },
+    {
+      skill_id: "samples/health-check-checkservicehealth",
+      title: "Check ACME Admin Service Health",
+      source_id: "samples",
+      tags: ["http"],
+      version: "1.0.0",
+      updated_at: "2026-09-03T00:00:00Z",
+      // A knowledge skill declares no risk_class — its badge cell renders "—".
+    },
+  ],
+  total: 2,
+};
+
 beforeEach(() => {
   mockRequestJson.mockReset();
   mockRequestJson.mockResolvedValue(LIST);
@@ -102,5 +130,30 @@ describe("SkillsView content viewer (SPEC-052 R-2)", () => {
       expect(screen.getByText(/skills hub unavailable/)).toBeTruthy(),
     );
     expect(screen.queryByTestId("skill-content-body")).toBeNull();
+  });
+});
+
+describe("SkillsView risk_class badge (SPEC-057 R-7)", () => {
+  it("renders the derived risk_class badge for a composition row", async () => {
+    mockRequestJson.mockResolvedValue(LIST_WITH_RISK);
+    render(<SkillsView />);
+    await waitFor(() =>
+      expect(screen.getByText("Account Recovery Runbook")).toBeTruthy(),
+    );
+    // The composition's derived (write) badge renders from summary(); the same
+    // read/write vocabulary the chat confirmation cards use.
+    expect(screen.getByText("write")).toBeTruthy();
+    expect(screen.queryByText("read")).toBeNull();
+  });
+
+  it("renders an em dash in the risk cell for a skill with no risk_class", async () => {
+    mockRequestJson.mockResolvedValue(LIST_WITH_RISK);
+    render(<SkillsView />);
+    await waitFor(() =>
+      expect(screen.getByText("Check ACME Admin Service Health")).toBeTruthy(),
+    );
+    // Both rows carry source/tags/version, so the only "—" is the knowledge
+    // skill's empty risk cell — a skill that declares no effect shows no badge.
+    expect(screen.getAllByText("—")).toHaveLength(1);
   });
 });

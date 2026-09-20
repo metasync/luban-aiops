@@ -37,6 +37,7 @@ def _skill(
     flow_intent=None,
     kind=None,
     steps=None,
+    sub_skills=None,
 ) -> Skill:
     return Skill(
         skill_id=skill_id,
@@ -51,6 +52,7 @@ def _skill(
         flow_intent=flow_intent,
         kind=kind,
         steps=steps,
+        sub_skills=sub_skills,
         updated_at=NOW,
         body=body,
     )
@@ -79,6 +81,25 @@ def _executable_skill(skill_id: str = "a/reset-password") -> Skill:
         risk_class="write",
         kind="executable_flow",
         steps=EXECUTABLE_STEPS,
+    )
+
+
+# SPEC-057 R-1: a composition's ordered sub-skill reference list. The derived
+# display ``risk_class`` is persisted at sync (write because a sub-skill is
+# write); the composition itself declares no web_target, steps, or author
+# risk_class.
+COMPOSITION_SUB_SKILLS = [
+    {"skill_id": "samples/password-reset-resetacmepassword", "note": "Reset first."},
+    {"skill_id": "samples/lock-unlock-user-lockunlockuser"},
+]
+
+
+def _composition_skill(skill_id: str = "a/incident-runbook") -> Skill:
+    return _skill(
+        skill_id,
+        kind="composition",
+        risk_class="write",
+        sub_skills=COMPOSITION_SUB_SKILLS,
     )
 
 
@@ -205,6 +226,40 @@ class InMemoryStoreTests(unittest.TestCase):
         self.assertIsNone(skill.steps)
         self.assertNotIn("kind", skill.summary())
         self.assertNotIn("steps", skill.summary())
+
+    def test_get_round_trips_composition_sub_skills(self) -> None:
+        # SPEC-057 R-1: the in-memory backend stores whole Skill objects, so
+        # the ordered sub-skill reference list round-trips for free — the
+        # parity check against the Postgres backend's explicit column
+        # persistence (the SPEC-050 dual-backend field-drop lesson). Order and
+        # note are the runbook contract; a re-sorted or note-stripped list
+        # would ground the wrong sequence.
+        _run(self.store.replace_source("a", [_composition_skill()]))
+        skill = _run(self.store.get("a/incident-runbook"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(skill.kind, "composition")
+        self.assertEqual(skill.risk_class, "write")
+        self.assertEqual(
+            [ref.skill_id for ref in skill.sub_skills],
+            [
+                "samples/password-reset-resetacmepassword",
+                "samples/lock-unlock-user-lockunlockuser",
+            ],
+        )
+        self.assertEqual(skill.sub_skills[0].note, "Reset first.")
+        self.assertIsNone(skill.sub_skills[1].note)
+        # The derived risk_class rides summary() to the Skills-list badge.
+        self.assertEqual(skill.summary()["risk_class"], "write")
+        self.assertEqual(len(skill.summary()["sub_skills"]), 2)
+
+    def test_a_non_composition_skill_omits_sub_skills(self) -> None:
+        # Additive: a knowledge/executable_flow skill carries no reference
+        # list, so ``sub_skills`` stays absent from its served shape.
+        _run(self.store.replace_source("a", [_executable_skill()]))
+        skill = _run(self.store.get("a/reset-password"))
+        self.assertIsNotNone(skill)
+        self.assertIsNone(skill.sub_skills)
+        self.assertNotIn("sub_skills", skill.summary())
 
     def test_ready_and_close_are_noops(self) -> None:
         self.assertTrue(_run(self.store.ready()))
@@ -395,7 +450,7 @@ class PostgresStoreAdapterTests(unittest.TestCase):
             "a/check", "a", "check.md", "local", "T", "summary",
             None, None, None, NOW, "body",
             "http://target:8080/", "write", "Submit the reset.",
-            None, None,
+            None, None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
@@ -414,7 +469,7 @@ class PostgresStoreAdapterTests(unittest.TestCase):
             "a/reset-password", "a", "reset.md", "local", "T", "summary",
             None, None, None, NOW, "body",
             "https://admin.internal/login", "write", None,
-            "executable_flow", EXECUTABLE_STEPS,
+            "executable_flow", EXECUTABLE_STEPS, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
@@ -426,12 +481,85 @@ class PostgresStoreAdapterTests(unittest.TestCase):
         self.assertEqual(skill.steps[0].tool, "web.navigate")
         self.assertEqual(skill.steps[2].expect, "the user list renders")
 
+    def test_replace_source_persists_composition_sub_skills(self) -> None:
+        # SPEC-057 R-1: ``sub_skills`` must survive the Postgres round-trip on
+        # both the INSERT params and the column list, or the deployed backend
+        # silently serves a composition with no reference list — the runbook
+        # would ground nothing (the SPEC-050 dual-backend field-drop lesson).
+        from psycopg.types.json import Jsonb
+
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(store.replace_source("a", [_composition_skill()]))
+        insert = calls[1]
+        self.assertIn("sub_skills", insert["sql"])
+        self.assertEqual(insert["params"]["kind"], "composition")
+        # ``sub_skills`` is JSONB: psycopg adapts a bare list only through the
+        # explicit ``Jsonb`` wrapper. The derived display risk_class is
+        # persisted beside it so summary() carries it to the list badge.
+        self.assertIsInstance(insert["params"]["sub_skills"], Jsonb)
+        self.assertEqual(insert["params"]["risk_class"], "write")
+        # The column stores the envelope's own dump, so an item that omits
+        # ``note`` materializes it as JSON null — read back as note=None.
+        self.assertEqual(
+            insert["params"]["sub_skills"].obj,
+            [
+                {
+                    "skill_id": "samples/password-reset-resetacmepassword",
+                    "note": "Reset first.",
+                },
+                {
+                    "skill_id": "samples/lock-unlock-user-lockunlockuser",
+                    "note": None,
+                },
+            ],
+        )
+
+    def test_replace_source_keeps_a_non_composition_sub_skills_null(self) -> None:
+        # An absent reference list is SQL NULL, never JSON ``null``: the
+        # row-map guard reads NULL back as ``None``, so the two backends agree.
+        calls: list[dict] = []
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls)
+        )
+        _run(store.replace_source("a", [_executable_skill()]))
+        self.assertIsNone(calls[1]["params"]["sub_skills"])
+
+    def test_get_maps_composition_sub_skills(self) -> None:
+        # JSONB decodes to a Python list, which the model coerces back into
+        # ``SubSkillRef`` objects in declared order — the shape R-6's read-path
+        # projection and the portal viewer read.
+        calls: list[dict] = []
+        row = (
+            "a/incident-runbook", "a", "runbook.md", "local", "T", "summary",
+            None, None, None, NOW, "body",
+            None, "write", None,
+            "composition", None, COMPOSITION_SUB_SKILLS,
+        )
+        store = PostgresSkillStore(
+            "postgresql://fake", connect=self._fake_connect(calls, rows=[row])
+        )
+        skill = _run(store.get("a/incident-runbook"))
+        self.assertIsNotNone(skill)
+        self.assertEqual(skill.kind, "composition")
+        self.assertEqual(skill.risk_class, "write")
+        self.assertIsNone(skill.steps)
+        self.assertEqual(len(skill.sub_skills), 2)
+        self.assertEqual(
+            skill.sub_skills[0].skill_id,
+            "samples/password-reset-resetacmepassword",
+        )
+        self.assertEqual(skill.sub_skills[0].note, "Reset first.")
+        self.assertIsNone(skill.sub_skills[1].note)
+
     def test_search_uses_full_text_prefilter(self) -> None:
         calls: list[dict] = []
         row = (
             "a/hit", "a", "hit.md", "local", "Pod", "summary",
             ["pod"], None, None, NOW, "pod body", None, None, None,
-            None, None,
+            None, None, None,
         )
         store = PostgresSkillStore(
             "postgresql://fake", connect=self._fake_connect(calls, rows=[row])

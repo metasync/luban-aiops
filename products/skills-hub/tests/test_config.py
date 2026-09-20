@@ -13,6 +13,7 @@ from unittest.mock import patch
 from skills_hub.core.config import (
     SettingsError,
     SkillsSettings,
+    parse_composition_max_sub_skills,
     parse_git_tokens,
     parse_query_clients,
     parse_sources,
@@ -111,6 +112,28 @@ class ParseQueryClientsTests(unittest.TestCase):
         self.assertEqual(parse_query_clients("no-secret=,=no-id,,"), tuple())
 
 
+class ParseCompositionMaxSubSkillsTests(unittest.TestCase):
+    """SPEC-057 R-2 / OQ-4: the composite-wide sub_skills cap fails fast."""
+
+    def test_parses_integer(self) -> None:
+        self.assertEqual(parse_composition_max_sub_skills("12"), 12)
+
+    def test_parses_one(self) -> None:
+        self.assertEqual(parse_composition_max_sub_skills("1"), 1)
+
+    def test_rejects_zero(self) -> None:
+        with self.assertRaises(SettingsError):
+            parse_composition_max_sub_skills("0")
+
+    def test_rejects_negative(self) -> None:
+        with self.assertRaises(SettingsError):
+            parse_composition_max_sub_skills("-3")
+
+    def test_rejects_non_integer(self) -> None:
+        with self.assertRaises(SettingsError):
+            parse_composition_max_sub_skills("many")
+
+
 class FromEnvTests(unittest.TestCase):
     def test_defaults(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -120,6 +143,8 @@ class FromEnvTests(unittest.TestCase):
         self.assertEqual(settings.store_backend, "memory")
         self.assertEqual(settings.workload_audience, "skills-hub")
         self.assertEqual(settings.sources, tuple())
+        # SPEC-057 R-2 / OQ-4: the composition cap defaults to 8.
+        self.assertEqual(settings.composition_max_sub_skills, 8)
         # SPEC-029 R-2: audit emission is opt-in and off by default.
         self.assertEqual(settings.audit_service_url, "")
         self.assertEqual(settings.audit_client_id, "skills-hub")
@@ -129,6 +154,7 @@ class FromEnvTests(unittest.TestCase):
         env = {
             "SKILLS_SOURCES": '[{"source_id": "a", "type": "local", "path": "/s"}]',
             "SKILLS_SYNC_INTERVAL_SECONDS": "60",
+            "SKILLS_COMPOSITION_MAX_SUB_SKILLS": "4",
             "SKILLS_STORE_BACKEND": "Postgres",
             "SKILLS_DB_URL": "postgresql://x",
             "SKILLS_QUERY_CLIENTS": "tool-gateway=secret",
@@ -140,6 +166,7 @@ class FromEnvTests(unittest.TestCase):
             settings = SkillsSettings.from_env()
         self.assertEqual(len(settings.sources), 1)
         self.assertEqual(settings.sync_interval_seconds, 60)
+        self.assertEqual(settings.composition_max_sub_skills, 4)
         self.assertEqual(settings.store_backend, "postgres")
         self.assertEqual(settings.query_clients[0].client_id, "tool-gateway")
         self.assertEqual(settings.audit_service_url, "http://audit-service:8000")

@@ -24,8 +24,13 @@ from opentelemetry import trace
 
 from skills_hub.core import metrics
 from skills_hub.core.config import SkillsSettings, SourceSpec
+from skills_hub.schemas.skill import Skill
 from skills_hub.services.audit_emitter import build_audit_event, emit_audit_event
-from skills_hub.services.ingestion import Rejection, ingest_directory
+from skills_hub.services.ingestion import (
+    COMPOSITION_KIND,
+    Rejection,
+    ingest_directory,
+)
 from skills_hub.services.skill_store import SkillStore
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +61,16 @@ def _rejection_category(reason: str) -> str:
     lowered = reason.lower()
     if lowered.startswith("duplicate"):
         return "duplicate_slug"
+    # SPEC-057 R-2: the composition *resolution* rejections (an unresolved or
+    # nested sub-skill, rendered by sync's ``_resolve_compositions``) are a
+    # distinct failure mode from a structural frontmatter error, so they get
+    # their own bounded label. The *structural* composition rejections render as
+    # "sub_skill N: ...", "a composition declares no ...", "more than N
+    # sub_skills", "kind: composition requires ...", or "sub_skills requires
+    # kind: composition" — none start with "composition", so they stay in the
+    # frontmatter bucket exactly as the other per-field bounds do.
+    if lowered.startswith("composition"):
+        return "composition"
     if "body exceeds" in lowered:
         return "size"
     # SPEC-055 R-3: the step list is the second size-bounded artifact, so its
@@ -199,8 +214,27 @@ class SyncManager:
             try:
                 root, ref = await self._materialize(spec)
                 result = await asyncio.to_thread(
-                    ingest_directory, spec.source_id, root, ref, now
+                    ingest_directory,
+                    spec.source_id,
+                    root,
+                    ref,
+                    now,
+                    self._settings.composition_max_sub_skills,
                 )
+                # SPEC-057 R-2: resolve each composition's sub-skill references
+                # against the catalog — this source's fresh records overlaid on
+                # ``store.get()`` for cross-source ids — dropping + rejecting any
+                # composition whose sub-skill is unresolved or is itself a
+                # composition, and deriving the survivors' display risk_class.
+                # The rejections ride the existing per-source status, rejected
+                # count and ``skills_synced`` event: no new audit event type.
+                resolved_records, composition_rejections = (
+                    await self._resolve_compositions(
+                        spec.source_id, result.records
+                    )
+                )
+                result.records = resolved_records
+                result.rejections.extend(composition_rejections)
                 await self._store.replace_source(spec.source_id, result.records)
                 status = SourceStatus(
                     source_id=spec.source_id,
@@ -279,6 +313,72 @@ class SyncManager:
                 )
             self._statuses[spec.source_id] = status
             return status
+
+    async def _resolve_compositions(
+        self, source_id: str, records: list[Skill]
+    ) -> tuple[list[Skill], list[Rejection]]:
+        """Resolve each composition's sub-skill references (SPEC-057 R-2).
+
+        Runs between ``ingest_directory`` (pure per-document parsing, no store
+        handle) and ``replace_source``, where ``self._store`` is reachable. The
+        structural facts a document proves alone were already checked in
+        ingestion; the *cross-skill* facts — does each referenced sub-skill
+        resolve, is it itself a composition — need the catalog and are checked
+        here.
+
+        The resolution index is *this source's fresh records overlaid on
+        ``store.get()`` for cross-source ids*, so a composition and its sub-skills
+        in one source resolve within a single cycle, while a cross-source
+        reference resolves only after its own source has synced at least once
+        (eventual consistency — sync repeats every ``SKILLS_SYNC_INTERVAL_
+        SECONDS``). A composition whose sub-skill is unresolved or is itself a
+        composition is **dropped and rejected** — never silently served, never
+        degraded to a knowledge skill. Single-target needs no check: a sub-skill's
+        ``web_target`` is a scalar, so it declares exactly one browser target or
+        none (infra), never several, and SPEC-055 R-4 already validated its blast
+        radius at graduation (R-2 re-checks presence + single-target, not the
+        trace). A surviving composition's display ``risk_class`` is derived
+        (``write`` if any resolved sub-skill is ``write``, else ``read``) and
+        persisted via ``model_copy`` so ``summary()`` carries it to the list badge.
+        """
+        fresh = {record.skill_id: record for record in records}
+        resolved: list[Skill] = []
+        rejections: list[Rejection] = []
+        for record in records:
+            if record.kind != COMPOSITION_KIND:
+                resolved.append(record)
+                continue
+            derived_risk_class = "read"
+            failure: str | None = None
+            for ref in record.sub_skills or []:
+                # Prefer this source's fresh record; fall back to the store for a
+                # cross-source id, which resolves only once that source synced.
+                sub_skill = fresh.get(ref.skill_id) or await self._store.get(
+                    ref.skill_id
+                )
+                if sub_skill is None:
+                    failure = (
+                        f"composition sub_skill '{ref.skill_id}' does not "
+                        "resolve to a published skill"
+                    )
+                    break
+                if sub_skill.kind == COMPOSITION_KIND:
+                    failure = (
+                        f"composition sub_skill '{ref.skill_id}' is itself a "
+                        "composition (no nesting in Phase 1)"
+                    )
+                    break
+                if sub_skill.risk_class == "write":
+                    derived_risk_class = "write"
+            if failure is not None:
+                rejections.append(
+                    Rejection(source_id, record.source_path, failure)
+                )
+                continue
+            resolved.append(
+                record.model_copy(update={"risk_class": derived_risk_class})
+            )
+        return resolved, rejections
 
     async def _materialize(self, spec: SourceSpec) -> tuple[Path, str]:
         """Return (readable root directory, ref marker) for one source."""
