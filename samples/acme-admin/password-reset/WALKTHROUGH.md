@@ -96,6 +96,12 @@ chat leg sends. The value must be in the message: it is a chat-supplied
 one-time secret, never stored in the skill, never committed, and — as step 6
 shows — never present in any tool output.
 
+> **Regular use is shorter.** You do not have to name the skill or the credential
+> set — "reset alice's acme-admin password to 'TempPass-2026!'" is enough, and the
+> agent finds the runbook through `skills.search`. The explicit form above is what
+> `demo.sh` sends so its assertions reproduce. See
+> [Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 **The session title in the sidebar masks it.** It reads
 
 ```

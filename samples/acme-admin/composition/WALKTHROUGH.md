@@ -119,6 +119,23 @@ human-readable projection (title, transcript, live stream, cards, tool evidence)
 masks it. The value stays real only in the agent's own context, because the reset
 needs it.
 
+**Or just ask conversationally.** In regular use you do not name the runbook, the
+credential set, or the order — the agent finds the runbook through `skills.search`
+and reads those details from it. This is enough:
+
+```
+dave's locked out of acme-admin — reset his password to 'TempPass-2026!' and
+unlock him.
+```
+
+The only inputs it cannot infer are the **target user**, the **new one-time
+password**, and the **intent** (recover = reset, then unlock); leave out the
+password and the agent asks for it, because the runbook says "if any is missing,
+ask." The explicit form above is what `demo.sh`'s chat leg sends: this
+walkthrough's automated leg asserts an exact two-card count, so it removes the one
+non-deterministic step — whether the model picks the runbook you meant. See
+[Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 ## Step 5: The FIRST card — `flow` (the password reset)
 
 The agent begins step 1 of the runbook: it follows

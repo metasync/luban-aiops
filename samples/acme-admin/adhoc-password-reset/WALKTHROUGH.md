@@ -82,6 +82,13 @@ Staying unbound is the point of the sample, not a warning sign — the runbook's
 prompt both answer the objections a model may raise. An unbound write is the
 **more** heavily gated path: one card per action rather than one gate per flow.
 
+> **In regular use, drop the runbook name too.** "reset alice's acme-admin
+> password to 'TempPass-2026!'" is enough — the agent finds the runbook through
+> `skills.search`. The "without a flow / do not pass `skill_id`" wording stays here
+> because *staying unbound* is what this sample demonstrates, not because the
+> request needs it. See
+> [Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 **Your password is masked in every human-readable projection.** The sidebar title
 reads `Ad-hoc, without binding a flow, reset the password for alice
 to ***` — masking runs *before* the 80-character cap, so this prompt's secret,

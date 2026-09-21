@@ -89,6 +89,13 @@ leg sends. The direction matters: "lock" and "unlock" are not interchangeable,
 they hit different endpoints, and the card an approver reads differs. If the
 caller does not say which, the skill says to ask rather than guess.
 
+> **Regular use is shorter.** You do not have to name the skill or the credential
+> set — "lock carol's acme-admin account" is enough, and the agent finds the
+> runbook through `skills.search`. Keep the direction ("lock", not "unlock"): it is
+> the one thing the skill cannot infer and will ask for if you omit it. The
+> explicit form above is what `demo.sh` sends so its assertions reproduce. See
+> [Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 The agent should make **one** `http.post`:
 
 ```

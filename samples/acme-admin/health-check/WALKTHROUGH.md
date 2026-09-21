@@ -95,6 +95,8 @@ instead send the bare request ("is acme-admin healthy?") and watch the agent
 find the skill itself through `skills.search` → `skills.get`, but if it asks
 whether it may proceed rather than calling the tool, re-send the message above.
 The skill's title (`Check ACME Admin Service Health`) works in place of its id.
+See [Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it)
+for the general principle.
 
 ## Step 5: What you should see
 

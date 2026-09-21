@@ -56,6 +56,12 @@ line and pressing Enter sends the first line on its own and leaves the rest
 behind. The walkthroughs under `samples/` give their prompts as blocks for
 exactly this reason.
 
+**You never have to name a skill to use one.** Describe the outcome and the
+agent finds the matching runbook itself (`skills.search` → `skills.get`); the
+`samples/` walkthroughs spell a skill id out only so their automated demos
+reproduce. See
+[Asking for a runbook without naming it](skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 ### Voice input
 
 The microphone button in the composer performs browser speech-to-text

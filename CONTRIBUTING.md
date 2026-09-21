@@ -93,6 +93,10 @@ What changes are expected to carry:
 - prefer explicit APIs and contracts over hidden cross-project coupling
 - keep risky operational behavior behind approval and audit boundaries
 - update documentation when product boundaries or release sequencing changes
+- in walkthroughs and samples, present the conversational form of a request as
+  the primary path and any exact, skill-naming prompt as the deterministic
+  variant the demo asserts against (see
+  [`docs/guides/skills-guide.md`](docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it))
 
 ## Pull Requests
 

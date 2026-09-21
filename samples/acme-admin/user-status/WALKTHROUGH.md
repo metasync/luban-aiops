@@ -113,6 +113,12 @@ and where the admin password comes from. Asking for the whole list instead
 ("show me the acme-admin user list and who is locked") is equally valid; the
 skill extracts `#user-table` for that and `#user-row-<username>` for one user.
 
+> **You do not have to name the skill either.** "is alice's acme-admin account
+> active or locked?" is enough — the agent finds the runbook through
+> `skills.search`. The explicit form above is what `demo.sh` sends so its
+> assertions reproduce. See
+> [Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+
 **Do not paste the admin password into the chat.** The credential set exists so
 that nobody has to, and the value never enters the prompt, the tool arguments
 or any result.

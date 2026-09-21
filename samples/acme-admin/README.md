@@ -298,7 +298,13 @@ The existing walkthroughs are the template. The shape they share:
 4. **Give the exact message to paste**, identical to the one the demo's chat leg
    sends. Naming the skill id and the credential set closes the two ambiguities
    that make a model stall: which runbook to follow, and where the password
-   comes from.
+   comes from. **Then say out loud that the explicit form is a determinism
+   choice, not a requirement.** In regular use the reader can ask conversationally
+   and the agent finds the runbook through `skills.search`, so every Step-4 prompt
+   carries a short "or just ask conversationally" note linking to
+   [`skills-guide.md`](../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it).
+   The strict block is what `demo.sh` asserts against; the conversational note is
+   what a person would actually type.
 5. **List what the turn should contain, tool by tool**, and what should *not*
    appear. "No confirmation card. Nothing parked." is an observation, not an
    omission — say so out loud on a read rung.
@@ -330,3 +336,5 @@ script does not join them by existing.
   — `http.get` and `http.post`, which rungs 1 and 3 use
 - [`../../docs/guides/tool-configuration.md`](../../docs/guides/tool-configuration.md)
   — the allowlists and feature switches named above
+- [`../../docs/guides/skills-guide.md`](../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it)
+  — asking for a runbook conversationally, without naming a skill id

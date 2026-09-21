@@ -128,6 +128,15 @@ Overrides: `TARGET_USER` (default `dave`, the seed's pre-locked user — the
 locked-out account this runbook recovers), `NEW_PASSWORD` (default
 `TempPass-2026!`, a one-time value that is masked everywhere and never stored).
 
+The chat leg's prompt names the runbook skill, the credential set, the target and
+the one-time value for **determinism** — the leg asserts an exact two-card count,
+so it removes the one non-deterministic step (whether the model picks the runbook
+you meant). In regular use none of that is required: "dave's locked out of
+acme-admin — reset his password and unlock him" is enough, and the agent finds the
+runbook through `skills.search`. See
+[Asking for a runbook without naming it](../../../docs/guides/skills-guide.md#asking-for-a-runbook-without-naming-it)
+and [WALKTHROUGH Step 4](WALKTHROUGH.md#step-4-ask-for-the-recovery).
+
 ## Where this rung sits
 
 | rung | sample | surface | tier | cards |

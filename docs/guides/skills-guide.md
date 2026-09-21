@@ -34,6 +34,37 @@ from the file path (not frontmatter). See
 [skill-format.md](../../shared/shared-contracts/skill-format.md) for the full
 contract.
 
+## Asking for a runbook without naming it
+
+You do not have to know a skill's id — or name it at all — to use it. The agent
+reaches runbooks the way it reaches every skill: it calls `skills.search` with
+the words you typed, reads the best match with `skills.get`, and follows it. Its
+default system prompt tells it to discover guidance by intent and *not* to demand
+a `skill_id` you were never given.
+
+So in regular use, describe the outcome and supply only what a skill cannot infer
+for itself:
+
+```
+dave's locked out of acme-admin — reset his password to 'TempPass-2026!' and
+unlock him.
+```
+
+The agent finds `samples/composition-recoveracmeaccount` on its own. Everything
+the runbook already grounds — the credential set, the target URL, the surface
+(browser vs. API), the order of steps — belongs in the skill, not in your
+message. The only inputs it cannot infer are the ones the skill's preconditions
+name as the caller's to supply (for a recovery: the **target user**, the **new
+one-time password**, and the **intent**). Omit one and the agent asks rather than
+guesses.
+
+**When to name a skill anyway.** Naming the `skill_id` (or its title) removes the
+one non-deterministic step in the exchange — whether the model picks the runbook
+you meant. The `samples/` walkthroughs and their `demo.sh` chat legs name it for
+exactly that reason: an assertion about an exact card count or a specific tool
+sequence has to reproduce. That is a *testing* need, not a usage requirement. Day
+to day, ask conversationally and let `skills.search` do the matching.
+
 ## The skill format in one minute
 
 A skill is a Markdown file with YAML frontmatter:
