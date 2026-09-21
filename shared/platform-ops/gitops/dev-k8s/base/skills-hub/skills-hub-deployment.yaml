@@ -99,6 +99,8 @@ spec:
             items:
               - key: guides-DebugPods.md
                 path: guides/DebugPods.md
+              - key: guides-GeneratePassword.md
+                path: guides/GeneratePassword.md
               - key: guides-ImagePullFailures.md
                 path: guides/ImagePullFailures.md
               - key: guides-DebugServices.md

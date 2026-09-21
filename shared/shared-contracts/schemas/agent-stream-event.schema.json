@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/agent-stream-event.schema.json",
-  "title": "Agent Stream Event (v11)",
-  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3). v9 adds an optional flow_summary on confirmation_request frames carrying the bound browser-flow headline so the live operator card renders the same workflow framing the durable record gives the approver inbox (SPEC-051 R-6). v10 adds an optional flow_intent inside flow_summary carrying the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (SPEC-053 R-2) — shipped at 0.34.0 but never recorded in this title/ledger, retro-fitted here. v11 adds an optional approval_kind on confirmation_request frames declaring whether the parked batch is a bound browser flow or an individually-approved action, so a card's kind is stated rather than inferred from ambient session state (SPEC-054 R-1), plus an optional display-only change_request projection on each pending_calls entry so an action card reads as a secret-masked change request instead of a bare tool name (SPEC-054 R-3). v11 also declares display_hint, which SPEC-050 already emits on pending_calls entries but never added to this schema (additionalProperties is false, so the omission was a latent contract violation).",
+  "title": "Agent Stream Event (v12)",
+  "description": "SSE frame payload for GET /api/v2/chat/stream. v3 added tool_call and tool_result event types for evidence panel rendering (SPEC-011 R-1). v4 adds confirmation_request and confirmation_result event types for HITL confirmation bridging (SPEC-020 R-1). v5 adds an optional data field on tool_result frames carrying the full tool payload within the stream size cap. v6 adds an optional risk_level on each pending_calls entry so confirmation cards can surface mutating (write/admin) tool calls (SPEC-021 R-3). v7 adds an optional model field on message_end frames carrying the model id that resolved for the turn (SPEC-024 R-3/R-4). v8 adds an optional action on each pending_calls entry carrying the policy action derived from the risk tier so the tiered require_approval confirmation bridge and portal approval badges can render (SPEC-030 R-3). v9 adds an optional flow_summary on confirmation_request frames carrying the bound browser-flow headline so the live operator card renders the same workflow framing the durable record gives the approver inbox (SPEC-051 R-6). v10 adds an optional flow_intent inside flow_summary carrying the skill-authored sentence describing what the flow's gated mutating step achieves, rendered as the card's lead decision line (SPEC-053 R-2) — shipped at 0.34.0 but never recorded in this title/ledger, retro-fitted here. v11 adds an optional approval_kind on confirmation_request frames declaring whether the parked batch is a bound browser flow or an individually-approved action, so a card's kind is stated rather than inferred from ambient session state (SPEC-054 R-1), plus an optional display-only change_request projection on each pending_calls entry so an action card reads as a secret-masked change request instead of a bare tool name (SPEC-054 R-3). v11 also declares display_hint, which SPEC-050 already emits on pending_calls entries but never added to this schema (additionalProperties is false, so the omission was a latent contract violation). v12 adds a secret_delivery event type (SPEC-062 R-3): a dedicated frame emitted as a sibling of tool_result when a secrets.generate_password result carries a delivery_id, so the portal can render a one-time Copy-password control. It carries delivery_id, channel, expires_at and an optional recipient — never the generated value, which rides no projection at all (the frame is a handle to a server-mediated single-use redemption, ADR-0012). A dedicated frame rather than a field on tool_result.data keeps the contract stable independent of the data size-cap omission and is self-describing to the portal; older clients ignore the unknown type.",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "session_id", "request_id"],
   "properties": {
     "type": {
       "type": "string",
-      "enum": ["message_start", "message_delta", "message_end", "error", "tool_call", "tool_result", "confirmation_request", "confirmation_result"]
+      "enum": ["message_start", "message_delta", "message_end", "error", "tool_call", "tool_result", "confirmation_request", "confirmation_result", "secret_delivery"]
     },
     "session_id": {
       "type": "string"
@@ -67,6 +67,8 @@
                 "type": "string",
                 "description": "Short human sentence naming the target and the effect, e.g. 'Delete pod \"scratch-restart-demo\" in namespace \"default\"'. Rendered as the card's lead line."
               },
+              "warning": { "type": "string" },
+              "requires_acknowledgment": { "type": "boolean" },
               "fields": {
                 "type": "array",
                 "description": "Optional label/value pairs rendered as a table beneath the summary. Omitted when the projection has nothing worth tabulating beyond the summary.",
@@ -154,6 +156,23 @@
         "message": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "delivery_id": {
+      "type": "string",
+      "description": "SPEC-062 R-3: opaque single-use handle for a generated secret's redemption. Present on secret_delivery frames; the portal binds a Copy-password control to it and exchanges it once via the authenticated GET /api/v2/secrets/delivery/{id}. Never the value itself."
+    },
+    "channel": {
+      "type": "string",
+      "description": "SPEC-062 R-3/R-5: delivery channel the handle belongs to (portal_copy today; email and future channels are additive, so this is an open string, not a closed enum). Present on secret_delivery frames."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "SPEC-062 R-3: when the handle stops being redeemable (the buffer TTL). Present on secret_delivery frames so the portal can render an expired state without a round trip."
+    },
+    "recipient": {
+      "type": "string",
+      "description": "SPEC-062 R-4: the external recipient for a non-local channel (e.g. an email address). Present on secret_delivery frames for external channels; absent for portal_copy, whose recipient is the session owner."
     }
   }
 }

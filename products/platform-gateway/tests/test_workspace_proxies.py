@@ -147,6 +147,57 @@ class WorkspaceProxyBase(unittest.TestCase):
         )
 
 
+class SecretRedemptionProxyTests(WorkspaceProxyBase):
+    delivery_id = "11111111-1111-4111-8111-111111111111"
+
+    def _get(self, fake, *, token="delegated-token", delivery_id=None):
+        with (
+            self._patch_identity("operator", "tools"),
+            patch("platform_gateway.api.routes.tools.obtain_delegated_token", new=AsyncMock(return_value=token)),
+            self._patch_httpx(fake, "tool_gateway_client"),
+        ):
+            return self.client.get(f"/api/v1/secrets/delivery/{delivery_id or self.delivery_id}")
+
+    def test_authenticated_value_is_proxied_without_caching(self):
+        fake = _FakeAsyncClient(response=_FakeResponse(200, {"value": "test-only-secret"}))
+        response = self._get(fake)
+        assert response.status_code == 200
+        assert response.json() == {"value": "test-only-secret"}
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["pragma"] == "no-cache"
+        assert fake.calls[0]["headers"]["authorization"] == "Bearer delegated-token"
+        assert fake.calls[0]["url"].endswith(f"/api/v2/secrets/delivery/{self.delivery_id}")
+
+    def test_auth_is_mandatory_even_with_dev_auth_disabled(self):
+        self._use_settings(_settings(require_auth=False))
+        response = self.client.get(f"/api/v1/secrets/delivery/{self.delivery_id}")
+        assert response.status_code == 401
+        assert response.headers["cache-control"] == "no-store"
+
+    def test_failures_never_forward_upstream_bodies(self):
+        for status in (302, 404, 410, 500):
+            fake = _FakeAsyncClient(response=_FakeResponse(status, {"detail": "test-only-secret"}))
+            response = self._get(fake)
+            assert response.status_code == (status if status in (404, 410) else 502)
+            assert response.json() == {"detail": "Secret delivery unavailable"}
+            assert response.headers["cache-control"] == "no-store"
+
+    def test_missing_delegation_and_bad_ids_do_not_call_upstream(self):
+        fake = _FakeAsyncClient()
+        assert self._get(fake, token=None).status_code == 503
+        assert self._get(fake, delivery_id="invalid").status_code == 404
+        assert fake.calls == []
+
+    def test_transport_and_malformed_success_are_sanitized(self):
+        for fake in (
+            _FakeAsyncClient(raise_exc=httpx.ConnectError("test-only-secret")),
+            _FakeAsyncClient(response=_FakeResponse(200, {"value": 123})),
+        ):
+            response = self._get(fake)
+            assert response.status_code == 502
+            assert "test-only-secret" not in response.text
+
+
 class ToolsProxyTests(WorkspaceProxyBase):
     def _patch_delegation(self, token: str | None = "delegated-token"):
         return patch(

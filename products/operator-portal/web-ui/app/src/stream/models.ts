@@ -53,6 +53,13 @@ export interface ToolResultFrame {
   truncated?: ToolTruncated;
 }
 
+export interface SecretDeliveryFrame {
+  kind: "secret_delivery";
+  deliveryId: string;
+  channel: "portal_copy";
+  expiresAt: string;
+}
+
 export interface PendingCall {
   callId?: string;
   toolName?: string;
@@ -88,6 +95,8 @@ export interface ChangeRequestField {
 export interface ChangeRequest {
   summary: string;
   fields?: ChangeRequestField[];
+  warning?: string;
+  requiresAcknowledgment?: boolean;
 }
 
 // SPEC-051 R-6: the card-level browser-flow headline. Mirrors the kernel's
@@ -139,6 +148,7 @@ export type StreamFrame =
   | TerminalFrame
   | ToolCallFrame
   | ToolResultFrame
+  | SecretDeliveryFrame
   | ConfirmationRequestFrame
   | ConfirmationResultFrame
   | ErrorFrame;

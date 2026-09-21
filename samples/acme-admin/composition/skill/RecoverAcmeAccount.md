@@ -94,8 +94,14 @@ relaxes none:
   **designated approver distinct from the operator**. Two mutating sub-skills
   means two approvals, and the same rule binds each: the requester cannot decide
   their own call.
-- The caller names the **target user**, the **new temporary password**, and the
-  **direction** for the second step (here, unlock). If any is missing, ask.
+- The caller names the **target user** and the **direction** for the second
+  step (here, unlock). Ask if either is missing. A supplied temporary password
+  stays supported. If no password is supplied, follow the reset sub-skill's
+  `secrets.generate_password(policy="default", handoff="portal_copy")` branch;
+  its strength policy is `shared/shared-contracts/policies/password-policy.yaml`.
+  Generation is read tier and adds no approval. It does not authorize either
+  mutation. Never invent or restate the generated value; the requester uses
+  the one-time **Copy password** control.
 
 ## Procedure
 

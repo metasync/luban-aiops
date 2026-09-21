@@ -330,9 +330,15 @@ def test_get_session_degrades_to_null_when_evidence_store_unreadable(
 # --- Delete ---
 
 
-def test_delete_session_removes_session_and_state(workspace):
+def test_delete_session_removes_session_and_state(workspace, monkeypatch):
+    from agent_service.api.v2 import routes
+    from agent_service.runtime_kernel import AgentKernel
+
+    kernel = AgentKernel()
+    monkeypatch.setattr(routes, "get_runtime_kernel", lambda: kernel)
     session_store, state_store = workspace
     record = session_store.create_session("alice")
+    kernel._generated_literals[record.session_id] = {"fixture-generated!"}
     state_store.save_state(record.session_id, _snapshot_json([]))
 
     response = _client().delete(
@@ -342,6 +348,7 @@ def test_delete_session_removes_session_and_state(workspace):
     assert response.json() == {"session_id": record.session_id, "deleted": True}
     assert session_store.get_session(record.session_id) is None
     assert state_store.load_state(record.session_id) is None
+    assert record.session_id not in kernel._generated_literals
 
 
 def test_delete_unknown_or_foreign_session_returns_404(workspace):

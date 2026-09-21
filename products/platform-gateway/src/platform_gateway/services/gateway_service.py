@@ -1009,6 +1009,7 @@ async def chat_confirm(
     confirm_id: str,
     decision: str,
     delegated_token: str | None = None,
+    recipient_warning_acknowledged: bool = False,
 ) -> StreamingResponse:
     """Proxy a parked-confirmation decision to agent-service (SPEC-020 R-3).
 
@@ -1033,6 +1034,11 @@ async def chat_confirm(
         raise HTTPException(
             status_code=502, detail="approval check unavailable"
         ) from exc
+    if decision == "approve" and parked and parked.get("confirm_id") == confirm_id:
+        from platform_gateway.services.policy_engine import ACTION_SECRETS_DELIVER
+
+        if any(call.get("tool_name") == "secrets.deliver" for call in parked.get("pending_calls", [])):
+            enforce_policy(settings, identity, ACTION_SECRETS_DELIVER, request_id)
     approval_context = _enforce_approval_tier(
         settings, request_id, identity, session_id, confirm_id,
         decision, parked,
@@ -1046,6 +1052,7 @@ async def chat_confirm(
             confirm_id,
             decision,
             delegated_token,
+            **({"recipient_warning_acknowledged": True} if recipient_warning_acknowledged else {}),
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

@@ -8,6 +8,30 @@ function sseBlock(payload: Record<string, unknown>): string {
 }
 
 describe("decodeEventBlock", () => {
+  it("accepts only delivery metadata, never a value", () => {
+    const payload = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
+      channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z", value: "must-not-survive" };
+    const frame = decodeEventBlock(sseBlock(payload))?.frame;
+    expect(frame).toEqual({ kind: "secret_delivery", deliveryId: payload.delivery_id,
+      channel: "portal_copy", expiresAt: payload.expires_at });
+    expect(JSON.stringify(frame)).not.toContain(payload.value);
+    for (const override of [{ delivery_id: "invalid" }, { channel: "email" },
+      { expires_at: "not-a-date" }, { expires_at: "2030-01-01T00:00:00" }]) {
+      expect(decodeEventBlock(sseBlock({ ...payload, ...override }))?.frame).toBeNull();
+    }
+  });
+
+  it("preserves the explicit email warning acknowledgment", () => {
+    const frame = decodeEventBlock(sseBlock({ type: "confirmation_request", confirm_id: "cf-1",
+      pending_calls: [{ tool_name: "secrets.deliver", change_request: {
+        summary: "Send via email", warning: "Outside approved list", requires_acknowledgment: true,
+      } }],
+    }))?.frame;
+    expect(frame?.kind === "confirmation_request" && frame.pendingCalls[0].changeRequest).toEqual({
+      summary: "Send via email", warning: "Outside approved list", requiresAcknowledgment: true,
+    });
+  });
+
   it("maps message_delta frames with a truthy delta to delta frames", () => {
     const decoded = decodeEventBlock(
       sseBlock({ type: "message_delta", delta: "hello", session_id: "s-1" }),

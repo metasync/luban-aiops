@@ -51,6 +51,21 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("retains delivery metadata and relays email acknowledgment on resume", async () => {
+    const delivery = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
+      channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z" };
+    const calls = queueFetch(okStream(sse(delivery, delivery, {
+      type: "confirmation_request", confirm_id: "cf-email", session_id: "s-email", pending_calls: [],
+    })), okStream(sse({ type: "confirmation_result", confirm_id: "cf-email", status: "approved" })));
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => { await result.current.send("Generate and email a password"); });
+    expect(result.current.turns[0].secretDeliveries).toHaveLength(1);
+    expect(result.current.turns[0].secretDeliveries?.[0].deliveryId).toBe(delivery.delivery_id);
+    await act(async () => { await result.current.decide("cf-email", "approve", true); });
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({ session_id: "s-email",
+      confirm_id: "cf-email", decision: "approve", recipient_warning_acknowledged: true });
+  });
+
   it("accumulates deltas, learns the session id, and marks completion", async () => {
     queueFetch(
       okStream(

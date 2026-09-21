@@ -43,6 +43,19 @@ DELEGATED_TOKEN: ContextVar[str | None] = ContextVar(
     default=None,
 )
 
+# SPEC-062: resumed generation belongs to the requester, never the approver.
+# None means a normal turn; (None,) is an explicit missing-owner credential
+# and must not fall back to the approver. This state is ephemeral only.
+GENERATION_OWNER_TOKEN: ContextVar[tuple[str | None] | None] = ContextVar(
+    "GENERATION_OWNER_TOKEN", default=None,
+)
+
+
+def generation_bearer_token() -> str | None:
+    owner = GENERATION_OWNER_TOKEN.get()
+    return owner[0] if owner is not None else DELEGATED_TOKEN.get()
+
+
 # Request-scoped chat session id (SPEC-049 R-1): set by the runtime kernel
 # around each turn so read-path gateway invocations forward the chat
 # session id beside the delegated token. A stateful gateway connector (the
@@ -379,7 +392,7 @@ def _make_tool_fn(
                 gateway_url=gateway_url,
                 tool_name=name,
                 parameters=kwargs,
-                bearer_token=DELEGATED_TOKEN.get(),
+                bearer_token=(generation_bearer_token() if name == "secrets.generate_password" else DELEGATED_TOKEN.get()),
                 session_id=CHAT_SESSION_ID.get(),
             )
         except httpx.TimeoutException:
@@ -396,6 +409,9 @@ def _make_tool_fn(
                     "gateway answered",
                 },
             }
+        from agent_service.services.prose_redaction import observe_generated_result
+
+        observe_generated_result(result)
         return ToolChunk(
             content=[TextBlock(text=json.dumps(result, default=str))],
             metadata={"gateway_result": result},

@@ -2,7 +2,7 @@
 // tier_1 "operator confirmation" from tier_2 "approver required", and
 // users without a designated decider role see a read-only card (no
 // approve/deny buttons) while the gateway bridge stays authoritative.
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingCall } from "../../stream/models";
 import type { ConfirmationCard } from "../../stream/useChatStream";
@@ -50,6 +50,29 @@ beforeEach(() => {
 // registers; unmount explicitly to keep renders isolated.
 afterEach(() => {
   cleanup();
+});
+
+describe("ConfirmationCardView email warning (SPEC-062)", () => {
+  it("requires an unchecked acknowledgment for approval, not denial", () => {
+    mockUseAuth.mockReturnValue({ roles: ["approver"] });
+    const card = cardOf([{ toolName: "secrets.deliver", action: "tools:mutate", riskLevel: "write",
+      changeRequest: { summary: "Email a secret", warning: "Recipient outside approved list",
+        requiresAcknowledgment: true, fields: [{ label: "password", value: "***", masked: true }] } }]);
+    const onDecide = vi.fn();
+    const view = render(<ConfirmationCardView card={card} canDecide busy={false} onDecide={onDecide} />);
+    const approve = screen.getByRole("button", { name: /Approve/ }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(screen.getByRole("checkbox")).toHaveProperty("checked", false);
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }));
+    expect(onDecide).toHaveBeenCalledWith("cf-1", "deny");
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(approve.disabled).toBe(false);
+    fireEvent.click(approve);
+    expect(onDecide).toHaveBeenCalledWith("cf-1", "approve", true);
+    view.rerender(<ConfirmationCardView card={{ ...card, confirmId: "cf-2" }} canDecide busy={false} onDecide={onDecide} />);
+    expect(screen.getByRole("checkbox")).toHaveProperty("checked", false);
+    expect(screen.getByRole("button", { name: /Approve/ })).toHaveProperty("disabled", true);
+  });
 });
 
 describe("ConfirmationCardView approval tiers (SPEC-030 R-5)", () => {

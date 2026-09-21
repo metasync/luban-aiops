@@ -51,6 +51,37 @@ def _raise_upstream(response: httpx.Response) -> None:
     raise HTTPException(status_code=502, detail="tool gateway request failed")
 
 
+async def redeem_secret(
+    settings: PlatformGatewaySettings, request_id: str, delegated_token: str, delivery_id: str,
+) -> str:
+    from uuid import UUID
+
+    try:
+        if str(UUID(delivery_id)) != delivery_id:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Secret delivery unavailable") from None
+    try:
+        async with httpx.AsyncClient(timeout=PROXY_TIMEOUT_SECONDS, follow_redirects=False) as client:
+            response = await client.get(
+                f"{_base_url(settings)}/api/v2/secrets/delivery/{delivery_id}",
+                headers={"authorization": f"Bearer {delegated_token}", "x-request-id": request_id},
+            )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Secret delivery unavailable") from None
+    if response.status_code != 200:
+        status = response.status_code if response.status_code in (401, 403, 404, 410) else 502
+        raise HTTPException(status_code=status, detail="Secret delivery unavailable")
+    try:
+        payload = response.json()
+        value = payload.get("value") if isinstance(payload, dict) else None
+    except ValueError:
+        value = None
+    if not isinstance(value, str) or not value:
+        raise HTTPException(status_code=502, detail="Secret delivery unavailable")
+    return value
+
+
 async def list_tools(
     settings: PlatformGatewaySettings,
     request_id: str,

@@ -33,7 +33,7 @@ LOGGER = logging.getLogger(__name__)
 
 # Frame types worth persisting; everything else on the sink (e.g. future
 # diagnostic frames) stays live-stream-scoped.
-EVIDENCE_FRAME_TYPES = frozenset({"tool_call", "tool_result"})
+EVIDENCE_FRAME_TYPES = frozenset({"tool_call", "tool_result", "secret_delivery"})
 
 _TTL_SWEEP_LIMIT = 100
 

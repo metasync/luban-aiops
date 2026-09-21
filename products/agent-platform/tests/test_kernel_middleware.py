@@ -707,6 +707,56 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         # gateway's signature check is unaffected by what the panel shows.
         self.assertIn("newpw=TempPass123%21", tool_call.input)
 
+    def test_result_projection_mutation_is_detected(self) -> None:
+        """R-8: bypass both layers of the result projection, in memory only."""
+        from unittest.mock import patch
+        from agent_service.services import kernel_middleware
+
+        with (
+            patch.object(kernel_middleware, "redact_result_data", lambda name, data: data),
+            patch.object(kernel_middleware, "redact_structure", lambda data, literals: data),
+            self.assertRaises(AssertionError),
+        ):
+            self.test_generation_masks_evidence_but_preserves_model_result()
+
+    def test_generation_masks_evidence_but_preserves_model_result(self) -> None:
+        from agentscope.tool import ToolResponse
+        from agent_service.api.v2.routes import _normalize_stream_event
+        from agent_service.services.prose_redaction import CURRENT_PROSE_REDACTOR, StreamingProseRedactor
+        from test_contract_adapter import load_schema
+        import jsonschema
+
+        secret = "aZ8***&+randomValue"
+        result = {
+            "tool_name": "secrets.generate_password", "status": "success",
+            "data": {
+                "generated_password": secret, "note": secret,
+                "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+                "channel": "portal_copy", "expires_at": "2099-01-01T00:00:00+00:00",
+            },
+        }
+        agent = _StubAgent([_StubTool("secrets_generate_password", gateway_tool_name="secrets.generate_password")])
+        token = CURRENT_PROSE_REDACTOR.set(StreamingProseRedactor())
+        try:
+            events = self._emit(
+                ToolEvidenceMiddleware(data_max_chars=1), agent,
+                _tool_call_block("secrets_generate_password", {}),
+                [ToolResponse(metadata={"gateway_result": result})],
+            )
+            self.assertIn(secret, CURRENT_PROSE_REDACTOR.get().literals)
+        finally:
+            CURRENT_PROSE_REDACTOR.reset(token)
+        self.assertEqual(result["data"]["generated_password"], secret)
+        self.assertEqual(events[1]["data_summary"]["generated_password"], "***")
+        self.assertNotIn(secret, json.dumps(events))
+        self.assertNotIn("data", events[1])
+        self.assertEqual(events[2]["type"], "secret_delivery")
+        self.assertEqual(set(events[2]), {"type", "delivery_id", "channel", "expires_at"})
+        for event in events:
+            wire = _normalize_stream_event(event, "ses", "req").model_dump(exclude_none=True)
+            jsonschema.validate(wire, load_schema("agent-stream-event.schema.json"))
+        self.assertEqual(wire["type"], "secret_delivery")
+
     def test_tool_result_frame_includes_error_on_failure(self) -> None:
         from agentscope.tool import ToolResponse
 

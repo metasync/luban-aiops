@@ -30,6 +30,13 @@
 set -eu
 
 DEMO_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+# SPEC-062: isolated handoff leg; no sample-app mutation or credential lookup.
+case "${1:-}" in
+  --secret-delivery-local)
+    exec sh "$DEMO_DIR/../../../../shared/platform-ops/e2e/secret-delivery-demo.sh" --local ;;
+  --secret-delivery-live)
+    exec sh "$DEMO_DIR/../../../../shared/platform-ops/e2e/secret-delivery-demo.sh" --live ;;
+esac
 # shellcheck source=../../demo-lib.sh
 . "$DEMO_DIR/../../demo-lib.sh"
 

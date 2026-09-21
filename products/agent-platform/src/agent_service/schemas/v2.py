@@ -104,6 +104,7 @@ class AgentChatConfirmRequest(BaseModel):
     session_id: str = Field(min_length=1)
     confirm_id: str = Field(min_length=1)
     decision: Literal["approve", "deny"]
+    recipient_warning_acknowledged: bool = Field(default=False, strict=True)
 
 
 # --- Streaming ---
@@ -148,6 +149,7 @@ class AgentStreamEvent(BaseModel):
         "tool_result",
         "confirmation_request",
         "confirmation_result",
+        "secret_delivery",
     ]
     session_id: str
     request_id: str
@@ -155,6 +157,10 @@ class AgentStreamEvent(BaseModel):
     message: str | None = None
     confirm_id: str | None = None
     pending_calls: list[dict[str, Any]] | None = None
+    delivery_id: str | None = None
+    channel: str | None = None
+    expires_at: str | None = None
+    recipient: str | None = None
     # SPEC-054 R-1: the parked batch's declared kind on confirmation_request
     # frames — ``"flow"`` (a bound browser web-check flow, one gate per
     # SPEC-051) or ``"action"`` (an individually-approved mutating call).

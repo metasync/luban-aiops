@@ -195,4 +195,5 @@ async def chat_confirm_route(
         confirm_id=body.confirm_id,
         decision=body.decision,
         delegated_token=delegated_token,
+        recipient_warning_acknowledged=body.recipient_warning_acknowledged,
     )

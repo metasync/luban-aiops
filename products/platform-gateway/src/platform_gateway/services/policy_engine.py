@@ -52,6 +52,7 @@ ACTION_CHAT_CONFIRM = "chat:confirm"
 # here so the live permission matrix always carries the action even if the
 # deployed bundle predates the grant.
 ACTION_TOOLS_MUTATE = "tools:mutate"
+ACTION_SECRETS_DELIVER = "secrets:deliver"
 # Model catalog discovery (SPEC-024 R-2): read-only pass-through behind its
 # own action; grants mirror the chat scope (operators + observers).
 ACTION_MODELS_LIST = "models:list"
@@ -105,6 +106,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_TOOLS_LIST,
         ACTION_SKILLS_READ,
         ACTION_TOOLS_MUTATE,
+        ACTION_SECRETS_DELIVER,
         ACTION_MODELS_LIST,
         ACTION_APPROVALS_LIST,
         ACTION_DOCUMENTS_CREATE,

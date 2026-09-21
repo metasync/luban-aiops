@@ -32,6 +32,9 @@ export interface EvidenceFrame {
   data_summary?: unknown;
   error?: { code?: string; message?: string } | null;
   truncated?: EvidenceTruncated;
+  delivery_id?: string;
+  channel?: string;
+  expires_at?: string;
 }
 
 export interface EvidenceTurn {
@@ -52,6 +55,8 @@ export interface ConfirmationChangeRequestField {
 export interface ConfirmationChangeRequest {
   summary: string;
   fields?: ConfirmationChangeRequestField[];
+  warning?: string;
+  requires_acknowledgment?: boolean;
 }
 
 // Durable confirmation lifecycle record (SPEC-031 R-1/R-2): the owner's

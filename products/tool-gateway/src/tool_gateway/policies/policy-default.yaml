@@ -127,6 +127,28 @@ rules:
     decision:
       outcome: allow
 
+  # External delivery of a generated secret (SPEC-062 R-4/D-3): secrets:deliver
+  # is a distinct action from tools:mutate so a deployment can grant "mutate
+  # infrastructure" separately from "email a secret to a third party". Granted to
+  # the same operational roles; approver carries it so a tier_2-approved send
+  # executes on the confirmer's delegated token (SPEC-030 R-3). secrets.deliver is
+  # write-tier, so the require-approval-tools-mutate rule below still wins by
+  # precedence on its tools:mutate leg and every send parks behind a designation
+  # distinct from the requester — this grant is the *additional* action the
+  # gateway's per-tool extra-action hook checks at admission. The portal-copy
+  # handoff (R-3) needs no action (owner-scoped retrieval of a value the
+  # operator's own session generated) but is still audited.
+  - id: allow-operators-secrets-deliver
+    domain: action_authz
+    description: Platform admins, operators, and approvers may deliver a generated secret over an external channel (email).
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["secrets:deliver"]
+    decision:
+      outcome: allow
+
   # Tiered approval for mutating execution (SPEC-030 R-4): every mutating run
   # parks behind a tier_2 requirement, enforced on the platform-gateway
   # chat:confirm path — only a designated approver or platform admin OTHER

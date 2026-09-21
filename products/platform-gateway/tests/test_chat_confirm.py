@@ -93,6 +93,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
             confirm_id,
             decision,
             delegated_token=None,
+            recipient_warning_acknowledged=False,
         ):
             if calls is not None:
                 calls.append(
@@ -103,6 +104,7 @@ class ChatConfirmRouteTests(unittest.TestCase):
                         "confirm_id": confirm_id,
                         "decision": decision,
                         "delegated_token": delegated_token,
+                        "recipient_warning_acknowledged": recipient_warning_acknowledged,
                     }
                 )
 
@@ -157,6 +159,68 @@ class ChatConfirmRouteTests(unittest.TestCase):
         self.assertEqual(call["confirm_id"], "cf-1")
         self.assertEqual(call["decision"], "approve")
         self.assertEqual(call["delegated_token"], "tok-delegated")
+
+    def test_recipient_acknowledgment_is_relayed(self) -> None:
+        calls: list = []
+        with (
+            self._patch_identity("approver"), self._patch_delegation(),
+            self._patch_fetch(), self._patch_open_stream([], calls),
+        ):
+            response = self.client.post(CONFIRM_PATH, json={
+                **CONFIRM_BODY, "recipient_warning_acknowledged": True,
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(calls[0]["recipient_warning_acknowledged"])
+
+    def test_recipient_acknowledgment_requires_a_boolean(self) -> None:
+        for value in ("true", 1, None):
+            with self.subTest(value=value), patch(OPEN_PATCH) as upstream:
+                response = self.client.post(CONFIRM_PATH, json={
+                    **CONFIRM_BODY, "recipient_warning_acknowledged": value,
+                })
+                self.assertEqual(response.status_code, 422)
+                upstream.assert_not_called()
+
+    def test_delivery_permission_is_independent_of_approval_tier(self) -> None:
+        from fastapi import HTTPException
+        from platform_gateway.services import gateway_service
+
+        original = gateway_service.enforce_policy
+        checked = []
+
+        def enforce(settings, identity, action, request_id, *args, **kwargs):
+            checked.append(action)
+            if action == "secrets:deliver":
+                raise HTTPException(403, detail={"action": action})
+            return original(settings, identity, action, request_id, *args, **kwargs)
+
+        parked = {
+            "confirm_id": "cf-1", "owner_user_id": "operator.user",
+            "action": "tools:mutate",
+            "pending_calls": [{"tool_name": "secrets.deliver"}],
+        }
+        with (
+            self._patch_identity("approver"), self._patch_delegation(),
+            self._patch_fetch(parked), patch(OPEN_PATCH) as upstream,
+            patch.object(gateway_service, "enforce_policy", enforce),
+        ):
+            response = self.client.post(CONFIRM_PATH, json=CONFIRM_BODY)
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["detail"]["action"], "secrets:deliver")
+            upstream.assert_not_called()
+        self.assertIn("secrets:deliver", checked)
+
+        checked.clear()
+        calls = []
+        with (
+            self._patch_identity("operator"), self._patch_delegation(),
+            self._patch_fetch(parked), self._patch_open_stream([], calls),
+            patch.object(gateway_service, "enforce_policy", enforce),
+        ):
+            response = self.client.post(CONFIRM_PATH, json={**CONFIRM_BODY, "decision": "deny"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("secrets:deliver", checked)
+        self.assertEqual(calls[0]["decision"], "deny")
 
     def test_sse_passthrough_preserves_frames(self) -> None:
         end_frame = {"event": "message_end", "message": "complete"}

@@ -2,10 +2,11 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-09-21
 - approved: 2026-09-21
+- delivered: 2026-09-22 (v0.41.0)
 - release slice: R5 — Hardening and External Consumption (twenty-fourth R5
   slice; target release **v0.41.0**, the next minor after the current 0.40.0,
   or bundled if it lands alongside another slice; recorded on the

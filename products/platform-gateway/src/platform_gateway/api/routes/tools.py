@@ -19,7 +19,7 @@ from platform_gateway.services.gateway_service import (
     resolve_request_identity,
 )
 from platform_gateway.services.policy_engine import ACTION_TOOLS_LIST
-from platform_gateway.services.tool_gateway_client import list_tools
+from platform_gateway.services.tool_gateway_client import list_tools, redeem_secret
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -34,6 +34,28 @@ def _bearer_token(request: Request) -> str | None:
     if scheme.lower() != "bearer" or not token:
         return None
     return token
+
+
+@router.get("/api/v1/secrets/delivery/{delivery_id}")
+async def redeem_secret_route(
+    delivery_id: str, request: Request,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+):
+    from dataclasses import replace
+    from fastapi.responses import JSONResponse
+
+    headers = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+    request_id = resolve_request_id(x_request_id)
+    try:
+        identity = await resolve_request_identity(replace(settings, require_auth=True), request, request_id)
+        token = await obtain_delegated_token(settings, identity.subject, _bearer_token(request))
+        if not token:
+            raise HTTPException(status_code=503, detail="Secret delivery unavailable")
+        value = await redeem_secret(settings, request_id, token, delivery_id)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": "Secret delivery unavailable"}, headers=headers)
+    return JSONResponse(content={"value": value}, headers=headers)
 
 
 @router.get("/api/v1/tools")

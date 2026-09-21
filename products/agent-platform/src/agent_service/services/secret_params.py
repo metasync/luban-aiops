@@ -111,6 +111,7 @@ TRACE_CREDENTIAL_PLACEHOLDER = "<credential-reference>"
 # directly into a field.
 OPAQUE_VALUE_FIELDS: frozenset[str] = frozenset({
     "web.type.text",
+    "secrets.generate_password.generated_password",
     # Arbitrary JS can read a masked secret off the page and can *be* the
     # mutation (``document.querySelector('#pw').value = '<literal>'`` is how
     # an agent fills a credential when it does not use
@@ -150,6 +151,8 @@ KNOWN_SAFE_FIELDS: frozenset[str] = frozenset({
     # ``parameters`` sibling still masks the body even while the curated
     # projection renders key names and non-secret scalar values.
     "http.post.url",
+    "secrets.deliver.channel",
+    "secrets.deliver.recipient",
 })
 
 
@@ -289,6 +292,11 @@ def _redact_evidence_value(tool_name: str, key: str | None, value: Any) -> Any:
     if isinstance(value, str):
         return redact_secret_query(value)
     return value
+
+
+def redact_result_data(tool_name: str, data: Any) -> Any:
+    """Mask secret-bearing result fields on a copy, never the model's result."""
+    return _redact_evidence_value(tool_name, None, data)
 
 
 def redact_evidence_parameters(tool_name: str, parameters: Any) -> Any:

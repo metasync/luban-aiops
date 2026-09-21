@@ -52,7 +52,7 @@ export interface ApprovalsInboxState {
   busyConfirmId: string | null;
   refresh: () => Promise<void>;
   setPageOffset: (offset: number) => void;
-  decide: (confirmId: string, decision: ConfirmationDecision) => Promise<void>;
+  decide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => Promise<void>;
 }
 
 // One inbox per signed-in decider: App owns the hook so the sidebar
@@ -154,7 +154,7 @@ export function useApprovalsInbox(
   );
 
   const decide = useCallback(
-    async (confirmId: string, decision: ConfirmationDecision) => {
+    async (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged = false) => {
       const record = pendingRef.current.find(
         (entry) =>
           entry.confirm_id === confirmId && entry.status === "pending",
@@ -168,6 +168,8 @@ export function useApprovalsInbox(
             session_id: record.session_id,
             confirm_id: confirmId,
             decision,
+            ...(decision === "approve" && recipientWarningAcknowledged
+              ? { recipient_warning_acknowledged: true } : {}),
           },
         });
         // The response is the owner's resumed stream; the inbox only
@@ -291,7 +293,7 @@ function InboxEntry({
         card={confirmationRecordToCard(record)}
         canDecide={canDecide && record.status === "pending"}
         busy={inbox.busyConfirmId === record.confirm_id}
-        onDecide={(confirmId, decision) => void inbox.decide(confirmId, decision)}
+        onDecide={(confirmId, decision, acknowledged) => void inbox.decide(confirmId, decision, acknowledged)}
       />
     </div>
   );

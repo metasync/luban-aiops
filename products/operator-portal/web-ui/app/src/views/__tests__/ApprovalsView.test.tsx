@@ -207,6 +207,38 @@ describe("ApprovalsView (SPEC-031 R-5)", () => {
     expect(mockGetInbox).toHaveBeenCalledTimes(2);
   });
 
+  it("requires and relays the email recipient acknowledgment", async () => {
+    mockGetInbox.mockResolvedValue(inboxPayload([recordOf({
+      pending_calls: [{
+        call_id: "email-1", tool_name: "secrets.deliver",
+        parameters: { channel: "email", recipient: "ops@outside.example", password: "***" },
+        risk_level: "write", action: "tools:mutate",
+        change_request: {
+          summary: "Email a generated secret to ops@outside.example",
+          warning: "Recipient domain not on the approved list.",
+          requires_acknowledgment: true,
+        },
+      }],
+    })]));
+    mockOpenStream.mockResolvedValue({ requestId: "req-email", chunks: [] });
+    mockConsumeStream.mockResolvedValue(undefined);
+    render(<Harness />);
+    const approve = await screen.findByRole("button", { name: /Approve/ });
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Recipient domain not on the approved list.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Deny/ }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect((approve as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(approve);
+    await waitFor(() => expect(mockOpenStream).toHaveBeenCalledWith(
+      "/api/v1/chat/confirm",
+      expect.objectContaining({ body: {
+        session_id: "s-1", confirm_id: "cf-1", decision: "approve",
+        recipient_warning_acknowledged: true,
+      } }),
+    ));
+  });
+
   it("flips a race-loser card to the winner's outcome on the 409", async () => {
     const { StreamOpenError } =
       await import("../../stream/transport");

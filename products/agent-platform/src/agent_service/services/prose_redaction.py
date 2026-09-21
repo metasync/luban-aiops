@@ -76,10 +76,12 @@ Known accepted limits, stated rather than hidden
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
+from contextvars import ContextVar
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, quote_plus, unquote, urlsplit
 
 from agent_service.services.secret_params import (
     MASK,
@@ -364,6 +366,48 @@ def credential_literals(text: str) -> frozenset[str]:
     return frozenset(found)
 
 
+def generated_credential_literals(value: Any) -> frozenset[str]:
+    """Harvest generation envelopes, including JSON inside kernel tool blocks.
+
+    Values are authoritative tool results, not heuristic user tokens. A real
+    password may contain the mask substring, so only the exact mask is ignored.
+    """
+    found: set[str] = set()
+
+    def visit(node: Any) -> None:
+        if isinstance(node, str) and node.lstrip().startswith(("{", "[")):
+            try:
+                visit(json.loads(node))
+            except (ValueError, RecursionError):
+                pass
+        elif isinstance(node, dict):
+            if node.get("tool_name") == "secrets.generate_password":
+                data = node.get("data")
+                literal = data.get("generated_password") if isinstance(data, dict) else None
+                if isinstance(literal, str) and literal and literal != MASK:
+                    found.update((literal, quote(literal, safe=""), quote_plus(literal)))
+            for item in node.values():
+                visit(item)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+
+    visit(value)
+    return frozenset(found)
+
+
+CURRENT_PROSE_REDACTOR: ContextVar[StreamingProseRedactor | None] = ContextVar(
+    "CURRENT_PROSE_REDACTOR", default=None,
+)
+
+
+def observe_generated_result(result: Any) -> None:
+    """Register a generated literal before the model can echo any part of it."""
+    redactor = CURRENT_PROSE_REDACTOR.get()
+    if redactor is not None:
+        redactor.add_generated_literals(generated_credential_literals(result))
+
+
 def _ordered_literals(literals: Iterable[str]) -> tuple[str, ...]:
     """Longest first, so a harvested raw token wins over its stripped prefix.
 
@@ -372,7 +416,7 @@ def _ordered_literals(literals: Iterable[str]) -> tuple[str, ...]:
     """
     return tuple(
         sorted(
-            {literal for literal in literals if literal and MASK not in literal},
+            {literal for literal in literals if literal and literal != MASK},
             key=lambda item: (-len(item), item),
         )
     )
@@ -422,7 +466,9 @@ def redact_structure(value: Any, literals: Iterable[str] = ()) -> Any:
     return value
 
 
-def redact_transcript(turns: Iterable[dict[str, str]]) -> list[dict[str, str]]:
+def redact_transcript(
+    turns: Iterable[dict[str, str]], generated_literals: Iterable[str] = (),
+) -> list[dict[str, str]]:
     """A transcript copy with credential material masked, both roles.
 
     Two passes, and the order matters: the operator's message is the only
@@ -440,7 +486,7 @@ def redact_transcript(turns: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     Other keys on a turn (``created_at``) pass through untouched.
     """
     materialized = list(turns)
-    literals: set[str] = set()
+    literals: set[str] = set(generated_literals)
     for turn in materialized:
         if turn.get("role") == "user":
             literals |= credential_literals(turn.get("content") or "")
@@ -449,7 +495,7 @@ def redact_transcript(turns: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     for turn in materialized:
         content = turn.get("content") or ""
         if turn.get("role") == "user":
-            content = redact_user_text(content)
+            content = redact_assistant_text(redact_user_text(content), frozen)
         else:
             content = redact_assistant_text(content, frozen)
         redacted.append({**turn, "content": content})
@@ -498,11 +544,19 @@ class StreamingProseRedactor:
     (``start < cut < end``) goes false as soon as the match ends.
     """
 
-    def __init__(self, literals: Iterable[str] = ()) -> None:
-        self._literals = _ordered_literals(literals)
+    def __init__(
+        self, literals: Iterable[str] = (), generated_literals: set[str] | None = None,
+    ) -> None:
+        self._generated = generated_literals if generated_literals is not None else set()
+        self._literals = _ordered_literals(set(literals) | self._generated)
         longest = max((len(item) for item in self._literals), default=1)
         self._hold = max(longest - 1, 0)
         self._pending = ""
+
+    def add_generated_literals(self, literals: Iterable[str]) -> None:
+        self._generated.update(literals)
+        self._literals = _ordered_literals(set(self._literals) | self._generated)
+        self._hold = max((len(item) - 1 for item in self._literals), default=0)
 
     @property
     def literals(self) -> tuple[str, ...]:

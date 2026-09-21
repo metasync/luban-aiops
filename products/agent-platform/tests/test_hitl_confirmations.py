@@ -178,7 +178,7 @@ def _patch_agent(monkeypatch, kernel: AgentKernel, agent: FakeAgent) -> None:
         return agent, FakeUserMsg, model_id or kernel.settings.provider
 
     monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
-    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent: None)
+    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent, turn_literals=(): None)
 
 
 # --- Registry semantics ---
@@ -1089,13 +1089,21 @@ def test_resume_confirmation_resolves_entry_on_stream_error(monkeypatch):
     pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
     claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
 
-    with pytest.raises(RuntimeError):
-        _drain(
-            kernel.resume_confirmation(
-                "s1", claimed, "approve", "alice", "req-x"
-            )
-        )
+    frames = _drain(
+        kernel.resume_confirmation("s1", claimed, "approve", "alice", "req-x")
+    )
+    errors = [frame for frame in frames if frame.get("type") == "error"]
+    assert errors == [{
+        "type": "error",
+        "message": "The resumed turn failed. Start a new turn.",
+        "request_id": "req-x",
+        "session_id": "s1",
+    }]
     assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    from agent_service.tools.gateway_tools import DELEGATED_TOKEN, GENERATION_OWNER_TOKEN
+    assert DELEGATED_TOKEN.get() is None
+    assert GENERATION_OWNER_TOKEN.get() is None
+    assert pending.requester_delegated_token is None
 
 
 def test_resume_confirmation_reparks_new_card_under_session_owner(monkeypatch):
@@ -1187,7 +1195,7 @@ def test_expire_confirmation_binds_the_pinned_model(monkeypatch):
         return agent, FakeUserMsg, model_id or kernel.settings.provider
 
     monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
-    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent: None)
+    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent, turn_literals=(): None)
     pending = CONFIRMATION_REGISTRY.register("s1", "alice", "reply-1", [TOOL_CALL], 600)
     pending.created_at = time.monotonic() - 601
 
@@ -1332,6 +1340,83 @@ def _park_registered(session_id: str, user_id: str = "alice", age: float = 0.0):
     if age:
         pending.created_at = time.monotonic() - age
     return pending
+
+
+@pytest.mark.parametrize("allowlist,recipient,warning", [
+    (("example.com",), "ana@example.com", False),
+    (("ana@example.com",), "ANA@EXAMPLE.COM", False),
+    (("example.com",), "ana@sub.example.com", True),
+    ((), "ana@example.com", True),
+])
+def test_email_projection_masks_value_without_changing_arguments(allowlist, recipient, warning):
+    parameters = {"channel": "email", "recipient": recipient, "password": "fixture-generated-secret!"}
+    before = canonical_digest(parameters)
+    projection = build_change_request("secrets.deliver", parameters, email_allowlist=allowlist)
+    assert recipient in projection["summary"]
+    assert "email" in projection["summary"]
+    assert "fixture-generated-secret!" not in json.dumps(projection)
+    assert any(field["label"] == "password" and field["masked"] for field in projection["fields"])
+    assert bool(projection.get("requires_acknowledgment")) == warning
+    assert canonical_digest(parameters) == before
+
+
+@pytest.mark.parametrize("decision,ack,status", [
+    ("approve", False, 422), ("approve", "true", 422),
+    ("approve", 1, 422), ("approve", True, 200), ("deny", False, 200),
+])
+def test_email_warning_checked_before_confirmation_claim(monkeypatch, decision, ack, status):
+    client = _client()
+    session_id = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"}).json()["session_id"]
+    call = ToolCallBlock(id="email-1", name="secrets.deliver", input=json.dumps({
+        "channel": "email", "recipient": "ana@outside.example", "password": "fixture-secret!",
+    }))
+    pending = CONFIRMATION_REGISTRY.register(session_id, "alice", "reply-1", [call], 600)
+    resumed = []
+
+    async def fake_resume(**kwargs):
+        resumed.append(kwargs)
+        yield {"type": "confirmation_result", "confirm_id": pending.confirm_id, "status": "approved"}
+
+    monkeypatch.setattr(get_runtime_kernel(), "resume_confirmation", fake_resume)
+    response = client.post("/api/v2/chat/confirm", json={
+        "session_id": session_id, "confirm_id": pending.confirm_id, "decision": decision,
+        "recipient_warning_acknowledged": ack,
+    }, headers={"X-User-ID": "bob-approver"})
+    assert response.status_code == status
+    if status == 422:
+        assert not resumed
+        assert CONFIRMATION_REGISTRY.peek_parked(session_id) is pending
+    else:
+        assert len(resumed) == 1
+
+
+def test_resume_preserves_requester_token_across_repark(monkeypatch):
+    from agent_service.tools.gateway_tools import DELEGATED_TOKEN, GENERATION_OWNER_TOKEN, generation_bearer_token
+
+    kernel = _configured_kernel()
+    observed = []
+
+    class ReparkAgent(FakeAgent):
+        async def reply_stream(self, inputs):
+            observed.append((DELEGATED_TOKEN.get(), generation_bearer_token()))
+            yield _park_event()
+
+    agent = ReparkAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    owner_var = DELEGATED_TOKEN.set("requester-token")
+    try:
+        frame = kernel._build_confirmation_frame(_park_event(), "s1", "alice", agent.toolkit)
+    finally:
+        DELEGATED_TOKEN.reset(owner_var)
+    assert "requester-token" not in json.dumps(frame)
+    pending = CONFIRMATION_REGISTRY.claim("s1", frame["confirm_id"], 600)
+    assert "requester-token" not in repr(pending)
+    _drain(kernel.resume_confirmation("s1", pending, "deny", "approver", "req",
+        bearer_token="approver-token", owner_user_name="alice"))
+    assert observed == [("approver-token", "requester-token")]
+    assert GENERATION_OWNER_TOKEN.get() is None
+    assert pending.requester_delegated_token is None
+    assert CONFIRMATION_REGISTRY.peek_parked("s1").requester_delegated_token == "requester-token"
 
 
 def test_confirm_unknown_confirmation_returns_404() -> None:

@@ -36,6 +36,10 @@ EventType = Literal[
     # trace into an executable-flow skill draft (blast-radius re-validated,
     # never auto-published).
     "skill_graduated",
+    # SPEC-062 R-3/R-4: a generated secret reached a human (portal-copy
+    # redemption or SMTP accept). Carries delivery_id/channel/recipient, never
+    # the value.
+    "secret_delivered",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

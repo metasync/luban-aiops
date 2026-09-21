@@ -342,7 +342,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "session:skill_graduate",
                 "audit:read",
                 "incident:read", "incident:create", "incident:triage",
-                "policy:read", "tools:list", "tools:mutate", "skills:read",
+                "policy:read", "tools:list", "tools:mutate", "secrets:deliver", "skills:read",
                 "models:list", "approvals:list",
                 "documents:create", "documents:read",
             }),

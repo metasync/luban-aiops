@@ -87,6 +87,8 @@ class PendingConfirmation:
     # headline-leak defect class is structurally impossible. ``None`` only for
     # a low-level registry park that predates the discriminator.
     approval_kind: str | None = None
+    email_recipient_allowlist: tuple[str, ...] = ()
+    requester_delegated_token: str | None = field(default=None, repr=False)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:
@@ -133,9 +135,10 @@ class PendingConfirmation:
             # byte-identical with and without the projection. A ``flow`` card
             # renders the flow headline instead (R-1), so the projection is
             # gated on the action kind and a legacy/None kind carries none.
-            if self.approval_kind == "action":
+            if self.approval_kind == "action" or tool_name == "secrets.deliver":
                 entry["change_request"] = build_change_request(
-                    tool_name, parameters, display_hint
+                    tool_name, parameters, display_hint,
+                    email_allowlist=self.email_recipient_allowlist,
                 )
             risk_level = self.risk_levels.get(sanitized)
             if risk_level:
@@ -145,6 +148,13 @@ class PendingConfirmation:
                     entry["action"] = action
             payload.append(entry)
         return payload
+
+    def requires_recipient_acknowledgment(self) -> bool:
+        return any(
+            call["tool_name"] == "secrets.deliver"
+            and _cr_secrets_deliver(call["parameters"], None, self.email_recipient_allowlist).get("requires_acknowledgment")
+            for call in self.pending_calls_payload()
+        )
 
     def highest_action(self) -> str | None:
         """The strictest policy action in the parked batch (SPEC-030 R-3).
@@ -342,6 +352,32 @@ def _mask_secret_keys(value: object) -> object:
     return value
 
 
+def _cr_secrets_deliver(
+    parameters: dict, display_hint: str | None, allowlist: tuple[str, ...] = (),
+) -> dict:
+    recipient = _display_value(parameters.get("recipient", ""))
+    channel = _display_value(parameters.get("channel", ""))
+    normalized = recipient.strip().lower()
+    domain = normalized.rsplit("@", 1)[-1] if "@" in normalized else ""
+    allowed = bool(domain) and any(
+        normalized == entry.strip().lower()
+        or domain == entry.strip().lower().lstrip("@")
+        for entry in allowlist if entry.strip()
+    )
+    projection = {
+        "summary": f"Send a secret to {recipient} via {channel}",
+        "fields": [
+            _cr_field("recipient", recipient), _cr_field("channel", channel),
+            _cr_field("password", "", masked=True),
+        ],
+    }
+    if channel == "email" and not allowed:
+        warning = "Recipient domain not on the approved list. Acknowledge before sending."
+        projection.update(warning=warning, requires_acknowledgment=True)
+        projection["summary"] = warning + " " + projection["summary"]
+    return projection
+
+
 def _cr_http_post(parameters: dict, display_hint: str | None) -> dict:
     """The ``http.post`` change-request card (SPEC-058 R-5).
 
@@ -398,11 +434,13 @@ _CHANGE_REQUEST_FORMATTERS = {
     "web.evaluate": _cr_web_evaluate,
     "web.fill_credential": _cr_web_fill_credential,
     "http.post": _cr_http_post,
+    "secrets.deliver": _cr_secrets_deliver,
 }
 
 
 def build_change_request(
-    tool_name: str, parameters: dict, display_hint: str | None = None
+    tool_name: str, parameters: dict, display_hint: str | None = None,
+    *, email_allowlist: tuple[str, ...] = (),
 ) -> dict:
     """The display-only change-request projection for one parked call (R-3).
 
@@ -412,6 +450,8 @@ def build_change_request(
     signed args_digest is unchanged by it.
     """
     parameters = parameters if isinstance(parameters, dict) else {}
+    if tool_name == "secrets.deliver":
+        return _cr_secrets_deliver(parameters, display_hint, email_allowlist)
     formatter = _CHANGE_REQUEST_FORMATTERS.get(tool_name)
     if formatter is not None:
         return formatter(parameters, display_hint)
@@ -461,9 +501,9 @@ def redact_pending_calls(
     card ``message`` must likewise be computed from the raw payload *before*
     this runs, since ``curated_effect_sentence`` reads ``parameters``.
     """
-    if pending.approval_kind != "action":
-        return payload
     for entry in payload:
+        if pending.approval_kind != "action" and entry.get("tool_name") != "secrets.deliver":
+            continue
         parameters = entry.get("parameters")
         if isinstance(parameters, dict):
             entry["parameters"] = redact_parameters(

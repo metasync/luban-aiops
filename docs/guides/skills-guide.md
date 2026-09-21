@@ -229,6 +229,28 @@ later one. The count is capped by `SKILLS_COMPOSITION_MAX_SUB_SKILLS` (default
 [`samples/acme-admin/composition`](../../samples/acme-admin/composition/) for a
 runnable example composing `password-reset` + `lock-unlock-user`.
 
+## Generate and hand over a password (SPEC-062)
+
+The knowledge skill
+[`GeneratePassword.md`](../../shared/platform-ops/skills/platform-runbooks/guides/GeneratePassword.md)
+is available through the `platform-runbooks` source. Search `generate a password`;
+it cites the canonical policy without duplicating strength numbers. It grants no
+authority and declares no executable flow.
+
+Example request: “Reset dave's acme-admin password and give me a strong one.”
+The [reset skill](../../samples/acme-admin/password-reset/skill/ResetAcmePassword.md)
+generates with `secrets.generate_password(policy="default", handoff="portal_copy")`
+when no temporary value was supplied, performs the separately approved reset,
+and points to **Copy password** without restating the value. The
+[recovery composition](../../samples/acme-admin/composition/skill/RecoverAcmeAccount.md)
+retains its two independent mutation approvals; read-tier generation adds none.
+
+Email is opt-in: “Generate a password and email it to the named recipient” uses
+`secrets.deliver(channel="email", password=<working value>, recipient=<address>)`
+and a separate action approval. Never treat a flow/composition approval as email
+authority. Disabled tools or expired handoffs are a reason to stop, not to invent
+or print a password. See the [configuration reference](configuration-reference.md#secure-password-generation-and-delivery-spec-062).
+
 ## Pre-flight validation
 
 Always validate before publishing — the CLI uses the same code path as the

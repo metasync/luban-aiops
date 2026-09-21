@@ -197,7 +197,7 @@ def _patch(monkeypatch, kernel: AgentKernel, agent: FakeAgent) -> None:
 
     monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
     monkeypatch.setattr(
-        kernel, "_snapshot_state", lambda session_id, agent: None
+        kernel, "_snapshot_state", lambda session_id, agent, turn_literals=(): None
     )
 
 
@@ -1097,6 +1097,169 @@ def test_unconfigured_stream_masks_the_fallback_delta(monkeypatch):
         "message_delta",
         "message_end",
     ]
+
+
+# --- SPEC-062: tool-generated literals --------------------------------------
+
+
+@pytest.mark.parametrize("size", [1, 3, 1000])
+def test_generated_literal_registered_mid_turn_and_retained(monkeypatch, size):
+    from agent_service.services.prose_redaction import CURRENT_PROSE_REDACTOR, observe_generated_result
+
+    secret = "z7A***&+R!omValue"
+    result = {"tool_name": "secrets.generate_password", "data": {"generated_password": secret}}
+
+    class GeneratingAgent(FakeAgent):
+        async def reply_stream(self, inputs):
+            observe_generated_result(result)
+            for event in _delta_events(f"Generated {secret} safely.", size):
+                yield event
+            yield {"type": "message_end"}
+
+    kernel = _kernel()
+    agent = GeneratingAgent()
+    _patch(monkeypatch, kernel, agent)
+    frames = _stream(kernel, "generate a password")
+    assert _deltas(frames) == "Generated *** safely."
+    assert result["data"]["generated_password"] == secret
+    assert CURRENT_PROSE_REDACTOR.get() is None
+    # Even after the tool block is compacted away, a later turn still masks.
+    agent = FakeAgent(events=_delta_events(f"Again {secret}.", size))
+    _patch(monkeypatch, kernel, agent)
+    assert _deltas(_stream(kernel, "what was it?")) == "Again ***."
+
+
+def test_generated_harvest_mutation_is_detected(monkeypatch):
+    """R-8: the existing stream assertion catches a disabled literal harvest."""
+    from agent_service.services import prose_redaction
+
+    with monkeypatch.context() as mutation:
+        mutation.setattr(prose_redaction, "generated_credential_literals", lambda value: frozenset())
+        with pytest.raises(AssertionError):
+            test_generated_literal_registered_mid_turn_and_retained(mutation, 1)
+
+
+def test_generated_literal_masks_blocking_structured_output(monkeypatch):
+    from agent_service.services.prose_redaction import CURRENT_PROSE_REDACTOR, observe_generated_result
+
+    secret = "xA3!randomGenerated"
+
+    class BlockingAgent:
+        state = FakeState()
+        async def reply(self, msg, structured_schema=None):
+            observe_generated_result({"tool_name": "secrets.generate_password", "data": {"generated_password": secret}})
+            return SimpleNamespace(content=f"Created {secret}", structured_output={"note": secret})
+
+    kernel = _kernel()
+    _patch(monkeypatch, kernel, BlockingAgent())
+    reply, structured = asyncio.run(kernel.reply_text("generate", "ses-1", "alice"))
+    assert reply == "Created ***"
+    assert structured == {"note": "***"}
+    assert CURRENT_PROSE_REDACTOR.get() is None
+
+
+def test_generated_literal_masks_snapshot_and_legacy_transcript(monkeypatch):
+    from agent_service import runtime_kernel
+    from agent_service.services.prose_redaction import generated_credential_literals
+
+    secret = "z7A***&+R!omValue"
+    result = {"tool_name": "secrets.generate_password", "data": {"generated_password": secret}}
+    state = {"context": [
+        {"role": "user", "content": "generate a password"},
+        {"role": "tool", "content": [{"type": "text", "text": json.dumps(result)}]},
+        {"role": "assistant", "content": [{"type": "text", "text": f"Generated {secret}."}]},
+    ]}
+    store = InMemoryAgentStateStore()
+    monkeypatch.setattr(runtime_kernel, "AGENT_STATE_STORE", store)
+    monkeypatch.setattr(session_transcript, "AGENT_STATE_STORE", store)
+    store.save_state("ses-1", json.dumps(state))
+    available, turns = session_transcript.extract_transcript("ses-1")
+    assert available and turns[-1]["content"] == "Generated ***."
+    assert secret in generated_credential_literals(state)
+    agent = SimpleNamespace(state=SimpleNamespace(model_dump_json=lambda: json.dumps(state)))
+    _kernel()._snapshot_state("ses-1", agent)
+    assert secret not in store.load_state("ses-1")
+    assert secret in json.dumps(state)  # The live context was not modified.
+
+
+def test_generated_literal_masks_confirmation_resume(monkeypatch):
+    kernel = _kernel()
+    secret = "mT8!randomGenerated"
+    kernel._generated_literals["ses-1"] = {secret}
+    agent = FakeAgent(events=_delta_events(f"Used {secret}.", 1))
+    _patch(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register("ses-1", "alice", "reply-1", [PARK_CALL], 600)
+    pending = CONFIRMATION_REGISTRY.claim("ses-1", pending.confirm_id, 600)
+    frames = _drain(kernel.resume_confirmation(
+        "ses-1", pending, "deny", "approver", "req-1", owner_user_name="alice",
+    ))
+    assert _deltas(frames) == "Used ***."
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+def test_generated_literal_exception_does_not_leak_to_logs_or_status(monkeypatch, caplog, resumed):
+    from agent_service.services.prose_redaction import observe_generated_result
+
+    secret = "fixture-only-generated-EXCEPTION!"
+
+    class FailingAgent(FakeAgent):
+        async def reply_stream(self, inputs):
+            observe_generated_result({"tool_name": "secrets.generate_password", "data": {"generated_password": secret}})
+            raise RuntimeError(f"provider echoed {secret}")
+            yield  # pragma: no cover
+
+    kernel = _kernel()
+    _patch(monkeypatch, kernel, FailingAgent())
+    if resumed:
+        pending = CONFIRMATION_REGISTRY.register("ses-1", "alice", "reply-1", [PARK_CALL], 600)
+        pending = CONFIRMATION_REGISTRY.claim("ses-1", pending.confirm_id, 600)
+        frames = _drain(kernel.resume_confirmation("ses-1", pending, "deny", "approver", "req-1"))
+    else:
+        frames = _stream(kernel, "generate a password")
+    assert secret not in json.dumps(frames)
+    assert secret not in caplog.text
+    assert secret not in (kernel._last_error or "")
+    assert "provider echoed ***" in caplog.text
+
+
+def test_nontext_payload_masks_generated_literal_copy():
+    kernel = _kernel()
+    redactor = StreamingProseRedactor({"fixture-secret!"})
+    event = {"type": "tool_result", "output": "fixture-secret!"}
+    frame = kernel.normalize_event(event, "req", "ses", redactor)
+    assert "fixture-secret!" not in json.dumps(frame)
+    assert event["output"] == "fixture-secret!"
+
+
+def test_literal_cache_never_forgets_a_live_compacted_agent(monkeypatch):
+    from agent_service import runtime_kernel
+
+    kernel = AgentKernel(settings=RuntimeSettings(api_key="test"), max_cached_agents=1)
+    secret = "fixture-generated-COMPACTED!"
+    agent = FakeAgent()
+    kernel._agents["live::read-only"] = (agent, FakeUserMsg, "test")
+    kernel._prose_redactor(agent, "", "live").add_generated_literals({secret})
+    for i in range(4):
+        kernel._prose_redactor(FakeAgent(), "", f"other-{i}")
+    prose = kernel._prose_redactor(agent, "", "live")
+    assert redact_assistant_text(secret, prose.literals) == "***"
+    assert len(kernel._generated_literals) <= 2
+
+    # Deletion/eviction during an in-flight turn cannot unmask its final snapshot.
+    kernel.forget_session("live")
+    assert "live::read-only" not in kernel._agents
+    assert "live" not in kernel._generated_literals
+    state = {"context": [{"role": "assistant", "content": secret}]}
+    agent.state = SimpleNamespace(model_dump_json=lambda: json.dumps(state))
+    store = InMemoryAgentStateStore()
+    monkeypatch.setattr(runtime_kernel, "AGENT_STATE_STORE", store)
+    kernel._snapshot_state("live", agent, prose.literals)
+    assert secret not in store.load_state("live")
+    kernel.remember_error(RuntimeError(secret), prose.literals)
+    assert kernel._last_error == "***"
+    # Once the agent is gone the next turn trims its stale session knowledge.
+    kernel._prose_redactor(FakeAgent(), "", "new")
+    assert len(kernel._generated_literals) == 1
 
 
 # --- C: prompt guidance (defense in depth, not the control) -----------------

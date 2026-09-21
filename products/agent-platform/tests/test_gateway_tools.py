@@ -96,6 +96,32 @@ class DiscoverToolsTests(unittest.TestCase):
         self.assertEqual(tools, [])
 
 
+class GeneratedPasswordOwnerTests(unittest.TestCase):
+    def test_generation_override_does_not_change_other_tool_authority(self):
+        from agent_service.tools.gateway_tools import GENERATION_OWNER_TOKEN
+        from agent_service.services.prose_redaction import CURRENT_PROSE_REDACTOR, StreamingProseRedactor
+
+        secret = "fixture-generated-secret!"
+        result = {"tool_name": "secrets.generate_password", "status": "success", "data": {"generated_password": secret}}
+        for owner in ("requester-token", None):
+            redactor = StreamingProseRedactor(())
+            token_var = DELEGATED_TOKEN.set("approver-token")
+            owner_var = GENERATION_OWNER_TOKEN.set((owner,))
+            prose_var = CURRENT_PROSE_REDACTOR.set(redactor)
+            try:
+                with patch("agent_service.tools.gateway_tools.invoke_gateway_tool", new=AsyncMock(return_value=result)) as invoke:
+                    chunk = _run(_make_tool_fn("http://gateway", "secrets.generate_password", "generate")())
+                    assert invoke.call_args.kwargs["bearer_token"] == owner
+                    assert chunk.metadata["gateway_result"]["data"]["generated_password"] == secret
+                    assert secret in redactor.literals
+                    _run(_make_tool_fn("http://gateway", "web.snapshot", "read")())
+                    assert invoke.call_args.kwargs["bearer_token"] == "approver-token"
+            finally:
+                CURRENT_PROSE_REDACTOR.reset(prose_var)
+                GENERATION_OWNER_TOKEN.reset(owner_var)
+                DELEGATED_TOKEN.reset(token_var)
+
+
 class InvokeGatewayToolTests(unittest.TestCase):
     def test_invoke_sends_bearer_header_and_no_identity_in_body(self) -> None:
         mock_response = MagicMock()

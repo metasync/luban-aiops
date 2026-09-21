@@ -322,10 +322,18 @@ class ContractAlignmentTests(unittest.TestCase):
         # Health and metrics routes carry no action and are exempt; portal-
         # facing actions (chat, session:*) live in platform-gateway. This set
         # is the complete protected surface of the tool service; tools:mutate
-        # gates write/admin risk invocations (SPEC-021 R-1).
+        # gates write/admin risk invocations (SPEC-021 R-1) and secrets:deliver
+        # gates external-channel secret delivery (SPEC-062 R-4).
         self.assertEqual(
             PROTECTED_ACTIONS,
-            frozenset({"tools:list", "tools:invoke", "tools:mutate"}),
+            frozenset(
+                {
+                    "tools:list",
+                    "tools:invoke",
+                    "tools:mutate",
+                    "secrets:deliver",
+                }
+            ),
         )
 
 

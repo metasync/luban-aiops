@@ -57,8 +57,10 @@ from agent_service.services.hitl_confirmations import (
 )
 from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.prose_redaction import (
+    CURRENT_PROSE_REDACTOR,
     StreamingProseRedactor,
     credential_literals,
+    generated_credential_literals,
     redact_assistant_text,
     redact_structure,
     redact_user_text,
@@ -219,6 +221,8 @@ class AgentKernel:
         self._provider = get_provider(self.settings.provider)
         self._agents: OrderedDict[str, tuple[object, type]] = OrderedDict()
         self._max_cached_agents = max_cached_agents
+        # Ephemeral masking knowledge survives context compaction, never a snapshot.
+        self._generated_literals: OrderedDict[str, set[str]] = OrderedDict()
         self._last_error: str | None = None
         # Per-token toolkit cache (SPEC-008 R-5): a toolkit is built per owning
         # user's delegated token so discovery runs once per token. Tool
@@ -284,8 +288,9 @@ class AgentKernel:
             )
         return f"AgentScope runtime ready through {self.provider_description()}."
 
-    def remember_error(self, exc: Exception) -> None:
-        self._last_error = str(exc)
+    def remember_error(self, exc: Exception, turn_literals=()) -> None:
+        literals = set(turn_literals).union(*self._generated_literals.values())
+        self._last_error = redact_assistant_text(str(exc), literals)
 
     def clear_error(self) -> None:
         self._last_error = None
@@ -548,7 +553,7 @@ class AgentKernel:
         except Exception as exc:
             record_agent_state_error("restore")
             LOGGER.warning(
-                "agent state restore failed for session %s: %s", session_id, exc
+                "agent state restore failed for session %s: %s", session_id, type(exc).__name__
             )
             return None
         if raw is None:
@@ -562,22 +567,27 @@ class AgentKernel:
             LOGGER.warning(
                 "discarding corrupt persisted agent state for session %s: %s",
                 session_id,
-                exc,
+                type(exc).__name__,
             )
             return None
 
-    def _snapshot_state(self, session_id: str, agent) -> None:
+    def _snapshot_state(self, session_id: str, agent, turn_literals=()) -> None:
         """Persist the agent state after a completed turn (SPEC-017 R-3).
 
         Never raises: a failed snapshot degrades durability, not the turn.
         """
         try:
-            state_json = agent.state.model_dump_json()
+            state = json.loads(agent.state.model_dump_json())
+            literals = set(self._generated_literals.get(session_id, ()))
+            literals.update(turn_literals)
+            literals.update(generated_credential_literals(state))
+            # Only the serialized projection changes; live tool/signing inputs stay raw.
+            state_json = json.dumps(redact_structure(state, literals))
             AGENT_STATE_STORE.save_state(session_id, state_json)
         except Exception as exc:
             record_agent_state_error("snapshot")
             LOGGER.warning(
-                "agent state snapshot failed for session %s: %s", session_id, exc
+                "agent state snapshot failed for session %s: %s", session_id, type(exc).__name__
             )
 
     @staticmethod
@@ -618,11 +628,33 @@ class AgentKernel:
                     continue
                 texts.append(extract_text(getattr(msg, "content", "")))
         except Exception as exc:  # pragma: no cover - defensive harvest
-            LOGGER.debug("prose literal harvest from context failed: %s", exc)
+            LOGGER.debug("prose literal harvest from context failed: %s", type(exc).__name__)
         literals: set[str] = set()
         for text in texts:
             literals |= credential_literals(text)
         return frozenset(literals)
+
+    def _prose_redactor(self, agent, message: str, session_id: str) -> StreamingProseRedactor:
+        generated = self._generated_literals.setdefault(session_id, set())
+        generated.update(generated_credential_literals(make_serializable(getattr(agent, "state", None))))
+        self._generated_literals.move_to_end(session_id)
+        # A live agent may retain a compacted prose copy after its tool block
+        # disappears. Never evict its masking knowledge on an independent LRU.
+        protected = {key.removesuffix("::read-only") for key in self._agents}
+        protected.add(session_id)
+        for key in list(self._generated_literals):
+            if len(self._generated_literals) <= max(1, self._max_cached_agents):
+                break
+            if key not in protected:
+                self._generated_literals.pop(key)
+        return StreamingProseRedactor(self._user_text_literals(agent, message), generated)
+
+    def forget_session(self, session_id: str) -> None:
+        """Drop ephemeral agents and literal knowledge after an owner deletion."""
+        self._agents.pop(session_id, None)
+        self._agents.pop(f"{session_id}::read-only", None)
+        # In-flight redactors retain their own reference until the turn ends.
+        self._generated_literals.pop(session_id, None)
 
     def _persist_evidence(
         self,
@@ -656,7 +688,7 @@ class AgentKernel:
             LOGGER.warning(
                 "evidence persistence failed for session %s: %s",
                 session_id,
-                exc,
+                type(exc).__name__,
             )
 
     async def _build_agent(
@@ -863,16 +895,18 @@ class AgentKernel:
         )
 
         serving_model: str | None = None
+        prose: StreamingProseRedactor | None = None
         try:
             agent, user_msg_cls, serving_model = await self.ensure_agent(
                 session_id, bearer_token, model_id, read_only
             )
             # Prose redaction for a blocking turn: no streaming, so the reply
             # is masked whole and no hold-back is needed.
-            prose_literals = self._user_text_literals(agent, message)
+            prose = self._prose_redactor(agent, message, session_id)
             # Expose the turn's delegated token to the cached tool closures
             # (SPEC-018 R-2). No evidence sink is set: blocking turns emit
             # no trace frames.
+            prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
             session_var = CHAT_SESSION_ID.set(session_id)
             try:
@@ -881,23 +915,24 @@ class AgentKernel:
                     structured_schema=response_schema,
                 )
             finally:
+                CURRENT_PROSE_REDACTOR.reset(prose_var)
                 DELEGATED_TOKEN.reset(token_var)
                 CHAT_SESSION_ID.reset(session_var)
             self.clear_error()
             structured = getattr(reply_msg, "structured_output", None)
             if not isinstance(structured, dict):
                 structured = None
-            self._snapshot_state(session_id, agent)
+            self._snapshot_state(session_id, agent, prose.literals)
             return (
                 redact_assistant_text(
                     extract_text(getattr(reply_msg, "content", reply_msg)),
-                    prose_literals,
+                    prose.literals,
                 ),
-                structured,
+                redact_structure(structured, prose.literals),
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
-            self.remember_error(exc)
-            LOGGER.exception("AgentScope reply failed; falling back to runtime error response: %s", exc)
+            self.remember_error(exc, prose.literals if prose is not None else ())
+            LOGGER.error("AgentScope reply failed; falling back to runtime error response: %s", self._last_error)
             return (
                 self.build_provider_error_message(
                     message, session_id, serving_model or model_id
@@ -953,7 +988,9 @@ class AgentKernel:
                 # AgentScope internal and the v1 stream helper has no caller
                 # — so this is a chunk-local mask of a duplicate, not the
                 # guarantee: the hold-back lives in ``delta`` above.
-                data["payload"] = redact_structure(payload, redactor.literals)
+                data["payload"] = {"type": event_type, "delta": masked}
+        elif redactor is not None:
+            data["payload"] = redact_structure(payload, redactor.literals)
         return data
 
     async def stream_events(
@@ -1002,6 +1039,7 @@ class AgentKernel:
         )
 
         bound_model_id: str | None = None
+        prose: StreamingProseRedactor | None = None
         try:
             # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls, bound_model_id = await self.ensure_agent(
@@ -1016,9 +1054,7 @@ class AgentKernel:
             # typed so the model's own reply cannot restate it. Built from the
             # raw message rather than effective_message — the notices injected
             # below are kernel text and carry no credential.
-            prose = StreamingProseRedactor(
-                self._user_text_literals(agent, message)
-            )
+            prose = self._prose_redactor(agent, message, session_id)
 
             # Deterministic anti-hallucination guard: with a gateway
             # configured but zero gateway tools registered the model has no
@@ -1065,6 +1101,7 @@ class AgentKernel:
                 else None
             )
             sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+            prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
             session_var = CHAT_SESSION_ID.set(session_id)
             requests_var = EXECUTION_REQUESTS.set(execution_requests)
@@ -1158,6 +1195,7 @@ class AgentKernel:
                 ):
                     yield decorated
             finally:
+                CURRENT_PROSE_REDACTOR.reset(prose_var)
                 DELEGATED_TOKEN.reset(token_var)
                 CHAT_SESSION_ID.reset(session_var)
                 EXECUTION_REQUESTS.reset(requests_var)
@@ -1173,10 +1211,10 @@ class AgentKernel:
 
             # Persist conversation state after the completed turn so it
             # survives restarts (SPEC-017 R-3). Fail-open by design.
-            self._snapshot_state(session_id, agent)
+            self._snapshot_state(session_id, agent, prose.literals)
         except Exception as exc:  # pragma: no cover - defensive fallback
-            self.remember_error(exc)
-            LOGGER.exception("AgentScope streaming failed; falling back to runtime error response: %s", exc)
+            self.remember_error(exc, prose.literals if prose is not None else ())
+            LOGGER.error("AgentScope streaming failed; falling back to runtime error response: %s", self._last_error)
             async for event in self.fallback_stream(
                 request_id=request_id,
                 session_id=session_id,
@@ -1264,6 +1302,10 @@ class AgentKernel:
         # SPEC-054 R-3/R-4: assemble the parked payload and the card message
         # ONCE here, so the live frame below and the durable record are fed
         # from a single value and the two paths can never diverge.
+        from agent_service.tools.gateway_tools import generation_bearer_token
+
+        pending.requester_delegated_token = generation_bearer_token()
+        pending.email_recipient_allowlist = self.settings.email_recipient_allowlist
         pending_calls = pending.pending_calls_payload()
         message = self._confirmation_message(pending_calls)
         # SPEC-055 R-7: redact secret-bearing raw parameter values on the
@@ -1275,6 +1317,12 @@ class AgentKernel:
         # signed args_digest stays byte-identical. flow/legacy cards are left
         # as-is (the helper gates on the action kind).
         redact_pending_calls(pending, pending_calls)
+        redactor = CURRENT_PROSE_REDACTOR.get()
+        flow_summary = pending.flow_summary()
+        if redactor is not None:
+            pending_calls = redact_structure(pending_calls, redactor.literals)
+            message = redact_assistant_text(message, redactor.literals)
+            flow_summary = redact_structure(flow_summary, redactor.literals)
         # SPEC-031 R-1: the durable record is written before the frame
         # below reaches the client, so the card survives re-login and
         # restarts. Best-effort: a store failure degrades to live-only
@@ -1292,7 +1340,7 @@ class AgentKernel:
                     turn_index=turn_index,
                     # SPEC-051 R-6: persist the flow headline so the inbox
                     # and session detail replay the same workflow framing.
-                    flow_summary=pending.flow_summary(),
+                    flow_summary=flow_summary,
                     # SPEC-054 R-1/R-4: persist the declared kind and the
                     # card message from the same values the live frame below
                     # carries, so a replayed card states its own kind and
@@ -1330,7 +1378,6 @@ class AgentKernel:
         # tool detail; absent when no flow is bound (tool-level fallback).
         # SPEC-054 R-1: emitted from the same branch as approval_kind, so it
         # is present iff approval_kind == "flow".
-        flow_summary = pending.flow_summary()
         if flow_summary is not None:
             frame["flow_summary"] = flow_summary
         return frame
@@ -2061,6 +2108,8 @@ class AgentKernel:
         durable record from that single value, so the two cannot diverge (R-4).
         """
         for call in pending_calls:
+            if call.get("tool_name") == "secrets.deliver" and call.get("change_request"):
+                return call["change_request"]["summary"]
             sentence = curated_effect_sentence(
                 str(call.get("tool_name", "")),
                 call.get("parameters") or {},
@@ -2190,6 +2239,7 @@ class AgentKernel:
             EXECUTION_AUDIT_CONTEXT,
             EXECUTION_REJECTION,
             EXECUTION_REQUESTS,
+            GENERATION_OWNER_TOKEN,
         )
 
         # Pass the session's pinned model (SPEC-024 R-3) so the resumed
@@ -2211,7 +2261,7 @@ class AgentKernel:
         # A resumed turn is a continuation of the same assistant reply, and
         # the model restating the password after an approval is exactly as
         # much a leak as restating it before one.
-        prose = StreamingProseRedactor(self._user_text_literals(agent, ""))
+        prose = self._prose_redactor(agent, "", session_id)
         confirmed = decision == "approve"
         confirm_event = UserConfirmResultEvent(
             reply_id=pending.reply_id,
@@ -2242,8 +2292,10 @@ class AgentKernel:
 
         trace_queue: asyncio.Queue = asyncio.Queue()
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+        prose_var = CURRENT_PROSE_REDACTOR.set(prose)
         token_var = DELEGATED_TOKEN.set(bearer_token)
         session_var = CHAT_SESSION_ID.set(session_id)
+        owner_token_var = GENERATION_OWNER_TOKEN.set((pending.requester_delegated_token,))
         requests_var = EXECUTION_REQUESTS.set(execution_requests or None)
         rejection_var = EXECUTION_REJECTION.set(execution_rejection)
         audit_var = EXECUTION_AUDIT_CONTEXT.set(
@@ -2267,9 +2319,9 @@ class AgentKernel:
                 # SPEC-055 R-7: redact the echoed batch too, so the result
                 # frame never streams a plaintext secret either (the gateway
                 # audit reads only tool_name; signing uses build_requests).
-                "pending_calls": redact_pending_calls(
+                "pending_calls": redact_structure(redact_pending_calls(
                     pending, pending.pending_calls_payload()
-                ),
+                ), prose.literals),
                 "request_id": request_id,
                 "session_id": session_id,
             }
@@ -2346,16 +2398,24 @@ class AgentKernel:
                 execution_requests,
             ):
                 yield decorated
+        except Exception as exc:
+            self.remember_error(exc, prose.literals if prose is not None else ())
+            LOGGER.error("AgentScope confirmation resume failed: %s", self._last_error)
+            yield {"type": "error", "message": "The resumed turn failed. Start a new turn.",
+                   "request_id": request_id, "session_id": session_id}
         finally:
             # Covers both completion and re-park (the early return above):
             # either way the frames drained so far belong to this turn.
             self._persist_evidence(
                 session_id, request_id, turn_index, evidence_frames
             )
+            CURRENT_PROSE_REDACTOR.reset(prose_var)
             DELEGATED_TOKEN.reset(token_var)
             CHAT_SESSION_ID.reset(session_var)
             EXECUTION_REQUESTS.reset(requests_var)
             EXECUTION_REJECTION.reset(rejection_var)
+            GENERATION_OWNER_TOKEN.reset(owner_token_var)
+            pending.requester_delegated_token = None
             EXECUTION_AUDIT_CONTEXT.reset(audit_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
@@ -2369,8 +2429,7 @@ class AgentKernel:
                 user_name,
                 decision,
             )
-
-        self._snapshot_state(session_id, agent)
+            self._snapshot_state(session_id, agent, prose.literals)
 
     async def expire_confirmation(
         self,
@@ -2408,15 +2467,16 @@ class AgentKernel:
             agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
                 session_id, None, model_id
             )
+            prose = self._prose_redactor(agent, "", session_id)
             interrupt = UserInterruptEvent(reply_id=pending.reply_id)
             async for _event in agent.reply_stream(interrupt):
                 pass
-            self._snapshot_state(session_id, agent)
+            self._snapshot_state(session_id, agent, prose.literals)
         except Exception as exc:  # pragma: no cover - defensive cleanup
             LOGGER.warning(
                 "expiring confirmation %s failed to interrupt parked reply: %s",
                 confirm_id,
-                exc,
+                type(exc).__name__,
             )
         finally:
             CONFIRMATION_REGISTRY.resolve(session_id, confirm_id)

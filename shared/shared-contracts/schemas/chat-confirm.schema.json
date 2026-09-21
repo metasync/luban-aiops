@@ -17,6 +17,11 @@
       "minLength": 1,
       "description": "Identifier from the confirmation_request frame being answered."
     },
+    "recipient_warning_acknowledged": {
+      "type": "boolean",
+      "default": false,
+      "description": "SPEC-062: explicit acknowledgment of an email recipient outside the approved list. Required to approve such a pending send; never changes signed tool arguments."
+    },
     "decision": {
       "type": "string",
       "enum": ["approve", "deny"],

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Checkbox,
   Collapse,
   Input,
   Modal,
@@ -32,7 +33,7 @@ import {
 import { Bubble, Sender } from "@ant-design/x";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { ApiError } from "../api/client";
+import { ApiError, copyDeliveredSecret, secretDeliveryAttempted } from "../api/client";
 import { getModelCatalog, type ModelCatalogResponse } from "../api/models";
 import {
   createSkillDraft,
@@ -360,9 +361,14 @@ export function ConfirmationCardView({
   card: ConfirmationCard;
   canDecide: boolean;
   busy: boolean;
-  onDecide: (confirmId: string, decision: ConfirmationDecision) => void;
+  onDecide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => void;
 }) {
   const status = CARD_STATUS[card.status] ?? CARD_STATUS.error;
+  const requiresAcknowledgment = card.pendingCalls.some(
+    (call) => call.changeRequest?.requiresAcknowledgment,
+  );
+  const [acknowledgedId, setAcknowledgedId] = useState<string | null>(null);
+  const acknowledged = acknowledgedId === card.confirmId;
   // SPEC-030 R-5: a parked batch whose highest action is tools:mutate is a
   // tier_2 approval — only designated approvers may decide. Display hint
   // only; the gateway approval-tier bridge stays authoritative (403 either
@@ -459,6 +465,18 @@ export function ConfirmationCardView({
         </div>
       ) : null}
       {card.message ? <div>{card.message}</div> : null}
+      {card.pendingCalls.map((call, index) => call.changeRequest?.warning ? (
+        <Alert key={`warning-${index}`} type="warning" showIcon title={call.changeRequest.warning} />
+      ) : null)}
+      {requiresAcknowledgment && card.status === "pending" && effectiveCanDecide ? (
+        <Checkbox
+          checked={acknowledged}
+          disabled={busy}
+          onChange={(event) => setAcknowledgedId(event.target.checked ? card.confirmId : null)}
+        >
+          I acknowledge sending a secret to a recipient outside the approved list.
+        </Checkbox>
+      ) : null}
       {card.pendingCalls.map((call, index) => (
         <div className="confirm-call" key={call.callId ?? index}>
           {/* SPEC-054 R-3: an action card's call leads with the change-request
@@ -565,8 +583,10 @@ export function ConfirmationCardView({
             <Button
               type="primary"
               icon={<CheckOutlined />}
-              disabled={busy}
-              onClick={() => onDecide(card.confirmId, "approve")}
+              disabled={busy || (requiresAcknowledgment && !acknowledged)}
+              onClick={() => requiresAcknowledgment
+                ? onDecide(card.confirmId, "approve", acknowledged)
+                : onDecide(card.confirmId, "approve")}
             >
               {approving ? "Approving…" : "Approve"}
             </Button>
@@ -602,6 +622,47 @@ const REVEAL_TICK_MS = 25;
 // Exported for tests: the render order (reply → post-approval "working"
 // indicator → tool evidence → confirmation cards) is a UX requirement
 // (#3), so TurnGroup.test.tsx asserts it directly.
+export function CopyPasswordControl({ delivery }: {
+  delivery: import("../stream/models").SecretDeliveryFrame;
+}) {
+  const [state, setState] = useState<"ready" | "copying" | "copied" | "unavailable">(
+    () => secretDeliveryAttempted(delivery.deliveryId) ? "unavailable" : "ready",
+  );
+  const [expired, setExpired] = useState(() => Date.parse(delivery.expiresAt) <= Date.now());
+  const attempted = useRef(false);
+  useEffect(() => {
+    const remaining = Date.parse(delivery.expiresAt) - Date.now();
+    if (remaining <= 0) { setExpired(true); return; }
+    const timer = window.setTimeout(() => setExpired(true), Math.min(remaining, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [delivery.expiresAt]);
+  const copy = async () => {
+    if (attempted.current || state !== "ready" || expired) return;
+    attempted.current = true;
+    setState("copying");
+    try {
+      await copyDeliveredSecret(delivery.deliveryId);
+      setState("copied");
+    } catch {
+      setState("unavailable");
+    }
+  };
+  return (
+    <div className="secret-delivery" style={{ margin: "8px 0" }}>
+      <Button icon={<CopyOutlined />} loading={state === "copying"}
+        disabled={state !== "ready" || expired} onClick={() => void copy()}>
+        {state === "copied" ? "Password copied" : expired ? "Password expired"
+          : state === "unavailable" ? "Password unavailable" : "Copy password"}
+      </Button>
+      <div role="status" style={{ marginTop: 4, fontSize: 12 }}>
+        {state === "copied" ? "Copied once. The password is not retained here."
+          : expired || state === "unavailable" ? "This password cannot be copied again. Generate a new password."
+          : "One-time copy. The password is never shown in this conversation."}
+      </div>
+    </div>
+  );
+}
+
 export function TurnGroup({
   turn,
   canDecide,
@@ -614,7 +675,7 @@ export function TurnGroup({
   turn: ChatTurn;
   canDecide: boolean;
   busy: boolean;
-  onDecide: (confirmId: string, decision: ConfirmationDecision) => void;
+  onDecide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => void;
   justArrived?: boolean;
   // SPEC-035 R-4: when set, the reply bubble re-types itself from this
   // char offset so the operator watches the new content land instead of
@@ -735,6 +796,9 @@ export function TurnGroup({
       {turn.toolCalls.length > 0 || turn.toolResults.length > 0 ? (
         <EvidencePanel turn={turn} />
       ) : null}
+      {turn.secretDeliveries?.map((delivery) => (
+        <CopyPasswordControl key={delivery.deliveryId} delivery={delivery} />
+      ))}
       {turn.confirmations.map((card) => (
         <ConfirmationCardView
           key={card.confirmId}
@@ -1687,8 +1751,8 @@ export default function ChatView({
                 agentWorking={
                   settling && index === chat.turns.length - 1
                 }
-                onDecide={(confirmId, decision) =>
-                  void chat.decide(confirmId, decision)
+                onDecide={(confirmId, decision, acknowledged) =>
+                  void chat.decide(confirmId, decision, acknowledged)
                 }
               />
             ))

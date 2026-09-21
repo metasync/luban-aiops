@@ -25,7 +25,7 @@ import json
 import logging
 
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
-from agent_service.services.prose_redaction import redact_transcript
+from agent_service.services.prose_redaction import generated_credential_literals, redact_transcript
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def extract_transcript(session_id: str) -> tuple[bool, list[dict[str, str]]]:
             if isinstance(created_at, str) and created_at:
                 turn["created_at"] = created_at
             turns.append(turn)
-        return True, redact_transcript(turns)
+        return True, redact_transcript(turns, generated_credential_literals(state))
     except Exception as exc:
         LOGGER.warning(
             "transcript extraction failed for session %s: %s", session_id, exc

@@ -33,7 +33,11 @@ from agentscope.permission import PermissionBehavior, PermissionDecision
 from agentscope.tool import ToolResponse
 
 from agent_service.services.flow_approvals import BROWSER_WRITE_TOOLS
-from agent_service.services.secret_params import redact_evidence_parameters
+from agent_service.services.secret_params import redact_evidence_parameters, redact_result_data
+from agent_service.services.prose_redaction import (
+    CURRENT_PROSE_REDACTOR, generated_credential_literals, observe_generated_result,
+    redact_structure,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +82,7 @@ DEFAULT_AUTO_ALLOWED_TOOLS = frozenset({
     "skills.list",
     "incidents.list",
     "incidents.get",
+    "secrets.generate_password",
     # SPEC-049/SPEC-050: read-class browser probes may run without an extra
     # gate; the gateway still enforces the origin allowlist and flow guards
     # on every call. web.click/web.type/web.select/web.press_key/web.upload_file
@@ -372,8 +377,11 @@ class ToolEvidenceMiddleware(MiddlewareBase):
                 # representation of the same call masks it (SPEC-049 R-5).
                 # The resume path digests a fresh raw payload, so masking here
                 # cannot shift an ``args_digest``.
-                "parameters": redact_evidence_parameters(
-                    gateway_tool_name, self._parse_parameters(tool_call),
+                "parameters": redact_structure(
+                    redact_evidence_parameters(
+                        gateway_tool_name, self._parse_parameters(tool_call),
+                    ),
+                    CURRENT_PROSE_REDACTOR.get().literals if CURRENT_PROSE_REDACTOR.get() else (),
                 ),
             })
 
@@ -389,19 +397,25 @@ class ToolEvidenceMiddleware(MiddlewareBase):
                 "call_id": call_id,
             }
             if isinstance(gateway_result, dict):
-                frame["status"] = gateway_result.get("status", "error")
-                evidence = gateway_result.get("evidence")
+                observe_generated_result(gateway_result)
+                redactor = CURRENT_PROSE_REDACTOR.get()
+                literals = redactor.literals if redactor else generated_credential_literals(gateway_result)
+                safe_result = redact_structure(
+                    redact_result_data(gateway_tool_name, gateway_result), literals,
+                )
+                frame["status"] = safe_result.get("status", "error")
+                evidence = safe_result.get("evidence")
                 if evidence:
                     frame["evidence"] = evidence
                 frame["data_summary"] = _make_data_summary(
-                    gateway_result.get("data"), self._max_chars,
+                    safe_result.get("data"), self._max_chars,
                 )
                 full_data = _make_full_data(
-                    gateway_result.get("data"), self._data_max_chars,
+                    safe_result.get("data"), self._data_max_chars,
                 )
                 if full_data is not None:
                     frame["data"] = full_data
-                error = gateway_result.get("error")
+                error = safe_result.get("error")
                 if error:
                     frame["error"] = error
             else:
@@ -410,6 +424,33 @@ class ToolEvidenceMiddleware(MiddlewareBase):
                 frame["status"] = "error"
                 frame["data_summary"] = None
             await sink.put(frame)
+            if (
+                gateway_tool_name == "secrets.generate_password"
+                and frame["status"] == "success"
+                and isinstance(gateway_result, dict)
+            ):
+                from datetime import datetime
+                from uuid import UUID
+
+                data = gateway_result.get("data")
+                if isinstance(data, dict) and data.get("channel") == "portal_copy":
+                    delivery_id, expires_at = data.get("delivery_id"), data.get("expires_at")
+                    try:
+                        valid = (
+                            isinstance(delivery_id, str)
+                            and str(UUID(delivery_id)) == delivery_id
+                            and isinstance(expires_at, str)
+                            and datetime.fromisoformat(expires_at).tzinfo is not None
+                        )
+                    except ValueError:
+                        valid = False
+                    if valid:
+                        await sink.put({
+                            "type": "secret_delivery",
+                            "delivery_id": delivery_id,
+                            "channel": "portal_copy",
+                            "expires_at": expires_at,
+                        })
         finally:
             CURRENT_CALL_ID.reset(call_token)
 

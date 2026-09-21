@@ -111,6 +111,47 @@ async function errorDetail(response: Response): Promise<string | undefined> {
   }
 }
 
+// Only spent-handle metadata survives reload; never the delivered value.
+const DELIVERY_ATTEMPT_KEY = "luban.portal.secretDeliveryAttempt.";
+export function secretDeliveryAttempted(deliveryId: string): boolean {
+  try {
+    return sessionStorage.getItem(DELIVERY_ATTEMPT_KEY + deliveryId) === "spent";
+  } catch {
+    return false;
+  }
+}
+
+// A one-time value stays inside this callback; never React state, storage, or errors.
+export async function copyDeliveredSecret(deliveryId: string): Promise<void> {
+  if (!navigator.clipboard?.writeText || !authHeaders().authorization) {
+    throw new Error("Sign in and enable clipboard access before copying.");
+  }
+  if (secretDeliveryAttempted(deliveryId)) {
+    throw new Error("Password unavailable. Generate a new password.");
+  }
+  try {
+    sessionStorage.setItem(DELIVERY_ATTEMPT_KEY + deliveryId, "spent");
+  } catch {
+    // Storage can be disabled; the server still enforces single-use redemption.
+  }
+  let payload: { value?: unknown } | null = null;
+  try {
+    const response = await fetch(`${currentGateway()}/api/v1/secrets/delivery/${encodeURIComponent(deliveryId)}`, {
+      headers: { ...authHeaders(), "x-request-id": buildRequestId() },
+      cache: "no-store",
+      redirect: "error",
+    });
+    if (!response.ok) throw new Error();
+    payload = await response.json();
+    if (typeof payload?.value !== "string" || !payload.value) throw new Error();
+    await navigator.clipboard.writeText(payload.value);
+  } catch {
+    throw new Error("Could not copy the password. Generate a new password.");
+  } finally {
+    if (payload) payload.value = undefined;
+  }
+}
+
 export function currentAuthenticatedUser(): string | null {
   return loadAuthSession()?.identity?.username || null;
 }

@@ -37,7 +37,34 @@ the authoring workspace see
 | `acme-admin` app | deployed and ready | `make deploy-sample-app` |
 | Skill installed | `/skills/samples/password-reset-ResetAcmePassword.md` | `make deploy-samples` |
 | Two identities | `luban-operator` **and** `luban-approver` | step 2 |
-| A one-time password | you generate it; you type it into the chat | step 4 |
+| Password source | supply a one-time value, or opt in to platform generation below | step 4 |
+
+## Optional: Generate the temporary password (SPEC-062)
+
+The supplied-value steps below remain supported. With `GATEWAY_SECRETS_ENABLED=true`
+and the delegation chain configured, you can instead ask:
+
+> Reset alice's acme-admin password through the console. Generate a strong one and let me copy it.
+
+The runbook calls `secrets.generate_password(handoff="portal_copy")`; generation
+adds no approval. The reset still needs its one flow approval and authoritative
+verification. **Copy password** can appear before reset completion: the button
+proves only generation, not that the account changed. Copy once from the original
+requester's signed-in portal in a secure clipboard context. Never ask the agent
+to print the value. Expired/spent handles cannot recover it; generating another
+password does not update the account without another approved reset. Email is a
+separate, explicitly requested outbound action with its own approval.
+
+`make secret-delivery-demo` runs the local sample handoff proof (including the
+clipboard test) without a cluster, email, or account mutation. It is also part of
+`make verify`; install the portal's npm dependencies first. For an explicitly
+approved live **generation-only** handoff, use
+`sh samples/acme-admin/password-reset/demo/demo.sh --secret-delivery-live` with
+the token and log-access prerequisites documented in
+[`secret-delivery-demo.sh`](../../../shared/platform-ops/e2e/secret-delivery-demo.sh).
+The live leg consumes a throwaway handle through the same API as Copy password;
+it does not manipulate the browser clipboard or reset an account. The remaining
+walkthrough/demo continues to verify the reset separately.
 
 ## Step 1: Prepare a starting state you can compare against
 

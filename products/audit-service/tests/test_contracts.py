@@ -141,6 +141,25 @@ class AuditEventContractTests(unittest.TestCase):
             _load_schema(self.schema_name),
         )
 
+    def test_secret_delivered_event_validates(self) -> None:
+        # SPEC-062 R-3/R-4: tool-gateway emits secret_delivered when a generated
+        # secret reaches a human (portal-copy redemption or SMTP accept). It
+        # carries the channel and recipient but never the value.
+        event = _event(
+            event_type="secret_delivered",
+            service="tool-gateway",
+            session_id="ses-1",
+            details={
+                "delivery_id": "dlv-abc123",
+                "channel": "portal_copy",
+                "recipient": "alice",
+            },
+        )
+        jsonschema.validate(
+            event.model_dump(mode="json", exclude_none=True),
+            _load_schema(self.schema_name),
+        )
+
     def test_document_events_validate(self) -> None:
         # SPEC-039 R-5: agent-service emits document_created /
         # document_published / cross-owner document_read; the model must

@@ -22,6 +22,7 @@ import type {
   ToolResultFrame,
 } from "../stream/models";
 import type { ChatTurn, ConfirmationCard } from "../stream/useChatStream";
+import { toSecretDeliveryFrame } from "../stream/decoder";
 
 // Frame mapping mirrors the live decoder's tool_call/tool_result handling
 // field-for-field so a replayed card is prop-identical to its live twin.
@@ -93,6 +94,14 @@ function attachEvidence(turns: ChatTurn[], groups: EvidenceTurn[]): void {
         target.toolCalls.push(toToolCallFrame(frame));
       } else if (frame.type === "tool_result") {
         target.toolResults.push(toToolResultFrame(frame));
+      } else if (frame.type === "secret_delivery") {
+        const delivery = toSecretDeliveryFrame(frame);
+        if (delivery) {
+          target.secretDeliveries ??= [];
+          if (!target.secretDeliveries.some((item) => item.deliveryId === delivery.deliveryId)) {
+            target.secretDeliveries.push(delivery);
+          }
+        }
       }
     }
   }
@@ -162,9 +171,12 @@ function toChangeRequest(
           masked: field.masked === true,
         }))
     : undefined;
-  return fields && fields.length > 0
-    ? { summary: projection.summary, fields }
-    : { summary: projection.summary };
+  return {
+    summary: projection.summary,
+    ...(fields && fields.length > 0 ? { fields } : {}),
+    ...(typeof projection.warning === "string" ? { warning: projection.warning } : {}),
+    ...(projection.requires_acknowledgment === true ? { requiresAcknowledgment: true } : {}),
+  };
 }
 
 // Shared by transcript seeding and the approvals inbox (SPEC-031 R-5):

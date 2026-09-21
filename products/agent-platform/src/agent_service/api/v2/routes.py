@@ -387,6 +387,14 @@ async def chat_confirm(
     session = get_session(body.session_id)
     kernel = get_runtime_kernel()
     registry = get_confirmation_registry()
+    candidate = registry.peek_parked(session.session_id)
+    if (
+        candidate is not None and candidate.confirm_id == body.confirm_id
+        and body.decision == "approve"
+        and candidate.requires_recipient_acknowledgment()
+        and not body.recipient_warning_acknowledged
+    ):
+        raise HTTPException(status_code=422, detail="recipient warning acknowledgment required")
     try:
         pending = registry.claim(
             session.session_id,
@@ -566,6 +574,7 @@ _STREAM_EVENT_TYPES = frozenset(
         "tool_result",
         "confirmation_request",
         "confirmation_result",
+        "secret_delivery",
     }
 )
 
@@ -618,6 +627,10 @@ def _normalize_stream_event(
             if isinstance(raw.get("confirm_id"), str)
             else None
         ),
+        delivery_id=raw.get("delivery_id") if isinstance(raw.get("delivery_id"), str) else None,
+        channel=raw.get("channel") if isinstance(raw.get("channel"), str) else None,
+        expires_at=raw.get("expires_at") if isinstance(raw.get("expires_at"), str) else None,
+        recipient=raw.get("recipient") if isinstance(raw.get("recipient"), str) else None,
         pending_calls=_coerce_pending_calls(raw.get("pending_calls")),
         # SPEC-051 R-6: the browser-flow headline rides confirmation_request
         # frames so the live operator card matches the durable record the
@@ -942,6 +955,7 @@ async def delete_session_route(
         )
     if not delete_session(session.session_id, user_id):
         raise HTTPException(status_code=404, detail="session not found")
+    get_runtime_kernel().forget_session(session.session_id)
     return {"session_id": session.session_id, "deleted": True}
 
 

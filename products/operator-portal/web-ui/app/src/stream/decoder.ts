@@ -89,12 +89,31 @@ function toChangeRequest(value: unknown): ChangeRequest | undefined {
         })
         .filter((field): field is ChangeRequestField => field !== undefined)
     : undefined;
-  return fields && fields.length > 0 ? { summary, fields } : { summary };
+  return {
+    summary,
+    ...(fields && fields.length > 0 ? { fields } : {}),
+    ...(asString(record.warning) ? { warning: asString(record.warning) } : {}),
+    ...(record.requires_acknowledgment === true ? { requiresAcknowledgment: true } : {}),
+  };
+}
+
+export function toSecretDeliveryFrame(payload: {
+  delivery_id?: unknown; channel?: unknown; expires_at?: unknown;
+}): import("./models").SecretDeliveryFrame | null {
+  const deliveryId = asString(payload.delivery_id);
+  const expiresAt = asString(payload.expires_at);
+  if (
+    !deliveryId || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(deliveryId) ||
+    payload.channel !== "portal_copy" || !expiresAt ||
+    !/(Z|[+-]\d{2}:\d{2})$/.test(expiresAt) || !Number.isFinite(Date.parse(expiresAt))
+  ) return null;
+  return { kind: "secret_delivery", deliveryId, expiresAt, channel: "portal_copy" };
 }
 
 function toFrame(payload: RawPayload): StreamFrame | null {
   const eventType = streamEventType(payload);
 
+  if (eventType === "secret_delivery") return toSecretDeliveryFrame(payload);
   if (eventType === "tool_call") {
     return {
       kind: "tool_call",

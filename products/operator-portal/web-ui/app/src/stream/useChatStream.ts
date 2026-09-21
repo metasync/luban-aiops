@@ -10,6 +10,7 @@ import type {
   ExecutionReceipt,
   FlowSummary,
   PendingCall,
+  SecretDeliveryFrame,
   ToolCallFrame,
   ToolResultFrame,
 } from "./models";
@@ -61,6 +62,7 @@ export interface ChatTurn {
   error?: string;
   toolCalls: ToolCallFrame[];
   toolResults: ToolResultFrame[];
+  secretDeliveries?: SecretDeliveryFrame[];
   confirmations: ConfirmationCard[];
   // Transcript-seeded turns carry chat text only unless persisted tool
   // evidence is attached (SPEC-025 R-3); the request id correlates the
@@ -120,7 +122,7 @@ export interface ChatStreamApi {
   streaming: boolean;
   lastRequestId: string | null;
   send: (message: string, options?: SendOptions) => Promise<void>;
-  decide: (confirmId: string, decision: ConfirmationDecision) => Promise<void>;
+  decide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => Promise<void>;
   // Session-switch support (SPEC-023 R-3): aborts any in-flight stream,
   // stashes the current session's turns, and restores the target session's
   // cached turns — or seeds them from `history` (the loaded transcript).
@@ -192,6 +194,12 @@ export function useChatStream(): ChatStreamApi {
         case "tool_result":
           turn.segmentBreak = true;
           turn.toolResults.push(frame);
+          break;
+        case "secret_delivery":
+          turn.secretDeliveries ??= [];
+          if (!turn.secretDeliveries.some((item) => item.deliveryId === frame.deliveryId)) {
+            turn.secretDeliveries.push(frame);
+          }
           break;
         case "terminal":
           turn.completed = true;
@@ -328,7 +336,7 @@ export function useChatStream(): ChatStreamApi {
   );
 
   const decide = useCallback(
-    async (confirmId: string, decision: ConfirmationDecision) => {
+    async (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged = false) => {
       if (streamingRef.current) return;
       let owner: ChatTurn | undefined;
       let card: ConfirmationCard | undefined;
@@ -367,6 +375,8 @@ export function useChatStream(): ChatStreamApi {
             session_id: sessionId,
             confirm_id: confirmId,
             decision,
+            ...(decision === "approve" && recipientWarningAcknowledged
+              ? { recipient_warning_acknowledged: true } : {}),
           },
           signal: controller.signal,
         });

@@ -21,6 +21,17 @@ class ToolDefinition:
     risk_level: str  # "read" | "write" | "admin" (validated by the registry)
     category: str  # e.g. "kubernetes"
     parameters_schema: dict = field(default_factory=dict)
+    # SPEC-062 R-4: extra policy actions a tool requires *in addition to* its
+    # static risk-tier gate. The gateway derives ``tools:invoke`` (every tool)
+    # and ``tools:mutate`` (write/admin) from ``risk_level`` alone, so a tool
+    # that must also gate on a capability-specific action — ``secrets.deliver``
+    # declares ``("secrets:deliver",)`` — lists it here. ``invoke_tool``
+    # evaluates each after the tier check and denies (audited) on the first
+    # refusal. Defaults to ``()`` so every existing tool's admission path is
+    # byte-identical. Deliberately **not** surfaced in ``to_dict()``: it is an
+    # admission control, not discovery metadata, and omitting it keeps the
+    # ``tools:list`` contract unchanged.
+    extra_required_actions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {

@@ -45,12 +45,27 @@ to Git like any other skill.
 | `acme-admin` app | deployed and ready | `make deploy-sample-app` |
 | All three skills installed | the composition **and both sub-skills** packed into the one `samples` source, so they resolve within a single sync cycle | `make deploy-samples` — check `/skills/samples/composition-RecoverAcmeAccount.md`, `password-reset-ResetAcmePassword.md` and `lock-unlock-user-LockUnlockUser.md` are all mounted |
 | Two identities | `luban-operator` **and** `luban-approver` | step 2 |
-| A one-time password | you generate it; you type it into the chat | step 4 |
+| Password source | supply a one-time value, or opt in to platform generation below | step 4 |
 | Portal | reachable at the canonical origin | open `https://aiops.luban.metasync.cc` |
 
 Two mutating sub-skills means **two approvals**, and the same rule binds each:
 the requester cannot decide their own call (SPEC-030 R-4). This is not a
 formality you can skip by using one identity twice.
+
+## Optional: Generate instead of supplying the password (SPEC-062)
+
+With generation and delegation activated, ask:
+
+> Recover dave's acme-admin account. Generate a strong temporary password and let me copy it, then unlock the account.
+
+The reset sub-skill generates through the platform CSPRNG and supplies a one-time
+**Copy password** control. This adds no approval and changes neither of the two
+mutation gates. Check the final reset and unlock evidence before reporting
+recovery. Copy from the requester's own portal; the approver cannot redeem it.
+Do not ask for plaintext in chat. For activation, expiry behavior, and the local
+sample handoff proof, see the
+[reset walkthrough](../password-reset/WALKTHROUGH.md#optional-generate-the-temporary-password-spec-062).
+The supplied-value procedure below remains available when generation is off.
 
 ## Step 1: Note the starting state
 

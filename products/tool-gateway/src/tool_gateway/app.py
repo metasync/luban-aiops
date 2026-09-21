@@ -16,12 +16,17 @@ from tool_gateway.tools.registry import ToolRegistry
 LOGGER = logging.getLogger(__name__)
 
 
-def _build_tool_registry() -> tuple[ToolRegistry, object | None]:
+def _build_tool_registry(
+    secret_delivery_buffer: object | None = None,
+) -> tuple[ToolRegistry, object | None]:
     """Build and populate the tool registry from enabled connectors.
 
     Returns the registry plus the browser connector (SPEC-049) when the
     browser flag is on — the connector needs app-lifecycle hooks for its
-    eager CDP connection, which the registry itself does not own.
+    eager CDP connection, which the registry itself does not own. The
+    secret-delivery buffer (SPEC-062) is built by ``create_app`` and passed in
+    so it can also be held on ``app.state`` for the redemption route; the
+    returned tuple shape is unchanged.
     """
     settings = get_settings()
     # Risk-tier admission (SPEC-021 R-1): mutating (write/admin) tools are
@@ -111,12 +116,78 @@ def _build_tool_registry() -> tuple[ToolRegistry, object | None]:
         http_connector.register_tools(registry)
         LOGGER.info("http connector registered")
 
+    if settings.secrets_enabled:
+        # SPEC-062: the secrets connector has no app-lifecycle hooks, but its
+        # delivery buffer must be shared with the redemption route, so the
+        # buffer is built in ``create_app`` and passed in (and stored on
+        # ``app.state``). ``secrets.deliver`` is write-tier and is refused by
+        # the registry when GATEWAY_MUTATING_TOOLS_ENABLED is off.
+        from tool_gateway.services.audit_emitter import (
+            build_audit_event,
+            emit_audit_event,
+        )
+        from tool_gateway.tools.secrets_connector import SecretsConnector
+
+        def _secret_delivered_sink(details: dict, identity: dict) -> None:
+            emit_audit_event(
+                settings,
+                build_audit_event(
+                    "secret_delivered",
+                    identity.get("request_id"),
+                    "success",
+                    subject=identity.get("sub"),
+                    username=identity.get("username"),
+                    actor=identity.get("actor"),
+                    roles=identity.get("roles"),
+                    details=details,
+                ),
+            )
+
+        secrets_connector = SecretsConnector(
+            policy_path=settings.password_policy_path,
+            password_min_length=settings.password_min_length,
+            password_required_classes=settings.password_required_classes,
+            password_exclude_ambiguous=settings.password_exclude_ambiguous,
+            buffer=secret_delivery_buffer,  # type: ignore[arg-type]
+            delivery_ttl_seconds=settings.secret_delivery_ttl_seconds,
+            email_host=settings.email_host,
+            email_port=settings.email_port,
+            email_user=settings.email_user,
+            email_password=settings.email_password,
+            email_from=settings.email_from,
+            email_use_tls=settings.email_use_tls,
+            email_recipient_allowlist=settings.email_recipient_allowlist,
+            email_strict_allowlist=settings.email_strict_allowlist,
+            secret_delivered_sink=_secret_delivered_sink,
+        )
+        secrets_connector.register_tools(registry)
+        LOGGER.info("secrets connector registered")
+
     return registry, browser_connector
 
 
 def create_app() -> FastAPI:
     configure_logging()
-    registry, browser_connector = _build_tool_registry()
+    settings = get_settings()
+    # SPEC-062: build the single-use delivery buffer once (before the registry,
+    # which shares it) so the redemption route reads the same instance from
+    # ``app.state``. An unknown GATEWAY_SECRET_DELIVERY_BACKEND fails startup
+    # here; a Redis connection failure fails open to in-memory (see the factory).
+    secret_delivery_buffer = None
+    if settings.secrets_enabled:
+        from tool_gateway.tools.secret_delivery import (
+            build_secret_delivery_buffer,
+        )
+
+        secret_delivery_buffer = build_secret_delivery_buffer(
+            backend=settings.secret_delivery_backend,
+            ttl_seconds=settings.secret_delivery_ttl_seconds,
+            max_entries=settings.secret_delivery_max_entries,
+            redis_host=settings.secret_delivery_redis_host,
+            redis_port=settings.secret_delivery_redis_port,
+            redis_db=settings.secret_delivery_redis_db,
+        )
+    registry, browser_connector = _build_tool_registry(secret_delivery_buffer)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -134,6 +205,8 @@ def create_app() -> FastAPI:
     app.state.tool_registry = registry
     if browser_connector is not None:
         app.state.browser_connector = browser_connector
+    if secret_delivery_buffer is not None:
+        app.state.secret_delivery_buffer = secret_delivery_buffer
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

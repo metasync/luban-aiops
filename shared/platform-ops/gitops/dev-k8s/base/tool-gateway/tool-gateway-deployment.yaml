@@ -36,6 +36,9 @@ spec:
             - secretRef:
                 name: tool-gateway-runtime-secrets
                 optional: true
+            - secretRef:
+                name: tool-gateway-email-secrets
+                optional: true
           ports:
             - containerPort: 8000
           volumeMounts:

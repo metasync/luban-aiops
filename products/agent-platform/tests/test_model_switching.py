@@ -323,7 +323,7 @@ def test_stream_message_end_carries_serving_model(monkeypatch):
         return (FakeEndAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
-    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent: None)
+    monkeypatch.setattr(kernel, "_snapshot_state", lambda session_id, agent, turn_literals=(): None)
     monkeypatch.setattr(kernel, "_persist_evidence", lambda *args: None)
 
     frames = _drain(

@@ -19,6 +19,12 @@
 # `approval_tier` for require_approval expectations.
 
 api:
+  - roles: ["platform-admin", "approver", "operator"]
+    action: secrets:deliver
+    expect: allow
+  - roles: ["developer", "read-only-observer", "auditor", "unknown"]
+    action: secrets:deliver
+    expect: deny
   # allow-operators-chat: operational and developer roles use chat and
   # manage their session workspace.
   - roles: ["platform-admin", "approver", "operator", "developer"]
@@ -197,6 +203,12 @@ api:
     expect: deny
 
 tools:
+  - roles: ["platform-admin", "approver", "operator"]
+    action: secrets:deliver
+    expect: allow
+  - roles: ["developer", "read-only-observer", "auditor", "unknown"]
+    action: secrets:deliver
+    expect: deny
   # allow-operators-tools: read-risk invocation, observer included.
   - roles:
       - platform-admin

@@ -63,10 +63,13 @@ demonstrates:
   registered and the flow cannot complete.
 - A `tools:mutate` grant for the caller's role and, under the default
   bundle, a **designated approver** who is not the requesting operator.
-- The caller supplies the **target user** (username or email) and the
-  **new temporary password** in the chat message. That password is a
-  chat-supplied one-time value: never stored in this skill, never
-  committed, and never present in any tool output.
+- The caller supplies the **target user** (username or email). Use a supplied
+  **new temporary password** unchanged. If none is supplied, generate it with
+  `secrets.generate_password(policy="default", handoff="portal_copy")` when
+  `GATEWAY_SECRETS_ENABLED=true`; otherwise ask for secure generation to be
+  enabled or for a caller-supplied temporary value. Never invent one.
+  Strength rules come from `shared/shared-contracts/policies/password-policy.yaml`.
+  The generated value stays in working context only; never restate it in prose.
 - The app is deployed (`make deploy-sample-app`). Unlike the static
   target this sample replaces, the reset really changes state — and the
   store is in memory, so a pod restart reverts it to the seed.
@@ -106,7 +109,9 @@ Exactly **one write-tier interaction**: the "Confirm reset" click in step
 
 6. **Open the reset form pre-filled.** `web.navigate` to
    `http://acme-admin:8080/admin/users/reset/?user=<target>&newpw=<new-password>`
-   — read tier, because navigating is not interacting. The page's own
+   — percent encode `<target>` and `<new-password>` separately as query values;
+   generated symbols such as `&`, `+` and `#` must not change URL structure.
+   This is read tier, because navigating is not interacting. The page's own
    script pre-fills `new-password` and `confirm-password` from the query
    string and sets `target-user`, and it deliberately does **not**
    submit. The `newpw` value is masked to `***` in the result and in the
@@ -136,6 +141,13 @@ Exactly **one write-tier interaction**: the "Confirm reset" click in step
    as final visual evidence and include it in the response. The API
    check is what makes the console's success message a fact rather than
    a claim.
+
+10. **Hand off a generated value without printing it.** After verification,
+    direct the original requester to **Copy password** in the portal. The control
+    may appear earlier, but generation alone does not prove the reset succeeded.
+    Only the requester can redeem it, once, before expiry. If it is spent or
+    expired, do not claim regeneration changes the account; another reset needs
+    its own flow and approval. Never include the value in the final response.
 
 ## Interpretation
 

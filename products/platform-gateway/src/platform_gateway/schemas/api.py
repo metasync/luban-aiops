@@ -37,6 +37,7 @@ class ChatConfirmRequest(BaseModel):
     session_id: str = Field(min_length=1)
     confirm_id: str = Field(min_length=1)
     decision: Literal["approve", "deny"]
+    recipient_warning_acknowledged: bool = Field(default=False, strict=True)
 
 
 class ChatResponse(BaseModel):

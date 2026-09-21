@@ -165,6 +165,7 @@ class RuntimeSettings:
     # confirmation stays answerable. 0 disables the bridge and restores the
     # pre-SPEC-020 silent-park posture.
     hitl_confirm_timeout: int = 600
+    email_recipient_allowlist: tuple[str, ...] = ()
     # Evidence persistence caps (SPEC-025 R-1): per-entry data cap in chars
     # and per-session storage budget in bytes. Defaults are measured-derived
     # (dev-k8s pass, SPEC-025 plan §Q3) and deliberately decoupled from the
@@ -462,6 +463,11 @@ class RuntimeSettings:
                 _optional_bool("AGENTSCOPE_TASK_TOOLS_ENABLED") or False
             ),
             hitl_confirm_timeout=int(os.getenv("AGENT_HITL_CONFIRM_TIMEOUT", "600")),
+            email_recipient_allowlist=tuple(
+                entry.strip().lower()
+                for entry in os.getenv("AGENT_EMAIL_RECIPIENT_ALLOWLIST", "").split(",")
+                if entry.strip()
+            ),
             evidence_entry_max_chars=int(
                 os.getenv("AGENT_EVIDENCE_ENTRY_MAX_CHARS", "131072")
             ),

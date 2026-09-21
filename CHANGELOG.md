@@ -11,6 +11,109 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.41.0 — 2026-09-22
+
+Minor release delivering **SPEC-062** (Secure Password Generation and Delivery
+Tools), the twenty-fourth R5 slice. It gives the agent two new tool-gateway
+primitives: a **read-tier** CSPRNG `secrets.generate_password` (randomness from
+Python's `secrets`, never model-invented) bound to a single-source strength
+policy, and a **write-tier** `secrets.deliver(channel="email")` outbound sender.
+The generated value rides **no** human-readable projection — the retrieval-vs-
+masking crux is resolved by redemption-on-click (**ADR-0012**), a narrow
+server-mediated secret-*retrieval* path that sits *beside* the SPEC-049 R-5 /
+SPEC-055 R-7 no-plaintext posture without excepting it. Generation is disabled
+by default (`GATEWAY_SECRETS_ENABLED=false`) and SMTP ships unconfigured/inert in
+the base overlay. One new `secrets:deliver` policy action and one new
+`secret_delivered` audit event type are introduced; the `secret_delivery` stream
+frame is additive (agent-stream-event schema title v11 → v12, stable `$id`).
+
+### Added
+
+- **Secrets connector** (`products/tool-gateway/src/tool_gateway/tools/`):
+  `secrets.generate_password(policy="default", handoff="portal_copy"|"none",
+  length?, exclude_ambiguous?)` — read tier, `tools:invoke`, no approval;
+  `secrets.choice` generation with a Fisher-Yates shuffle and conservative
+  entropy accounting, raising short requests to the policy minimum and refusing
+  impossible/oversized requests with `INVALID_PARAMETERS`. The raw
+  `generated_password` survives the gateway's exact-key `redact_result` gate for
+  model use while every copy is masked.
+- **Password-policy contract** — canonical
+  `shared/shared-contracts/policies/password-policy.yaml` (min length 16, hard
+  floor 12, entropy floor 64 bits, four required classes) synced to the packaged
+  tool-gateway copy by `make sync-policy`; overrides tighten only. A fail-closed
+  loader refuses generation on a missing/unreadable/invalid policy with **no**
+  stale or built-in fallback. `validate_password_policy.py` +
+  `make validate-password-policy` (added to `make verify`) reject floor/class
+  drift, a missing consumer, malformed input, and packaged-copy drift.
+- **One-time delivery handoff** (`tools/secret_delivery.py`): a `SecretDeliveryBuffer`
+  `Protocol` with in-memory (monotonic TTL + capacity) and Redis (`SET EX` +
+  atomic `GETDEL`) backends; wrong-owner/foreign attempts burn the handle and
+  share the single unavailable posture with expired/unknown. Portal-copy is
+  folded into generation as the default intrinsic handoff.
+- **Redemption routes**: authenticated `GET /api/v2/secrets/delivery/{delivery_id}`
+  on tool-gateway and a delegated `GET /api/v1/secrets/delivery/{delivery_id}`
+  proxy on platform-gateway — canonical-UUID validated, authentication mandatory
+  even in the dev posture, no redirects, `no-store`/`no-cache`, destructive
+  single-use redemption, sanitized upstream failures, and metadata-only
+  `secret_delivered` audit at redemption.
+- **External email delivery**: `secrets.deliver(channel="email", password,
+  recipient)` — write tier requiring `secrets:deliver` in addition to
+  `tools:mutate`, enforced at the gateway before connector execution and
+  independently at platform-gateway confirmation admission. Mandatory
+  certificate-validated STARTTLS (missing SMTP/TLS config refuses with
+  `EMAIL_NOT_CONFIGURED`), exact-address/domain recipient allowlisting (no
+  automatic subdomain match), and an out-of-allowlist warning requiring a strict
+  boolean `recipient_warning_acknowledged=true` checked before the confirmation
+  is claimed. `secret_delivered` fires at SMTP acceptance (not proof of inbox
+  delivery), metadata only.
+- **Kernel generated-literal masking** (`products/agent-platform`): raw,
+  percent-encoded and quote-plus generated literals are harvested per session and
+  masked across blocking/streaming/resumed prose, structured output, evidence
+  frames, snapshots, error paths and legacy transcripts, while raw model and
+  signing arguments stay intact. Knowledge is retained while an agent is cached
+  (including compacted contexts); owner deletion clears session caches and
+  turn-local literals still protect an in-flight snapshot. The requester's
+  delegated token is preserved ephemerally across approval resume/re-park for
+  generation only; approved writes retain approver authority.
+- **`secret_delivery` stream frame** (metadata-only: `delivery_id`, `channel`,
+  `expires_at`, optional recipient) emitted alongside tool results and
+  persisted/replayed independently of result-data truncation.
+- **`secrets:deliver` action** registered in all three policy bundles
+  (platform-admin, approver, operator) with both engines' scenario suites
+  updated; **`secret_delivered`** added to the audit vocabulary, service mirror
+  and the portal audit filter (drift-guarded).
+- **Operator portal**: a one-time **Copy password** control driven by the
+  `secret_delivery` frame — explicit click fetches directly to the clipboard with
+  no plaintext React state, DOM, or browser storage (only tab-local spent
+  markers); expired/unavailable controls stay disabled, and missing auth or
+  clipboard support prevents redemption. The email out-of-allowlist warning
+  acknowledgment renders in both chat and the approvals inbox.
+- **`GeneratePassword` knowledge skill**
+  (`shared/platform-ops/skills/platform-runbooks/guides/GeneratePassword.md`)
+  citing the policy contract by reference and forbidding restating a generated
+  value; the `acme-admin` reset/recovery runbooks gained the generate-and-hand-off
+  branch.
+- **Configuration** (`GATEWAY_*` on `GatewaySettings.from_env()`): generation
+  enablement, policy path/tightening, buffer backend/TTL/capacity/Redis, SMTP/TLS,
+  and paired gateway/agent recipient allowlists + strict mode — documented in
+  `configuration-reference.md` (Feature Activation Matrix), `tool-configuration.md`
+  (tool table, activation checklist, error codes) and `skills-guide.md`; SMTP
+  password provisioned by `sync-email-secrets.sh` (never in the ConfigMap).
+- **e2e**: `shared/platform-ops/e2e/secret-delivery-demo.sh` (local by default;
+  `--live` is an explicit opt-in) registered in `make e2e` and run in local mode
+  by `make verify`; a cross-product generation→projection→redemption integration
+  test, mocked-I/O execution of the live demo, and three in-memory security
+  mutation checks (projection bypass, dropped harvest, weakened owner scope).
+
+### Security
+
+- The generated value is real only in bounded, intentional places (the gateway
+  process, the kernel working context, the single-use delivery buffer, and the
+  approved TLS SMTP transport) and masked or absent everywhere else. No
+  model-side generation, no plaintext in any transcript/title/card/evidence/stream
+  frame/audit event/log, and no live email, deployment, browser or OS-clipboard
+  use in verification.
+
 ## 0.40.0 — 2026-09-20
 
 Minor release delivering **SPEC-057** (Skill Composition — Validated Runbooks of

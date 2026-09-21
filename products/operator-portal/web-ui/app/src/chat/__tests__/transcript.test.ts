@@ -26,6 +26,22 @@ function turnOf(replyText: string, userMessage = "run it"): ChatTurn {
 }
 
 describe("transcriptToTurns", () => {
+  it("replays only validated delivery metadata and preserves email warnings", () => {
+    const frame = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
+      channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z", value: "must-not-survive" };
+    const turns = transcriptToTurns([{ role: "user", content: "generate" }], [
+      { turn_index: 0, request_id: "r1", frames: [frame, frame, { ...frame, delivery_id: "bad" }] },
+    ], [{ confirm_id: "cf", session_id: "s", status: "pending", pending_calls: [{
+      tool_name: "secrets.deliver", change_request: { summary: "Email secret",
+        warning: "Outside approved list", requires_acknowledgment: true },
+    }] } as ConfirmationRecord]);
+    expect(turns[0].secretDeliveries).toHaveLength(1);
+    expect(JSON.stringify(turns)).not.toContain(frame.value);
+    expect(turns[0].confirmations[0].pendingCalls[0].changeRequest).toEqual({
+      summary: "Email secret", warning: "Outside approved list", requiresAcknowledgment: true,
+    });
+  });
+
   it("pairs a user turn with the following assistant reply", () => {
     const transcript: TranscriptTurn[] = [
       { role: "user", content: "status please" },

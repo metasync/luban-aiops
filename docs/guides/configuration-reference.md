@@ -21,6 +21,8 @@ activate them. A feature is **active** when all required variables are set to no
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
 | **Isolated execution worker (SPEC-038)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret` | agent-service, execution-runtime | **must be provisioned** (`sync-execution-handoff-secret.sh` + worker URL); absent config or any transport error fails mutating resumes closed (`worker_unavailable`) |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
+| **Secure password generation / Copy password (SPEC-062)** | `GATEWAY_SECRETS_ENABLED=true`, readable `GATEWAY_PASSWORD_POLICY_PATH`, delegation + `tools:invoke` | tool-gateway, agent-service, platform-gateway, portal | disabled (`false`); no SMTP required |
+| **Email secret delivery (SPEC-062)** | Secrets + mutating/HITL/signed execution enabled; `GATEWAY_EMAIL_HOST`, sender, TLS, optional SMTP Secret; paired gateway/agent recipient allowlists; `secrets:deliver` + `tools:mutate` | tool-gateway, agent-service, platform-gateway, policy bundle | SMTP unconfigured; inert |
 | **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
 | **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
 | **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, auth `OTEL_EXPORTER_OTLP_HEADERS` | all services | enabled (OpenObserve; header via `sync-otel-secrets.sh`) |
@@ -31,6 +33,60 @@ activate them. A feature is **active** when all required variables are set to no
 | **Skill compositions (`kind: composition`, SPEC-057)** | *(no activation switch — additive on the skills path above)*; `SKILLS_COMPOSITION_MAX_SUB_SKILLS` bounds a composition's `sub_skills` count. A composition carries no authority (ADR-0011): no new policy action, no new audit event type, no new gate — each sub-skill keeps its own HITL gate | skills-hub | enabled (`8`); `make policy-diff` reports zero transitions |
 | **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`, `AGENT_INCIDENT_SERVICE_URL`, `AGENT_INCIDENT_CLIENT_SECRET` (SPEC-043 incident-report documents) ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway, agent-service | **must be provisioned** (`sync-incident-secrets.sh`) |
 | **Portal voice input** | *(none — browser Web Speech API; `input_modality` passes through gateway/agent and is audited only)* | operator-portal, platform-gateway, agent-service | enabled (browser-capability gated) |
+
+## Secure Password Generation and Delivery (SPEC-062)
+
+| Variable | Default | Owning service / behavior |
+|---|---|---|
+| `GATEWAY_SECRETS_ENABLED` | `false` | tool-gateway discovery switch for `secrets.*` |
+| `GATEWAY_PASSWORD_POLICY_PATH` | packaged contract; dev-k8s `/etc/luban/policy/password-policy.yaml` | tool-gateway reads the canonical password policy; unreadable/invalid policy refuses generation |
+| `GATEWAY_PASSWORD_MIN_LENGTH` | unset (contract) | Tightening only; weakening or exceeding the generator bound fails startup |
+| `GATEWAY_PASSWORD_REQUIRED_CLASSES` | unset (contract) | Comma-separated classes; must retain all required classes without duplicates/unknowns |
+| `GATEWAY_PASSWORD_EXCLUDE_AMBIGUOUS` | `false` | May add exclusion, never relax a policy's exclusion |
+| `GATEWAY_SECRET_DELIVERY_BACKEND` | `memory` | `memory` or `redis`; other names fail startup |
+| `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` | `300` | Positive one-time handle TTL |
+| `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES` | `256` | Positive in-memory capacity; oldest-expiring entry evicted |
+| `GATEWAY_SECRET_DELIVERY_REDIS_HOST` | `127.0.0.1` | Redis host; use `redis` for the dev-k8s Service |
+| `GATEWAY_SECRET_DELIVERY_REDIS_PORT` | `6379` | Redis port, 1–65535 |
+| `GATEWAY_SECRET_DELIVERY_REDIS_DB` | `2` | Nonnegative DB index, separate from the kernel message bus |
+| `GATEWAY_EMAIL_HOST` | empty | SMTP host; empty keeps email inert |
+| `GATEWAY_EMAIL_PORT` | `587` | SMTP STARTTLS port, 1–65535 |
+| `GATEWAY_EMAIL_USER` | empty | Optional SMTP login username |
+| `GATEWAY_EMAIL_PASSWORD` | empty | SMTP login secret; Secret only, never ConfigMap |
+| `GATEWAY_EMAIL_FROM` | empty (falls back to user) | Must resolve to one valid ASCII mailbox |
+| `GATEWAY_EMAIL_USE_TLS` | `true` | STARTTLS with certificate validation; `false` refuses email |
+| `GATEWAY_EMAIL_RECIPIENT_ALLOWLIST` | empty | Comma-separated exact domains or addresses; no wildcard/subdomain expansion |
+| `GATEWAY_EMAIL_STRICT_ALLOWLIST` | `false` | If true, send-time refusal outside the list; otherwise warning + approval |
+| `AGENT_EMAIL_RECIPIENT_ALLOWLIST` | empty | agent-service's matching card-warning list, captured at park time |
+
+Chain: portal click → authenticated platform-gateway proxy
+`GET /api/v1/secrets/delivery/{id}` → delegated token → tool-gateway
+`GET /api/v2/secrets/delivery/{id}` → owner-scoped atomic redemption → clipboard.
+Only delivery metadata enters the stream and durable record. No email setup is
+needed for generation or portal copy. After an approver resumes a turn, generation
+uses the original requester's ephemeral delegated credential, not the approver's;
+missing/expired requester credentials fail closed and require a new requester turn.
+
+Email adds the existing mutating-tool switch, HITL and signed-execution setup,
+plus `tools:mutate` and `secrets:deliver` grants. Keep both recipient allowlists
+identical; the gateway's strict send-time check is authoritative. Provision SMTP
+credentials explicitly with `sh shared/platform-ops/gitops/sync-email-secrets.sh`
+after securely exporting `GATEWAY_EMAIL_PASSWORD`. It updates only the optional
+`tool-gateway-email-secrets` Secret, does not restart workloads, and is not part
+of automatic deployment. Base overlays leave secrets disabled and SMTP unset.
+
+Memory buffers require one replica and lose handles on restart. Redis uses TTL
+and atomic `GETDEL` (Redis 6.2+). Startup connectivity failure logs a fallback to
+memory: **do not scale out while fallback is active**. Use a private, access-controlled,
+non-persistent Redis instance for ephemeral values; do not enable RDB/AOF backups
+for this buffer. TTL expiry is logical deletion, not secure erasure of snapshots.
+The current client targets private-network Redis without an authentication/TLS
+configuration surface; do not expose it beyond that trusted network.
+
+`secret_delivered` is emitted on redemption or SMTP acceptance, not when a handle
+is created. SMTP acceptance does not prove inbox delivery. A spent, expired or
+wrong-owner handle is unavailable; a wrong-owner attempt also consumes the handle.
+Clipboard failure cannot restore it. Never log redemption bodies or SMTP bodies.
 
 ## Cross-Service Dependency Chains
 

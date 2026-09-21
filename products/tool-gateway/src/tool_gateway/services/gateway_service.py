@@ -290,6 +290,55 @@ async def invoke_tool(
             )
             return JSONResponse(content=result.to_dict(), status_code=403)
 
+    # Per-tool extra-action admission (SPEC-062 R-4): a tool may require a
+    # capability-specific action *in addition to* its static risk-tier gate —
+    # ``secrets.deliver`` declares ``("secrets:deliver",)``. Evaluated after the
+    # tier check so the denial names the specific missing capability; the first
+    # refusal wins, is audited, and returns the standard denied envelope. The
+    # field defaults to ``()``, so every existing tool skips this loop entirely.
+    if target is not None:
+        for extra_action in target.definition.extra_required_actions:
+            extra_decision = evaluate(settings, identity.roles, extra_action)
+            record_policy_decision(extra_action, extra_decision.decision)
+            if extra_decision.decision == "deny":
+                LOGGER.warning(
+                    "tool invocation denied by extra required action",
+                    extra={
+                        "request_id": request_id,
+                        "tool_name": tool_name,
+                        "action": extra_action,
+                        "subject": identity.subject,
+                        "roles": identity.roles,
+                        "reason": extra_decision.reason,
+                    },
+                )
+                emit_audit_event(
+                    settings,
+                    build_audit_event(
+                        "policy_decision",
+                        request_id,
+                        "deny",
+                        subject=identity.subject,
+                        username=identity.username,
+                        actor=identity.actor,
+                        roles=identity.roles,
+                        details={
+                            "action": extra_action,
+                            "decision": "deny",
+                            "reason": extra_decision.reason,
+                            "tool_name": tool_name,
+                            "risk_level": target.definition.risk_level,
+                            "matched_rule_ids": extra_decision.matched_rule_ids,
+                        },
+                    ),
+                )
+                result = make_denied_result(
+                    tool_name,
+                    extra_decision.reason,
+                    target.definition.risk_level,
+                )
+                return JSONResponse(content=result.to_dict(), status_code=403)
+
     # Dispatch to registry. request_id rides along so connectors can
     # propagate correlation to downstream services (SPEC-029 R-3).
     identity_dict = {
@@ -297,6 +346,7 @@ async def invoke_tool(
         "username": identity.username,
         "roles": identity.roles,
         "request_id": request_id,
+        "actor": identity.actor,
     }
     if chat_session_id is not None:
         identity_dict["chat_session_id"] = chat_session_id

@@ -230,6 +230,7 @@ async def open_chat_confirm_stream(
     confirm_id: str,
     decision: str,
     delegated_token: str | None = None,
+    recipient_warning_acknowledged: bool = False,
 ) -> AsyncIterator[str]:
     """Open the confirm stream and return an SSE line iterator (SPEC-020 R-3).
 
@@ -245,6 +246,8 @@ async def open_chat_confirm_stream(
         "confirm_id": confirm_id,
         "decision": decision,
     }
+    if recipient_warning_acknowledged:
+        payload["recipient_warning_acknowledged"] = True
     client = httpx.AsyncClient(timeout=timeout)
     try:
         request = client.build_request(

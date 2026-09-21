@@ -109,6 +109,47 @@ A projected `location` header is query-masked just like `url`. A POST redirect
 refusal stops further requests but cannot undo the initial POST: inspect the
 target state before retrying, since the first request may already have mutated it.
 
+### Secrets Connector Tools (SPEC-062)
+
+| Tool | Parameters | Risk / permission |
+|---|---|---|
+| `secrets.generate_password` | `policy` (default `default`), optional `length`, `exclude_ambiguous`, `handoff` (`portal_copy` default or `none`) | read; `tools:invoke`; no approval |
+| `secrets.deliver` | `channel="email"`, `password`, `recipient` | write; `tools:invoke` + `tools:mutate` + `secrets:deliver`; action approval |
+
+Generation reads [the password-policy contract](../../shared/shared-contracts/policies/password-policy.yaml)
+and uses a CSPRNG. `generated_password` is raw only in working context; evidence,
+prose, snapshots and approval projections mask it. Portal-copy is folded into
+generation and is **not** a `secrets.deliver` channel. The metadata-only delivery
+frame produces an explicit one-time **Copy password** control. Replay never
+redeems automatically. Expired/spent values are not recoverable from history.
+
+Activation checklist:
+
+- Enable `GATEWAY_SECRETS_ENABLED`; ensure the configured policy is readable.
+- Verify delegation and `tools:invoke`; portal copy needs HTTPS or localhost and
+  browser clipboard permission. No SMTP or mutating switch is needed.
+- For email, enable mutating tools, HITL and the signed execution worker; review
+  `tools:mutate` and `secrets:deliver` policy grants, then `make sync-policy`.
+- Configure STARTTLS SMTP host/sender and optional authentication using the
+  dedicated Secret. Keep the agent/gateway recipient allowlists in sync.
+  Outside-list approvals require an explicit checkbox acknowledgment; strict
+  mode refuses them. Tier-2 self-approval remains blocked.
+- Use one replica for memory; for scale-out select Redis and verify no startup
+  fallback. See [configuration and Redis constraints](configuration-reference.md#secure-password-generation-and-delivery-spec-062).
+
+Errors: `INVALID_PARAMETERS` covers invalid/unsatisfiable policy or inputs;
+`EMAIL_NOT_CONFIGURED` means no TLS-enabled SMTP sender is available;
+`EMAIL_RECIPIENT_NOT_ALLOWED` is a strict-list refusal; `UPSTREAM_ERROR` is a
+buffer/transport failure. Nothing is sent on the configuration/list refusals.
+A timeout after SMTP acceptance can leave delivery uncertain; do not retry blindly.
+
+Extension seam: `DeliveryChannel.send(value, recipient, context)` returns a
+metadata-only `DeliveryOutcome`. Register a new external sender with
+`SecretsConnector.register_channel`; generation and the buffer stay unchanged.
+The dispatcher emits `secret_delivered` after successful external delivery;
+`PortalCopyChannel` defers that event until actual redemption. New senders must
+never log values and must preserve write-tier authorization.
+
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
 - [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — the base commits `false`

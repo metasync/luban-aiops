@@ -130,15 +130,23 @@ push: ## Push every product container image (set REGISTRY to re-tag)
 # --- Policy management ------------------------------------------------------
 
 POLICY_CANONICAL := shared/shared-contracts/policies/policy-default.yaml
+# SPEC-062 R-2: the password-strength contract is authored once beside the
+# policy bundle and synced into the only consumer that reads it (tool-gateway).
+PASSWORD_POLICY_CANONICAL := shared/shared-contracts/policies/password-policy.yaml
 POLICY_TARGETS := \
 	products/tool-gateway/src/tool_gateway/policies/policy-default.yaml \
 	products/platform-gateway/src/platform_gateway/policies/policy-default.yaml \
 	shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml
+PASSWORD_POLICY_TARGETS := \
+	products/tool-gateway/src/tool_gateway/policies/password-policy.yaml
 
 .PHONY: sync-policy
-sync-policy: ## Copy canonical policy bundle to all consumer locations
+sync-policy: ## Copy canonical policy bundles to all consumer locations
 	@for t in $(POLICY_TARGETS); do \
 		cp $(POLICY_CANONICAL) "$$t" && echo "synced $$t" || exit 1; \
+	done
+	@for t in $(PASSWORD_POLICY_TARGETS); do \
+		cp $(PASSWORD_POLICY_CANONICAL) "$$t" && echo "synced $$t" || exit 1; \
 	done
 
 .PHONY: validate-policy
@@ -166,6 +174,10 @@ validate-version: ## Validate version lockstep between VERSION, products, and po
 validate-secret-vocabulary: ## Validate secret-literal lockstep (agent-platform / tool-gateway / skills-hub)
 	@cd products/agent-platform && uv run python ../../shared/shared-contracts/scripts/validate_secret_vocabulary.py ../..
 
+.PHONY: validate-password-policy
+validate-password-policy: ## Validate the password-policy contract and pin the connector floor to it (SPEC-062 R-2)
+	@cd products/tool-gateway && uv run python ../../shared/shared-contracts/scripts/validate_password_policy.py ../..
+
 # --- Cross-cutting ----------------------------------------------------------
 
 .PHONY: overlays
@@ -175,8 +187,12 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 		kustomize build --load-restrictor LoadRestrictionsNone $(GITOPS_DIR)/$$o >/dev/null || exit 1; \
 	done
 
+.PHONY: secret-delivery-demo
+secret-delivery-demo: ## Run the local sample handoff proof (uv + installed portal npm dependencies; no cluster)
+	@sh $(SAMPLES_DIR)/acme-admin/password-reset/demo/demo.sh --secret-delivery-local
+
 .PHONY: verify
-verify: test overlays validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary ## Verification gate: tests + overlays + policy + scenarios + version + vocabulary lockstep
+verify: test overlays validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo ## Verification gate: tests + overlays + policy + scenarios + version + vocabulary + password-policy + local handoff demo
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)
@@ -212,7 +228,7 @@ e2e: ## Run the e2e demo scripts against the deployed dev cluster
 	@echo "The acme-admin suite additionally needs 'make deploy-sample-app' and"
 	@echo "'make deploy-samples' to have been run; it fails loudly naming them if not."
 	@status=0; \
-	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
+	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(E2E_DIR)/secret-delivery-demo.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
 		echo "==> $$script"; \
 		sh $$script || status=1; \
 	done; \

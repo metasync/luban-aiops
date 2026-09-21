@@ -65,6 +65,22 @@ class ScoreTests(unittest.TestCase):
 
 
 class RankTests(unittest.TestCase):
+    def test_shipped_password_skill_is_discoverable(self) -> None:
+        from pathlib import Path
+        from skills_hub.services.ingestion import ingest_directory
+
+        root = Path(__file__).resolve().parents[3]
+        result = ingest_directory(
+            "platform-runbooks", root / "shared/platform-ops/skills/platform-runbooks",
+            "local", NOW,
+        )
+        self.assertEqual(result.rejections, [])
+        hits = rank("generate a password", result.records, limit=5)
+        skill = next(h.skill for h in hits if h.skill.source_path.endswith("GeneratePassword.md"))
+        self.assertEqual(skill.kind, "knowledge")
+        self.assertIn("shared/shared-contracts/policies/password-policy.yaml", skill.body)
+        self.assertIn('handoff="portal_copy"', skill.body)
+
     def test_zero_score_records_excluded(self) -> None:
         hits = rank(
             "pod",

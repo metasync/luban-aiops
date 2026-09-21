@@ -37,8 +37,18 @@ ACTION_TOOLS_INVOKE = "tools:invoke"
 # Mutating tool execution (SPEC-021 R-1): write/admin risk tools additionally
 # require this action; deny-by-default like every other platform action.
 ACTION_TOOLS_MUTATE = "tools:mutate"
+# Secret delivery over an external channel (SPEC-062 R-4): ``secrets.deliver``
+# requires this *in addition to* ``tools:mutate`` via the per-tool
+# ``extra_required_actions`` admission hook. Deny-by-default; joined to
+# PROTECTED_ACTIONS so the policy matrix surfaces it.
+ACTION_SECRETS_DELIVER = "secrets:deliver"
 PROTECTED_ACTIONS = frozenset(
-    {ACTION_TOOLS_LIST, ACTION_TOOLS_INVOKE, ACTION_TOOLS_MUTATE}
+    {
+        ACTION_TOOLS_LIST,
+        ACTION_TOOLS_INVOKE,
+        ACTION_TOOLS_MUTATE,
+        ACTION_SECRETS_DELIVER,
+    }
 )
 
 # Approval semantics (SPEC-030 R-2): this gateway bridges no approval
