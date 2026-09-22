@@ -11,6 +11,50 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.42.0 — 2026-09-23
+
+Minor release refining **SPEC-062 R-3** delivery timing after a live-test
+finding: the portal **Copy password** button appeared the instant
+`secrets.generate_password(handoff="portal_copy")` returned — before the bound
+reset's HITL approval card was even filed. The reveal now fires on **commit**:
+for a gated flow the `secret_delivery` frame is withheld at generation and
+released only once the gate is approved **and** its gated mutation executes
+successfully, so the button lands on the operator's committed turn. A standalone
+generation (no gate follows) still reveals at that turn's end, preserving the
+original generate-and-copy flow. On deny, gated-call failure, or expiry the held
+delivery is silently burned — no frame is emitted and the value expires
+unredeemed. The frame shape, portal rendering, redemption path, and
+`secret_delivered` audit are unchanged; only emission timing moves (**ADR-0012**,
+amended). No wire-format or schema change (agent-stream-event stays title v12).
+
+### Added
+
+- **Reveal-on-commit hold TTL** (`products/tool-gateway`): a new
+  `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` (default `900` = the 600s HITL
+  approval timeout plus the 300s redemption margin) bounds how long a portal-copy
+  delivery is stashed, so a password generated before a gated reset survives the
+  full approval wait and is still redeemable when the Copy button is revealed.
+  The standalone `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` (300) remains the
+  redemption window and the buffer's baseline TTL; single-use, owner-scope, and
+  expiry-burn are unchanged. Documented in the configuration reference and the
+  dev-k8s tool-gateway `runtime-config.env`.
+
+### Changed
+
+- **Deferred emission** (`products/agent-platform`): `ToolEvidenceMiddleware` no
+  longer emits the `secret_delivery` frame inline at generation; it buffers the
+  delivery handle in a per-stream contextvar (`STREAM_PENDING_DELIVERIES`).
+  `runtime_kernel` drains that buffer onto the parked confirmation card
+  (`PendingConfirmation.pending_deliveries`, ephemeral like
+  `requester_delegated_token` and never persisted to the durable record), flushes
+  it as a frame at normal stream end for the standalone case, and — on an
+  approved resume — releases it into the resumed sink only when the gated call
+  returns success (`PENDING_RELEASE_DELIVERIES`, gated on `EXECUTION_REQUESTS`).
+  The deferred frame is persisted under the **original** `turn_index`, so it
+  replays to an operator who reloads after the commit without watching the
+  resumed stream. A mid-approval restart drops the ephemeral hold and the value
+  expires unreleased (fail-safe — no leaked secret, no orphaned button).
+
 ## 0.41.1 — 2026-09-22
 
 Patch release hardening the agent-platform default system prompt after a

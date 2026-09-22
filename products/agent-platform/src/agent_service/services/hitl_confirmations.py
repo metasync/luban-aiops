@@ -89,6 +89,15 @@ class PendingConfirmation:
     approval_kind: str | None = None
     email_recipient_allowlist: tuple[str, ...] = ()
     requester_delegated_token: str | None = field(default=None, repr=False)
+    # SPEC-062 R-3 reveal-on-commit: portal_copy secret deliveries generated in
+    # the turn that parked this card, held opaquely as ``{delivery_id, channel,
+    # expires_at}`` dicts (never the plaintext) so they ride the park across
+    # resume and are released as ``secret_delivery`` frames only when the
+    # approved gated mutation commits. Ephemeral like ``requester_delegated_token``:
+    # never persisted to the durable card record, so a mid-approval restart drops
+    # it and the delivery simply expires unreleased (fail-safe — no leak, no
+    # orphaned Copy button).
+    pending_deliveries: tuple[dict, ...] = field(default=(), repr=False)
     created_at: float = field(default_factory=time.monotonic)
     resolved: bool = False
     # Single-flight guard set by ``claim`` before a decision streams back:

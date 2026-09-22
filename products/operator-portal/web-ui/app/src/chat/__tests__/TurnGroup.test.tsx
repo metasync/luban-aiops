@@ -114,6 +114,26 @@ describe("Copy password (SPEC-062)", () => {
     await screen.findByRole("button", { name: /Password unavailable/ });
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("renders the Copy button when a deferred delivery replays onto the turn (SPEC-062 R-3)", () => {
+    // Reveal-on-commit: the frame is withheld at generation and emitted only
+    // after the gated reset commits, then persisted under the original
+    // turn_index. On reload the turn carries secretDeliveries, and TurnGroup
+    // maps each one to a Copy control — frame presence still means button.
+    const { fetcher } = prepare();
+    render(
+      <TurnGroup
+        turn={turnOf({ secretDeliveries: [delivery], completed: true })}
+        canDecide={false}
+        busy={false}
+        onDecide={() => {}}
+        agentWorking={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Copy password/ })).toBeTruthy();
+    // Presence alone never redeems — the value is fetched only on click.
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
 
 function turnOf(overrides: Partial<ChatTurn> = {}): ChatTurn {

@@ -150,6 +150,7 @@ def _build_tool_registry(
             password_exclude_ambiguous=settings.password_exclude_ambiguous,
             buffer=secret_delivery_buffer,  # type: ignore[arg-type]
             delivery_ttl_seconds=settings.secret_delivery_ttl_seconds,
+            delivery_hold_ttl_seconds=settings.secret_delivery_hold_ttl_seconds,
             email_host=settings.email_host,
             email_port=settings.email_port,
             email_user=settings.email_user,

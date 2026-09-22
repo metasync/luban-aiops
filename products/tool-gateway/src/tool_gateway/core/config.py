@@ -31,10 +31,17 @@ DEFAULT_HTTP_MAX_REQUEST_BYTES = 4096
 
 # Secrets connector defaults (SPEC-062). Off by default; the delivery buffer is
 # in-memory (single-replica, ephemeral) and email is unconfigured, so a cluster
-# that enables nothing gains no tool and loses nothing. The delivery TTL is
-# short by design — a generated value is stashed only long enough for the
-# operator to click Copy — and the entry cap bounds the in-memory buffer.
+# that enables nothing gains no tool and loses nothing. Two TTLs bound a stashed
+# value: ``secret_delivery_ttl_seconds`` (300) is the standalone redemption
+# window — how long a generated value waits for the operator to click Copy —
+# while ``secret_delivery_hold_ttl_seconds`` (900) is the window a portal_copy
+# delivery actually stashes under. The hold spans a full HITL approval wait
+# (``hitl_confirm_timeout`` 600) plus the 300 redemption margin, so a password
+# generated before a gated reset is still redeemable when the reset commits and
+# the reveal-on-commit Copy button appears (SPEC-062 R-3). The entry cap bounds
+# the in-memory buffer.
 DEFAULT_SECRET_DELIVERY_TTL_SECONDS = 300
+DEFAULT_SECRET_DELIVERY_HOLD_TTL_SECONDS = 900
 DEFAULT_SECRET_DELIVERY_MAX_ENTRIES = 256
 DEFAULT_SECRET_DELIVERY_REDIS_HOST = "127.0.0.1"
 DEFAULT_SECRET_DELIVERY_REDIS_PORT = 6379
@@ -127,9 +134,13 @@ class GatewaySettings:
     password_exclude_ambiguous: bool = False
     # One-time delivery buffer (R-3): in-memory by default (single-replica,
     # ephemeral); ``redis`` is the additive backend for ``replicas > 1`` and
-    # fails open to in-memory with a recorded fallback.
+    # fails open to in-memory with a recorded fallback. ``_ttl_seconds`` is the
+    # standalone redemption window; ``_hold_ttl_seconds`` is the longer window a
+    # portal_copy delivery stashes under so it survives a full approval wait
+    # before the reveal-on-commit Copy button appears (see the defaults above).
     secret_delivery_backend: str = "memory"
     secret_delivery_ttl_seconds: int = DEFAULT_SECRET_DELIVERY_TTL_SECONDS
+    secret_delivery_hold_ttl_seconds: int = DEFAULT_SECRET_DELIVERY_HOLD_TTL_SECONDS
     secret_delivery_max_entries: int = DEFAULT_SECRET_DELIVERY_MAX_ENTRIES
     secret_delivery_redis_host: str = DEFAULT_SECRET_DELIVERY_REDIS_HOST
     secret_delivery_redis_port: int = DEFAULT_SECRET_DELIVERY_REDIS_PORT
@@ -159,7 +170,11 @@ class GatewaySettings:
         """
         if self.secret_delivery_backend not in {"memory", "redis"}:
             raise ValueError("GATEWAY_SECRET_DELIVERY_BACKEND must be memory or redis")
-        for value in (self.secret_delivery_ttl_seconds, self.secret_delivery_max_entries):
+        for value in (
+            self.secret_delivery_ttl_seconds,
+            self.secret_delivery_hold_ttl_seconds,
+            self.secret_delivery_max_entries,
+        ):
             if type(value) is not int or value <= 0:
                 raise ValueError("Secret delivery TTL and capacity must be positive integers")
         for port in (self.secret_delivery_redis_port, self.email_port):
@@ -353,6 +368,12 @@ class GatewaySettings:
                 os.getenv(
                     "GATEWAY_SECRET_DELIVERY_TTL_SECONDS",
                     str(DEFAULT_SECRET_DELIVERY_TTL_SECONDS),
+                )
+            ),
+            secret_delivery_hold_ttl_seconds=int(
+                os.getenv(
+                    "GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS",
+                    str(DEFAULT_SECRET_DELIVERY_HOLD_TTL_SECONDS),
                 )
             ),
             secret_delivery_max_entries=int(

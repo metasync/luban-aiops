@@ -1030,7 +1030,11 @@ class AgentKernel:
                 yield event
             return
 
-        from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
+        from agent_service.services.kernel_middleware import (
+            PENDING_RELEASE_DELIVERIES,
+            STREAM_PENDING_DELIVERIES,
+            TOOL_EVIDENCE_SINK,
+        )
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
             DELEGATED_TOKEN,
@@ -1101,6 +1105,13 @@ class AgentKernel:
                 else None
             )
             sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+            # SPEC-062 R-3 reveal-on-commit: arm the per-stream delivery buffers.
+            # A fresh turn generates into STREAM_PENDING (flushed at a normal end
+            # or drained onto a parked card); PENDING_RELEASE stays empty here —
+            # only an approved resume carries held deliveries into it, so the
+            # middleware's release branch can never fire on a non-resumed turn.
+            pending_deliveries_var = STREAM_PENDING_DELIVERIES.set([])
+            release_deliveries_var = PENDING_RELEASE_DELIVERIES.set([])
             prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
             session_var = CHAT_SESSION_ID.set(session_id)
@@ -1185,6 +1196,13 @@ class AgentKernel:
                     prose, request_id, session_id
                 ):
                     yield flushed
+                # SPEC-062 R-3 reveal-on-commit: a normal (unparked) end flushes
+                # any portal_copy deliveries generated this turn as secret_delivery
+                # frames — the standalone generate-and-copy path, where no gate
+                # follows so the Copy button appears at turn end. A turn that
+                # parked already drained these onto its card (and broke out above),
+                # so the buffer is empty and this is a no-op there.
+                self._flush_pending_deliveries(trace_queue)
                 # Drain any remaining trace events after the stream completes.
                 for decorated in self._drain_trace_queue(
                     trace_queue,
@@ -1200,6 +1218,8 @@ class AgentKernel:
                 CHAT_SESSION_ID.reset(session_var)
                 EXECUTION_REQUESTS.reset(requests_var)
                 EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+                STREAM_PENDING_DELIVERIES.reset(pending_deliveries_var)
+                PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
 
             # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
@@ -1225,6 +1245,54 @@ class AgentKernel:
                 yield event
 
     # --- HITL confirmation bridging (SPEC-020 R-2) ---
+
+    def _flush_pending_deliveries(self, trace_queue: asyncio.Queue) -> None:
+        """Emit this stream's buffered portal_copy deliveries as frames.
+
+        SPEC-062 R-3 reveal-on-commit: the standalone generate-and-copy path.
+        Drains ``STREAM_PENDING_DELIVERIES`` onto the trace queue so the frames
+        are decorated, persisted as evidence, and yielded like any other frame.
+        A turn that parked already drained the buffer onto its card, so this is a
+        no-op there. ``PENDING_RELEASE_DELIVERIES`` is deliberately NOT flushed:
+        a held delivery releases only on a gated commit, so an ungated turn end
+        burns it silently (the deny/failure posture).
+        """
+        from agent_service.services.kernel_middleware import (
+            STREAM_PENDING_DELIVERIES,
+        )
+
+        pending = STREAM_PENDING_DELIVERIES.get()
+        if not pending:
+            return
+        for delivery in list(pending):
+            trace_queue.put_nowait({"type": "secret_delivery", **delivery})
+        pending.clear()
+
+    def _drain_held_deliveries(self) -> tuple[dict, ...]:
+        """Drain both per-stream delivery buffers into a tuple for a parked card.
+
+        SPEC-062 R-3 reveal-on-commit: called from ``_build_confirmation_frame``
+        so the held portal_copy handles ride the park across resume. Combines the
+        deliveries generated in this stream (``STREAM_PENDING_DELIVERIES``) with
+        any carried in from a prior park and not yet released
+        (``PENDING_RELEASE_DELIVERIES`` — non-empty only on a re-park that happens
+        before a gated commit). Clears both so a later normal-end flush cannot
+        double-emit them. Only the opaque handles ride along, never the plaintext.
+        """
+        from agent_service.services.kernel_middleware import (
+            PENDING_RELEASE_DELIVERIES,
+            STREAM_PENDING_DELIVERIES,
+        )
+
+        held: list[dict] = []
+        for buffer in (
+            STREAM_PENDING_DELIVERIES.get(),
+            PENDING_RELEASE_DELIVERIES.get(),
+        ):
+            if buffer:
+                held.extend(buffer)
+                buffer.clear()
+        return tuple(held)
 
     def _build_confirmation_frame(
         self,
@@ -1306,6 +1374,12 @@ class AgentKernel:
 
         pending.requester_delegated_token = generation_bearer_token()
         pending.email_recipient_allowlist = self.settings.email_recipient_allowlist
+        # SPEC-062 R-3 reveal-on-commit: attach this stream's held portal_copy
+        # deliveries so they ride the park across resume and are released only
+        # when the approved gated mutation commits. Ephemeral (like the requester
+        # token above): never persisted to the durable record below, so a
+        # mid-approval restart drops it and the delivery expires unreleased.
+        pending.pending_deliveries = self._drain_held_deliveries()
         pending_calls = pending.pending_calls_payload()
         message = self._confirmation_message(pending_calls)
         # SPEC-055 R-7: redact secret-bearing raw parameter values on the
@@ -2232,7 +2306,11 @@ class AgentKernel:
         """
         from agentscope.event import ConfirmResult, UserConfirmResultEvent
 
-        from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
+        from agent_service.services.kernel_middleware import (
+            PENDING_RELEASE_DELIVERIES,
+            STREAM_PENDING_DELIVERIES,
+            TOOL_EVIDENCE_SINK,
+        )
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
             DELEGATED_TOKEN,
@@ -2292,6 +2370,17 @@ class AgentKernel:
 
         trace_queue: asyncio.Queue = asyncio.Queue()
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+        # SPEC-062 R-3 reveal-on-commit: carry the parked card's held deliveries
+        # into PENDING_RELEASE so the middleware emits them the instant an
+        # approved gated mutation commits — and only on an approval. A deny (or a
+        # batch that never executes) leaves the buffer empty, so nothing is
+        # revealed and the delivery burns. STREAM_PENDING collects any NEW
+        # delivery generated during this resumed stream (flushed at its normal
+        # end, or re-attached to a new card on a re-park).
+        release_deliveries_var = PENDING_RELEASE_DELIVERIES.set(
+            list(pending.pending_deliveries) if confirmed else []
+        )
+        pending_deliveries_var = STREAM_PENDING_DELIVERIES.set([])
         prose_var = CURRENT_PROSE_REDACTOR.set(prose)
         token_var = DELEGATED_TOKEN.set(bearer_token)
         session_var = CHAT_SESSION_ID.set(session_id)
@@ -2390,6 +2479,12 @@ class AgentKernel:
             # paths above add nothing here.
             for flushed in flush_prose_frames(prose, request_id, session_id):
                 yield flushed
+            # SPEC-062 R-3 reveal-on-commit: flush only deliveries GENERATED
+            # during this resumed stream (a standalone generate with no further
+            # gate). Held deliveries from the prior park live in PENDING_RELEASE
+            # and are NOT flushed here — if the gated mutation never committed
+            # they burn silently, which is the deny/failure posture.
+            self._flush_pending_deliveries(trace_queue)
             for decorated in self._drain_trace_queue(
                 trace_queue,
                 request_id,
@@ -2416,6 +2511,13 @@ class AgentKernel:
             EXECUTION_REJECTION.reset(rejection_var)
             GENERATION_OWNER_TOKEN.reset(owner_token_var)
             pending.requester_delegated_token = None
+            # SPEC-062 R-3: drop the held deliveries after resume — released on a
+            # gated commit, burned on a deny/failure, or re-attached to a re-parked
+            # card by _drain_held_deliveries — so a resolved entry never retains a
+            # live secret handle.
+            pending.pending_deliveries = ()
+            STREAM_PENDING_DELIVERIES.reset(pending_deliveries_var)
+            PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
             EXECUTION_AUDIT_CONTEXT.reset(audit_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)

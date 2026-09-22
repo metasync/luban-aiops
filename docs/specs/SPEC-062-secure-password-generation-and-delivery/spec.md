@@ -204,6 +204,27 @@ not excepted. The delivery is recorded as an **event** (`secret_delivered`:
 `delivery_id`, `channel`, recipient, acting identity, timestamp — never the
 value).
 
+**Reveal timing (refined — reveal-on-commit, v0.42.0).** The `secret_delivery`
+frame is emitted when the value is *redeemable in context*, not the instant
+generation returns. When a generation is followed in the same turn by a gated
+mutation (the `ResetAcmePassword` shape: generate, then a write-tier reset that
+parks an approval card), the frame is **withheld at generation** and released only
+once that gate is **approved and its gated call executes successfully** — so the
+Copy-password button appears on the operator's committed turn, never while the
+card is still pending. A **standalone** generation (no gate follows) reveals at
+that turn's end, preserving the original generate-and-copy flow. On **deny,
+gated-call failure, or expiry** the held delivery is silently burned: no frame is
+emitted and the buffered value expires unredeemed. The frame is unchanged in shape
+(its presence still means "redeemable"), is persisted under the **original**
+`turn_index`, and therefore replays to an operator who reloads after the commit
+without having watched the resumed stream. Because the hold now spans the approval
+window, the buffer stashes a portal-copy delivery under
+`GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` (default 900 = the 600s HITL approval
+timeout plus the 300s redemption margin) rather than the standalone
+`GATEWAY_SECRET_DELIVERY_TTL_SECONDS` (300); the held delivery rides the parked
+card ephemerally and is never persisted to the durable record, so a mid-approval
+restart drops it and the value expires unreleased (fail-safe).
+
 Acceptance criteria:
 
 - The generated value appears in **no** persisted or streamed human-readable
@@ -221,6 +242,12 @@ Acceptance criteria:
   **not** the value.
 - Reloading the session after delivery shows no value and a spent/expired control
   — nothing plaintext is recoverable from the durable record.
+- For a gated flow, the `secret_delivery` frame is withheld at generation and
+  emitted only once the bound gate is approved **and** its gated call succeeds; a
+  deny, gated-call failure, or expiry emits **no** frame (the delivery burns
+  unredeemed). A standalone generation still reveals at turn end, and the
+  deferred frame replays under its original `turn_index` (reveal-on-commit,
+  v0.42.0).
 
 ### R-4: Optional email delivery channel (gated outbound)
 

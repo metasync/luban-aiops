@@ -6,6 +6,7 @@
 
 - date: 2026-09-21
 - accepted: 2026-09-21
+- amended: 2026-09-23 (reveal-on-commit timing, v0.42.0 — see Decision 6)
 - deciders: workspace maintainers
 - related specs: SPEC-062 (secure password generation and delivery — R-3 blocks
   its approval on this decision), SPEC-049 (credential sets and the
@@ -67,6 +68,20 @@ reaches a human without ever becoming a projection. This ADR records it.
 5. **The posture is preserved, not excepted.** Because the value rides no
    projection at all, there is nothing to mask; the SPEC-049 R-5 / SPEC-055 R-7
    invariant holds unchanged for generated secrets.
+6. **Reveal-on-commit timing (amendment, v0.42.0).** The `delivery_id` frame is
+   emitted when the value is redeemable *in context*, not the instant generation
+   returns. When a generation is followed in the same turn by a gated mutation, the
+   frame is **withheld at generation** and released only once that gate is approved
+   **and** its gated call executes successfully; a **standalone** generation reveals
+   at that turn's end; a **deny, gated-call failure, or expiry** burns the held value
+   silently (no frame). The frame shape is unchanged — its presence still means
+   "redeemable" — and it is persisted under the original `turn_index`, so it replays
+   to an operator who reloads after the commit. To span the approval wait, the buffer
+   stashes a portal-copy delivery under a longer hold TTL
+   (`GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS`, default 900 = the 600s HITL approval
+   timeout plus the 300s redemption margin) rather than the standalone redemption
+   TTL; the held delivery rides the parked card ephemerally and is never persisted to
+   the durable record.
 
 ## Alternatives Considered
 
@@ -105,6 +120,12 @@ reaches a human without ever becoming a projection. This ADR records it.
   simple.
 - **Accepted trade-off — an extra click.** The operator must click to retrieve the
   value; that is the price of it never being projected.
+- **Reveal-on-commit (amendment, v0.42.0)** tightens *when* the Copy-password
+  button appears for a gated reset — on the committed turn, never while the
+  approval card is pending — without changing the frame, the redemption path, or
+  the no-projection guarantee. Because the held delivery is ephemeral park state
+  (never persisted), a mid-approval agent-service restart drops it and the value
+  expires unreleased: fail-safe, with no leaked secret and no orphaned button.
 - **Accepted trade-off — email is an exfiltration vector.** Sending a secret to an
   operator/model-named address is inherently risky; it is bounded by the
   allowlist, mandatory confirmation, an optional strict-deny mode, and the

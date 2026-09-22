@@ -49,6 +49,31 @@ TOOL_EVIDENCE_SINK: ContextVar[Any | None] = ContextVar(
     default=None,
 )
 
+# SPEC-062 R-3 reveal-on-commit: two per-stream buffers that decouple a
+# generated portal_copy secret from the moment its ``secret_delivery`` frame is
+# emitted. Both are set/reset by the runtime kernel around each streamed turn
+# (mirroring ``TOOL_EVIDENCE_SINK``) and stay ``None`` for blocking turns, so the
+# evidence middleware buffers nothing there.
+#
+# - ``STREAM_PENDING_DELIVERIES`` collects deliveries GENERATED in *this* stream.
+#   The kernel drains it onto the parked card at an ASK park (so the held secret
+#   rides the approval), or flushes it as ``secret_delivery`` frames at a normal
+#   stream end (the standalone generate-and-copy path — no gate follows, so the
+#   Copy button appears at turn end).
+# - ``PENDING_RELEASE_DELIVERIES`` carries deliveries from a PRIOR park into a
+#   resumed stream. Set only on an approved resume, it is released as
+#   ``secret_delivery`` frames the instant a gated mutating call in the approved
+#   batch returns success — never at a normal stream end, so a denied or failed
+#   mutation burns the secret silently.
+STREAM_PENDING_DELIVERIES: ContextVar[list | None] = ContextVar(
+    "STREAM_PENDING_DELIVERIES",
+    default=None,
+)
+PENDING_RELEASE_DELIVERIES: ContextVar[list | None] = ContextVar(
+    "PENDING_RELEASE_DELIVERIES",
+    default=None,
+)
+
 # Built-in agentscope task tools (SPEC-018 R-5). Names match the kernel's
 # tool names; these tools mutate only session-local agent state and are
 # always allowed — they must never hit the interactive ASK gate on a
@@ -177,6 +202,41 @@ def _make_full_data(data: Any, max_chars: int = 128000) -> Any:
     if len(serialized) > max_chars:
         return None
     return data
+
+
+def _portal_copy_delivery(gateway_result: dict) -> dict | None:
+    """Extract a valid portal_copy handle from a generate_password result.
+
+    SPEC-062 R-3: returns the opaque ``{delivery_id, channel, expires_at}``
+    triple (never the plaintext) that the evidence middleware buffers for a
+    deferred ``secret_delivery`` frame, or ``None`` when the result carries no
+    portal_copy handoff or the handle is malformed. The delivery_id must be a
+    canonical UUID and expires_at a tz-aware ISO-8601 timestamp — the same
+    validity gate the inline emit used, so a bad handle is dropped, not surfaced.
+    """
+    from datetime import datetime
+    from uuid import UUID
+
+    data = gateway_result.get("data")
+    if not isinstance(data, dict) or data.get("channel") != "portal_copy":
+        return None
+    delivery_id, expires_at = data.get("delivery_id"), data.get("expires_at")
+    try:
+        valid = (
+            isinstance(delivery_id, str)
+            and str(UUID(delivery_id)) == delivery_id
+            and isinstance(expires_at, str)
+            and datetime.fromisoformat(expires_at).tzinfo is not None
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        return None
+    return {
+        "delivery_id": delivery_id,
+        "channel": "portal_copy",
+        "expires_at": expires_at,
+    }
 
 
 class GatewayPermissionMiddleware(MiddlewareBase):
@@ -361,7 +421,10 @@ class ToolEvidenceMiddleware(MiddlewareBase):
         # SPEC-037 R-3: bind the in-flight invocation to its parked call
         # id so the tool closure can match it against the signed execution
         # request set by the resume path.
-        from agent_service.tools.gateway_tools import CURRENT_CALL_ID
+        from agent_service.tools.gateway_tools import (
+            CURRENT_CALL_ID,
+            EXECUTION_REQUESTS,
+        )
 
         call_token = CURRENT_CALL_ID.set(call_id)
         try:
@@ -424,33 +487,36 @@ class ToolEvidenceMiddleware(MiddlewareBase):
                 frame["status"] = "error"
                 frame["data_summary"] = None
             await sink.put(frame)
+            # SPEC-062 R-3 reveal-on-commit: a generated portal_copy secret is
+            # no longer emitted inline. Buffer the opaque handle into this
+            # stream's pending set so the kernel can defer the secret_delivery
+            # frame — onto the parked card when a gate follows, or to a normal
+            # stream end when none does. Frame shape is unchanged; only timing.
             if (
                 gateway_tool_name == "secrets.generate_password"
                 and frame["status"] == "success"
                 and isinstance(gateway_result, dict)
             ):
-                from datetime import datetime
-                from uuid import UUID
-
-                data = gateway_result.get("data")
-                if isinstance(data, dict) and data.get("channel") == "portal_copy":
-                    delivery_id, expires_at = data.get("delivery_id"), data.get("expires_at")
-                    try:
-                        valid = (
-                            isinstance(delivery_id, str)
-                            and str(UUID(delivery_id)) == delivery_id
-                            and isinstance(expires_at, str)
-                            and datetime.fromisoformat(expires_at).tzinfo is not None
-                        )
-                    except ValueError:
-                        valid = False
-                    if valid:
-                        await sink.put({
-                            "type": "secret_delivery",
-                            "delivery_id": delivery_id,
-                            "channel": "portal_copy",
-                            "expires_at": expires_at,
-                        })
+                delivery = _portal_copy_delivery(gateway_result)
+                pending = STREAM_PENDING_DELIVERIES.get()
+                if delivery is not None and pending is not None:
+                    pending.append(delivery)
+            # Release trigger: an approved gated mutating call just committed.
+            # EXECUTION_REQUESTS is keyed by call_id and populated only on an
+            # approved resume (SPEC-037 R-2), so a success whose call_id is in
+            # that map is exactly the bound reset flow's gated write succeeding
+            # — the moment the held Copy-password button is revealed. On a deny,
+            # a gated-call failure, or an expiry nothing is emitted and the
+            # delivery burns silently.
+            release = PENDING_RELEASE_DELIVERIES.get()
+            if (
+                release
+                and frame["status"] == "success"
+                and call_id in (EXECUTION_REQUESTS.get() or {})
+            ):
+                for held in list(release):
+                    await sink.put({"type": "secret_delivery", **held})
+                release.clear()
         finally:
             CURRENT_CALL_ID.reset(call_token)
 

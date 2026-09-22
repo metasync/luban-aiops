@@ -301,6 +301,7 @@ class SecretsConnector:
         password_exclude_ambiguous: bool = False,
         buffer: SecretDeliveryBuffer | None = None,
         delivery_ttl_seconds: int = 300,
+        delivery_hold_ttl_seconds: int = 900,
         email_host: str = "",
         email_port: int = 587,
         email_user: str = "",
@@ -317,12 +318,21 @@ class SecretsConnector:
         self._classes_override = password_required_classes
         self._exclude_ambiguous = password_exclude_ambiguous
         self._delivery_ttl_seconds = int(delivery_ttl_seconds)
+        # SPEC-062 R-3 reveal-on-commit: a portal_copy delivery is stashed under
+        # the longer hold TTL so it survives a full HITL approval wait — the
+        # password is generated before the gated reset is even filed, but must
+        # still be redeemable when that reset commits and the Copy button is
+        # revealed. ``delivery_ttl_seconds`` remains the standalone redemption
+        # window and the buffer's baseline TTL.
+        self._delivery_hold_ttl_seconds = int(delivery_hold_ttl_seconds)
         self._buffer = buffer if buffer is not None else InMemorySecretDeliveryBuffer(
             ttl_seconds=self._delivery_ttl_seconds
         )
         self._sink = secret_delivered_sink
         self._channels: dict[str, DeliveryChannel] = {
-            PortalCopyChannel.name: PortalCopyChannel(self._buffer, self._delivery_ttl_seconds),
+            PortalCopyChannel.name: PortalCopyChannel(
+                self._buffer, self._delivery_hold_ttl_seconds
+            ),
         }
         self.register_channel(EmailChannel(
             host=email_host, port=email_port, user=email_user, password=email_password,

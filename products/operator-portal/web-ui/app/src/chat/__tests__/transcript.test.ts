@@ -151,6 +151,32 @@ describe("transcriptToTurns evidence replay", () => {
     expect(turns[1].toolCalls).toEqual([]);
   });
 
+  it("anchors a deferred secret_delivery to its originating turn (SPEC-062 R-3)", () => {
+    // Reveal-on-commit: the frame is generated in turn 0 but withheld until
+    // the gated reset commits, then persisted under the ORIGINAL turn_index.
+    // An operator who reloads — never having watched the resumed stream —
+    // still sees the Copy button on the committed turn, not the newest one.
+    const delivery = {
+      type: "secret_delivery",
+      delivery_id: "11111111-1111-4111-8111-111111111111",
+      channel: "portal_copy",
+      expires_at: "2030-01-01T00:00:00Z",
+      value: "must-not-survive",
+    };
+    const group: EvidenceTurn = { turn_index: 0, request_id: "req-reset", frames: [delivery] };
+    const turns = transcriptToTurns(TWO_TURNS, [group]);
+    expect(turns[0].secretDeliveries).toEqual([{
+      kind: "secret_delivery",
+      deliveryId: delivery.delivery_id,
+      channel: "portal_copy",
+      expiresAt: delivery.expires_at,
+    }]);
+    // The reveal stays on its origin turn; a later turn never grows a button.
+    expect(turns[1].secretDeliveries).toBeUndefined();
+    // Only validated metadata replays — the value never survives the store.
+    expect(JSON.stringify(turns)).not.toContain(delivery.value);
+  });
+
   it("maps frames to the exact live-stream frame shape", () => {
     // Prop-identical to what the SSE decoder produces for the same
     // frames — one component renders both, so the shapes must match.

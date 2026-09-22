@@ -44,7 +44,8 @@ activate them. A feature is **active** when all required variables are set to no
 | `GATEWAY_PASSWORD_REQUIRED_CLASSES` | unset (contract) | Comma-separated classes; must retain all required classes without duplicates/unknowns |
 | `GATEWAY_PASSWORD_EXCLUDE_AMBIGUOUS` | `false` | May add exclusion, never relax a policy's exclusion |
 | `GATEWAY_SECRET_DELIVERY_BACKEND` | `memory` | `memory` or `redis`; other names fail startup |
-| `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` | `300` | Positive one-time handle TTL |
+| `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` | `300` | Positive standalone redemption window — how long a generated value waits for the operator to click Copy |
+| `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` | `900` | Positive portal-copy hold TTL spanning a full HITL approval wait (600s timeout + 300s redemption margin) so a password generated before a gated reset is still redeemable when the reveal-on-commit Copy button appears (SPEC-062 R-3) |
 | `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES` | `256` | Positive in-memory capacity; oldest-expiring entry evicted |
 | `GATEWAY_SECRET_DELIVERY_REDIS_HOST` | `127.0.0.1` | Redis host; use `redis` for the dev-k8s Service |
 | `GATEWAY_SECRET_DELIVERY_REDIS_PORT` | `6379` | Redis port, 1–65535 |

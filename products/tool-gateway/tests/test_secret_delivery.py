@@ -1,7 +1,10 @@
 """SPEC-062: buffer contract and authenticated one-time handoff."""
+import asyncio
 import json
+import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,10 +14,12 @@ from fastapi.testclient import TestClient
 from tool_gateway.app import create_app
 from tool_gateway.core.config import GatewaySettings, get_settings
 from tool_gateway.services.policy_engine import reset_policy_state
+from tool_gateway.tools.registry import ToolRegistry
 from tool_gateway.tools.secret_delivery import (
     InMemorySecretDeliveryBuffer, RedisSecretDeliveryBuffer,
     SecretDeliveryBuffer, build_secret_delivery_buffer,
 )
+from tool_gateway.tools.secrets_connector import SecretsConnector
 from test_tool_invoke import _mint_delegated, _patch_jwks
 
 VALUE = "Fixture-Only9!abc"
@@ -97,6 +102,82 @@ class BufferContractTests(unittest.TestCase):
         for raw in ("[]", "null", "bad-json", '{"value":42,"owner_sub":"owner"}'):
             transport.set("secret_delivery:bad", raw, 5)
             self.assertIsNone(buffer.redeem("bad", "owner"))
+
+
+class HoldTtlTests(unittest.TestCase):
+    """SPEC-062 R-3: the reveal-on-commit hold TTL spans the approval window.
+
+    A portal_copy delivery is generated *before* the gated reset is filed, so it
+    stashes under ``secret_delivery_hold_ttl_seconds`` (900 = 600 approval +
+    300 redemption margin), not the 300s standalone window — otherwise the value
+    would expire while the approval card is still pending. Single-use, owner
+    scope, and expiry-burn are unchanged; only the deadline moves.
+    """
+
+    def _setup(self, *, hold=900, standalone=300):
+        now = [0]
+        buffer = InMemorySecretDeliveryBuffer(ttl_seconds=standalone, clock=lambda: now[0])
+        connector = SecretsConnector(
+            buffer=buffer,
+            delivery_ttl_seconds=standalone,
+            delivery_hold_ttl_seconds=hold,
+        )
+        registry = ToolRegistry()
+        connector.register_tools(registry)
+        return connector, registry, now
+
+    def _generate(self, registry, sub="owner-sub"):
+        result = asyncio.run(registry.invoke(
+            "secrets.generate_password", {}, {"sub": sub, "chat_session_id": "ses-1"},
+        ))
+        self.assertEqual(result.status, "success")
+        return result.data
+
+    def test_portal_copy_stashes_under_hold_ttl_not_standalone_window(self):
+        connector, registry, now = self._setup(hold=900, standalone=300)
+        data = self._generate(registry)
+        self.assertEqual(data["channel"], "portal_copy")
+        # expires_at reflects the 900s hold deadline, not the 300s standalone TTL.
+        remaining = (datetime.fromisoformat(data["expires_at"]) - datetime.now(timezone.utc)).total_seconds()
+        self.assertAlmostEqual(remaining, 900, delta=10)
+        # Survives a full approval wait (600s, well past the 300s window)...
+        now[0] += 600
+        self.assertEqual(
+            connector.buffer.redeem(data["delivery_id"], "owner-sub"),
+            data["generated_password"],
+        )
+        # ...and remains strictly single-use.
+        self.assertIsNone(connector.buffer.redeem(data["delivery_id"], "owner-sub"))
+
+    def test_held_delivery_expires_at_hold_deadline(self):
+        connector, registry, now = self._setup(hold=900, standalone=300)
+        alive = self._generate(registry)
+        burned = self._generate(registry)
+        # One second before the hold deadline the entry is still redeemable —
+        # proving the hold (not the 300s standalone TTL) bounds its lifetime.
+        now[0] = 899
+        self.assertEqual(
+            connector.buffer.redeem(alive["delivery_id"], "owner-sub"),
+            alive["generated_password"],
+        )
+        # At the hold deadline the unredeemed delivery is silently burned.
+        now[0] = 900
+        self.assertIsNone(connector.buffer.redeem(burned["delivery_id"], "owner-sub"))
+
+    def test_owner_scope_preserved_under_hold_ttl(self):
+        connector, registry, now = self._setup(hold=900, standalone=300)
+        data = self._generate(registry)
+        now[0] += 600  # still held after a full approval wait
+        # A foreign approver cannot redeem, and the probe burns the handle.
+        self.assertIsNone(connector.buffer.redeem(data["delivery_id"], "approver-sub"))
+        self.assertIsNone(connector.buffer.redeem(data["delivery_id"], "owner-sub"))
+
+    def test_hold_ttl_config_from_env_and_validation(self):
+        self.assertEqual(GatewaySettings().secret_delivery_hold_ttl_seconds, 900)
+        with patch.dict(os.environ, {"GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS": "1200"}):
+            self.assertEqual(GatewaySettings.from_env().secret_delivery_hold_ttl_seconds, 1200)
+        with self.assertRaises(ValueError):
+            GatewaySettings(secret_delivery_hold_ttl_seconds=0)
 
 
 class RedemptionTests(unittest.TestCase):

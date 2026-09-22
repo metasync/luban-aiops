@@ -17,6 +17,8 @@ import jsonschema
 from agent_service.services.kernel_middleware import (
     AUTO_ALLOW_ENV,
     AUTO_ALLOW_EXTRA_ENV,
+    PENDING_RELEASE_DELIVERIES,
+    STREAM_PENDING_DELIVERIES,
     TASK_TOOL_NAMES,
     STRUCTURED_OUTPUT_TOOL_NAME,
     TOOL_EVIDENCE_SINK,
@@ -635,6 +637,42 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
 
         return self._with_sink(_scope)
 
+    def _emit_with_pending(self, mw, agent, tool_call, items, *, held=(), execution_requests=None):
+        """Run ``on_acting`` with the delivery buffers armed as the kernel does.
+
+        SPEC-062 R-3 reveal-on-commit: returns ``(events, stream_pending,
+        release)`` so a test can assert both what was emitted and what was
+        withheld for a deferred reveal. ``held`` pre-loads PENDING_RELEASE (the
+        deliveries a prior park carried into a resumed stream); ``execution_requests``
+        arms the call_id-keyed approved-execution map the release trigger reads.
+        """
+        from agent_service.tools.gateway_tools import EXECUTION_REQUESTS
+
+        async def _scope(queue):
+            pending_token = STREAM_PENDING_DELIVERIES.set([])
+            release_token = PENDING_RELEASE_DELIVERIES.set(list(held))
+            requests_token = EXECUTION_REQUESTS.set(execution_requests)
+            try:
+                gen = mw.on_acting(
+                    agent, {"tool_call": tool_call}, _acting_next(*items),
+                )
+                async for _ in gen:
+                    pass
+                events = []
+                while not queue.empty():
+                    events.append(queue.get_nowait())
+                return (
+                    events,
+                    list(STREAM_PENDING_DELIVERIES.get() or []),
+                    list(PENDING_RELEASE_DELIVERIES.get() or []),
+                )
+            finally:
+                EXECUTION_REQUESTS.reset(requests_token)
+                STREAM_PENDING_DELIVERIES.reset(pending_token)
+                PENDING_RELEASE_DELIVERIES.reset(release_token)
+
+        return self._with_sink(_scope)
+
     def test_emits_tool_call_and_tool_result_frames(self) -> None:
         from agentscope.message import TextBlock
         from agentscope.tool import ToolChunk, ToolResponse
@@ -738,7 +776,7 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         agent = _StubAgent([_StubTool("secrets_generate_password", gateway_tool_name="secrets.generate_password")])
         token = CURRENT_PROSE_REDACTOR.set(StreamingProseRedactor())
         try:
-            events = self._emit(
+            events, stream_pending, release = self._emit_with_pending(
                 ToolEvidenceMiddleware(data_max_chars=1), agent,
                 _tool_call_block("secrets_generate_password", {}),
                 [ToolResponse(metadata={"gateway_result": result})],
@@ -750,12 +788,104 @@ class ToolEvidenceMiddlewareTests(unittest.TestCase):
         self.assertEqual(events[1]["data_summary"]["generated_password"], "***")
         self.assertNotIn(secret, json.dumps(events))
         self.assertNotIn("data", events[1])
-        self.assertEqual(events[2]["type"], "secret_delivery")
-        self.assertEqual(set(events[2]), {"type", "delivery_id", "channel", "expires_at"})
+        # SPEC-062 R-3 reveal-on-commit: generation NO LONGER emits the frame
+        # inline. Only tool_call + tool_result are streamed; the portal_copy
+        # handle is withheld into the per-stream buffer for a deferred reveal,
+        # and the buffered handle carries metadata only, never the value.
+        self.assertEqual([e["type"] for e in events], ["tool_call", "tool_result"])
+        self.assertEqual(
+            stream_pending,
+            [{
+                "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+                "channel": "portal_copy",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+            }],
+        )
+        self.assertEqual(release, [])
+        self.assertNotIn(secret, json.dumps(stream_pending))
+        # The deferred frame the buffer will eventually emit is schema-valid and
+        # carries only delivery metadata.
+        deferred = {"type": "secret_delivery", **stream_pending[0]}
+        wire = _normalize_stream_event(deferred, "ses", "req").model_dump(exclude_none=True)
+        jsonschema.validate(wire, load_schema("agent-stream-event.schema.json"))
+        self.assertEqual(wire["type"], "secret_delivery")
         for event in events:
             wire = _normalize_stream_event(event, "ses", "req").model_dump(exclude_none=True)
             jsonschema.validate(wire, load_schema("agent-stream-event.schema.json"))
-        self.assertEqual(wire["type"], "secret_delivery")
+
+    def test_held_delivery_released_on_gated_success(self) -> None:
+        """SPEC-062 R-3 reveal-on-commit: a successful tool_result whose call_id
+        is in the approved EXECUTION_REQUESTS map releases the held delivery as a
+        secret_delivery frame and clears the buffer."""
+        from agentscope.tool import ToolResponse
+
+        held = {
+            "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+            "channel": "portal_copy",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        result = {"tool_name": "web.click", "status": "success", "data": {"ok": True}}
+        agent = _StubAgent([_StubTool("web_click", gateway_tool_name="web.click")])
+        events, stream_pending, release = self._emit_with_pending(
+            ToolEvidenceMiddleware(), agent,
+            _tool_call_block("web_click", {}, call_id="gated-1"),
+            [ToolResponse(metadata={"gateway_result": result})],
+            held=[held],
+            execution_requests={"gated-1": {"call_id": "gated-1"}},
+        )
+        self.assertEqual(
+            [e for e in events if e["type"] == "secret_delivery"],
+            [{"type": "secret_delivery", **held}],
+        )
+        self.assertEqual(release, [])  # cleared after release
+        self.assertEqual(stream_pending, [])
+
+    def test_held_delivery_not_released_on_gated_failure(self) -> None:
+        """A gated call that FAILS reveals nothing; the delivery stays held (and
+        burns at expiry) — the deny/failure posture."""
+        from agentscope.tool import ToolResponse
+
+        held = {
+            "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+            "channel": "portal_copy",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        result = {
+            "tool_name": "web.click", "status": "error",
+            "error": {"code": "UPSTREAM_ERROR", "message": "reset failed"},
+        }
+        agent = _StubAgent([_StubTool("web_click", gateway_tool_name="web.click")])
+        events, _stream_pending, release = self._emit_with_pending(
+            ToolEvidenceMiddleware(), agent,
+            _tool_call_block("web_click", {}, call_id="gated-1"),
+            [ToolResponse(metadata={"gateway_result": result})],
+            held=[held],
+            execution_requests={"gated-1": {"call_id": "gated-1"}},
+        )
+        self.assertFalse(any(e["type"] == "secret_delivery" for e in events))
+        self.assertEqual(release, [held])  # still held, not released
+
+    def test_held_delivery_not_released_when_call_not_gated(self) -> None:
+        """A successful call that is NOT in the approved execution map (e.g. a
+        read-tier probe during the resumed turn) reveals nothing."""
+        from agentscope.tool import ToolResponse
+
+        held = {
+            "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+            "channel": "portal_copy",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        result = {"tool_name": "web.snapshot", "status": "success", "data": {}}
+        agent = _StubAgent([_StubTool("web_snapshot", gateway_tool_name="web.snapshot")])
+        events, _stream_pending, release = self._emit_with_pending(
+            ToolEvidenceMiddleware(), agent,
+            _tool_call_block("web_snapshot", {}, call_id="probe-1"),
+            [ToolResponse(metadata={"gateway_result": result})],
+            held=[held],
+            execution_requests={"gated-1": {"call_id": "gated-1"}},
+        )
+        self.assertFalse(any(e["type"] == "secret_delivery" for e in events))
+        self.assertEqual(release, [held])
 
     def test_tool_result_frame_includes_error_on_failure(self) -> None:
         from agentscope.tool import ToolResponse
