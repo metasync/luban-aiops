@@ -6,7 +6,8 @@
 
 - date: 2026-09-21
 - accepted: 2026-09-21
-- amended: 2026-09-23 (reveal-on-commit timing, v0.42.0 — see Decision 6)
+- amended: 2026-09-23 (reveal-on-commit timing + deny-path discard, v0.42.0 — see
+  Decision 6)
 - deciders: workspace maintainers
 - related specs: SPEC-062 (secure password generation and delivery — R-3 blocks
   its approval on this decision), SPEC-049 (credential sets and the
@@ -81,7 +82,18 @@ reaches a human without ever becoming a projection. This ADR records it.
    (`GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS`, default 900 = the 600s HITL approval
    timeout plus the 300s redemption margin) rather than the standalone redemption
    TTL; the held delivery rides the parked card ephemerally and is never persisted to
-   the durable record.
+   the durable record. The burn is **active**, not merely passive: on deny, gated-call
+   failure, or expiry the kernel calls an owner-scoped `discard(delivery_id)`
+   (`DELETE …/secrets/delivery/{id}`, the value-less counterpart to `redeem`) that
+   destroys the handle at once, so it is not redeemable — even by a direct owner-scoped
+   fetch — during the hold TTL. The discard is idempotent, oracle-free (an
+   indistinguishable `204` for found / already-spent / expired / wrong-owner /
+   malformed alike, mirroring the redeem route's single-`404` posture), best-effort (a
+   missing gateway/token or transport failure degrades to the expiry burn, the value
+   being inert once the gated reset never commits), and adds **no** audit vocabulary
+   or policy action — the deny is already `confirmation_decided`, and the discard logs
+   a structured INFO line, never the value. A re-park drains the hold onto the new
+   card and returns early, so it never discards.
 
 ## Alternatives Considered
 

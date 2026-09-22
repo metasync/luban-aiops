@@ -24,6 +24,7 @@ from agent_service.tools.gateway_tools import (
     build_gateway_toolkit,
     build_toolkit,
     discover_tools,
+    discard_deliveries,
     invoke_gateway_tool,
 )
 
@@ -187,6 +188,71 @@ class InvokeGatewayToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "NO_CREDENTIAL")
         self.assertEqual(result["tool_name"], "k8s.list_pods")
+
+
+class DiscardDeliveriesTests(unittest.TestCase):
+    """The deny-path client: owner-scoped DELETE, best-effort (SPEC-062 R-3)."""
+
+    def test_discard_sends_owner_bearer_delete_per_id(self) -> None:
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            mock_client = _mock_client(response=MagicMock(status_code=204))
+            mock_client_cls.return_value = mock_client
+
+            _run(discard_deliveries(
+                "http://gateway:8080",
+                ["dlv-1", "dlv-2"],
+                "tok-owner",
+            ))
+
+        # One DELETE per delivery id, each owner-scoped via the requester token.
+        self.assertEqual(mock_client.delete.await_count, 2)
+        urls = [call.args[0] for call in mock_client.delete.await_args_list]
+        self.assertEqual(
+            urls,
+            [
+                "http://gateway:8080/api/v2/secrets/delivery/dlv-1",
+                "http://gateway:8080/api/v2/secrets/delivery/dlv-2",
+            ],
+        )
+        for call in mock_client.delete.await_args_list:
+            self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer tok-owner")
+
+    def test_discard_without_gateway_or_token_makes_no_network_call(self) -> None:
+        # Fail-safe: a missing gateway url or token is a silent no-op (degrades
+        # to the hold-TTL expiry burn), never a network call.
+        for gateway_url, token in (
+            (None, "tok-owner"),
+            ("http://gateway:8080", None),
+            ("http://gateway:8080", ""),
+        ):
+            with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+                _run(discard_deliveries(gateway_url, ["dlv-1"], token))
+            mock_client_cls.assert_not_called()
+
+    def test_discard_without_ids_makes_no_network_call(self) -> None:
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            _run(discard_deliveries("http://gateway:8080", [], "tok-owner"))
+        mock_client_cls.assert_not_called()
+
+    def test_discard_swallows_transport_error(self) -> None:
+        # Best-effort: one failing DELETE never raises and never blocks the rest,
+        # so the resumed stream is never held open by a cleanup failure.
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            mock_client = _mock_client(response=MagicMock(status_code=204))
+            mock_client.delete.side_effect = [
+                Exception("connection refused"),
+                MagicMock(status_code=204),
+            ]
+            mock_client_cls.return_value = mock_client
+
+            _run(discard_deliveries(
+                "http://gateway:8080",
+                ["dlv-bad", "dlv-good"],
+                "tok-owner",
+            ))
+
+        # The error on the first id did not abort the loop: both were attempted.
+        self.assertEqual(mock_client.delete.await_count, 2)
 
 
 class MakeToolFnTests(unittest.TestCase):

@@ -235,7 +235,10 @@ spec's `Impact` sketch and are flagged for the record.
 - chosen approach: `SecretDeliveryBuffer` is a `@runtime_checkable` `Protocol`
   with `stash(value, owner_sub, session_id, ttl) -> delivery_id` and
   `redeem(delivery_id, owner_sub) -> str | None` (single-use, owner-scoped,
-  TTL-bounded), plus `backend_name` — mirroring `SessionStore`. Two backends and a
+  TTL-bounded), plus `discard(delivery_id, owner_sub) -> bool` (the value-less,
+  owner-scoped, idempotent burn counterpart to `redeem`, added for the v0.42.0
+  deny-path hardening) and `backend_name` — mirroring `SessionStore`. Two backends
+  and a
   `build_secret_delivery_buffer()` factory reading
   `GATEWAY_SECRET_DELIVERY_BACKEND` (`memory`|`redis`, default `memory`, unknown
   fails startup), exactly the `build_session_store()` shape.
@@ -256,6 +259,18 @@ spec's `Impact` sketch and are flagged for the record.
   success it emits `secret_delivered` (`channel: portal_copy`, recipient = the
   operator). The value is returned **only** on this one-time authenticated call —
   it rides no stream frame, no render tree, no log.
+- the deny-path burn is **active** (v0.42.0 hardening): an internal
+  `DELETE /api/v2/secrets/delivery/{delivery_id}` route calls `discard(id, sub)`
+  and returns an oracle-free `204` for every outcome (found / spent / expired /
+  wrong-owner / malformed alike). agent-platform's `runtime_kernel` calls it
+  (`discard_deliveries`, with the requester's delegated token) on the three burn
+  paths — deny, approve-but-gated-failure, park expiry — so a held handle is
+  destroyed at once rather than left redeemable until the hold TTL lapses; a
+  re-park drains onto the new card and returns early, so it never discards. The
+  route adds no audit vocabulary (the deny is already `confirmation_decided`) and
+  is best-effort: a missing gateway/token or transport failure degrades to the
+  expiry burn. It is internal (agent-platform → tool-gateway), so no
+  platform-gateway proxy is needed.
 - the kernel emits a dedicated `secret_delivery` frame (schema v12) when a
   `secrets.generate_password` result carries a `delivery_id`, as a sibling of the
   `tool_result` frame in `ToolEvidenceMiddleware`. It carries `delivery_id`,

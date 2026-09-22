@@ -19,7 +19,7 @@ import logging
 from dataclasses import replace
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 
 from tool_gateway.core.config import GatewaySettings, get_settings
@@ -41,6 +41,16 @@ def _unavailable() -> JSONResponse:
             "detail": "This delivery is no longer available. It may have already "
             "been retrieved, expired, or been issued to a different session."
         },
+    )
+
+
+# Discard is idempotent and reveals nothing, so every authenticated call answers
+# 204 with no body — found, already-spent, expired, wrong-owner and malformed
+# handles are indistinguishable (the same no-oracle posture as ``_unavailable``).
+def _no_content() -> Response:
+    return Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
 
 
@@ -107,3 +117,53 @@ async def redeem_delivery(
         status_code=200, content={"value": value},
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
+
+
+@router.delete("/delivery/{delivery_id}")
+async def discard_delivery(
+    delivery_id: str,
+    request: Request,
+    x_request_id: str | None = Header(default=None),
+    settings: GatewaySettings = Depends(get_settings),
+) -> Response:
+    """Destroy a stashed secret WITHOUT revealing it (SPEC-062 R-3 deny path).
+
+    The burn counterpart to ``redeem_delivery``. agent-platform calls this when a
+    gated reset is denied, its mutation fails, or its park expires, so the held
+    handle is destroyed immediately instead of lingering redeemable — even to a
+    direct owner-scoped fetch — until the hold TTL lapses. The caller presents the
+    *requester's* delegated token, so the discard is owner-scoped exactly like a
+    redemption: a wrong owner discards nothing.
+
+    Idempotent and oracle-free: found, already-spent, expired, wrong-owner and
+    malformed handles all answer 204 with no body, so the response never discloses
+    whether a handle existed. The value is never returned and never logged; a
+    successful discard records only the opaque ``delivery_id`` and channel. The
+    deny itself is audited upstream as ``confirmation_decided`` — this endpoint
+    deliberately adds no new audit vocabulary.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(replace(settings, require_auth=True), request, request_id)
+    buffer = getattr(request.app.state, "secret_delivery_buffer", None)
+    if buffer is None or identity is None or not identity.subject:
+        return _no_content()
+    try:
+        valid = str(UUID(delivery_id)) == delivery_id
+    except ValueError:
+        valid = False
+    discarded = False
+    if valid:
+        try:
+            discarded = bool(buffer.discard(delivery_id, identity.subject))
+        except Exception:  # noqa: BLE001 - best-effort; the hold TTL still burns it
+            discarded = False
+    if discarded:
+        LOGGER.info(
+            "secret delivery discarded",
+            extra={
+                "request_id": request_id,
+                "channel": "portal_copy",
+                "sub": identity.subject,
+            },
+        )
+    return _no_content()

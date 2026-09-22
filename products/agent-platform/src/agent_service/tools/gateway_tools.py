@@ -34,6 +34,9 @@ LOGGER = logging.getLogger(__name__)
 # Timeout for tool invocations (K8s reads can be slow on large clusters).
 INVOKE_TIMEOUT_SECONDS = 30.0
 DISCOVER_TIMEOUT_SECONDS = 10.0
+# Discard is a short best-effort cleanup on the deny/failure path; it must never
+# hold the resumed stream open, so it gets a tighter budget than an invocation.
+DISCARD_TIMEOUT_SECONDS = 10.0
 
 # Request-scoped delegated token (SPEC-018 R-2): set by the runtime kernel
 # around each turn so closures inside cached toolkits always present the
@@ -166,6 +169,43 @@ async def invoke_gateway_tool(
             headers=_auth_headers(bearer_token),
         )
         return response.json()
+
+
+async def discard_deliveries(
+    gateway_url: str | None,
+    delivery_ids: list[str],
+    bearer_token: str | None,
+) -> None:
+    """Best-effort discard of burned portal_copy deliveries (SPEC-062 R-3).
+
+    The deny-path counterpart to a redemption: when a gated reset is denied, its
+    mutation fails, or its park expires, the kernel calls this so the gateway
+    destroys the held handle at once instead of leaving it redeemable — even to a
+    direct owner-scoped fetch — until the hold TTL lapses. ``bearer_token`` is the
+    *requester's* delegated token, so the gateway discard is owner-scoped exactly
+    like a redemption.
+
+    Never raises. A missing gateway url or token, or any transport/HTTP failure,
+    degrades silently to the hold-TTL expiry burn (fail-safe — the value is inert
+    either way, since the gated reset never committed). Only the opaque
+    ``delivery_id`` rides the call, never the plaintext.
+    """
+    if not gateway_url or not bearer_token or not delivery_ids:
+        return
+    headers = _auth_headers(bearer_token)
+    async with httpx.AsyncClient(timeout=DISCARD_TIMEOUT_SECONDS) as client:
+        for delivery_id in delivery_ids:
+            try:
+                await client.delete(
+                    f"{gateway_url}/api/v2/secrets/delivery/{delivery_id}",
+                    headers=headers,
+                )
+            except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+                LOGGER.warning(
+                    "secret delivery discard failed (%s); falling back to the "
+                    "hold-TTL expiry burn",
+                    exc.__class__.__name__,
+                )
 
 
 def _normalize_input_schema(schema: Any) -> dict:

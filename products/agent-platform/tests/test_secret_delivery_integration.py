@@ -319,12 +319,57 @@ class _ResetFlowCommitAgent(_StubAgent):
         yield {"type": "message_end"}
 
 
-def _run_reset_flow(monkeypatch, decision, gated_status="success"):
+class _ResetFlowReparkAgent(_StubAgent):
+    """Resumes the parked reset but re-parks on a SECOND gated write.
+
+    The reveal-on-commit hold rides the park across resume; a re-park drains it
+    onto the new card and returns early, so the held delivery is still pending
+    and must NOT be discarded (the exclusion the deny-path hook respects).
+    """
+
+    def __init__(self):
+        super().__init__([_StubTool("web_click", "web.click")])
+        self.snapshot = {"context": []}
+        self.state = SimpleNamespace(
+            model_dump_json=lambda: json.dumps(self.snapshot), context=[]
+        )
+
+    async def reply_stream(self, inputs):
+        yield RequireUserConfirmEvent(
+            reply_id="reply-2",
+            tool_calls=[ToolCallBlock(id="gated-reset-2", name="web_click", input='{"ref": 8}')],
+        )
+
+
+class _InterruptDrainAgent(_StubAgent):
+    """Stands in for the parked reply that expiry interrupts.
+
+    ``expire_confirmation`` feeds a ``UserInterruptEvent`` and drains the stream;
+    this agent closes without generating or parking, so the test isolates the
+    expiry ``finally`` hook's active discard of the held delivery.
+    """
+
+    def __init__(self):
+        super().__init__([_StubTool("web_click", "web.click")])
+        self.snapshot = {"context": []}
+        self.state = SimpleNamespace(
+            model_dump_json=lambda: json.dumps(self.snapshot), context=[]
+        )
+
+    async def reply_stream(self, inputs):
+        return
+        yield  # pragma: no cover - marks this coroutine an async generator
+
+
+def _run_reset_flow(monkeypatch, decision, gated_status="success", repark=False):
     """Drive generate -> park -> resume for one reset-flow scenario.
 
     Returns ``(park_frames, resume_frames, env)``. The signing machinery is
     stubbed so the test isolates delivery TIMING: an approval arms exactly the
-    gated call_id in EXECUTION_REQUESTS, a denial arms nothing.
+    gated call_id in EXECUTION_REQUESTS, a denial arms nothing. ``decision="expire"``
+    closes the park via ``expire_confirmation`` instead of resuming (returning no
+    resume frames); ``repark=True`` makes the resumed turn park again on a second
+    gate so the hold rides the new card.
     """
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "products/tool-gateway/src"))
@@ -377,12 +422,20 @@ def _run_reset_flow(monkeypatch, decision, gated_status="success"):
     monkeypatch.setattr(kernel, "_prepare_executions", fake_prepare_executions)
 
     park_frames = asyncio.run(_collect(kernel.stream_events(
-        prompt, "req-park", session.session_id, "alice")))
+        prompt, "req-park", session.session_id, "alice", bearer_token="tok-owner")))
     parked = CONFIRMATION_REGISTRY.peek_parked(session.session_id)
     assert parked is not None, "the reset flow must park on the gated write"
+    if decision == "expire":
+        # Close the TTL-expired park without resuming; the expiry finally hook
+        # is what actively discards the held delivery.
+        holder["agent"] = _InterruptDrainAgent()
+        asyncio.run(kernel.expire_confirmation(session.session_id, parked.confirm_id))
+        return park_frames, [], env
     claimed = CONFIRMATION_REGISTRY.claim(
         session.session_id, parked.confirm_id, kernel.settings.hitl_confirm_timeout)
-    holder["agent"] = _ResetFlowCommitAgent(gated_status)
+    holder["agent"] = (
+        _ResetFlowReparkAgent() if repark else _ResetFlowCommitAgent(gated_status)
+    )
     resume_frames = asyncio.run(_collect(kernel.resume_confirmation(
         session.session_id, claimed, decision, "alice", "req-resume",
         bearer_token="tok-alice")))
@@ -452,3 +505,91 @@ def test_reset_flow_gated_failure_burns_delivery(monkeypatch):
     assert not any(f.get("type") == "secret_delivery" for f in resume_frames)
     replay = env.evidence.load_turns(env.session.session_id)
     assert not any(f["type"] == "secret_delivery" for turn in replay for f in turn["frames"])
+
+
+# --- SPEC-062 R-3 deny-path hardening: active discard of a burned delivery ---
+
+
+def _record_discards(monkeypatch):
+    """Capture kernel→gateway discard calls as ``[(delivery_ids, token), ...]``.
+
+    Replaces the HTTP client seam, so the test asserts the kernel's discard
+    WIRING (which handles, whose token, on which outcome) independent of a live
+    gateway; the gateway-side destroy is covered by the tool-gateway suite.
+    """
+    from agent_service.tools import gateway_tools
+
+    calls = []
+
+    async def fake_discard(gateway_url, delivery_ids, bearer_token):
+        calls.append((list(delivery_ids), bearer_token))
+
+    monkeypatch.setattr(gateway_tools, "discard_deliveries", fake_discard)
+    return calls
+
+
+def test_reset_flow_deny_actively_discards_held_delivery(monkeypatch):
+    """A denial does not merely withhold the held delivery — the kernel actively
+    discards it at the gateway, owner-scoped, so the handle is not redeemable even
+    by a direct owner fetch during the hold TTL (defense-in-depth over the burn)."""
+    calls = _record_discards(monkeypatch)
+    _park, resume_frames, env = _run_reset_flow(monkeypatch, "deny")
+    delivery_id = env.raw_results[0]["data"]["delivery_id"]
+    # Withheld from the stream (no reveal) AND discarded with the requester token.
+    assert not any(f.get("type") == "secret_delivery" for f in resume_frames)
+    assert calls, "a denial must actively discard the held delivery"
+    assert delivery_id in calls[-1][0]
+    assert calls[-1][1] == "tok-owner"
+
+
+def test_reset_flow_gated_failure_actively_discards_held_delivery(monkeypatch):
+    """An approved gate whose mutation FAILS burns the delivery AND discards it:
+    the unreleased remainder is destroyed, not left redeemable until the TTL."""
+    calls = _record_discards(monkeypatch)
+    _park, resume_frames, env = _run_reset_flow(
+        monkeypatch, "approve", gated_status="error")
+    delivery_id = env.raw_results[0]["data"]["delivery_id"]
+    assert not any(f.get("type") == "secret_delivery" for f in resume_frames)
+    assert calls and delivery_id in calls[-1][0]
+    assert calls[-1][1] == "tok-owner"
+
+
+def test_reset_flow_commit_reveals_and_does_not_discard(monkeypatch):
+    """A successful gated commit RELEASES the delivery (the Copy button) and must
+    NOT discard it — the reveal and the burn are mutually exclusive outcomes."""
+    calls = _record_discards(monkeypatch)
+    _park, resume_frames, env = _run_reset_flow(monkeypatch, "approve")
+    delivery_id = env.raw_results[0]["data"]["delivery_id"]
+    released = [f for f in resume_frames if f.get("type") == "secret_delivery"]
+    assert len(released) == 1 and released[0]["delivery_id"] == delivery_id
+    assert not any(delivery_id in ids for ids, _token in calls)
+
+
+def test_reset_flow_expiry_actively_discards_held_delivery(monkeypatch):
+    """A park that EXPIRES unredeemed burns the delivery AND actively discards it,
+    so the handle is not left redeemable for the remainder of the hold TTL. The
+    requester token may itself be stale by then; the discard is best-effort and
+    degrades to the gateway expiry burn, but the wiring must still fire."""
+    calls = _record_discards(monkeypatch)
+    _park, resume_frames, env = _run_reset_flow(monkeypatch, "expire")
+    delivery_id = env.raw_results[0]["data"]["delivery_id"]
+    assert resume_frames == []
+    assert calls, "an expired park must actively discard its held delivery"
+    assert delivery_id in calls[-1][0]
+    assert calls[-1][1] == "tok-owner"
+
+
+def test_reset_flow_repark_carries_hold_and_does_not_discard(monkeypatch):
+    """A resumed turn that RE-PARKS on a second gate carries the held delivery
+    onto the new card and returns early, so the still-pending handle is NEVER
+    discarded — it remains redeemable by the owner once the new gate commits."""
+    calls = _record_discards(monkeypatch)
+    _park, resume_frames, env = _run_reset_flow(monkeypatch, "approve", repark=True)
+    delivery_id = env.raw_results[0]["data"]["delivery_id"]
+    value = env.raw_results[0]["data"]["generated_password"]
+    # The turn re-parked (a new card, no reveal) and discarded nothing.
+    assert any(f.get("type") == "confirmation_request" for f in resume_frames)
+    assert not any(f.get("type") == "secret_delivery" for f in resume_frames)
+    assert calls == [], "a re-park carries the hold onto the new card; it never discards"
+    # Proof it was not burned: the owner can still redeem the held handle.
+    assert env.connector.buffer.redeem(delivery_id, "owner-sub") == value

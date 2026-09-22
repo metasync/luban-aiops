@@ -73,6 +73,18 @@ class SecretDeliveryBuffer(Protocol):
         """
         ...
 
+    def discard(self, delivery_id: str, owner_sub: str) -> bool:
+        """Destroy a stashed value WITHOUT revealing it (SPEC-062 R-3 deny path).
+
+        The burn counterpart to ``redeem``: when a gated reset is denied, its
+        mutation fails, or its park expires, the held handle is destroyed at once
+        rather than left redeemable until the TTL lapses. Owner-scoped — a wrong
+        owner discards nothing — and idempotent: an unknown, expired, or
+        already-spent handle returns ``False``. Returns ``True`` only when a live,
+        owner-matched entry was destroyed. Never returns or logs the value.
+        """
+        ...
+
     def is_ready(self) -> bool: ...
 
     def __len__(self) -> int: ...
@@ -157,6 +169,21 @@ class InMemorySecretDeliveryBuffer:
             return None
         return entry.value
 
+    def discard(self, delivery_id: str, owner_sub: str) -> bool:
+        now = self._clock()
+        self._purge_expired(now)
+        entry = self._entries.get(delivery_id)
+        if entry is None or entry.expires_at <= now:
+            return False
+        # Owner-scoped: never destroy a handle that is not the caller's. The
+        # unguessable uuid4 + gateway auth already make a cross-owner probe
+        # moot, but keeping the guarantee structural mirrors ``redeem`` and
+        # means a mis-routed discard can never burn another owner's secret.
+        if not owner_sub or entry.owner_sub != owner_sub:
+            return False
+        self._entries.pop(delivery_id, None)
+        return True
+
     def is_ready(self) -> bool:
         return True
 
@@ -214,6 +241,25 @@ class RedisSecretDeliveryBuffer:
             return None
         value = data.get("value")
         return value if isinstance(value, str) else None
+
+    def discard(self, delivery_id: str, owner_sub: str) -> bool:
+        key = self._key(delivery_id)
+        # Peek to verify ownership before destroying: a wrong owner discards
+        # nothing. GET+DELETE is not atomic, but the handle is an unguessable
+        # uuid4 and the route is authenticated, so the only race is against a
+        # concurrent owner redemption — and either way the entry ends up gone,
+        # preserving single-use. The value is parsed past, never logged.
+        raw = self._client.get(key)
+        if raw is None:
+            return False
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(data, dict) or not owner_sub or data.get("owner_sub") != owner_sub:
+            return False
+        self._client.delete(key)
+        return True
 
     def is_ready(self) -> bool:
         try:

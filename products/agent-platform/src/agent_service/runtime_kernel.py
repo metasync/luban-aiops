@@ -1268,6 +1268,36 @@ class AgentKernel:
             trace_queue.put_nowait({"type": "secret_delivery", **delivery})
         pending.clear()
 
+    async def _discard_burned_deliveries(
+        self, deliveries: list[dict], owner_token: str | None
+    ) -> None:
+        """Actively discard held portal_copy deliveries that burned (SPEC-062 R-3).
+
+        The deny/failure counterpart to ``_flush_pending_deliveries``: rather than
+        reveal a held delivery, destroy it at the gateway so the handle is not
+        redeemable — even by a direct owner-scoped fetch — during the hold TTL.
+        Best-effort and never fatal: a missing gateway/token or a transport
+        failure degrades to the expiry burn. Only the opaque ``delivery_id`` rides
+        the call, never the plaintext, and ``owner_token`` is the requester's, so
+        the gateway discard is owner-scoped exactly like a redemption.
+        """
+        delivery_ids = [
+            delivery_id
+            for delivery_id in (
+                delivery.get("delivery_id")
+                for delivery in deliveries
+                if isinstance(delivery, dict)
+            )
+            if delivery_id
+        ]
+        if not delivery_ids:
+            return
+        from agent_service.tools.gateway_tools import discard_deliveries
+
+        await discard_deliveries(
+            self.settings.tool_gateway_url, delivery_ids, owner_token
+        )
+
     def _drain_held_deliveries(self) -> tuple[dict, ...]:
         """Drain both per-stream delivery buffers into a tuple for a parked card.
 
@@ -2493,6 +2523,24 @@ class AgentKernel:
                 execution_requests,
             ):
                 yield decorated
+            # SPEC-062 R-3 deny-path hardening: actively discard the deliveries
+            # that burned — never released because the gate was denied, or because
+            # an approved gate's mutation failed/never committed — so the handle is
+            # not redeemable even by a direct owner-scoped fetch during the hold
+            # TTL. On a deny these are the parked card's deliveries (never carried
+            # into PENDING_RELEASE); on an approve, the unreleased remainder. A
+            # re-park returned early above (its deliveries ride the new card), so a
+            # still-pending handle is never discarded. Best-effort: a failure here
+            # degrades to the hold-TTL expiry burn.
+            burned = (
+                list(pending.pending_deliveries)
+                if not confirmed
+                else list(PENDING_RELEASE_DELIVERIES.get() or [])
+            )
+            if burned:
+                await self._discard_burned_deliveries(
+                    burned, pending.requester_delegated_token
+                )
         except Exception as exc:
             self.remember_error(exc, prose.literals if prose is not None else ())
             LOGGER.error("AgentScope confirmation resume failed: %s", self._last_error)
@@ -2581,6 +2629,16 @@ class AgentKernel:
                 type(exc).__name__,
             )
         finally:
+            # SPEC-062 R-3 deny-path hardening: an expired park burns its held
+            # deliveries too, so actively discard them rather than leaving the
+            # handle redeemable for the remainder of the hold TTL. Best-effort —
+            # the requester token may itself have expired by now, which degrades
+            # to the gateway hold-TTL burn.
+            if pending.pending_deliveries:
+                await self._discard_burned_deliveries(
+                    list(pending.pending_deliveries),
+                    pending.requester_delegated_token,
+                )
             CONFIRMATION_REGISTRY.resolve(session_id, confirm_id)
             # SPEC-031 R-1: surface expiry as an outcome, not a
             # disappearance — the record stays visible as expired.

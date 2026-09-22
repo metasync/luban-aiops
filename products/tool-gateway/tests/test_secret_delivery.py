@@ -38,6 +38,13 @@ class RedisTransport:
         item = self.entries.pop(key, None)
         return item[0] if item and self.clock() < item[1] else None
 
+    def get(self, key):
+        item = self.entries.get(key)
+        return item[0] if item and self.clock() < item[1] else None
+
+    def delete(self, key):
+        return 1 if self.entries.pop(key, None) is not None else 0
+
     def ping(self):
         return True
 
@@ -85,6 +92,32 @@ class BufferContractTests(unittest.TestCase):
         self.assertEqual(len(buffer), 1)
         self.assertIsNone(buffer.redeem(first, "owner"))
         self.assertEqual(buffer.redeem(second, "owner"), VALUE)
+
+    def test_discard_is_owner_scoped_single_use_and_never_reveals(self):
+        """SPEC-062 R-3 deny path: discard destroys without revealing, for the
+        owner only, and is idempotent — the burn counterpart to ``redeem``."""
+        now = [0]
+        clock = lambda: now[0]
+        for buffer in (InMemorySecretDeliveryBuffer(clock=clock),
+                       RedisSecretDeliveryBuffer(RedisTransport(clock))):
+            with self.subTest(backend=buffer.backend_name):
+                # An owner discard destroys the entry and reveals nothing.
+                handle = buffer.stash(VALUE, "owner", "session", 5)
+                self.assertTrue(buffer.discard(handle, "owner"))
+                self.assertIsNone(buffer.redeem(handle, "owner"))
+                # Idempotent: a repeat discard is a no-op False.
+                self.assertFalse(buffer.discard(handle, "owner"))
+                # A wrong owner discards nothing; the owner can still redeem.
+                handle = buffer.stash(VALUE, "owner", "session", 5)
+                for stranger in ("approver", "other-owner", ""):
+                    self.assertFalse(buffer.discard(handle, stranger))
+                self.assertEqual(buffer.redeem(handle, "owner"), VALUE)
+                # An unknown handle is False.
+                self.assertFalse(buffer.discard("nope", "owner"))
+                # An expired handle is False (the value is already gone).
+                handle = buffer.stash(VALUE, "owner", "session", 5)
+                now[0] += 5
+                self.assertFalse(buffer.discard(handle, "owner"))
 
     def test_factory_and_malformed_redis(self):
         self.assertEqual(build_secret_delivery_buffer().backend_name, "memory")
@@ -236,6 +269,39 @@ class RedemptionTests(unittest.TestCase):
         self.assertEqual(self.client.get(url).status_code, 401)
         wrong = {"Authorization": f"Bearer {_mint_delegated('operator', 'wrong')}"}
         self.assertEqual(self.client.get(url, headers=wrong).status_code, 401)
+
+    def test_discard_destroys_owner_handle_then_redeem_404s(self):
+        data = self.generate()
+        url = "/api/v2/secrets/delivery/" + data["delivery_id"]
+        self.assertEqual(self.client.delete(url, headers=self.headers).status_code, 204)
+        # The handle is gone: a later owner redemption is unavailable.
+        self.assertEqual(self.client.get(url, headers=self.headers).status_code, 404)
+
+    def test_discard_is_owner_scoped_idempotent_and_oracle_free(self):
+        data = self.generate()
+        url = "/api/v2/secrets/delivery/" + data["delivery_id"]
+        foreign = {"Authorization": f"Bearer {_mint_delegated('approver')}"}
+        # A foreign discard answers 204 (no oracle) but destroys nothing...
+        self.assertEqual(self.client.delete(url, headers=foreign).status_code, 204)
+        # ...so the owner can still redeem the value.
+        self.assertEqual(
+            self.client.get(url, headers=self.headers).json(),
+            {"value": data["generated_password"]},
+        )
+        # Owner discard, a repeat, an unknown id and a malformed id are all 204 —
+        # indistinguishable, so the response never discloses whether one existed.
+        for target in (url, url, "/api/v2/secrets/delivery/unknown",
+                       "/api/v2/secrets/delivery/not-a-uuid"):
+            self.assertEqual(
+                self.client.delete(target, headers=self.headers).status_code, 204
+            )
+
+    def test_discard_requires_authentication(self):
+        data = self.generate()
+        url = "/api/v2/secrets/delivery/" + data["delivery_id"]
+        self.assertEqual(self.client.delete(url).status_code, 401)
+        wrong = {"Authorization": f"Bearer {_mint_delegated('operator', 'wrong')}"}
+        self.assertEqual(self.client.delete(url, headers=wrong).status_code, 401)
 
     def test_disabled_discovery_and_read_only_registration(self):
         for enabled, mutating, expected in ((False, True, set()), (True, False, {"secrets.generate_password"})):

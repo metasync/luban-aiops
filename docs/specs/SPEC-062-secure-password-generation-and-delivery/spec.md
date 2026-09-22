@@ -214,7 +214,11 @@ Copy-password button appears on the operator's committed turn, never while the
 card is still pending. A **standalone** generation (no gate follows) reveals at
 that turn's end, preserving the original generate-and-copy flow. On **deny,
 gated-call failure, or expiry** the held delivery is silently burned: no frame is
-emitted and the buffered value expires unredeemed. The frame is unchanged in shape
+emitted and the handle is **actively discarded** at the gateway (an owner-scoped,
+value-less `DELETE …/secrets/delivery/{id}`), so it is not redeemable — even by a
+direct owner-scoped fetch — during the hold window; a discard that cannot reach the
+gateway degrades to the buffered value expiring unredeemed (fail-safe). The frame
+is unchanged in shape
 (its presence still means "redeemable"), is persisted under the **original**
 `turn_index`, and therefore replays to an operator who reloads after the commit
 without having watched the resumed stream. Because the hold now spans the approval
@@ -248,6 +252,13 @@ Acceptance criteria:
   unredeemed). A standalone generation still reveals at turn end, and the
   deferred frame replays under its original `turn_index` (reveal-on-commit,
   v0.42.0).
+- On the deny / gated-failure / expiry burn paths the held handle is **actively
+  discarded** (owner-scoped, value-less, idempotent), so a subsequent redemption
+  of that `delivery_id` fails immediately rather than only after the hold TTL
+  lapses; the discard route is oracle-free (an indistinguishable `204` for any
+  outcome), adds no audit vocabulary or policy action, and is best-effort (a
+  transport failure falls back to the expiry burn). A re-park carries the hold
+  onto the new card and never discards (deny-path discard, v0.42.0).
 
 ### R-4: Optional email delivery channel (gated outbound)
 

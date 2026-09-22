@@ -67,6 +67,11 @@ Only delivery metadata enters the stream and durable record. No email setup is
 needed for generation or portal copy. After an approver resumes a turn, generation
 uses the original requester's ephemeral delegated credential, not the approver's;
 missing/expired requester credentials fail closed and require a new requester turn.
+On the deny / gated-failure / expiry burn paths, agent-service issues an **internal**
+owner-scoped `DELETE /api/v2/secrets/delivery/{id}` (no portal proxy) to discard the
+held handle at once rather than leave it redeemable until the hold TTL lapses; the
+discard is value-less, oracle-free, best-effort, and degrades to the expiry burn
+(SPEC-062 R-3 deny-path hardening).
 
 Email adds the existing mutating-tool switch, HITL and signed-execution setup,
 plus `tools:mutate` and `secrets:deliver` grants. Keep both recipient allowlists

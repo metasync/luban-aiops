@@ -22,8 +22,10 @@ released only once the gate is approved **and** its gated mutation executes
 successfully, so the button lands on the operator's committed turn. A standalone
 generation (no gate follows) still reveals at that turn's end, preserving the
 original generate-and-copy flow. On deny, gated-call failure, or expiry the held
-delivery is silently burned — no frame is emitted and the value expires
-unredeemed. The frame shape, portal rendering, redemption path, and
+delivery is silently burned — no frame is emitted and the handle is **actively
+discarded** at the gateway (best-effort, falling back to TTL expiry), so it is
+not redeemable even by a direct owner-scoped fetch during the hold window. The
+frame shape, portal rendering, redemption path, and
 `secret_delivered` audit are unchanged; only emission timing moves (**ADR-0012**,
 amended). No wire-format or schema change (agent-stream-event stays title v12).
 
@@ -38,6 +40,22 @@ amended). No wire-format or schema change (agent-stream-event stays title v12).
   redemption window and the buffer's baseline TTL; single-use, owner-scope, and
   expiry-burn are unchanged. Documented in the configuration reference and the
   dev-k8s tool-gateway `runtime-config.env`.
+
+- **Deny-path discard hardening** (`products/tool-gateway`,
+  `products/agent-platform`): defense-in-depth over the reveal-on-commit hold.
+  `SecretDeliveryBuffer` gains a value-less, owner-scoped, idempotent
+  `discard(delivery_id, owner_sub)` — the burn counterpart to `redeem` — exposed
+  internally as `DELETE /api/v2/secrets/delivery/{delivery_id}`. On the three
+  burn paths (deny, approve-but-gated-failure, park expiry) `runtime_kernel`
+  calls `discard_deliveries` with the requester's delegated token, so a held
+  handle is destroyed at once rather than left redeemable until the 900s hold TTL
+  lapses. A re-park drains onto the new card and returns early, so it never
+  discards. The route is oracle-free (204 for found / already-spent / expired /
+  wrong-owner / malformed alike, mirroring the redeem route's single-404
+  posture), adds no audit vocabulary (the deny is already `confirmation_decided`;
+  discard logs a structured INFO line, never the value), and is fail-safe: a
+  missing gateway/token or transport error degrades to the expiry burn, since the
+  value is inert once the gated reset never commits.
 
 ### Changed
 
