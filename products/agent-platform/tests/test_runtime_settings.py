@@ -27,6 +27,32 @@ def test_default_system_prompt_carries_skills_discipline(monkeypatch):
     assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
 
 
+def test_default_system_prompt_drives_skill_search_for_operational_requests(monkeypatch):
+    """SPEC-062 live-test finding: on an imperative operational request
+    ("reset alice's acme-admin password") the model refused on
+    anti-fabrication grounds — "no record of an acme-admin system, an alice
+    account, or a credential set" — and never called skills.search, so the
+    conversational (no-skill_id) flow the acme-admin samples document went
+    undemonstrated. The platform was wired correctly: skills.search returned
+    samples/password-reset-resetacmepassword as the top hit (score 40). The
+    model simply did not search, so the prompt now makes an imperative request
+    to act on a named system, account, or target a skill-search trigger, and
+    reframes an absence of offhand grounding as a reason to search rather than
+    to refuse.
+    """
+    # The trigger spans operational/action requests, not just "questions".
+    assert "named system, account, or target" in DEFAULT_SYSTEM_PROMPT
+    assert "resetting a password" in DEFAULT_SYSTEM_PROMPT
+    # Search precedes any conclusion that grounding is absent.
+    assert "skills.search FIRST" in DEFAULT_SYSTEM_PROMPT
+    assert "never a reason to refuse" in DEFAULT_SYSTEM_PROMPT
+    assert "until skills.search has returned no match" in DEFAULT_SYSTEM_PROMPT
+
+    monkeypatch.delenv("AGENTSCOPE_SYSTEM_PROMPT", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.system_prompt == DEFAULT_SYSTEM_PROMPT
+
+
 def test_default_system_prompt_carries_browser_authorization_discipline(monkeypatch):
     """SPEC-054 R-2: the default prompt teaches that an unbound browser write is
     a supported, platform-gated path rather than an attack.

@@ -11,6 +11,28 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.41.1 — 2026-09-22
+
+Patch release hardening the agent-platform default system prompt after a
+**SPEC-062** live-test finding. On an imperative operational request ("reset
+alice's acme-admin password") the model refused on anti-fabrication grounds —
+it had "no record of an acme-admin system, an alice account, or a credential
+set" — and never called `skills.search`, so the conversational (no-`skill_id`)
+password-reset flow the acme-admin samples document went undemonstrated. The
+platform was wired correctly: `skills.search` returned the `ResetAcmePassword`
+runbook as the top hit and the operator held every required capability, so the
+gap was purely that the model did not search.
+
+The prompt's skill-search trigger, previously scoped to "procedure,
+interpretation, or remediation questions", now also fires for **any request to
+act on a named system, account, or target** (resetting a password, locking or
+recovering an account, restarting or scaling a workload), and an absence of
+offhand grounding is reframed as a reason to search rather than to refuse. No
+tool, policy, contract, or wire format changes; agent-platform only. Mirrors
+the `0.18.1` log-quoting and `SPEC-054 R-2` browser-discipline prompt fixes,
+each shipped after a live-run finding and pinned by a prompt assertion in
+`test_runtime_settings.py`.
+
 ## 0.41.0 — 2026-09-22
 
 Minor release delivering **SPEC-062** (Secure Password Generation and Delivery
