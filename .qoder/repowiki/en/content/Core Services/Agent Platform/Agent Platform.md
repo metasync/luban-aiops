@@ -13,6 +13,13 @@
 - [api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated System Prompt section to reflect enhanced skill-search triggering for operational requests
+- Added new subsection documenting the SPEC-062 enhancement for proactive skill discovery
+- Updated troubleshooting guide with new prompt behavior expectations
+- Enhanced examples to demonstrate improved operational request handling
+
 ## Table of Contents
 1. Introduction
 2. Project Structure
@@ -198,6 +205,33 @@ ModelCatalog --> RuntimeSettings : "built from"
 - [runtime_settings.py:137-527](file://products/agent-platform/src/agent_service/runtime_settings.py#L137-L527)
 - [providers/__init__.py:1-10](file://products/agent-platform/src/agent_service/providers/__init__.py#L1-L10)
 
+### System Prompt and Skill Search Discipline
+**Updated** Enhanced DEFAULT_SYSTEM_PROMPT now proactively triggers skill-search for operational requests involving named systems, accounts, or targets. The prompt reframes absence of offhand grounding as a reason to search rather than refuse, ensuring skills.search is called FIRST before any conclusion about missing information.
+
+Key enhancements include:
+- **Operational Request Trigger**: Any request to act on a named system, account, or target (resetting passwords, locking accounts, restarting workloads) automatically triggers skill-search
+- **Proactive Discovery**: The prompt instructs the model to consult skills.search FIRST for team-owned runbooks before refusing requests due to lack of grounding
+- **Grounded Refusal**: Only after skills.search returns no match should the model report "no team guidance matched" rather than inventing steps
+- **Skill Citation**: Required citation of skills by title (skill_id acceptable) ensures transparency in skill usage
+
+```mermaid
+flowchart TD
+Request["Operational Request"] --> CheckNamed{"Named system/account/target?"}
+CheckNamed --> |Yes| SkillSearch["Call skills.search FIRST"]
+CheckNamed --> |No| DirectResponse["Direct response"]
+SkillSearch --> HasMatch{"Skills found?"}
+HasMatch --> |Yes| LoadSkill["Load full skill via skills.get"]
+HasMatch --> |No| ReportNoMatch["Report 'no team guidance matched'"]
+LoadSkill --> FollowRunbook["Follow documented procedure"]
+ReportNoMatch --> HonestRefusal["Honest refusal with explanation"]
+```
+
+**Diagram sources**
+- [runtime_settings.py:8-58](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L58)
+
+**Section sources**
+- [runtime_settings.py:8-58](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L58)
+
 ### Session Persistence and Evidence
 - Agent state: Persisted per session as JSON snapshots; restored on agent creation. Backends: in-memory (dev/CI) and PostgreSQL (deployed). TTL-aware reads keep rows alive during active sessions; opportunistic sweep reclaims expired rows.
 - Evidence: Captures tool_call and tool_result frames per turn with per-entry char caps and per-session byte budgets. Eviction nulls oldest result payloads while preserving metadata. Backends mirror the state store selection via AGENT_STATE_STORE_BACKEND and share AGENT_STATE_DB_URL.
@@ -311,8 +345,7 @@ Kernel --> Evidence["services/evidence_store.py"]
 - Middleware opt-ins: Tracing and reply token budget are configurable to balance observability and latency.
 - Evidence sizing: Per-entry and per-session caps prevent unbounded storage growth; evictions preserve metadata for accurate cards.
 - Model discovery: Periodic refresh with timeouts avoids blocking startup; failures degrade gracefully.
-
-[No sources needed since this section provides general guidance]
+- **Enhanced Skill Search**: The proactive skill-search triggering adds minimal overhead but significantly improves operational request handling efficiency by preventing unnecessary refusals and guiding models toward appropriate skill discovery.
 
 ## Troubleshooting Guide
 - Unknown model id: Requests specifying an unrecognized model id fail closed with 422; verify the model exists in the catalog or remove the field to use pinned/default.
@@ -320,6 +353,7 @@ Kernel --> Evidence["services/evidence_store.py"]
 - Evidence store unreadable: Evidence retrieval degrades to transcript_available=false without 500 errors; check backend configuration and connectivity.
 - State store fallback: If Postgres is unavailable, agent state falls back to in-memory; monitor metrics for fallback counts.
 - No tools available: When no operational tools are discovered, the kernel injects a system notice to prevent hallucinated infrastructure data.
+- **Operational Request Refusals**: If operational requests are still being refused despite having relevant skills, verify that skills.search is being triggered by checking for "named system, account, or target" patterns in the prompt. The enhanced prompt should proactively search skills before refusing requests lacking offhand grounding.
 
 **Section sources**
 - [api/v2/routes.py:202-243](file://products/agent-platform/src/agent_service/api/v2/routes.py#L202-L243)
@@ -329,4 +363,4 @@ Kernel --> Evidence["services/evidence_store.py"]
 - [runtime_kernel.py:94-119](file://products/agent-platform/src/agent_service/runtime_kernel.py#L94-L119)
 
 ## Conclusion
-The Agent Platform provides a robust, observable, and durable orchestration layer for AIOPS workflows. It centralizes session lifecycle, supports dynamic model switching across multiple providers, enforces safety through HITL approvals and read-only modes, and captures rich evidence for transparency and replay. With pluggable persistence, streaming responses, and careful error handling, it scales to concurrent sessions while maintaining reliability and auditability.
+The Agent Platform provides a robust, observable, and durable orchestration layer for AIOPS workflows. It centralizes session lifecycle, supports dynamic model switching across multiple providers, enforces safety through HITL approvals and read-only modes, and captures rich evidence for transparency and replay. With pluggable persistence, streaming responses, and careful error handling, it scales to concurrent sessions while maintaining reliability and auditability. The enhanced system prompt now ensures that operational requests are handled more intelligently by proactively searching for relevant skills before refusing requests due to lack of immediate knowledge, improving both user experience and operational efficiency.

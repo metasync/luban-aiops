@@ -14,12 +14,24 @@
 - [docs/adr/template.md](file://docs/adr/template.md)
 - [docs/guides/getting-started.md](file://docs/guides/getting-started.md)
 - [docs/guides/troubleshooting.md](file://docs/guides/troubleshooting.md)
+- [docs/guides/skills-guide.md](file://docs/guides/skills-guide.md)
 - [shared/platform-ops/gitops/deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [shared/platform-ops/gitops/select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [shared/platform-ops/gitops/sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
 - [products/platform-gateway/tests/test_policy_scenarios.py](file://products/platform-gateway/tests/test_policy_scenarios.py)
 - [products/agent-platform/tests/test_app.py](file://products/agent-platform/tests/test_app.py)
+- [samples/README.md](file://samples/README.md)
+- [samples/acme-admin/README.md](file://samples/acme-admin/README.md)
+- [samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md](file://samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md)
+- [samples/acme-admin/password-reset/WALKTHROUGH.md](file://samples/acme-admin/password-reset/WALKTHROUGH.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated contribution workflow section to emphasize conversational-first principles
+- Enhanced sample walkthrough documentation with detailed examples
+- Added guidance on presenting both conversational and deterministic forms in documentation
+- Updated testing strategy to include sample verification requirements
 
 ## Table of Contents
 1. Introduction
@@ -257,6 +269,47 @@ Make-->>Dev : "Verification status"
 - [products/platform-gateway/tests/test_policy_scenarios.py:1-35](file://products/platform-gateway/tests/test_policy_scenarios.py#L1-L35)
 - [products/agent-platform/tests/test_app.py:1-52](file://products/agent-platform/tests/test_app.py#L1-L52)
 
+### Enhanced Sample Walkthroughs and Conversational-First Approach
+
+**Updated** The platform now emphasizes conversational-first principles in both documentation and sample implementations. Contributors should present the conversational form of a request as the primary path while providing exact, skill-naming prompts as deterministic variants for testing purposes.
+
+#### Conversational-First Documentation Guidelines
+- Present natural language requests as the primary example users would type
+- Include deterministic skill-naming variants for reproducible testing
+- Explain when and why to name specific skills vs. asking conversationally
+- Demonstrate how the agent discovers runbooks through `skills.search`
+
+#### Enhanced Sample Implementation
+The acme-admin sample suite demonstrates this approach comprehensively:
+
+```mermaid
+flowchart TD
+UserInput["Natural Language Request"] --> SkillSearch["Agent searches skills"]
+SkillSearch --> BestMatch["Finds best matching runbook"]
+BestMatch --> Execute["Executes steps from runbook"]
+Execute --> Result["Returns result"]
+UserInput2["Explicit Skill Name"] --> DirectPath["Direct skill reference"]
+DirectPath --> Execute
+```
+
+**Diagram sources**
+- [docs/guides/skills-guide.md:37-66](file://docs/guides/skills-guide.md#L37-L66)
+- [samples/acme-admin/README.md:280-321](file://samples/acme-admin/README.md#L280-L321)
+
+#### Sample Walkthrough Structure
+Each sample now includes:
+- **Conversational prompt**: Natural language request users would actually type
+- **Deterministic variant**: Exact message for reproducible testing
+- **Step-by-step verification**: Clear expectations for each interaction
+- **Troubleshooting guidance**: Common issues and resolutions
+
+**Section sources**
+- [CONTRIBUTING.md:96-99](file://CONTRIBUTING.md#L96-L99)
+- [docs/guides/skills-guide.md:37-66](file://docs/guides/skills-guide.md#L37-L66)
+- [samples/acme-admin/README.md:280-321](file://samples/acme-admin/README.md#L280-L321)
+- [samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md:67-91](file://samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md#L67-L91)
+- [samples/acme-admin/password-reset/WALKTHROUGH.md:83-103](file://samples/acme-admin/password-reset/WALKTHROUGH.md#L83-L103)
+
 ### Build System and Deployment Automation
 - Root Makefile aggregates per-product routines and owns cross-cutting tasks: sync, test, lint, base-images, build, push, overlays, verify, deploy, e2e.
 - Image tagging is coordinated from the VERSION file and git metadata; `.images.env` stores built image references for deployment.
@@ -339,9 +392,17 @@ Fix --> Validate["Re-run 'make verify' and e2e"]
 - No numeric coverage bar; reviewers judge whether risky branches are exercised.
 - Per ADR-0008, each acceptance criterion maps to at least one asserting test recorded in tasks.md; any shipped sample must be exercised by its own demo script in the verification path.
 
+**Updated** When documenting features, always include both conversational and deterministic forms:
+- Primary examples should show natural language requests users would actually type
+- Deterministic variants should be clearly marked as testing-specific
+- Explain how the agent discovers and executes runbooks conversationally
+- Ensure samples demonstrate both approaches with clear explanations
+
 **Section sources**
 - [CONTRIBUTING.md:59-88](file://CONTRIBUTING.md#L59-L88)
+- [CONTRIBUTING.md:96-99](file://CONTRIBUTING.md#L96-L99)
 - [docs/specs/README.md:101-113](file://docs/specs/README.md#L101-L113)
+- [docs/guides/skills-guide.md:37-66](file://docs/guides/skills-guide.md#L37-L66)
 
 ### Platform Conventions
 - Product package names differ from directory names (e.g., agent-platform is agent_service).
@@ -424,6 +485,8 @@ Common symptoms and resolutions:
 ## Conclusion
 This guide consolidates the development workflow, testing strategy, build and deployment automation, spec-driven development, ADR process, debugging techniques, and quality conventions for the Luban AIOps platform. Contributors should follow spec-driven practices, maintain contract parity, exercise error paths in tests, and rely on the root Makefile and GitOps overlays for reproducible builds and deployments.
 
+**Updated** The platform now emphasizes conversational-first principles throughout the development process. When contributing new features or updating existing ones, present natural language interactions as the primary user experience while providing deterministic variants for testing and reproducibility.
+
 [No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
@@ -440,3 +503,24 @@ This guide consolidates the development workflow, testing strategy, build and de
 
 **Section sources**
 - [Makefile:77-183](file://Makefile#L77-L183)
+
+### Sample Development Guidelines
+
+**New Section** The platform provides comprehensive sample development guidelines that demonstrate the conversational-first approach:
+
+#### Sample Structure
+Each sample follows a consistent pattern:
+- `README.md`: Tutorial walkthrough explaining the automation pattern
+- `WALKTHROUGH.md`: Live, click-by-click run against a cluster
+- `skill/`: Skill document(s) installed by `make deploy-samples`
+- `demo/`: Demo/test scripts for automated verification
+
+#### Conversational-First Pattern
+Samples demonstrate both approaches:
+1. **Primary path**: Natural language requests users would actually type
+2. **Deterministic variant**: Exact messages for reproducible testing
+3. **Explanation**: Clear guidance on when to use each approach
+
+**Section sources**
+- [samples/README.md:81-167](file://samples/README.md#L81-L167)
+- [samples/acme-admin/README.md:280-321](file://samples/acme-admin/README.md#L280-L321)

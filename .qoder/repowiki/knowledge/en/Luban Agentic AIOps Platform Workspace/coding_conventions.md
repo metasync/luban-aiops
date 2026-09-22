@@ -1,6 +1,5 @@
-- Each product follows a uniform layout of `src/<package>/` with `api/`, `core/`, `services/`, `schemas/`, `policies/`, and `tools/` subpackages plus `app.py`, `main.py`, and `metadata.py` entry points.
-- Product packages are uv-managed Python projects with their own `pyproject.toml`, `uv.lock`, and `.python-version`, enabling independent dependency resolution and container builds.
-- Cross-cutting policies are authored once in `shared/shared-contracts/policies/policy-default.yaml` and copied into each consumer via the `sync-policy` Make target rather than maintained per service.
-- Versioning is centralized in the root `VERSION` file and enforced at build time by `validate-version`, keeping every product's declared version in lockstep.
-- Documentation is organized as spec-driven slices under `docs/specs/SPEC-NNN-<title>/` containing `plan.md`, `spec.md`, and `tasks.md`, with architecture decisions captured as numbered ADRs under `docs/adr/`.
-- Samples and tutorial apps are kept out of the base Kustomize overlay and installed on demand via `make deploy-samples` / `make deploy-sample-app`, ensuring the default deployment surface stays minimal.
+- Each product under `products/` is self-contained with its own `src/<package>/`, `tests/`, `Dockerfile`, `Makefile`, `pyproject.toml`, and `.python-version`, enabling standalone `make -C products/<name> help` invocations.
+- Cross-cutting concerns (policy bundles, schema definitions, version pinning) live in `shared/shared-contracts` and are consumed by products through explicit copy or script-based sync targets rather than direct imports.
+- Product services follow a uniform internal layout of `api/`, `core/`, `schemas/`, `services/`, and an `app.py` + `main.py` entrypoint pair, making new products discoverable by convention.
+- Build and runtime defaults are centralized in `mk/defaults.mk` using `?=` assignment so command-line overrides always win, and included both by the root Makefile and per-product fragments.
+- Spec-driven development is enforced by numbering artifacts sequentially: specs under `docs/specs/SPEC-NNN-*` with plan/spec/tasks triads, ADRs under `docs/adr/`, and release notes dated and prefixed to match delivered work.

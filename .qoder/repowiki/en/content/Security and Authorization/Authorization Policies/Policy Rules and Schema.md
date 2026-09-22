@@ -6,14 +6,27 @@
 - [policy-decision.schema.json](file://shared/shared-contracts/schemas/policy-decision.schema.json)
 - [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [password-policy.yaml](file://shared/shared-contracts/policies/password-policy.yaml)
+- [password_policy.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/tools/password_policy.py)
+- [secrets_connector.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
+- [validate_password_policy.py](file://shared/shared-contracts/scripts/validate_password_policy.py)
 - [policy_engine.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [policy_engine.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
 - [test_policy_engine.py (platform-gateway)](file://products/platform-gateway/tests/test_policy_engine.py)
 - [test_policy_engine.py (tool-gateway)](file://products/tool-gateway/tests/test_policy_engine.py)
+- [test_secrets_connector.py (tool-gateway)](file://products/tool-gateway/tests/test_secrets_connector.py)
 - [policy_diff.py](file://shared/shared-contracts/scripts/policy_diff.py)
 - [policy-specification.md](file://docs/agentic-aiops-platform/policy-specification.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new password policy engine with fail-closed enforcement
+- Documented minimum length requirements, entropy thresholds, and character class validation
+- Added password policy schema and enforcement mechanisms
+- Updated security posture section to include password generation policies
+- Enhanced troubleshooting guide with password policy validation issues
 
 ## Table of Contents
 1. Introduction
@@ -21,14 +34,17 @@
 3. Core Components
 4. Architecture Overview
 5. Detailed Component Analysis
-6. Dependency Analysis
-7. Performance Considerations
-8. Troubleshooting Guide
-9. Conclusion
-10. Appendices
+6. Password Policy Engine
+7. Dependency Analysis
+8. Performance Considerations
+9. Troubleshooting Guide
+10. Conclusion
+11. Appendices
 
 ## Introduction
 This document explains the policy rule schema and structure used by the Luban AIOPS platform to authorize actions, gate approvals, and control execution. It covers the complete rule object shape, match fields, decision outcomes, approval tiers, and metadata. It also documents the four policy domains defined by the specification and clarifies which are enforced today versus those reserved for future expansion. Concrete YAML examples illustrate read-only access, production restart approvals, destructive action denials, and approver permissions. Guidance on rule ordering, priority conflicts, and best practices is included to help author maintainable policies.
+
+**Updated** The platform now includes a comprehensive password policy engine that enforces fail-closed security policies for generated passwords, including minimum length requirements, entropy thresholds, and character class validation.
 
 ## Project Structure
 Policy artifacts are split between shared contracts (schemas and default bundle) and gateway implementations that enforce them:
@@ -36,6 +52,7 @@ Policy artifacts are split between shared contracts (schemas and default bundle)
 - The default policy bundle defines concrete authorization behavior for the current surface.
 - Platform-gateway enforces action authorization and bridges tiered approvals for mutating tool calls.
 - Tool-gateway enforces admission for tool invocation and intentionally skips require_approval enforcement because it has no approval substrate.
+- **New**: Password policy contract provides centralized enforcement for generated password strength.
 
 ```mermaid
 graph TB
@@ -44,6 +61,7 @@ S1["policy-rule.schema.json"]
 S2["policy-decision.schema.json"]
 S3["policy-matrix.schema.json"]
 S4["policy-default.yaml"]
+S5["password-policy.yaml"]
 end
 subgraph "Platform Gateway"
 P1["policy_engine.py"]
@@ -51,18 +69,30 @@ T1["tests/test_policy_engine.py"]
 end
 subgraph "Tool Gateway"
 G1["policy_engine.py"]
+G2["password_policy.py"]
+G3["secrets_connector.py"]
 T2["tests/test_policy_engine.py"]
+T3["tests/test_secrets_connector.py"]
+end
+subgraph "Validation"
+V1["validate_password_policy.py"]
 end
 S1 --> P1
 S2 --> P1
 S3 --> P1
 S4 --> P1
+S5 --> G2
+S5 --> G3
 S1 --> G1
 S2 --> G1
 S3 --> G1
 S4 --> G1
+V1 --> S5
+V1 --> G2
 P1 --> T1
 G1 --> T2
+G2 --> T3
+G3 --> T3
 ```
 
 **Diagram sources**
@@ -70,22 +100,24 @@ G1 --> T2
 - [policy-decision.schema.json:1-60](file://shared/shared-contracts/schemas/policy-decision.schema.json#L1-L60)
 - [policy-matrix.schema.json:1-85](file://shared/shared-contracts/schemas/policy-matrix.schema.json#L1-L85)
 - [policy-default.yaml:1-326](file://shared/shared-contracts/policies/policy-default.yaml#L1-L326)
-- [policy_engine.py (platform-gateway):1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
-- [policy_engine.py (tool-gateway):1-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L355)
-- [test_policy_engine.py (platform-gateway):39-66](file://products/platform-gateway/tests/test_policy_engine.py#L39-L66)
-- [test_policy_engine.py (tool-gateway):127-152](file://products/tool-gateway/tests/test_policy_engine.py#L127-L152)
+- [password-policy.yaml:1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
+- [password_policy.py:1-346](file://products/tool-gateway/src/tool_gateway/tools/password_policy.py#L1-L346)
+- [secrets_connector.py:1-654](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L1-L654)
+- [validate_password_policy.py:1-261](file://shared/shared-contracts/scripts/validate_password_policy.py#L1-L261)
 
 **Section sources**
 - [policy-rule.schema.json:1-105](file://shared/shared-contracts/schemas/policy-rule.schema.json#L1-L105)
 - [policy-default.yaml:1-326](file://shared/shared-contracts/policies/policy-default.yaml#L1-L326)
+- [password-policy.yaml:1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
 - [policy_engine.py (platform-gateway):1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
 - [policy_engine.py (tool-gateway):1-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L355)
 
 ## Core Components
 - Rule schema: Defines id, domain, description, priority, enabled, match, and decision with required and conditional fields.
-- Decision schema: Defines the engine’s output including decision, matched_rule_ids, reason, optional subject/action, and approval details when applicable.
+- Decision schema: Defines the engine's output including decision, matched_rule_ids, reason, optional subject/action, and approval details when applicable.
 - Matrix schema: Exposes a read-only view of effective role × action permissions and approval requirements derived from the loaded bundle.
 - Default bundle: Concrete rules implementing deny-by-default semantics, explicit allow/deny grants, and tiered approval for mutating tool execution.
+- **New**: Password policy contract: Centralized enforcement for generated password strength with fail-closed guarantees.
 
 Key behaviors enforced by the engines:
 - Deny by default when no rule matches.
@@ -93,12 +125,14 @@ Key behaviors enforced by the engines:
 - require_approval overrides allow within matching rules.
 - Higher priority wins among rules of the same outcome class.
 - Disabled rules are ignored.
+- **New**: Password generation fails closed when policy is unavailable or invalid.
 
 **Section sources**
 - [policy-rule.schema.json:1-105](file://shared/shared-contracts/schemas/policy-rule.schema.json#L1-L105)
 - [policy-decision.schema.json:1-60](file://shared/shared-contracts/schemas/policy-decision.schema.json#L1-L60)
 - [policy-matrix.schema.json:1-85](file://shared/shared-contracts/schemas/policy-matrix.schema.json#L1-L85)
 - [policy-default.yaml:1-326](file://shared/shared-contracts/policies/policy-default.yaml#L1-L326)
+- [password-policy.yaml:1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
 - [policy_engine.py (platform-gateway):390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [policy_engine.py (tool-gateway):299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 
@@ -111,6 +145,7 @@ participant Client as "Client"
 participant PG as "Platform Gateway<br/>policy_engine.evaluate()"
 participant TG as "Tool Gateway<br/>policy_engine.evaluate()"
 participant Bundle as "policy-default.yaml"
+participant PolicyStore as "PasswordPolicyStore"
 participant Decision as "PolicyDecision"
 Client->>PG : Evaluate roles + action
 PG->>Bundle : Load rules (deny-by-default)
@@ -125,11 +160,13 @@ else No match
 PG-->>Decision : decision=deny
 end
 Note over TG,Bundle : Tool-gateway skips require_approval enforcement<br/>and only evaluates allow/deny for tools : invoke/tools : mutate
+Note over PolicyStore : Password generation requires valid policy<br/>or fails closed with INVALID_PARAMETERS
 ```
 
 **Diagram sources**
 - [policy_engine.py (platform-gateway):390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [policy_engine.py (tool-gateway):299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
+- [password_policy.py:238-346](file://products/tool-gateway/src/tool_gateway/tools/password_policy.py#L238-L346)
 - [policy-default.yaml:1-326](file://shared/shared-contracts/policies/policy-default.yaml#L1-L326)
 
 **Section sources**
@@ -266,7 +303,7 @@ Within the engine:
 - If any deny matches, return deny.
 - Else if require_approval matches, pick highest priority and return require_approval with approval block.
 - Else if allow matches, pick highest priority and return allow.
-- Else return deny with “no matching policy rule”.
+- Else return deny with "no matching policy rule".
 
 **Section sources**
 - [policy-specification.md:256-273](file://docs/agentic-aiops-platform/policy-specification.md#L256-L273)
@@ -336,11 +373,71 @@ Caller-->>Result : inspect decision, matched_rule_ids, reason
 - [policy_engine.py (platform-gateway):390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [policy_engine.py (tool-gateway):299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 
+## Password Policy Engine
+
+**New Section** The Luban AIOPS platform includes a comprehensive password policy engine that enforces fail-closed security policies for generated passwords. This system ensures that all generated passwords meet minimum security standards through centralized policy enforcement.
+
+### Password Policy Contract
+The password policy contract (`password-policy.yaml`) serves as the single source of truth for generated password strength. It defines:
+
+- **min_length**: The minimum length a generated password must have (default: 16 characters)
+- **hard_floor**: Absolute minimum length that cannot be bypassed (default: 12 characters)  
+- **required_classes**: Character classes that must be present (upper, lower, digit, symbol)
+- **entropy_floor_bits**: Minimum entropy requirement (default: 64 bits)
+- **exclude_ambiguous**: Option to exclude visually ambiguous characters (I/l/1/O/0)
+
+### Fail-Closed Enforcement
+The password policy engine implements fail-closed security:
+
+- **Unavailable policy**: Generation refuses with `INVALID_PARAMETERS` error
+- **Invalid policy**: Generation refuses without falling back to defaults
+- **Weak policy**: Environment overrides can only tighten, never weaken the contract
+- **Missing contract**: System refuses generation rather than using built-in defaults
+
+### Policy Store Implementation
+The `PasswordPolicyStore` provides lazy-loading with automatic refresh:
+
+- **Mtime-based reloading**: Detects policy file changes without restart
+- **Fail-closed loading**: Invalid or unreadable policies clear active state
+- **No content logging**: Policy contents are never logged for security
+- **Packaged fallback**: Uses embedded policy when no custom path is configured
+
+### Password Generation Algorithm
+The generation algorithm ensures cryptographic security:
+
+- **CSPRNG source**: Uses Python's `secrets` module for cryptographically secure randomness
+- **Class seeding**: Guarantees at least one character from each required class
+- **Entropy validation**: Verifies generated passwords meet entropy floor requirements
+- **Fisher-Yates shuffle**: Ensures unbiased character distribution
+
+### Configuration and Overrides
+Environment variables provide controlled tightening:
+
+- **GATEWAY_PASSWORD_MIN_LENGTH**: Raises minimum length (cannot weaken below contract)
+- **GATEWAY_PASSWORD_REQUIRED_CLASSES**: Adds required character classes (must include contract classes)
+- **GATEWAY_PASSWORD_EXCLUDE_AMBIGUOUS**: Enables ambiguous character exclusion
+
+### Validation and Testing
+Comprehensive validation ensures policy integrity:
+
+- **Contract validation**: Verifies YAML structure and field types
+- **Connector pinning**: Ensures hardcoded values match contract specifications
+- **Integration testing**: Tests fail-closed behavior and policy enforcement
+- **Security mutation checks**: Validates no plaintext leakage in projections
+
+**Section sources**
+- [password-policy.yaml:1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
+- [password_policy.py:1-346](file://products/tool-gateway/src/tool_gateway/tools/password_policy.py#L1-L346)
+- [secrets_connector.py:1-654](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L1-L654)
+- [validate_password_policy.py:1-261](file://shared/shared-contracts/scripts/validate_password_policy.py#L1-L261)
+- [test_secrets_connector.py:135-213](file://products/tool-gateway/tests/test_secrets_connector.py#L135-L213)
+
 ## Dependency Analysis
 - Schemas define the contract consumed by both gateways.
 - Default bundle provides the authoritative policy set.
 - Platform-gateway enforces action_authz and bridges require_approval for tools:mutate.
 - Tool-gateway enforces allow/deny for tools:invoke and tools:mutate; require_approval rules are skipped at load because there is no approval substrate.
+- **New**: Password policy contract provides centralized enforcement for generated password strength.
 - Tests validate deny-by-default, higher-priority wins, and role/action matching.
 
 ```mermaid
@@ -349,13 +446,19 @@ Schema["Schemas"] --> PG["Platform Gateway Engine"]
 Schema --> TG["Tool Gateway Engine"]
 Bundle["Default Bundle"] --> PG
 Bundle --> TG
+PasswordPolicy["Password Policy Contract"] --> TG
 PG --> TestsPG["Platform Gateway Tests"]
 TG --> TestsTG["Tool Gateway Tests"]
+PasswordPolicyValidator["Password Policy Validator"] --> PasswordPolicy
+PasswordPolicyValidator --> TG
 ```
 
 **Diagram sources**
 - [policy-rule.schema.json:1-105](file://shared/shared-contracts/schemas/policy-rule.schema.json#L1-L105)
 - [policy-default.yaml:1-326](file://shared/shared-contracts/policies/policy-default.yaml#L1-L326)
+- [password-policy.yaml:1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
+- [password_policy.py:1-346](file://products/tool-gateway/src/tool_gateway/tools/password_policy.py#L1-L346)
+- [validate_password_policy.py:1-261](file://shared/shared-contracts/scripts/validate_password_policy.py#L1-L261)
 - [policy_engine.py (platform-gateway):1-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L444)
 - [policy_engine.py (tool-gateway):1-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L1-L355)
 - [test_policy_engine.py (platform-gateway):39-66](file://products/platform-gateway/tests/test_policy_engine.py#L39-L66)
@@ -373,14 +476,14 @@ TG --> TestsTG["Tool Gateway Tests"]
 - Prefer explicit deny rules for high-risk actions to short-circuit further checks.
 - Avoid overly broad roles_any unless necessary; combine with actions_any and other recommended match fields when supported.
 - Leverage priority to resolve conflicts deterministically without duplicating logic.
-
-[No sources needed since this section provides general guidance]
+- **New**: Password policy store uses lazy loading with mtime-based refresh to avoid unnecessary reloads.
+- **New**: Password generation uses efficient CSPRNG operations with bounded alphabet sizes.
 
 ## Troubleshooting Guide
 Common issues and how to diagnose them:
 - Unexpected deny:
-  - Verify the action is protected and present in the bundle’s vocabulary.
-  - Confirm the caller’s roles intersect with roles_any in a matching rule.
+  - Verify the action is protected and present in the bundle's vocabulary.
+  - Confirm the caller's roles intersect with roles_any in a matching rule.
   - Check for explicit deny rules that override allow or require_approval.
   - See tests asserting deny-by-default for unknown actions or ungranted roles.
 
@@ -398,10 +501,17 @@ Common issues and how to diagnose them:
   - require_approval on non-bridged actions is rejected at load time in platform-gateway.
   - Tool-gateway logs warnings and skips require_approval rules due to lack of enforcement substrate.
 
+- **New**: Password policy issues:
+  - **Policy unavailable**: Check that password-policy.yaml is readable and properly formatted
+  - **Generation failures**: Verify policy meets minimum requirements (length ≥ 16, entropy ≥ 64 bits)
+  - **Override conflicts**: Ensure environment variables don't weaken the base policy
+  - **Validation errors**: Run `make validate-password-policy` to check contract consistency
+
 Useful references:
 - Default bundle comments explain precedence, tiers, and authoring conventions.
 - Tests demonstrate expected behaviors for deny-by-default and priority resolution.
 - Policy diff script can compute outcomes across role/action pairs and report bundle SHA-256.
+- **New**: Password policy validator ensures contract and connector consistency.
 
 **Section sources**
 - [policy_default.yaml:1-39](file://shared/shared-contracts/policies/policy-default.yaml#L1-L39)
@@ -409,11 +519,12 @@ Useful references:
 - [policy_engine.py (tool-gateway):152-251](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L152-L251)
 - [test_policy_engine.py (platform-gateway):55-66](file://products/platform-gateway/tests/test_policy_engine.py#L55-L66)
 - [policy_diff.py:68-84](file://shared/shared-contracts/scripts/policy_diff.py#L68-L84)
+- [validate_password_policy.py:223-261](file://shared/shared-contracts/scripts/validate_password_policy.py#L223-L261)
 
 ## Conclusion
 The Luban AIOPS platform enforces a deny-by-default policy model with explicit allow/deny and tiered approval for risky actions. The current implementation focuses on action_authz with allow/deny/require_approval outcomes, while feature_access, approval, and execution_gate remain part of the broader specification for future expansion. By using precise match fields, clear priorities, and structured approval blocks, teams can author maintainable policies that scale safely across environments and roles.
 
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** The platform now includes a comprehensive password policy engine that enforces fail-closed security policies for generated passwords, ensuring cryptographic strength through minimum length requirements, entropy thresholds, and character class validation. This addition strengthens the platform's security posture by centralizing password generation policies and providing robust validation against policy drift.
 
 ## Appendices
 
@@ -424,5 +535,15 @@ The Luban AIOPS platform enforces a deny-by-default policy model with explicit a
 - Keep rules focused on one concern; split complex logic into multiple rules.
 - Validate bundles before deployment; use policy-diff to review changes.
 - Audit and review changes through Git; version bumps signal policy drift.
+- **New**: For password policies, ensure generated passwords meet organizational security requirements through appropriate min_length and entropy settings.
+- **New**: Test password policy changes thoroughly using the validation suite before deployment.
+
+### Password Policy Security Guidelines
+- **Minimum Length**: Set min_length to at least 16 characters for strong security
+- **Character Classes**: Require all four classes (upper, lower, digit, symbol) for maximum entropy
+- **Entropy Thresholds**: Ensure entropy_floor_bits meets organizational requirements (64+ bits recommended)
+- **Ambiguous Characters**: Consider enabling exclude_ambiguous for manual entry scenarios
+- **Environment Overrides**: Use environment variables to tighten policies without weakening the base contract
+- **Policy Validation**: Regularly run validation checks to ensure policy consistency across deployments
 
 [No sources needed since this section provides general guidance]

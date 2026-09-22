@@ -11,15 +11,18 @@
 - [app.py](file://products/agent-platform/src/agent_service/app.py)
 - [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
 - [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
+- [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
+- [test_secret_delivery_integration.py](file://products/agent-platform/tests/test_secret_delivery_integration.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated auto-allow list documentation to reflect removal of `http.get` from default vetted tools
-- Added documentation for new `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` environment variable
-- Enhanced security posture section with opt-in behavior for outbound HTTP requests
-- Updated configuration examples to show additive approval pattern
-- Revised permission middleware behavior to reflect hardened defaults
+- Added comprehensive documentation for per-stream delivery buffers (STREAM_PENDING_DELIVERIES and PENDING_RELEASE_DELIVERIES) for gated secret delivery workflows
+- Documented new _flush_pending_deliveries() method for standalone generate-and-copy scenarios
+- Documented _drain_held_deliveries() method for HITL workflow support
+- Enhanced ToolEvidenceMiddleware documentation to cover secrets.generate_password interception and deferred delivery mechanism
+- Updated architecture diagrams to reflect the new delivery buffer system
+- Added detailed examples of gated secret delivery workflows
 
 ## Table of Contents
 1. Introduction
@@ -36,7 +39,7 @@
 ## Introduction
 This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating and evidence emission, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
 
-**Updated** The security posture has been hardened to require explicit operator confirmation for outbound HTTP requests by default, representing a shift from automatic approval to opt-in behavior for network egress operations.
+**Updated** The runtime kernel now features enhanced per-stream delivery buffers that enable gated secret delivery workflows, allowing secure one-time password generation with deferred reveal-on-commit semantics. This enhancement supports both standalone generate-and-copy scenarios and complex human-in-the-loop (HITL) approval workflows where secrets are only revealed when approved mutations commit successfully.
 
 ## Project Structure
 The runtime kernel lives under the agent-service package and is composed of:
@@ -55,6 +58,7 @@ RC["Request Context<br/>request_context.py"]
 TEL["Telemetry (OTel)<br/>telemetry.py"]
 MET["Prometheus Metrics<br/>metrics.py"]
 SET["Runtime Settings<br/>runtime_settings.py"]
+BUF["Delivery Buffers<br/>STREAM_PENDING_DELIVERIES<br/>PENDING_RELEASE_DELIVERIES"]
 end
 APP --> RC
 APP --> MET
@@ -62,6 +66,7 @@ APP --> TEL
 APP --> KERNEL
 KERNEL --> MW
 KERNEL --> SET
+KERNEL --> BUF
 RC --> TEL
 ```
 
@@ -84,13 +89,13 @@ RC --> TEL
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
 
 ## Core Components
-- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, and evidence persistence.
+- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, and evidence persistence. **Updated** Now includes per-stream delivery buffers for gated secret delivery workflows.
 - GatewayPermissionMiddleware: Enforces a platform allow-list for auto-approved read-only tools, always allows kernel-local task tools, and routes other tool invocations to explicit ASK for operator confirmation; supports browser flow unlock for approved mutating flows. **Updated** Outbound HTTP requests now require explicit operator confirmation by default.
-- ToolEvidenceMiddleware: Emits tool_call and tool_result evidence frames for gateway-backed tools during streaming, with bounded data summaries and optional full payloads, and redacts sensitive parameters.
+- ToolEvidenceMiddleware: Emits tool_call and tool_result evidence frames for gateway-backed tools during streaming, with bounded data summaries and optional full payloads, and redacts sensitive parameters. **Updated** Now intercepts secrets.generate_password calls and implements deferred delivery mechanism using per-stream buffers.
 - Request Context: Resolves x-request-id by preferring inbound header, then current OTel trace_id, then generating a UUID.
 - Telemetry: Optional OpenTelemetry push pipeline for traces, metrics, and logs; integrates FastAPI and HTTPX instrumentation.
 - Metrics: Always-on Prometheus surface with RED middleware and /metrics endpoint; includes counters/gauges for sessions, chat requests, store backends, evidence writes, audit emissions, and model discovery.
-- Runtime Settings: Environment-driven configuration for provider options, kernel tuning, middleware toggles, HITL timeouts, evidence caps, model discovery, signed execution, isolated worker, browser flow TTL, audit/incident/skills clients, and authoring-trace bounds.
+- Runtime Settings: Environment-driven configuration for provider options, kernel tuning, middleware toggles, HITL timeouts, evidence caps, model discovery, signed execution, isolated worker, browser flow TTL, audit/incident/skills clients, and authoring-trace bounds. **Updated** Enhanced default system prompt with operational request handling improvements.
 
 **Section sources**
 - [runtime_kernel.py:212-235](file://products/agent-platform/src/agent_service/runtime_kernel.py#L212-L235)
@@ -103,7 +108,7 @@ RC --> TEL
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
 
 ## Architecture Overview
-The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions and emit evidence frames. Observability is enabled via optional OTel and always-on Prometheus metrics.
+The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions and emit evidence frames. Observability is enabled via optional OTel and always-on Prometheus metrics. **Updated** The architecture now includes per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics.
 
 ```mermaid
 sequenceDiagram
@@ -113,6 +118,7 @@ participant RC as "Request Context<br/>request_context.py"
 participant Kernel as "AgentKernel<br/>runtime_kernel.py"
 participant Perm as "GatewayPermissionMiddleware"
 participant Evidence as "ToolEvidenceMiddleware"
+participant Buf as "Delivery Buffers"
 participant Provider as "Model Provider"
 Client->>App : HTTP request
 App->>RC : resolve_request_id(x-request-id)
@@ -122,9 +128,11 @@ Kernel->>Kernel : ensure_agent(session_id, bearer_token, model_id)
 Kernel->>Perm : on_check_permission(tool)
 Perm-->>Kernel : ALLOW or ASK
 Kernel->>Evidence : on_acting(tool_call)
+Evidence->>Buf : Buffer portal_copy deliveries
 Evidence-->>Kernel : yield items + emit frames
 Kernel->>Provider : execute turn
 Provider-->>Kernel : stream events / result
+Kernel->>Buf : Flush pending deliveries
 Kernel-->>App : normalized events / reply
 App-->>Client : SSE or response
 ```
@@ -143,7 +151,7 @@ Responsibilities:
 - Agent lifecycle: build, cache, and reuse per session; LRU-bounded cache; serializes concurrent creation to avoid memory loss.
 - Toolkit management: discovers tools from the tool-gateway per delegated token; caches per token; filters mutating tools when HITL bridging is disabled; supports read-only toolkits for automated diagnostics.
 - Model switching: resolves model id via catalog; rebuilds agent when bound model changes; restores persisted state.
-- Streaming and evidence: sets request-scoped evidence sink around streamed turns; persists evidence frames best-effort; flushes streaming prose redactor tails on terminal events.
+- Streaming and evidence: sets request-scoped evidence sink around streamed turns; persists evidence frames best-effort; flushes streaming prose redactor tails on terminal events. **Updated** Manages per-stream delivery buffers for gated secret delivery workflows.
 - Structured output: passes schema to agent and returns validated structured output when requested.
 - Observability integration: records metrics for evidence writes and agent state errors; emits audit events via configured service.
 
@@ -156,6 +164,7 @@ Key behaviors verified by tests:
 - Kernel config defaults and overrides.
 - Structured output round trip.
 - State persistence and snapshot failure tolerance.
+- **Updated** Per-stream delivery buffer management for gated secret delivery workflows.
 
 ```mermaid
 flowchart TD
@@ -170,25 +179,64 @@ StreamOrReply --> |Yes| SetSink["Set TOOL_EVIDENCE_SINK"]
 StreamOrReply --> |No| Execute["Execute turn"]
 SetSink --> Execute
 Execute --> PersistEvidence["_persist_evidence(...)"]
-PersistEvidence --> End(["Exit"])
+PersistEvidence --> CheckPark{"HITL Park?"}
+CheckPark --> |Yes| DrainDeliveries["_drain_held_deliveries()"]
+CheckPark --> |No| End(["Exit"])
+DrainDeliveries --> End
 ```
 
 **Diagram sources**
 - [runtime_kernel.py:699-774](file://products/agent-platform/src/agent_service/runtime_kernel.py#L699-L774)
-- [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
-- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-L660)
+- [runtime_kernel.py:539-582](file://products/agent-agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
+- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 
 **Section sources**
 - [runtime_kernel.py:699-774](file://products/agent-platform/src/agent_service/runtime_kernel.py#L699-L774)
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
-- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-L660)
+- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 - [test_runtime_kernel.py:219-298](file://products/agent-platform/tests/test_runtime_kernel.py#L219-L298)
 - [test_runtime_kernel.py:301-552](file://products/agent-platform/tests/test_runtime_kernel.py#L301-L552)
-- [test_runtime_kernel.py:652-683](file://products/agent-platform/tests/test_runtime_kernel.py#L652-L683)
+- [test_runtime_kernel.py:652-683](file://products/agent-platform/tests/test_runtime_kernel.py#L652-683)
 - [test_runtime_kernel.py:713-749](file://products/agent-platform/tests/test_runtime_kernel.py#L713-L749)
 - [test_runtime_kernel.py:757-795](file://products/agent-platform/tests/test_runtime_kernel.py#L757-L795)
+
+### Enhanced Default System Prompt Behavior
+**Updated** The runtime kernel's default system prompt has been enhanced to improve operational request handling and prevent anti-fabrication refusals.
+
+Key enhancements include:
+- **Skills Search Priority**: Models are instructed to use `skills.search FIRST` for any request to act on named systems, accounts, or targets
+- **Operational Request Triggers**: Specific triggers like "resetting a password", "locking or recovering an account", "restarting or scaling a workload" are explicitly covered
+- **Anti-Fabrication Prevention**: Reframes absence of offhand grounding as a reason to search rather than to refuse
+- **Skill Citation Requirements**: Models must cite skills they rely on by title or skill_id
+- **Guidance vs Live Data Separation**: Clear distinction between skill guidance and live cluster data
+
+Behavior verified by tests:
+- Operational request triggers are properly defined in the default prompt
+- Skills search precedence is enforced before any refusal decisions
+- Anti-fabrication safeguards prevent premature conclusions about missing systems or credentials
+- Browser authorization discipline is maintained alongside operational improvements
+
+```mermaid
+flowchart TD
+UserRequest["Operational Request<br/>(e.g., 'reset alice's password')"] --> CheckTrigger{"Named system,<br/>account, or target?"}
+CheckTrigger --> |Yes| SkillSearch["Call skills.search FIRST"]
+CheckTrigger --> |No| DirectResponse["Direct Response"]
+SkillSearch --> HasMatch{"Skills found?"}
+HasMatch --> |Yes| ReadSkill["Read skill with skills.get"]
+HasMatch --> |No| NoMatch["Report no team guidance matched"]
+ReadSkill --> FollowRunbook["Follow documented procedure"]
+NoMatch --> Alternative["Suggest alternatives or ask for clarification"]
+```
+
+**Diagram sources**
+- [runtime_settings.py:8-58](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L58)
+- [test_runtime_settings.py:30-54](file://products/agent-platform/tests/test_runtime_settings.py#L30-L54)
+
+**Section sources**
+- [runtime_settings.py:8-58](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L58)
+- [test_runtime_settings.py:30-54](file://products/agent-platform/tests/test_runtime_settings.py#L30-L54)
 
 ### GatewayPermissionMiddleware
 Responsibilities:
@@ -235,6 +283,7 @@ Responsibilities:
 - Redact sensitive parameters in tool_call frames.
 - Include bounded data_summary and optional full data payload within size limits.
 - Keep frame schema valid even when gateway result is missing or error.
+- **Updated** Intercept secrets.generate_password calls and implement deferred delivery mechanism using per-stream buffers.
 
 Behavior verified by tests:
 - Frames conform to agent-stream-event schema.
@@ -243,11 +292,13 @@ Behavior verified by tests:
 - Data truncation markers and omission of oversized full data.
 - No frames emitted when sink is unset (blocking turns).
 - Non-gateway tools pass through silently.
+- **Updated** Deferred delivery mechanism for secrets.generate_password with proper buffer management.
 
 ```mermaid
 sequenceDiagram
 participant MW as "ToolEvidenceMiddleware"
 participant Sink as "TOOL_EVIDENCE_SINK"
+participant Buf as "Delivery Buffers"
 participant Next as "next_handler"
 participant GW as "Tool Closure"
 MW->>Sink : get()
@@ -257,6 +308,12 @@ Next-->>MW : ToolChunk(s)
 MW->>Sink : put(tool_call frame)
 Next-->>MW : ToolResponse(metadata.gateway_result)
 MW->>Sink : put(tool_result frame)
+alt secrets.generate_password success
+MW->>Buf : Buffer portal_copy delivery
+end
+alt Gated commit success
+MW->>Sink : Emit held deliveries
+end
 else Not gateway or no sink
 MW->>Next : pass through
 end
@@ -267,8 +324,52 @@ end
 
 **Section sources**
 - [kernel_middleware.py:282-398](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L282-L398)
+- [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
 - [test_kernel_middleware.py:508-736](file://products/agent-platform/tests/test_kernel_middleware.py#L508-L736)
 - [test_kernel_middleware.py:738-787](file://products/agent-platform/tests/test_kernel_middleware.py#L738-L787)
+- [test_kernel_middleware.py:760-815](file://products/agent-platform/tests/test_kernel_middleware.py#L760-L815)
+- [test_kernel_middleware.py:816-888](file://products/agent-platform/tests/test_kernel_middleware.py#L816-L888)
+
+### Per-Stream Delivery Buffers
+**New Section** The enhanced runtime kernel introduces per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics.
+
+Key components:
+- **STREAM_PENDING_DELIVERIES**: Context variable holding deliveries generated in the current stream for deferred reveal
+- **PENDING_RELEASE_DELIVERIES**: Context variable carrying deliveries from prior parks that await release on gated commits
+- **_flush_pending_deliveries()**: Method to emit buffered portal_copy deliveries as frames at normal stream end
+- **_drain_held_deliveries()**: Method to combine both buffer types for parked cards across HITL workflows
+
+Workflow patterns:
+- **Standalone generate-and-copy**: Secrets generated without following gates are flushed at stream end
+- **Gated reveal-on-commit**: Secrets generated before HITL approval are released only when approved mutations succeed
+- **HITL workflow support**: Held deliveries ride across park/resume cycles and are released on successful gated commits
+
+```mermaid
+flowchart TD
+Generate["secrets.generate_password"] --> Buffer["Buffer in STREAM_PENDING_DELIVERIES"]
+Buffer --> Decision{"Following HITL gate?"}
+Decision --> |No| FlushEnd["Flush at stream end"]
+Decision --> |Yes| Park["Park for approval"]
+Park --> Combine["Combine with PENDING_RELEASE_DELIVERIES"]
+Combine --> Approval{"Approval granted?"}
+Approval --> |No| Burn["Burn delivery (deny/failure)"]
+Approval --> |Yes| Commit["Gated commit succeeds?"]
+Commit --> |Yes| Release["Release held deliveries"]
+Commit --> |No| Burn
+```
+
+**Diagram sources**
+- [runtime_kernel.py:1249-1295](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1249-L1295)
+- [kernel_middleware.py:68-75](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L68-L75)
+- [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
+
+**Section sources**
+- [runtime_kernel.py:1249-1295](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1249-L1295)
+- [kernel_middleware.py:68-75](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L68-L75)
+- [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
+- [test_secret_delivery_integration.py:35-152](file://products/agent-platform/tests/test_secret_delivery_integration.py#L35-L152)
+- [test_kernel_middleware.py:760-815](file://products/agent-platform/tests/test_kernel_middleware.py#L760-L815)
+- [test_kernel_middleware.py:816-888](file://products/agent-platform/tests/test_kernel_middleware.py#L816-L888)
 
 ### Request Context and Tracing Integration
 - Request ID resolution prefers inbound x-request-id, falls back to current OTel trace_id when tracing is enabled, otherwise generates a UUID.
@@ -309,6 +410,7 @@ HasTrace --> |No| GenUUID["Generate UUID"]
 ### Runtime Settings and Configuration
 - Environment-driven configuration for provider options, kernel tuning, middleware toggles, HITL timeout, evidence caps, model discovery, signed execution, isolated worker, browser flow approval TTL, audit/incident/skills clients, and authoring-trace bounds.
 - Validation ensures sane defaults and rejects invalid values at startup.
+- **Updated** Enhanced default system prompt with operational request handling improvements including skills.search-first policy and anti-fabrication prevention.
 
 **Section sources**
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
@@ -331,20 +433,21 @@ Kernel --> StateStore["Agent State Store"]
 Kernel --> EvidenceStore["Evidence Store"]
 Kernel --> Audit["Audit Emitter"]
 Kernel --> Middleware["AgentScope MiddlewareBase"]
+Kernel --> DeliveryBuffers["Delivery Buffers"]
 ```
 
 **Diagram sources**
 - [runtime_kernel.py:9-67](file://products/agent-platform/src/agent_service/runtime_kernel.py#L9-L67)
 - [runtime_kernel.py:340-403](file://products/agent-platform/src/agent_service/runtime_kernel.py#L340-L403)
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
-- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-L660)
+- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [kernel_middleware.py:30-37](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L30-L37)
 
 **Section sources**
 - [runtime_kernel.py:9-67](file://products/agent-platform/src/agent_service/runtime_kernel.py#L9-L67)
 - [runtime_kernel.py:340-403](file://products/agent-platform/src/agent_service/runtime_kernel.py#L340-L403)
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
-- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-L660)
+- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [kernel_middleware.py:30-37](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L30-L37)
 
 ## Performance Considerations
@@ -354,8 +457,8 @@ Kernel --> Middleware["AgentScope MiddlewareBase"]
 - Streaming redaction: Terminal event flushing ensures complete text delivery without buffering artifacts.
 - Observability overhead: OTel push pipeline is opt-in; Prometheus metrics use bounded labels and lightweight counters/histograms.
 - Model switching: Rebuilds occur only when necessary (model id change or toolkit recovery), preserving conversation history via persisted state.
-
-[No sources needed since this section provides general guidance]
+- **Updated** Enhanced system prompt processing: Skills search-first approach may add initial latency but improves overall operational efficiency by reducing failed attempts and improving first-time success rates.
+- **Updated** Delivery buffer management: Per-stream buffers minimize memory footprint and provide efficient deferred delivery mechanisms without blocking main execution paths.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -365,12 +468,14 @@ Common issues and diagnostics:
 - Evidence persistence failures: best-effort persistence; watch evidence_store_writes_total and related error counters.
 - Agent state restore/snapshot failures: degraded durability but turns continue; monitor agent_state_errors_total and fallback counters.
 - HITL parking: unexpected ASK indicates tool not in allow-list or flow-unlock not applicable; verify allow-list and flow authority. **Updated** `http.get` now parks by default unless explicitly opted in via `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA`.
+- **Updated** Operational request refusals: If models refuse operational requests without calling skills.search, verify the enhanced default system prompt is being used and that skills.search tool is available.
+- **Updated** Secret delivery issues: Monitor delivery buffer states and verify portal_copy handles are properly formatted; check that held deliveries are released only on successful gated commits.
 - Telemetry misconfiguration: OTel setup failures are logged but do not block requests; verify OTEL_ENABLED and endpoint configuration.
 
 **Section sources**
 - [runtime_kernel.py:236-289](file://products/agent-platform/src/agent_service/runtime_kernel.py#L236-L289)
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
-- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-L660)
+- [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [kernel_middleware.py:195-279](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L195-L279)
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
 - [metrics.py:156-185](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L185)
@@ -378,9 +483,7 @@ Common issues and diagnostics:
 ## Conclusion
 The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads), resilience (best-effort persistence, fail-open telemetry), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
 
-**Updated** The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
-
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** The enhanced runtime kernel now includes sophisticated per-stream delivery buffers that enable secure gated secret delivery workflows with reveal-on-commit semantics. This enhancement supports both standalone generate-and-copy scenarios and complex human-in-the-loop (HITL) approval workflows where secrets are only revealed when approved mutations commit successfully. The enhanced default system prompt significantly improves operational request handling by ensuring models consult skills.search FIRST for any request to act on named systems, accounts, or targets. This prevents anti-fabrication refusals and promotes better operational workflows by prioritizing skill-based guidance over model-generated procedures. The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
 
 ## Appendices
 
@@ -393,16 +496,19 @@ To add cross-cutting behavior:
 Guidance grounded in existing patterns:
 - Permission decisions should explicitly ALLOW or ASK rather than delegating to built-in engines when platform policy requires strict control.
 - Evidence emission should produce schema-valid frames with bounded data and redacted parameters.
+- **Updated** For secret delivery workflows, leverage the per-stream delivery buffers (STREAM_PENDING_DELIVERIES and PENDING_RELEASE_DELIVERIES) for deferred reveal semantics.
 
 **Section sources**
 - [kernel_middleware.py:151-193](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L151-L193)
 - [kernel_middleware.py:282-398](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L282-L398)
+- [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 
 ### Extending the Request Pipeline
 - Add HTTP-level middleware in the FastAPI app for logging, metrics, or auth before routing.
 - Use request context resolution to correlate requests across services using x-request-id or trace_id.
 - Enable OTel for distributed tracing and attach log bridge to correlate logs with traces.
+- **Updated** Leverage per-stream delivery buffers for implementing custom secret delivery workflows with gated reveal semantics.
 
 **Section sources**
 - [app.py:55-76](file://products/agent-platform/src/agent_service/app.py#L55-L76)
@@ -413,6 +519,8 @@ Guidance grounded in existing patterns:
 - Inspect runtime_metadata and configuration_hint to validate provider and model configuration.
 - Monitor Prometheus metrics for anomalies in request rates, durations, store errors, and evidence writes.
 - Validate middleware behavior with unit-style checks similar to existing tests for permission and evidence emission.
+- **Updated** For operational request issues: Verify that the enhanced default system prompt is active and that skills.search tool is properly configured and accessible.
+- **Updated** For secret delivery issues: Monitor delivery buffer states, verify portal_copy handle formatting, and ensure held deliveries are properly released on successful gated commits.
 
 **Section sources**
 - [runtime_kernel.py:236-289](file://products/agent-platform/src/agent_service/runtime_kernel.py#L236-L289)
@@ -428,7 +536,7 @@ Guidance grounded in existing patterns:
 
 Semantics:
 
-- **Unset** → the built-in vetted list (the read tools shipped with the platform). The authoritative copy is `DEFAULT_AUTO_ALLOWED_TOOLS` in `agent_service/services/kernel_middleware.py`; as shipped it includes `k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`, `skills.search`, `skills.get`, `skills.list`, `incidents.list`, `incidents.get`, and the read-class browser probes (`web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`, `web.extract`, `web.wait_for`, `web.hover`, `web.scroll`, `web.switch_frame`). **Note:** `http.get` is no longer included in the default list due to security hardening. Every write-tier tool is absent by construction — including `web.click`/`web.type`/`web.evaluate`, `http.post` and `k8s.delete_pod` — and naming one cannot change that (see the invariant below).
+- **Unset** → the built-in vetted list (the read tools shipped with the platform). The authoritative copy is `DEFAULT_AUTO_ALLOWED_TOOLS` in `agent_service/services/kernel_middleware.py`; as shipped it includes `k8s.list_pods`, `k8s.get_pod`, `k8s.get_events`, `k8s.get_pod_logs`, `skills.search`, `skills.get`, `skills.list`, `incidents.list`, `incidents.get`, `secrets.generate_password`, and the read-class browser probes (`web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`, `web.extract`, `web.wait_for`, `web.hover`, `web.scroll`, `web.switch_frame`). **Note:** `http.get` is no longer included in the default list due to security hardening. Every write-tier tool is absent by construction — including `web.click`/`web.type`/`web.evaluate`, `http.post` and `k8s.delete_pod` — and naming one cannot change that (see the invariant below).
 - **Empty string** → auto-approve nothing; every gateway tool parks for confirmation.
 - **Comma-separated dotted names** → replaces the default entirely. Names are normalized to AgentScope's sanitized form (`k8s.get_pod` → `k8s_get_pod`). Unknown names are harmless (they simply match nothing).
 
@@ -464,3 +572,54 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 - [kernel_middleware.py:117-139](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L139)
 - [test_kernel_middleware.py:178-205](file://products/agent-platform/tests/test_kernel_middleware.py#L178-L205)
 - [test_kernel_middleware.py:222-233](file://products/agent-platform/tests/test_kernel_middleware.py#L222-L233)
+
+### Enhanced Operational Request Handling
+**New Section** The enhanced default system prompt introduces significant improvements to operational request handling:
+
+**Key Improvements:**
+- **Skills Search First Policy**: All operational requests to act on named systems, accounts, or targets now trigger skills.search before any other action
+- **Anti-Fabrication Prevention**: Models are instructed to treat absence of offhand knowledge as a reason to search rather than refuse
+- **Operational Trigger Coverage**: Specific operational scenarios like password resets, account locking/recovery, workload restarts/scaling are explicitly covered
+- **Skill Citation Requirements**: Models must cite skills they rely on, improving transparency and auditability
+
+**Implementation Details:**
+- The enhanced prompt is defined in `DEFAULT_SYSTEM_PROMPT` in `runtime_settings.py`
+- Tests verify proper trigger coverage and skills search precedence
+- The prompt maintains existing browser authorization discipline while adding operational capabilities
+
+**Benefits:**
+- Reduced operational friction for common administrative tasks
+- Improved consistency in following documented procedures
+- Better audit trails through skill citation requirements
+- Enhanced safety through mandatory skill-based guidance
+
+**Section sources**
+- [runtime_settings.py:8-58](file://products/agent-platform/src/agent_service/runtime_settings.py#L8-L58)
+- [test_runtime_settings.py:30-54](file://products/agent-platform/tests/test_runtime_settings.py#L30-L54)
+
+### Gated Secret Delivery Workflows
+**New Section** The enhanced runtime kernel implements sophisticated gated secret delivery workflows with reveal-on-commit semantics for secure password generation and handoff.
+
+**Core Components:**
+- **Per-Stream Delivery Buffers**: STREAM_PENDING_DELIVERIES and PENDING_RELEASE_DELIVERIES context variables manage deferred secret delivery
+- **Deferred Reveal Mechanism**: Secrets are buffered during generation and only revealed when appropriate conditions are met
+- **HITL Workflow Support**: Held deliveries persist across park/resume cycles and are released only on successful gated commits
+
+**Workflow Patterns:**
+- **Standalone Generate-and-Copy**: Secrets generated without following gates are automatically flushed at stream end
+- **Gated Reveal-on-Commit**: Secrets generated before HITL approval are released only when approved mutations succeed
+- **Failure Safety**: Denied or failed gated calls burn held deliveries silently, preventing secret exposure
+
+**Security Benefits:**
+- Secrets are never exposed in evidence frames or stream events until appropriate conditions are met
+- Single-use delivery handles prevent replay attacks
+- Owner-scoped redemption ensures only authorized users can access secrets
+- TTL-based expiration prevents indefinite secret retention
+
+**Section sources**
+- [runtime_kernel.py:1249-1295](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1249-L1295)
+- [kernel_middleware.py:68-75](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L68-L75)
+- [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
+- [test_secret_delivery_integration.py:35-152](file://products/agent-platform/tests/test_secret_delivery_integration.py#L35-L152)
+- [test_kernel_middleware.py:760-815](file://products/agent-platform/tests/test_kernel_middleware.py#L760-L815)
+- [test_kernel_middleware.py:816-888](file://products/agent-platform/tests/test_kernel_middleware.py#L816-L888)

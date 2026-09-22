@@ -1,0 +1,6 @@
+- Each product follows a uniform layout of `src/<product>/` split into `api/`, `core/`, `services/`, `schemas/`, `policies/`, and `tools/`, with `app.py`, `main.py`, and `metadata.py` as entry points.
+- Shared contracts (API schemas, event types, policy documents) live in `shared/shared-contracts/` and are consumed by multiple products via relative imports or scripts rather than published packages.
+- Policy files are authored once as canonical YAML in `shared/shared-contracts/policies/` and copied into consumers through the `make sync-policy` target instead of being edited in place.
+- Feature work is tracked as numbered specs under `docs/specs/SPEC-NNN-<slug>/` containing plan.md, spec.md, and tasks.md, driving incremental delivery with clear validation points.
+- Container images across all products share a coordinated tag computed from the root `VERSION` file plus git state, ensuring all services in a deployment are version-locked.
+- Tests mirror production package structure under `products/<name>/tests/` and are executed uniformly through each product's `Makefile` target aggregated by the root `make test`.

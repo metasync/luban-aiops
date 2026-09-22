@@ -13,10 +13,21 @@
 - [request_context.py](file://products/tool-gateway/src/tool_gateway/core/request_context.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
+- [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
+- [audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
+- [routes/secrets.py](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py)
+- [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_platform/runtime_kernel.py)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added documentation for the new `secrets:deliver` policy action required for email delivery channel operations
+- Enhanced audit event types with `secret_delivered` events for tracking secret delivery completion
+- Expanded approval workflow coverage to include write-tier secret delivery operations requiring separate authorization
+- Updated policy engine documentation to reflect the distinct action model for secret delivery vs. general tool mutation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -31,7 +42,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the Luban AIOPS platform’s multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. It also provides guidance on configuring security settings, defining custom policies, and implementing additional authorization controls.
+This document explains the Luban AIOPS platform's multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. It also provides guidance on configuring security settings, defining custom policies, and implementing additional authorization controls.
 
 ## Project Structure
 Security is enforced at multiple boundaries:
@@ -230,37 +241,50 @@ Action --> PolicyBundle : "matched by"
 - [authorization-matrix.md:155-265](file://docs/agentic-aiops-platform/authorization-matrix.md#L155-L265)
 - [policy-default.yaml:53-152](file://shared/shared-contracts/policies/policy-default.yaml#L53-L152)
 
-### Approval Workflows and HITL
-- Risky tool calls are parked and require human confirmation. Tier 1 allows self-confirmation for low-risk non-production actions; Tier 2 requires a designated approver distinct from the requester.
-- The confirm flow bridges policy decisions to execution: only after approval does the tool run under the confirmer’s delegated token.
-- Blocked approvals are recorded as durable audit events with structured reasons.
+### Secret Delivery Authorization and Approval Workflows
+**Updated** Added comprehensive documentation for the new `secrets:deliver` policy action and enhanced approval workflows for secret delivery operations.
+
+The platform now implements a distinct authorization model for secret delivery operations:
+
+- **Separate Action Model**: The `secrets:deliver` action is independent from `tools:mutate`, allowing granular control over external secret delivery capabilities separate from general tool mutation permissions.
+- **Write-Tier Enforcement**: Secret delivery operations are classified as write-tier, requiring the same approval gates as other mutating operations but with additional authorization checks.
+- **Enhanced Approval Coverage**: The approval workflow now covers secret delivery operations, requiring tier-2 approval from designated approvers distinct from the requester.
+- **Policy Integration**: The default policy bundle includes explicit grants for `secrets:deliver` to operational roles (platform-admin, approver, operator), maintaining separation of duties.
 
 ```mermaid
 sequenceDiagram
-participant A as "Agent Platform"
+participant R as "Requester"
 participant G as "Platform Gateway"
-participant U as "Approver"
+participant A as "Approver"
 participant T as "Tool Gateway"
-A->>G : Park tool call (tools : mutate)
-G->>G : Evaluate policy -> require_approval (tier_2)
-U->>G : chat : confirm (approve/deny)
+R->>G : secrets.deliver (email channel)
+G->>G : Check secrets : deliver action
+alt require_approval
+G->>A : Park for approval (tier_2)
+A->>G : Approve/deny
 alt approved
-G->>T : Execute with confirmer's delegated token
-T-->>G : Result (redacted)
+G->>T : Execute with approver's token
+T->>T : Deliver secret via email
+T->>G : Emit secret_delivered audit event
 else denied
-G-->>A : Denied (parked call remains parked)
+G-->>R : Denied
+end
+else allow
+G->>T : Execute with requester's token
+T->>T : Deliver secret via email
+T->>G : Emit secret_delivered audit event
 end
 ```
 
 **Diagram sources**
-- [runtime_kernel.py:1232-1258](file://products/agent-platform/src/agent_platform/runtime_kernel.py#L1232-L1258)
-- [approval-and-hitl.md:190-215](file://docs/guides/approval-and-hitl.md#L190-L215)
+- [gateway_service.py:1035-1050](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1035-L1050)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
+- [secrets_connector.py:576-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L576-L620)
 
 **Section sources**
-- [approval-and-hitl.md:190-215](file://docs/guides/approval-and-hitl.md#L190-L215)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
-- [runtime_kernel.py:1232-1258](file://products/agent-platform/src/agent_platform/runtime_kernel.py#L1232-L1258)
+- [gateway_service.py:1035-1050](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1035-L1050)
+- [secrets_connector.py:576-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L576-L620)
 
 ### Tool Execution Security and Data Redaction
 - Tool invocation is admitted based on policy actions (tools:invoke for read-risk, tools:mutate for write/admin risk).
@@ -310,6 +334,38 @@ Note over E,AS : Unauthorized ingest returns 401; malformed events return 400
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 - [SPEC-013-durable-audit-trail/spec.md:86-104](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L86-L104)
 
+### Secret Delivery Audit Events
+**Updated** Enhanced audit trail with `secret_delivered` events for tracking secret delivery completion.
+
+The platform now emits comprehensive audit events for secret delivery operations:
+
+- **Event Type**: New `secret_delivered` event type tracks when generated secrets reach their intended recipients through external channels like email.
+- **Event Content**: Audit events carry delivery metadata including delivery_id, channel type, and recipient information, but never the actual secret value.
+- **Delivery Points**: Events are emitted at key delivery points - when portal-copy handoffs are redeemed and when external channels successfully deliver secrets.
+- **Integration**: The audit service schema has been updated to validate and store these new event types alongside existing audit events.
+
+```mermaid
+flowchart TD
+Generate["Generate Password"] --> Handoff["Portal Copy Handoff"]
+Handoff --> Redeem["Human Redemption"]
+Redeem --> Event1["Emit secret_delivered (portal_copy)"]
+Generate --> External["External Channel (Email)"]
+External --> Deliver["Deliver Secret"]
+Deliver --> Event2["Emit secret_delivered (email)"]
+Event1 --> Audit["Audit Service"]
+Event2 --> Audit
+```
+
+**Diagram sources**
+- [routes/secrets.py:76-94](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L76-L94)
+- [audit.py:40-43](file://products/audit-service/src/audit_service/schemas/audit.py#L40-L43)
+- [app.py:131-144](file://products/tool-gateway/src/tool_gateway/app.py#L131-L144)
+
+**Section sources**
+- [routes/secrets.py:76-94](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L76-L94)
+- [audit.py:40-43](file://products/audit-service/src/audit_service/schemas/audit.py#L40-L43)
+- [app.py:131-144](file://products/tool-gateway/src/tool_gateway/app.py#L131-L144)
+
 ## Dependency Analysis
 - Platform gateway depends on the policy engine and policy bundle to enforce action authorization and approval requirements.
 - Identity broker provides delegated tokens to platform gateway; roles are copied, never elevated.
@@ -344,14 +400,13 @@ Broker --> Audit
 - Redaction walks serialized results; keep tool outputs bounded to avoid excessive traversal and potential overflow rejections.
 - Audit ingestion is fire-and-forget with timeouts; configure appropriate backends and retention to avoid storage pressure.
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
 - Token exchange failures: verify service credentials, subject token validity, and audience allow-lists. Check metrics and logs for exchange errors.
 - Policy denials: inspect matched rule IDs and reasons returned by the policy engine; confirm roles and actions align with the bundle.
 - Approval blocks: ensure the caller holds the required decider roles and that self-approval is permitted per tier; review blocked confirmation events.
 - Redaction overflow: if tool output is withheld due to high credential density, tighten parameters or scope inputs to reduce sensitive content.
 - Audit ingestion issues: confirm emitter URLs and service identities; check audit service health and retention configuration.
+- Secret delivery failures: verify email channel configuration, recipient allowlists, and SMTP connectivity; check for UPSTREAM_ERROR responses.
 
 **Section sources**
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
@@ -361,8 +416,6 @@ Broker --> Audit
 
 ## Conclusion
 Luban AIOPS enforces least privilege through a layered model: OIDC-based authentication, policy-as-code authorization with explicit approval tiers, broker-mediated token delegation preserving human attribution, deterministic redaction of tool outputs, and a durable audit trail with retention. The authorization matrix defines clear permissions per role and environment, while the policy engine ensures consistent enforcement. Operators can configure security settings, extend policies, and add controls while maintaining separation of duties and auditability.
-
-[No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
@@ -397,4 +450,18 @@ Luban AIOPS enforces least privilege through a layered model: OIDC-based authent
 **Section sources**
 - [authorization-matrix.md:183-265](file://docs/agentic-aiops-platform/authorization-matrix.md#L183-L265)
 - [approval-and-hitl.md:190-215](file://docs/guides/approval-and-hitl.md#L190-L215)
+- [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
+
+### Configuring Secret Delivery Security
+**Updated** Added configuration guidance for secret delivery security controls.
+
+- Configure email delivery channels with proper SMTP settings, recipient allowlists, and TLS encryption.
+- Set secret delivery TTL values to control how long generated secrets remain available for redemption.
+- Configure password policies for generated secrets including minimum length requirements and character class mandates.
+- Enable recipient warning acknowledgments to ensure approvers understand when secrets will be sent to external recipients.
+- Monitor secret delivery audit events for successful deliveries and track delivery channels used.
+
+**Section sources**
+- [secrets_connector.py:295-332](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L295-L332)
+- [app.py:146-162](file://products/tool-gateway/src/tool_gateway/app.py#L146-L162)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)

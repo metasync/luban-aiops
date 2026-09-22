@@ -21,17 +21,21 @@
 - [user-status skill](file://samples/acme-admin/user-status/skill/CheckUserStatus.md)
 - [lock-unlock-user skill](file://samples/acme-admin/lock-unlock-user/skill/LockUnlockUser.md)
 - [password-reset skill](file://samples/acme-admin/password-reset/skill/ResetAcmePassword.md)
+- [password-reset README](file://samples/acme-admin/password-reset/README.md)
+- [password-reset WALKTHROUGH](file://samples/acme-admin/password-reset/WALKTHROUGH.md)
 - [adhoc-password-reset skill](file://samples/acme-admin/adhoc-password-reset/skill/ResetPasswordAdHoc.md)
+- [adhoc-password-reset README](file://samples/acme-admin/adhoc-password-reset/README.md)
+- [adhoc-password-reset WALKTHROUGH](file://samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md)
 - [demo-suite.sh](file://samples/acme-admin/demo-suite.sh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated ACME Admin sample application documentation to include the newly migrated `adhoc-password-reset` and `skill-graduation` samples that were moved from `samples/web-checks/` to `samples/acme-admin/`
-- Enhanced the four-rung ladder with two additional approval model samples demonstrating ad-hoc per-action approval and develop-as-you-go graduation workflows
-- Updated skill pattern examples to include both bound flow and unbound per-action approval models
-- Reflected the retirement of the `web-checks` category while maintaining browser-check-target for platform consumers
-- Added comprehensive documentation for the complete approval model triad: flow cards, action cards, and graduation workflow
+- Enhanced the skills guide with conversational-first interaction patterns that allow operators to ask for runbooks naturally without naming specific skills
+- Improved operator guidance for password reset workflows with detailed walkthroughs for both bound flow and unbound per-action approval models
+- Added comprehensive documentation for the complete approval model triad including enhanced examples demonstrating ad-hoc per-action approval and develop-as-you-go graduation workflows
+- Updated skill pattern examples to include both bound flow and unbound per-action approval models with improved operator guidance
+- Enhanced password reset workflow documentation with better separation between flow cards and action cards
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -49,6 +53,8 @@
 This document explains the skills system that enables team-owned operational guidance in Markdown format. It covers the complete lifecycle from authoring drafts through validation, testing, graduation to production, and consumption by agents during operations. It also documents the skill format specification, the skills-hub service that ingests and serves skills, the graduation workflow with quality gates, common patterns, best practices, and integration with the agent runtime for grounded responses.
 
 The system now includes comprehensive examples through the ACME Admin sample application, which demonstrates a complete approval model triad: health checks (read-only HTTP), user status verification (browser-based read), user account locking (action card), password resets (flow card), ad-hoc per-action approval, and develop-as-you-go skill graduation. These examples provide concrete implementations of abstract concepts and serve as templates for creating new skills.
+
+**Updated** The skills system now supports conversational-first interactions where operators can ask for guidance naturally without needing to know or specify exact skill IDs. The agent uses `skills.search` to find relevant runbooks based on intent rather than requiring explicit naming.
 
 ## Project Structure
 The skills system spans several components:
@@ -323,7 +329,7 @@ end
 
 ### ACME Admin Sample Application and Approval Model Triad
 
-**Updated** Added comprehensive documentation for the ACME Admin sample application demonstrating the complete approval model triad with six distinct skill patterns that showcase different aspects of the skills system.
+**Updated** Enhanced documentation for the ACME Admin sample application demonstrating the complete approval model triad with improved operator guidance for password reset workflows and conversational-first interaction patterns.
 
 The ACME Admin sample application provides a complete demonstration of the skills system through six carefully designed skill patterns that form a progressive learning ladder covering the entire approval model spectrum:
 
@@ -337,6 +343,21 @@ The ACME Admin sample application provides a complete demonstration of the skill
 | 4 | [password-reset](samples/acme-admin/password-reset/) | bound browser flow | write | **1** | `flow` | Flow Card |
 | 5 | [adhoc-password-reset](samples/acme-admin/adhoc-password-reset/) | unbound browser | write | N | `action` | Per-Action |
 | 6 | [skill-graduation](samples/acme-admin/skill-graduation/) | none → graduated | write | N→1 | `action`→`flow` | Graduation |
+
+#### Conversational-First Interaction Patterns
+
+**Updated** The skills system now supports natural, conversational interactions where operators can ask for guidance without needing to know specific skill IDs or technical details.
+
+**How it works:**
+- Operators describe outcomes in plain language: "reset alice's acme-admin password to 'TempPass-2026!'"
+- The agent uses `skills.search` to find relevant runbooks based on intent
+- Skills are discovered automatically through semantic matching rather than explicit naming
+- Only essential inputs that cannot be inferred are required from the operator
+
+**When to name skills anyway:**
+- Testing scenarios require deterministic reproduction
+- Assertions about specific card counts or tool sequences
+- When you need to ensure the exact skill is used rather than relying on model selection
 
 #### Pattern 1: Health Check (Pure Read Operation)
 The health-check skill demonstrates a purely read-only operation using HTTP GET calls to verify service health. Key characteristics:
@@ -380,9 +401,12 @@ The password-reset skill demonstrates complex browser workflows requiring flow-l
 - Uses `flow_intent` to describe the operator-facing intent
 - Demonstrates one-time secret handling and cross-surface verification
 
+**Updated** Enhanced operator guidance with detailed walkthrough showing the difference between bound flow approval and the mutation-focused gate placement.
+
 **Section sources**
 - [password-reset skill:1-222](file://samples/acme-admin/password-reset/skill/ResetAcmePassword.md#L1-L222)
 - [password-reset README:1-171](file://samples/acme-admin/password-reset/README.md#L1-L171)
+- [password-reset WALKTHROUGH:1-366](file://samples/acme-admin/password-reset/WALKTHROUGH.md#L1-L366)
 
 #### Pattern 5: Ad-Hoc Password Reset (Per-Action Approval)
 The adhoc-password-reset skill demonstrates the unbound, per-action HITL approval model:
@@ -392,9 +416,12 @@ The adhoc-password-reset skill demonstrates the unbound, per-action HITL approva
 - Demonstrates credential safety in unbound context
 - Shows change-request projections with masked secrets
 
+**Updated** Improved operator guidance explaining the differences between per-action and flow-based approval models, with clear examples of when to use each approach.
+
 **Section sources**
 - [adhoc-password-reset skill:1-230](file://samples/acme-admin/adhoc-password-reset/skill/ResetPasswordAdHoc.md#L1-L230)
 - [adhoc-password-reset README:1-157](file://samples/acme-admin/adhoc-password-reset/README.md#L1-L157)
+- [adhoc-password-reset WALKTHROUGH:1-298](file://samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md#L1-L298)
 
 #### Pattern 6: Skill Graduation (Develop-as-You-Go)
 The skill-graduation sample demonstrates the complete graduation workflow end-to-end:
@@ -499,7 +526,7 @@ ACME["ACME Samples"] --> Ing
 ## Conclusion
 The skills system provides a robust, team-owned operational guidance model with clear contracts, deterministic ingestion and search, safe agent consumption, and a high-trust graduation pathway for executable flows. By enforcing strict validation, blast-radius re-validation, and human-in-the-loop merges, it balances agility with safety, enabling grounded responses during operations while preserving auditability and reproducibility.
 
-The ACME Admin sample application enhances this foundation by providing concrete, working examples of the complete approval model triad—from simple health checks to complex browser workflows with multi-step approvals, ad-hoc per-action approval, and develop-as-you-go skill graduation. These samples serve as both educational resources and practical templates for creating new operational skills, demonstrating that the card count tracks the effect of a skill, not the surface it uses.
+**Updated** The enhanced skills system now supports conversational-first interactions where operators can ask for guidance naturally without needing to know specific skill IDs. The improved operator guidance for password reset workflows demonstrates the complete approval model triad—from simple health checks to complex browser workflows with multi-step approvals, ad-hoc per-action approval, and develop-as-you-go skill graduation. These enhancements make the system more accessible while maintaining the security and auditability that operators require.
 
 ## Appendices
 
@@ -518,7 +545,7 @@ The ACME Admin sample application enhances this foundation by providing concrete
 
 ### ACME Admin Sample Deployment and Usage
 
-**Updated** Added comprehensive deployment and usage instructions for the complete ACME Admin sample application including the newly migrated samples.
+**Updated** Enhanced deployment and usage instructions with improved operator guidance for password reset workflows and conversational interaction patterns.
 
 #### Prerequisites
 - Platform deployed with browser-dev and mutating-dev runtime profiles
@@ -549,6 +576,7 @@ samples/acme-admin/skill-graduation/demo/demo.sh
 - **Cross-skill verification**: Proving mutations across different interfaces
 - **Credential management**: Secure handling of secrets through credential sets
 - **Error handling**: Proper treatment of upstream errors and edge cases
+- **Conversational interactions**: Natural language queries without skill naming
 
 **Section sources**
 - [ACME Admin README:38-77](file://samples/acme-admin/README.md#L38-L77)
@@ -557,7 +585,7 @@ samples/acme-admin/skill-graduation/demo/demo.sh
 
 ### Common Skill Patterns Reference
 
-**Updated** Enhanced common patterns section with concrete examples from the complete ACME Admin sample suite including the newly migrated samples.
+**Updated** Enhanced common patterns section with concrete examples from the complete ACME Admin sample suite including improved operator guidance for password reset workflows.
 
 #### Complete Pattern Categories
 
@@ -600,13 +628,16 @@ samples/acme-admin/skill-graduation/demo/demo.sh
 - **Cross-surface verification**: Verify changes through multiple interfaces
 - **Documentation**: Include comprehensive README and WALKTHROUGH files
 - **Approval model selection**: Choose between flow, action, or per-action based on workflow complexity
+- **Conversational design**: Write skills that can be found through natural language queries
 
 **Section sources**
 - [health-check README:63-89](file://samples/acme-admin/health-check/README.md#L63-L89)
 - [user-status README:63-99](file://samples/acme-admin/user-status/README.md#L63-L99)
 - [lock-unlock-user README:55-100](file://samples/acme-admin/lock-unlock-user/README.md#L55-L100)
-- [password-reset README:80-121](file://samples/acme-admin/password-reset/README.md#L80-L121)
+- [password-reset README:80-121](file://samples/acme-admin/password-reset/README.md#L80-121)
+- [password-reset WALKTHROUGH:83-103](file://samples/acme-admin/password-reset/WALKTHROUGH.md#L83-L103)
 - [adhoc-password-reset README:60-104](file://samples/acme-admin/adhoc-password-reset/README.md#L60-L104)
+- [adhoc-password-reset WALKTHROUGH:67-90](file://samples/acme-admin/adhoc-password-reset/WALKTHROUGH.md#L67-L90)
 - [skill-graduation README:96-169](file://samples/acme-admin/skill-graduation/README.md#L96-L169)
 
 ### Web-Checks Migration Notes

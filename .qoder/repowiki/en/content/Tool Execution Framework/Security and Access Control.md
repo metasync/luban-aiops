@@ -18,7 +18,19 @@
 - [adding-a-tool.md](file://docs/guides/adding-a-tool.md)
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [part-2-reference-architecture.md](file://docs/agentic-aiops-platform/part-2-reference-architecture.md)
+- [SPEC-062 spec.md](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md)
+- [ADR-0012](file://docs/adr/0012-one-time-secret-delivery-handoff.md)
+- [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added new section on CSPRNG-based password generation capabilities from SPEC-062
+- Updated credential management section to include one-time secret delivery handoff mechanism
+- Enhanced policy engine integration documentation with new `secrets:deliver` action
+- Added new diagram showing the redemption-on-click delivery flow
+- Updated configuration guidance to include new environment variables for secret delivery
+- Expanded audit trail documentation to cover `secret_delivered` events
 
 ## Table of Contents
 1. Introduction
@@ -37,6 +49,7 @@ This document explains the security model governing tool execution in the Luban 
 - The three-tier risk classification system (read, write, admin) and how it controls invocation permissions.
 - The policy engine integration that evaluates authorization decisions before tool execution.
 - Credential management and secret handling for external system authentication.
+- **New**: One-time secret delivery handoff mechanism and CSPRNG-based password generation capabilities from SPEC-062.
 - Output redaction to prevent sensitive data leakage in tool responses.
 - Audit trail generation for all tool invocations, including successful and denied requests.
 - Separation between read-only and mutating tools and their respective security models.
@@ -49,6 +62,7 @@ The security model spans several components across the platform:
 - Tool Registry validates tool definitions and dispatches invocations safely.
 - Agent Platform provides credential parameter masking, evidence projection masking, and prose redaction for chat transcripts.
 - Platform Gateway handles service-to-service token delegation for internal calls.
+- **New**: Secret delivery buffer with pluggable backends (in-memory/Redis) for one-time secret handoff.
 
 ```mermaid
 graph TB
@@ -60,12 +74,14 @@ TOOL["Tool Implementations"]
 AUD["Audit Service"]
 AGP["Agent Platform<br/>Credential & Prose Redaction"]
 PGW["Platform Gateway<br/>Delegation"]
+DEL["Secret Delivery Buffer<br/>One-time Handoff"]
 Client --> GW
 GW --> PE
 GW --> REG
 REG --> TOOL
 GW --> AUD
 GW --> AGP
+GW --> DEL
 PGW --> GW
 ```
 
@@ -87,6 +103,7 @@ PGW --> GW
 - Redaction: Applies pattern-based and key-based masking to tool results before response and audit emission, with fail-closed overflow protection.
 - Credential handling: Parameter masking, evidence masking, and prose masking ensure secrets do not leak into approvals, transcripts, or stored traces.
 - Delegation: Internal services exchange tokens via the identity broker using workload or static credentials.
+- **New**: Secret delivery: One-time, owner-scoped, server-mediated handoff with redemption-on-click mechanism and pluggable backends.
 
 **Section sources**
 - [base.py:9-12](file://products/tool-gateway/src/tool_gateway/tools/base.py#L9-L12)
@@ -103,6 +120,7 @@ The tool execution path enforces layered security:
 3. Registry dispatch to the target tool implementation.
 4. Output redaction with overflow protection.
 5. Structured logging and durable audit emission.
+6. **New**: Optional one-time secret delivery through redemption-on-click mechanism.
 
 ```mermaid
 sequenceDiagram
@@ -112,6 +130,7 @@ participant P as "Policy Engine"
 participant R as "Tool Registry"
 participant T as "Tool Implementation"
 participant A as "Audit Service"
+participant D as "Secret Delivery"
 C->>G : POST /api/v2/tools/invoke
 G->>G : resolve_request_identity()
 G->>P : evaluate("tools : invoke")
@@ -133,6 +152,10 @@ R->>T : execute(parameters, identity)
 T-->>R : ToolResult
 R-->>G : ToolResult
 G->>G : redact_result()
+opt secret_delivery
+G->>D : deliver_secret(value, channel)
+D-->>G : delivery_id
+end
 G->>A : emit_audit_event("tool_invoked", success/error)
 G-->>C : JSONResponse
 end
@@ -190,10 +213,11 @@ RequireMutate --> End
 - [authorization-matrix.md:517-528](file://docs/agentic-aiops-platform/authorization-matrix.md#L517-L528)
 
 ### Policy Engine Integration
-- Actions: tools:list, tools:invoke, tools:mutate.
+- Actions: tools:list, tools:invoke, tools:mutate, **new**: secrets:deliver.
 - Evaluation order: explicit deny overrides require_approval and allow; require_approval overrides allow; higher priority wins within an outcome class; disabled rules ignored.
 - Bundles: loaded from configured path or packaged default; content fingerprint exposed for readiness checks.
 - Tests confirm observer roles can list and invoke read-only tools and unknown actions are denied by default.
+- **New**: The `secrets:deliver` action is required for email delivery channels and follows the same tier-based authorization model.
 
 ```mermaid
 classDiagram
@@ -241,6 +265,8 @@ PolicyDecision --> ApprovalSpec : "optional"
 - Authoring traces replace credential values with placeholders to enforce replay-time parameterization.
 - Browser connector uses credential sets and field validation; missing sets return generic errors to avoid enumeration.
 - Platform gateway exchanges delegated tokens using either projected workload tokens or static client credentials.
+- **New**: CSPRNG-based password generation using Python's `secrets` module, never model-invented randomness.
+- **New**: One-time secret delivery handoff with redemption-on-click mechanism - generated values never enter human-readable projections.
 
 ```mermaid
 flowchart TD
@@ -250,12 +276,16 @@ Masked["Mask value"]
 Preserve["Preserve value"]
 URLMask["Mask secret query params"]
 TracePlace["Replace with placeholder for traces"]
+GenPassword["Generate CSPRNG password"]
+DeliverSecret["Deliver via one-time handoff"]
 Params --> MaskCheck
 MaskCheck --> |Yes| Preserve
 MaskCheck --> |No| Masked
 Masked --> URLMask
 Preserve --> URLMask
 URLMask --> TracePlace
+TracePlace --> GenPassword
+GenPassword --> DeliverSecret
 ```
 
 **Diagram sources**
@@ -275,12 +305,53 @@ URLMask --> TracePlace
 - [browser_connector.py:1323-1357](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L1323-L1357)
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
 
+### One-Time Secret Delivery Handoff
+**New**: The platform now supports secure delivery of generated secrets through a redemption-on-click mechanism that ensures secrets never enter human-readable projections.
+
+- **Generation**: CSPRNG-based password generation using Python's `secrets` module, bound to centralized policy enforcement.
+- **Delivery**: Server-mediated handoff where generated values are stashed in ephemeral, single-use, TTL-bounded, owner-scoped buffers.
+- **Redemption**: Portal renders Copy password button bound to opaque `delivery_id`; clicking performs authenticated, single-use redemption.
+- **Backends**: Pluggable Protocol with in-memory backend (default) and Redis backend (for multi-replica deployments).
+- **Channels**: Extensible interface supporting portal-copy (primary) and email (gated outbound) channels.
+- **Security**: Generated values ride no projection - structural guarantee rather than rendering convention.
+
+```mermaid
+sequenceDiagram
+participant A as "Agent"
+participant S as "Secret Service"
+participant B as "Buffer"
+participant P as "Portal"
+A->>S : generate_password(policy)
+S-->>A : ToolResult(password)
+A->>S : deliver(channel=portal_copy, value)
+S->>B : store(value, ttl, owner_scope)
+B-->>S : delivery_id
+S-->>A : ToolResult(delivery_id)
+P->>P : render Copy password button
+P->>S : GET /secrets/delivery/{id}
+S->>B : redeem(delivery_id)
+B-->>S : value (single-use)
+S-->>P : clipboard write
+B-->>B : invalidate handle
+```
+
+**Diagram sources**
+- [SPEC-062 spec.md:171-223](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L171-L223)
+- [ADR-0012:45-69](file://docs/adr/0012-one-time-secret-delivery-handoff.md#L45-L69)
+
+**Section sources**
+- [SPEC-062 spec.md:90-121](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L90-L121)
+- [SPEC-062 spec.md:171-223](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L171-L223)
+- [SPEC-062 spec.md:224-279](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L224-L279)
+- [ADR-0012:45-69](file://docs/adr/0012-one-time-secret-delivery-handoff.md#L45-L69)
+
 ### Output Redaction System
 - Two-layer redaction:
   - Value patterns: PEM private keys, JWTs, Bearer/Basic headers, AWS access key IDs.
   - Explicit key list: exact, case-insensitive match on sensitive string fields (password, secret, token, etc.).
 - Overflow protection: If too much of the payload would be redacted, the response is withheld with a REDACTION_OVERFLOW error.
 - Tests verify clean outputs pass through unchanged and overflow is fail-closed.
+- **New**: Generated passwords are automatically added to the secret vocabulary for comprehensive masking across all surfaces.
 
 ```mermaid
 flowchart TD
@@ -324,6 +395,7 @@ Overflow --> |No| Return
 - Events include request correlation, tool name, status, duration, risk level, identity context, and redacted span counts.
 - Denied policy decisions emit policy_decision events with reasons and matched rule IDs.
 - Audit service supports summary aggregation and retention policies.
+- **New**: `secret_delivered` audit events capture delivery attempts without exposing the actual secret values.
 
 ```mermaid
 sequenceDiagram
@@ -333,6 +405,9 @@ participant A as "Audit Service"
 G->>L : log_event("tool_invoked", ...)
 G->>A : emit_audit_event("tool_invoked", success/error)
 Note over G,A : Includes request_id, tool_name, status, duration_ms, risk_level, identity, redacted_spans
+opt secret_delivery
+G->>A : emit_audit_event("secret_delivered", channel, recipient)
+end
 ```
 
 **Diagram sources**
@@ -351,6 +426,7 @@ Note over G,A : Includes request_id, tool_name, status, duration_ms, risk_level,
   - Require tools:mutate in addition to tools:invoke.
   - Registration gated by allow_mutating configuration.
   - Produce approval cards and are subject to stricter approval boundaries.
+- **New**: Password generation is read-tier and requires no mutation approval; email delivery is write-tier and requires `secrets:deliver` action.
 
 ```mermaid
 flowchart TD
@@ -379,6 +455,7 @@ Gate --> |False| Blocked
 - User-authored text is masked with four layers: pinned shapes, URL query masking, key=value masking, and heuristic token masking when a secret hint is present.
 - Assistant text is masked more narrowly: pinned shapes, URL query masking, and exact literal matches harvested from user text.
 - Streaming redactor holds back partial matches to avoid splitting credentials across deltas.
+- **New**: Generated passwords are treated as secrets from the moment they exist, ensuring consistent masking across all transcript surfaces.
 
 ```mermaid
 flowchart TD
@@ -413,6 +490,7 @@ Stream --> Output
 - Redaction is applied post-execution and before audit emission.
 - Agent Platform modules provide complementary masking for different surfaces (parameters, evidence, prose).
 - Platform Gateway delegates tokens to internal services, ensuring secure service-to-service communication.
+- **New**: Secret delivery depends on pluggable buffer backends (in-memory/Redis) and integrates with existing audit infrastructure.
 
 ```mermaid
 graph LR
@@ -422,6 +500,7 @@ GW --> RED["Redaction"]
 GW --> AUD["Audit Emission"]
 AP["Agent Platform"] --> GW
 PGW["Platform Gateway"] --> GW
+DEL["Secret Delivery"] --> GW
 ```
 
 **Diagram sources**
@@ -445,8 +524,8 @@ PGW["Platform Gateway"] --> GW
 - Policy bundle evaluation is in-memory after load; ensure bundles remain small and well-structured.
 - Streaming prose redaction holds bounded tails to avoid splitting credentials; tune thresholds implicitly via anchor caps.
 - Token verification and delegation caching reduce network overhead.
-
-[No sources needed since this section provides general guidance]
+- **New**: Secret delivery buffer performance depends on backend choice - in-memory for single-replica, Redis for multi-replica deployments.
+- **New**: CSPRNG generation is lightweight but should be rate-limited to prevent abuse.
 
 ## Troubleshooting Guide
 - 403 denied by policy:
@@ -461,6 +540,10 @@ PGW["Platform Gateway"] --> GW
 - Credential issues:
   - Ensure credential sets are configured and referenced correctly.
   - Validate parameter names against secret vocabulary and opaque fields.
+- **New**: Secret delivery issues:
+  - Check buffer backend availability (in-memory vs Redis).
+  - Verify delivery_id expiration and owner scope.
+  - Review `secret_delivered` audit events for delivery attempts.
 
 **Section sources**
 - [gateway_service.py:197-248](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L197-L248)
@@ -476,9 +559,9 @@ The Luban AIOPS platform enforces a robust, layered security model for tool exec
 - Comprehensive redaction prevents credential leakage across responses, approvals, and transcripts.
 - Durable audit trails capture every decision and invocation for accountability.
 - Credential management ensures secrets are never persisted or displayed in plaintext.
-Operators should configure policies carefully, classify tools accurately, and monitor audit and redaction metrics to maintain a secure operational posture.
-
-[No sources needed since this section summarizes without analyzing specific files]
+- **New**: One-time secret delivery handoff provides secure distribution of generated secrets without projection exposure.
+- **New**: CSPRNG-based password generation ensures cryptographically strong randomness independent of LLM capabilities.
+Operators should configure policies carefully, classify tools accurately, monitor audit and redaction metrics, and leverage the new secret delivery capabilities for secure password distribution while maintaining the platform's strict no-projection security posture.
 
 ## Appendices
 
@@ -486,6 +569,7 @@ Operators should configure policies carefully, classify tools accurately, and mo
 - Define tool risk_level accurately; anything changing upstream state must be at least write.
 - Enable mutating tools only when necessary via configuration; observe registry logs for registration gating.
 - Use policy bundles to grant tools:list and tools:invoke broadly for read-only roles, and restrict tools:mutate to approver/operator roles.
+- **New**: Configure `secrets:deliver` action separately from other mutating actions to control email delivery capabilities.
 
 **Section sources**
 - [adding-a-tool.md:127-134](file://docs/guides/adding-a-tool.md#L127-L134)
@@ -496,8 +580,22 @@ Operators should configure policies carefully, classify tools accurately, and mo
 - Add rules matching roles and actions; prefer explicit deny for high-risk scenarios.
 - Use require_approval for workflows requiring human confirmation; note that tool-gateway invocation path does not enforce approval directly—approval enforcement lives on the platform-gateway confirm path.
 - Validate bundles during deployment; readiness endpoints expose bundle fingerprints.
+- **New**: Create specific rules for `secrets:deliver` action to control email delivery capabilities independently from other mutating actions.
 
 **Section sources**
 - [policy_engine.py:192-251](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L192-L251)
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [gateway_service.py:40-58](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L40-L58)
+
+### Secret Delivery Configuration
+**New**: Configuration requirements for one-time secret delivery handoff:
+
+- **Buffer Backend**: Choose between in-memory (default, single-replica) and Redis (multi-replica) backends.
+- **Email Channel**: Configure SMTP settings and recipient allowlists for optional email delivery.
+- **Policy Action**: Register `secrets:deliver` action in policy bundle for email delivery control.
+- **Environment Variables**: Set appropriate configuration for buffer TTL, email allowlists, and delivery timeouts.
+- **Testing**: Validate delivery functionality across both backends and channels.
+
+**Section sources**
+- [SPEC-062 spec.md:298-320](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L298-L320)
+- [SPEC-062 spec.md:407-434](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L407-L434)

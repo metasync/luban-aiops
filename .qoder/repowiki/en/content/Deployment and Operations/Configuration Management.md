@@ -19,16 +19,18 @@
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [skills_hub config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [skills_hub ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
+- [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
+- [secret_delivery.py](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new `SKILLS_COMPOSITION_MAX_SUB_SKILLS` configuration option introduced in SPEC-057
-- Updated skills-hub configuration section with detailed explanation of composition limits and security implications
-- Enhanced configuration examples to include composition tuning scenarios
-- Added troubleshooting guidance for skill composition validation failures
-- Updated performance considerations to address composition-related resource management
-- Added reference to SPEC-057 skill composition runbooks feature
+- Added comprehensive documentation for the new `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` environment variable (default 900 seconds) for portal_copy channel TTL management in gated workflows
+- Updated configuration validation section to include positive integer constraints for both standard and hold TTL values
+- Enhanced secret delivery configuration section with detailed explanation of portal_copy channel behavior and HITL approval timing
+- Added troubleshooting guidance for secret delivery TTL validation failures
+- Updated performance considerations to address secret delivery buffer management
+- Added reference to SPEC-062 secure password generation and delivery feature
 
 ## Table of Contents
 1. Introduction
@@ -51,6 +53,7 @@ This document explains how the Luban AIOPS platform manages configuration and se
 - Environment-specific configuration, startup validation behavior, and troubleshooting techniques.
 - Best practices for managing configuration across development, staging, and production.
 - **New**: Skill composition configuration including the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` operator-tunable limit for controlling the maximum number of sub-skills in compositions.
+- **Updated**: Secret delivery configuration including the `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` environment variable for portal_copy channel TTL management in gated workflows.
 
 ## Project Structure
 The configuration is assembled with Kustomize. The dev overlay defines a configMapGenerator that merges multiple env files into one ConfigMap named platform-runtime-config. Runtime profiles add additional environment fragments (for example, default, mutating-dev, browser-dev). Product deployments reference these ConfigMaps and Secrets through their deployment manifests.
@@ -63,6 +66,7 @@ A --> D["Mutating profile env<br/>mutating-dev/mutating.env"]
 A --> E["Browser profile env<br/>browser-dev/browser.env"]
 B --> F["Platform services read ConfigMap at startup"]
 F --> G["Skills Hub<br/>Composition Limits"]
+F --> H["Tool Gateway<br/>Secret Delivery TTL"]
 ```
 
 **Diagram sources**
@@ -79,11 +83,13 @@ F --> G["Skills Hub<br/>Composition Limits"]
 - Sync scripts: Shell utilities that generate or reuse secrets, write them into per-product runtime-secrets.env files, apply them to the cluster, and restart affected deployments.
 - Environment overlays: Profiles under runtime-profiles allow environment-specific configuration without changing application code.
 - **New**: Skills composition configuration: Operator-tunable limits for controlling the maximum number of sub-skills in skill compositions to prevent resource exhaustion and maintain security boundaries.
+- **Updated**: Secret delivery configuration: Portal_copy channel TTL management with configurable hold periods spanning full HITL approval workflows.
 
 Key responsibilities:
 - Non-secret configuration: Managed via ConfigMap; changes can be applied without image rebuilds.
 - Secret configuration: Managed via Secrets; provisioned by sync scripts; changes require Secret updates and workload restarts.
 - **New**: Composition limits: Configurable bounds on skill composition complexity to balance functionality with resource constraints.
+- **Updated**: Secret delivery TTL: Configurable hold periods for portal_copy channels to support gated workflow scenarios.
 
 **Section sources**
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
@@ -96,6 +102,7 @@ The platform uses a layered configuration approach:
 - Kustomize merges all env fragments into a single platform-runtime-config ConfigMap.
 - Secrets are provisioned separately by sync scripts and mounted into pods.
 - **New**: Skills composition limits are enforced at ingestion time through configurable bounds.
+- **Updated**: Secret delivery hold TTL spans full HITL approval workflows for portal_copy channels.
 
 ```mermaid
 graph TB
@@ -104,6 +111,7 @@ P1["Default profile<br/>default/configmap.yaml"]
 P2["Mutating profile env<br/>mutating-dev/mutating.env"]
 P3["Browser profile env<br/>browser-dev/browser.env"]
 P4["Skills Hub config<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
+P5["Tool Gateway config<br/>GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
 end
 subgraph "Kustomize Assembly"
 K["dev-k8s/kustomization.yaml<br/>configMapGenerator"]
@@ -115,7 +123,7 @@ end
 subgraph "Services"
 AG["Agent Service"]
 PG["Platform Gateway"]
-TG["Tool Gateway"]
+TG["Tool Gateway<br/>Secret Delivery"]
 IB["Identity Broker"]
 AS["Audit Service"]
 SH["Skills Hub<br/>Composition Validation"]
@@ -125,6 +133,7 @@ P1 --> K
 P2 --> K
 P3 --> K
 P4 --> K
+P5 --> K
 K --> CM
 S1 --> AG
 S1 --> PG
@@ -259,7 +268,7 @@ GATEWAY_HTTP_ALLOW_ORIGINS=http://acme-admin:8080
 - [config.py:25-31](file://products/tool-gateway/src/tool_gateway/core/config.py#L25-L31)
 - [config.py:201-234](file://products/tool-gateway/src/tool_gateway/core/config.py#L201-L234)
 - [browser.env:16-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L16-L26)
-- [tool-gateway runtime-config.env:46-70](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L46-L70)
+- [tool-gateway runtime-config.env:46-70](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L46-70)
 
 ### Browser profile configuration
 The browser-dev profile serves as the browser posture profile for development environments. After SPEC-061, it no longer ships the static browser-check-target app and instead permits only the acme-admin sample application.
@@ -318,11 +327,66 @@ SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
 - [skills_hub config.py:211-213](file://products/skills-hub/src/skills_hub/core/config.py#L211-L213)
 - [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
 
+### Secret delivery configuration
+**Updated Feature**: The tool-gateway service includes secret delivery functionality through SPEC-062, supporting one-time password generation and delivery with portal_copy channel support for gated workflows. The `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` configuration option provides operator control over the hold period for portal_copy deliveries.
+
+**Configuration Details:**
+- **Variable**: `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS`
+- **Default**: `900` seconds (600s HITL approval timeout + 300s redemption margin)
+- **Source**: `runtime-config` (via Kustomize ConfigMap)
+- **Validation**: Must be a positive integer; invalid values cause startup failure with `ValueError`
+- **Purpose**: Controls the hold period for portal_copy channel deliveries to survive full HITL approval workflows
+
+**Portal Copy Channel Behavior:**
+- Portal_copy deliveries are stashed under the longer hold TTL rather than the standalone redemption window
+- A password generated before a gated reset is filed remains redeemable when the reset commits and the reveal-on-commit Copy button appears
+- The hold spans a full HITL approval wait (600s timeout) plus 300s redemption margin
+- Standalone redemption window (`GATEWAY_SECRET_DELIVERY_TTL_SECONDS`) remains separate at 300s default
+
+**Security Implications:**
+- Hold TTL must be greater than or equal to the HITL approval timeout to ensure passwords remain available
+- Multi-replica deployments should use Redis backend to persist held deliveries across restarts
+- Memory backend is suitable for single-replica development but loses handles on restart
+- Entry capacity (`GATEWAY_SECRET_DELIVERY_MAX_ENTRIES`) bounds memory usage
+
+**Behavior Matrix:**
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `900` (default) | Full HITL approval span | Standard gated workflow support |
+| `< 600` | Insufficient for full approval | May cause premature expiration during HITL |
+| `> 900` | Extended hold period | Long-running approval workflows |
+| `300` (standalone) | Direct redemption only | Simple copy-paste scenarios |
+
+**Example Configuration:**
+```bash
+# Development environment - standard gated workflow support
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=900
+
+# Production environment - extended hold for complex approvals
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=1200
+
+# High-security environment - shorter hold to minimize exposure
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=600
+```
+
+**Backend Selection Guidance:**
+- **Memory backend**: Suitable for single-replica development; holds expire on restart
+- **Redis backend**: Required for multi-replica deployments; persists held deliveries across restarts
+- **Startup validation**: Redis connection failure falls back to memory with recorded warning
+
+**Section sources**
+- [config.py:32-49](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L49)
+- [config.py:171-179](file://products/tool-gateway/src/tool_gateway/core/config.py#L171-L179)
+- [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
+- [secrets_connector.py:323-335](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L323-L335)
+- [tool-gateway runtime-config.env:84-97](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L84-L97)
+
 ### Environment-specific configurations
 - Default profile: Provides baseline provider configuration and optional catalog entries.
 - Mutating-dev profile: Adds environment-specific flags via mutating.env.
 - Browser-dev profile: Adds browser-related configuration via browser.env and patches tool-gateway with a sidecar. Also enables HTTP connectors for service health checks.
 - **New**: Skills composition limits can be tuned per environment based on security requirements and operational needs.
+- **Updated**: Secret delivery hold TTL can be configured per environment based on HITL workflow requirements.
 
 To switch environments:
 - Select or create a runtime profile under runtime-profiles.
@@ -341,12 +405,14 @@ To switch environments:
 - Browser connector validation: When `GATEWAY_BROWSER_ENABLED=false`, no browser tools are registered. When enabled but origin allowlist is empty, all browser navigation is denied.
 - Agent auto-allow validation: Tools listed in auto-allow configuration must be read-only; mutating tools are logged as misconfiguration but remain available for HITL approval.
 - **New**: Skills composition validation: Invalid `SKILLS_COMPOSITION_MAX_SUB_SKILLS` values (non-integer or < 1) cause immediate startup failure with descriptive error messages.
+- **Updated**: Secret delivery validation: Both `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` and `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` must be positive integers; invalid values cause startup failure with `ValueError("Secret delivery TTL and capacity must be positive integers")`.
 
 Operational guidance:
 - Validate that all required keys are present in the relevant runtime-secrets.env files before applying.
 - Use the SKIP_* environment variables in sync scripts to bypass provisioning when CI injects secrets externally.
 - Verify auto-allow list composition matches expected behavior for your environment.
 - **New**: Test composition limits during development to ensure they meet operational requirements before production deployment.
+- **Updated**: Verify secret delivery TTL values are appropriate for your HITL workflow timing requirements.
 
 [No sources needed since this section synthesizes behavior described by scripts and examples]
 
@@ -357,6 +423,7 @@ Operational guidance:
 - Browser configuration changes: Modify browser profile settings through ConfigMap updates without requiring image rebuilds.
 - Agent auto-allow changes: Update `AGENT_GATEWAY_TOOL_AUTO_ALLOW` or `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` through ConfigMap updates; changes take effect on service restart.
 - **New**: Skills composition limit changes: Update `SKILLS_COMPOSITION_MAX_SUB_SKILLS` through ConfigMap updates; changes take effect on skills-hub service restart.
+- **Updated**: Secret delivery hold TTL changes: Update `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` through ConfigMap updates; changes take effect on tool-gateway service restart.
 
 Best practice:
 - Keep non-secret configuration in profile env files and ConfigMaps.
@@ -364,6 +431,7 @@ Best practice:
 - Test HTTP and browser connector configurations in development profiles before promoting to production.
 - Use additive auto-allow patterns (`_EXTRA` variables) for environment-specific opt-ins rather than replacing entire default lists.
 - **New**: Test composition limits thoroughly in development environments to validate workflow complexity requirements before production deployment.
+- **Updated**: Test secret delivery hold TTL values to ensure they accommodate your HITL approval workflow timing before production deployment.
 
 **Section sources**
 - [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
@@ -422,7 +490,7 @@ Best practice:
 
 **Section sources**
 - [browser.env:16-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L16-L26)
-- [tool-gateway runtime-config.env:46-70](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L46-L70)
+- [tool-gateway runtime-config.env:46-70](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L46-70)
 
 #### Configuring browser web-check tools
 - Enable browser tools by setting `GATEWAY_BROWSER_ENABLED=true` in the browser-dev profile.
@@ -490,6 +558,47 @@ echo "Testing composition with $(cat /proc/self/environ | tr '\0' '\n' | grep SK
 - [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
 - [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
 
+#### Configuring secret delivery hold TTL for gated workflows
+**Updated Scenario**: Configure the portal_copy channel hold TTL to support gated workflow scenarios where passwords are generated before HITL approval completes.
+
+**Development Environment (Standard Support):**
+```bash
+# Standard gated workflow support with full HITL approval span
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=900
+```
+
+**Production Environment (Extended Approval):**
+```bash
+# Extended hold for complex approval workflows
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=1200
+```
+
+**High-Security Environment (Minimal Exposure):**
+```bash
+# Shorter hold to minimize secret exposure window
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=600
+```
+
+**Multi-Replica Deployment:**
+```bash
+# Use Redis backend for persistence across restarts
+GATEWAY_SECRET_DELIVERY_BACKEND=redis
+GATEWAY_SECRET_DELIVERY_REDIS_HOST=redis
+GATEWAY_SECRET_DELIVERY_REDIS_PORT=6379
+GATEWAY_SECRET_DELIVERY_REDIS_DB=2
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=900
+```
+
+**Validation Testing:**
+```bash
+# Test secret delivery configuration with current hold TTL
+echo "Testing secret delivery with $(cat /proc/self/environ | tr '\0' '\n' | grep GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS)"
+```
+
+**Section sources**
+- [tool-gateway runtime-config.env:84-97](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L84-L97)
+- [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
+
 ### Conceptual overview
 ```mermaid
 flowchart TD
@@ -502,8 +611,11 @@ Apply --> Restart["Restart affected deployments"]
 Restart --> Verify["Verify services start and endpoints respond"]
 Verify --> CompositionCheck{"Skills composition limit?"}
 CompositionCheck --> |Yes| ValidateLimits["Validate SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
-CompositionCheck --> |No| Complete["Configuration complete"]
+CompositionCheck --> |No| SecretDeliveryCheck{"Secret delivery TTL?"}
+SecretDeliveryCheck --> |Yes| ValidateTTL["Validate GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
+SecretDeliveryCheck --> |No| Complete["Configuration complete"]
 ValidateLimits --> Complete
+ValidateTTL --> Complete
 ```
 
 [No sources needed since this diagram shows conceptual workflow, not actual code structure]
@@ -519,16 +631,18 @@ The sync scripts coordinate dependencies across services and databases:
 - Browser connectors depend on CDP endpoint availability and configured origin allowlists.
 - Agent auto-allow list depends on tool definitions being available at toolkit construction time.
 - **New**: Skills composition limits depend on proper validation of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` during service startup.
+- **Updated**: Secret delivery hold TTL depends on proper validation of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` during service startup and appropriate backend selection for multi-replica deployments.
 
 ```mermaid
 graph LR
 PGW["Platform Gateway"] --> IB["Identity Broker"]
-PGW --> TG["Tool Gateway"]
+PGW --> TG["Tool Gateway<br/>Secret Delivery"]
 PGW --> IS["Incident Service"]
 TG --> IS
 TG --> SH["Skills Hub<br/>Composition Limits"]
 TG --> HTTP["HTTP Connectors"]
 TG --> BROWSER["Browser Connectors"]
+TG --> SECRET["Secret Delivery<br/>Hold TTL"]
 AG["Agent Service"] --> IS
 AG --> SH
 AG --> EXEC["Execution Runtime"]
@@ -541,6 +655,7 @@ HTTP --> External["External Services"]
 BROWSER --> ACME["Acme Admin Sample"]
 AUTOALLOW --> TOOLS["Gateway Tools"]
 LIMITS --> VALIDATION["Ingestion Validation"]
+SECRET --> BUFFER["Delivery Buffer<br/>Memory/Redis"]
 ```
 
 **Diagram sources**
@@ -551,6 +666,7 @@ LIMITS --> VALIDATION["Ingestion Validation"]
 - [sync-sessions-db.sh:1-46](file://shared/platform-ops/gitops/sync-sessions-db.sh#L1-L46)
 - [kernel_middleware.py:117-138](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L117-L138)
 - [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
+- [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
 
 **Section sources**
 - [sync-delegation-secrets.sh:1-97](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L1-L97)
@@ -571,6 +687,9 @@ LIMITS --> VALIDATION["Ingestion Validation"]
 - **New**: Skills composition limits directly impact memory usage and processing time; higher limits increase resource consumption proportionally.
 - **New**: Composition validation occurs during skill ingestion; excessive sub-skill counts can slow down sync operations.
 - **New**: Consider the worst-case scenario: `SKILLS_COMPOSITION_MAX_SUB_SKILLS × GATEWAY_BROWSER_FLOW_MAX_STEPS` for resource planning.
+- **Updated**: Secret delivery hold TTL impacts memory usage in the delivery buffer; longer hold periods retain secrets longer in memory.
+- **Updated**: Multi-replica deployments require Redis backend for secret delivery to persist held values across restarts.
+- **Updated**: Consider the relationship between `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` and `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES` for capacity planning.
 
 [No sources needed since this section provides general guidance]
 
@@ -592,6 +711,10 @@ Common issues and resolutions:
 - **New**: Skills composition validation failed: Check `SKILLS_COMPOSITION_MAX_SUB_SKILLS` value and ensure it's a valid integer ≥ 1. Review error messages for specific validation failures.
 - **New**: Composition rejected during ingestion: Verify that the composition doesn't exceed the configured `SKILLS_COMPOSITION_MAX_SUB_SKILLS` limit. Check for duplicate sub-skill IDs or invalid references.
 - **New**: Skills-hub startup failure: Inspect logs for `SettingsError` related to `SKILLS_COMPOSITION_MAX_SUB_SKILLS` parsing or validation.
+- **Updated**: Secret delivery TTL validation failed: Check `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` and `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` values and ensure they are positive integers. Review startup error messages for specific validation failures.
+- **Updated**: Portal copy delivery expired prematurely: Verify that `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` is sufficient to span your HITL approval workflow duration. Consider increasing the hold TTL if approvals take longer than expected.
+- **Updated**: Multi-replica secret delivery issues: Ensure Redis backend is configured for multi-replica deployments to persist held deliveries across restarts. Check Redis connectivity and authentication.
+- **Updated**: Secret delivery buffer capacity exceeded: Monitor `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES` and increase if you're experiencing eviction of held deliveries. Check for leaked delivery handles in long-running processes.
 
 **Updated** After SPEC-061, the browser-dev profile no longer includes the static browser-check-target app, so browser navigation is only permitted to the acme-admin sample application.
 
@@ -607,6 +730,8 @@ Verification steps:
 - Verify tool auto-approval behavior matches expected environment posture.
 - **New**: Verify skills-hub logs for composition limit validation and successful ingestion of compositions.
 - **New**: Test composition creation with various sub-skill counts to validate limit enforcement.
+- **Updated**: Verify tool-gateway logs for secret delivery TTL validation and successful portal copy delivery handling.
+- **Updated**: Test secret delivery flows with various hold TTL values to validate portal copy channel behavior.
 
 **Section sources**
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
@@ -625,9 +750,10 @@ Luban's configuration system separates non-secret and secret concerns:
 - Browser connector configuration enables web application testing through Chromium automation with strict origin controls.
 - Agent auto-allow list configuration supports both hardened defaults and environment-specific opt-ins through additive patterns.
 - **New**: Skills composition configuration provides operator control over composition complexity through the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` knob, balancing functionality with security and resource constraints.
+- **Updated**: Secret delivery configuration provides operator control over portal_copy channel hold periods through the `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` knob, supporting gated workflow scenarios with configurable TTL validation.
 - Following the documented procedures ensures consistent, auditable, and recoverable configuration management across development, staging, and production.
 
-**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios.
+**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios. **Updated**: The addition of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` enables precise control over portal_copy channel TTL management, supporting gated workflow scenarios with robust validation and flexible backend options.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -772,3 +898,66 @@ SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
 - [skills_hub config.py:188-191](file://products/skills-hub/src/skills_hub/core/config.py#L188-L191)
 - [skills_hub config.py:211-213](file://products/skills-hub/src/skills_hub/core/config.py#L211-L213)
 - [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
+
+### Secret Delivery Configuration Reference
+**Updated Feature**: Secret delivery configuration for SPEC-062 secure password generation and delivery.
+
+**Environment Variables:**
+- `GATEWAY_SECRETS_ENABLED`: Enable/disable secret delivery tools (default: false)
+- `GATEWAY_SECRET_DELIVERY_BACKEND`: Backend type - `memory` or `redis` (default: memory)
+- `GATEWAY_SECRET_DELIVERY_TTL_SECONDS`: Standalone redemption window (default: 300)
+- `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS`: Portal copy hold TTL (default: 900)
+- `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES`: In-memory capacity (default: 256)
+- `GATEWAY_SECRET_DELIVERY_REDIS_HOST`: Redis host (default: 127.0.0.1)
+- `GATEWAY_SECRET_DELIVERY_REDIS_PORT`: Redis port (default: 6379)
+- `GATEWAY_SECRET_DELIVERY_REDIS_DB`: Redis database index (default: 2)
+
+**Configuration Options:**
+| Variable | Default | Purpose | Validation |
+|----------|---------|---------|------------|
+| `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` | 300 | Standalone redemption window | Positive integer |
+| `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` | 900 | Portal copy hold TTL | Positive integer |
+| `GATEWAY_SECRET_DELIVERY_MAX_ENTRIES` | 256 | Buffer capacity | Positive integer |
+| `GATEWAY_SECRET_DELIVERY_BACKEND` | memory | Storage backend | memory or redis |
+
+**Portal Copy Channel Behavior:**
+- Portal copy deliveries use the longer hold TTL rather than standalone TTL
+- Hold TTL spans full HITL approval workflows (600s timeout + 300s margin)
+- Passwords generated before gated resets remain redeemable after commit
+- Single-use redemption with owner scope preservation
+
+**Backend Selection Guidance:**
+- **Memory backend**: Single-replica development; ephemeral storage
+- **Redis backend**: Multi-replica production; persistent storage across restarts
+- **Fallback behavior**: Redis connection failure falls back to memory with warning
+
+**Validation Rules:**
+- Both TTL values must be positive integers
+- Invalid values cause immediate startup failure with `ValueError`
+- Redis backend requires accessible Redis instance
+- Entry capacity bounds memory usage with oldest-expiring eviction
+
+**Example Configuration:**
+```bash
+# Development environment - standard gated workflow support
+GATEWAY_SECRET_DELIVERY_BACKEND=memory
+GATEWAY_SECRET_DELIVERY_TTL_SECONDS=300
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=900
+GATEWAY_SECRET_DELIVERY_MAX_ENTRIES=256
+
+# Production environment - multi-replica with Redis
+GATEWAY_SECRET_DELIVERY_BACKEND=redis
+GATEWAY_SECRET_DELIVERY_REDIS_HOST=redis
+GATEWAY_SECRET_DELIVERY_REDIS_PORT=6379
+GATEWAY_SECRET_DELIVERY_REDIS_DB=2
+GATEWAY_SECRET_DELIVERY_TTL_SECONDS=300
+GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=1200
+GATEWAY_SECRET_DELIVERY_MAX_ENTRIES=512
+```
+
+**Section sources**
+- [config.py:32-49](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L49)
+- [config.py:171-179](file://products/tool-gateway/src/tool_gateway/core/config.py#L171-L179)
+- [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
+- [secrets_connector.py:323-335](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L323-L335)
+- [tool-gateway runtime-config.env:84-97](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L84-L97)

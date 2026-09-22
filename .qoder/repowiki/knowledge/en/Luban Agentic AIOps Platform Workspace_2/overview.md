@@ -1,0 +1,1 @@
+Monorepo workspace for the Luban agentic AIOps platform, organizing nine product services, shared contracts and SDKs, GitOps overlays, specs, ADRs, and operator/portal assets under a unified build and verification gate.

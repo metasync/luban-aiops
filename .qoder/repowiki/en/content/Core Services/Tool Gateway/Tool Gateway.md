@@ -18,18 +18,24 @@
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [secrets.py](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py)
+- [secret_delivery.py](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py)
+- [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
+- [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
+- [test_secret_delivery.py](file://products/tool-gateway/tests/test_secret_delivery.py)
 - [test_tool_registry.py](file://products/tool-gateway/tests/test_tool_registry.py)
 - [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
 - [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
+- [SPEC-062 spec.md](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new HTTP connector with read/write tier tools
-- Documented the URL redaction module for secret parameter masking
-- Expanded configuration options for HTTP operations including allowlist management
-- Updated architecture diagrams to include HTTP connector integration
-- Enhanced credential management section with HTTP-specific authentication patterns
+- Added comprehensive documentation for the new DELETE /api/v2/secrets/delivery/{delivery_id} endpoint and discard capability for active destruction of held deliveries as part of SPEC-062 security enhancement
+- Updated Secrets Connector section to include the complete implementation with both read and write tier tools
+- Enhanced Secret Delivery Buffer documentation with discard functionality
+- Updated API endpoints section to document the new delivery management endpoints
+- Expanded security considerations to include deny-path hardening and oracle-free responses
 
 ## Table of Contents
 1. Introduction
@@ -43,9 +49,9 @@
 9. Conclusion
 
 ## Introduction
-The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. Built-in connectors provide safe, bounded access to Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, and skills repositories. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
+The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. Built-in connectors provide safe, bounded access to Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, skills repositories, and secure secret delivery mechanisms. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
 
-**Updated** Added support for HTTP service checks with bounded read/write operations, URL secret masking, and configurable origin allowlists.
+**Updated** Added support for HTTP service checks with bounded read/write operations, URL secret masking, and configurable origin allowlists. The platform now includes a complete implementation of SPEC-062 secure password generation and delivery system, featuring cryptographically strong password generation, secure one-time delivery mechanisms, and active destruction capabilities for held deliveries through the new DELETE endpoint.
 
 ## Project Structure
 The Tool Gateway service is organized into:
@@ -70,19 +76,23 @@ B --> I["BrowserConnector"]
 B --> J["IncidentsConnector"]
 B --> K["SkillsConnector"]
 B --> L["HttpConnector"]
-L --> M["URL Redaction<br/>secret masking"]
+B --> M["SecretsConnector"]
+L --> N["URL Redaction<br/>secret masking"]
+M --> O["SecretDeliveryBuffer<br/>stash/redeem/discard"]
+O --> P["InMemory/Redis Backend"]
 ```
 
 **Diagram sources**
-- [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
+- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
+- [secret_delivery.py:50-91](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L91)
 
 **Section sources**
-- [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
+- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 - [main.py:1-9](file://products/tool-gateway/src/tool_gateway/main.py#L1-L9)
 
 ## Core Components
@@ -95,7 +105,7 @@ L --> M["URL Redaction<br/>secret masking"]
 - AuditEmitter: Fire-and-forget durable audit events to the audit service; non-blocking and failure-tolerant.
 - Config: Centralized environment-driven configuration for connectors, policy, auth, and feature flags.
 
-**Updated** Added URL Redaction module for coordinated secret masking across HTTP and browser connectors.
+**Updated** Added URL Redaction module for coordinated secret masking across HTTP and browser connectors. Also documented the complete SecretsConnector implementation for SPEC-062 secure password generation and delivery, including the new discard capability for active destruction of held deliveries.
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
@@ -116,7 +126,7 @@ The invocation path enforces security and safety at every stage:
 - Output redaction before response and audit emission.
 - Durable audit trail via fire-and-forget emission.
 
-**Updated** HTTP connector follows the same security model as browser connector with origin allowlists and credential set references.
+**Updated** HTTP connector follows the same security model as browser connector with origin allowlists and credential set references. The SecretsConnector provides complete secure password generation and delivery capabilities with active destruction support through the new DELETE endpoint.
 
 ```mermaid
 sequenceDiagram
@@ -129,6 +139,8 @@ participant HttpConn as "HttpConnector"
 participant UrlRedact as "URL Redaction"
 participant Redact as "Redaction"
 participant Audit as "AuditEmitter"
+participant SecretsRoute as "Secrets Route"
+participant Buffer as "SecretDeliveryBuffer"
 Client->>Gateway : POST /api/v2/tools/invoke
 Gateway->>Service : resolve_request_identity + enforce_policy
 Service->>Policy : evaluate("tools : invoke")
@@ -142,9 +154,14 @@ Registry->>HttpConn : execute(parameters, identity)
 HttpConn->>UrlRedact : redact_secret_query(url)
 UrlRedact-->>HttpConn : masked URL
 HttpConn-->>Registry : ToolResult
-else other connector
-Registry->>Connector : execute(parameters, identity)
-Connector-->>Registry : ToolResult
+else secrets.generate_password/secrets.deliver
+Registry->>SecretsConn : execute(parameters, identity)
+SecretsConn-->>Registry : ToolResult
+else delivery management
+Client->>SecretsRoute : DELETE /api/v2/secrets/delivery/{id}
+SecretsRoute->>Buffer : discard(delivery_id, owner_sub)
+Buffer-->>SecretsRoute : bool
+SecretsRoute-->>Client : 204 No Content
 end
 Registry-->>Service : ToolResult
 Service->>Redact : redact_result(result)
@@ -162,6 +179,7 @@ end
 - [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
+- [secrets.py:122-170](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L122-L170)
 
 ## Detailed Component Analysis
 
@@ -207,6 +225,8 @@ BaseTool <|-- IncidentsConnector
 BaseTool <|-- SkillsConnector
 BaseTool <|-- HttpGetTool
 BaseTool <|-- HttpPostTool
+BaseTool <|-- GeneratePasswordTool
+BaseTool <|-- DeliverSecretTool
 ToolRegistry --> BaseTool : "dispatches"
 ```
 
@@ -214,6 +234,7 @@ ToolRegistry --> BaseTool : "dispatches"
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [http_connector.py:497-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L497-L699)
+- [secrets_connector.py:403-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L403-L620)
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
@@ -253,11 +274,89 @@ MaskSecrets --> ReturnResult["Return ToolResult"]
 **Diagram sources**
 - [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
-- [http_connector.py:255-302](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L255-L302)
+- [http_connector.py:255-302](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L255-302)
 
 **Section sources**
 - [http_connector.py:1-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L1-L699)
 - [test_http_connector.py:1-789](file://products/tool-gateway/tests/test_http_connector.py#L1-L789)
+
+### Secrets Connector and Secure Delivery System
+**Complete Implementation** The SecretsConnector provides secure password generation and delivery capabilities as specified in SPEC-062. This connector introduces two tool primitives with comprehensive security controls and active destruction capabilities.
+
+**Key Features:**
+- **`secrets.generate_password`**: A read-tier CSPRNG tool that generates cryptographically strong passwords using Python's `secrets` module, bound to a centralized password policy
+- **`secrets.deliver`**: A write-tier tool that securely delivers generated passwords through multiple channels (portal Copy button, email) without ever exposing plaintext in transcripts or evidence
+- **Active Destruction**: New DELETE endpoint for immediate destruction of held deliveries without revealing values
+- **Password Policy Enforcement**: Centralized password strength rules with configurable tightening
+- **One-Time Delivery**: Ephemeral, single-use, TTL-bounded delivery mechanism with owner-scoped access
+- **Extensible Channel Interface**: Support for portal Copy button (primary) and email (optional, gated) with extensibility for Teams/Slack
+
+```mermaid
+flowchart TD
+Start(["secrets.generate_password"]) --> ValidatePolicy{"Validate password policy"}
+ValidatePolicy --> |Invalid| ErrorPolicy["Return INVALID_PARAMETERS"]
+ValidatePolicy --> |Valid| Generate["Generate CSPRNG password"]
+Generate --> StashValue["Stash in delivery buffer"]
+StashValue --> ReturnGen["Return masked ToolResult with delivery_id"]
+Start2(["secrets.deliver"]) --> ValidateChannel{"Validate channel"}
+ValidateChannel --> |Portal| CreateHandle["Create ephemeral handle"]
+CreateHandle --> ReturnDeliver["Return delivery_id"]
+ValidateChannel --> |Email| GateDelivery{"Gated by secrets:deliver"}
+GateDelivery --> |Allowed| SendEmail["Send via SMTP"]
+GateDelivery --> |Denied| AccessDenied["Return ACCESS_DENIED"]
+SendEmail --> EmitAudit["Emit secret_delivered event"]
+EmitAudit --> ReturnDeliver
+Start3(["DELETE /delivery/{id}"]) --> ValidateOwner{"Validate owner scope"}
+ValidateOwner --> |Valid| DestroyHandle["Destroy delivery handle"]
+DestroyHandle --> Return204["Return 204 No Content"]
+ValidateOwner --> |Invalid| Return204
+```
+
+**Diagram sources**
+- [secrets_connector.py:403-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L403-L620)
+- [secrets.py:57-170](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L57-L170)
+- [secret_delivery.py:50-91](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L91)
+
+**Section sources**
+- [secrets_connector.py:1-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L1-L620)
+- [secrets.py:1-170](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L1-L170)
+- [secret_delivery.py:1-369](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L1-L369)
+- [test_secret_delivery.py:270-332](file://products/tool-gateway/tests/test_secret_delivery.py#L270-L332)
+
+### Secret Delivery Buffer
+**Enhanced** The SecretDeliveryBuffer provides single-use, owner-scoped, TTL-bounded secret storage with both redemption and active destruction capabilities. It supports both in-memory and Redis backends for different deployment scenarios.
+
+**Key Capabilities:**
+- **Single-Use Redemption**: Values can be redeemed exactly once by the authorized owner
+- **Active Destruction**: New discard capability allows immediate destruction without revealing values
+- **Owner Scoping**: Both redemption and destruction are scoped to the original owner
+- **TTL Management**: Automatic expiration with configurable TTL periods
+- **Backend Flexibility**: Supports both in-memory (development) and Redis (production) backends
+- **Oracle-Free Responses**: All operations return indistinguishable responses regardless of outcome
+
+```mermaid
+flowchart TD
+Input["delivery_id + owner_sub"] --> Validate{"Valid UUID format?"}
+Validate --> |No| ReturnFalse["Return False"]
+Validate --> |Yes| Lookup{"Lookup entry"}
+Lookup --> |Not Found| ReturnFalse
+Lookup --> |Found| CheckExpiry{"Entry expired?"}
+CheckExpiry --> |Yes| ReturnFalse
+CheckExpiry --> |No| CheckOwner{"Owner matches?"}
+CheckOwner --> |No| ReturnFalse
+CheckOwner --> |Yes| Operation{"Operation type?"}
+Operation --> |Redeem| PopAndReturn["Pop entry and return value"]
+Operation --> |Discard| DeleteOnly["Delete entry only"]
+PopAndReturn --> SuccessTrue["Return True"]
+DeleteOnly --> SuccessTrue
+```
+
+**Diagram sources**
+- [secret_delivery.py:158-186](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L158-L186)
+- [secret_delivery.py:232-263](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L232-L263)
+
+**Section sources**
+- [secret_delivery.py:50-369](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L369)
 
 ### URL Redaction Module
 **New** The URL redaction module provides coordinated secret masking for URLs across HTTP and browser connectors. It masks secret-bearing query parameters and userinfo components while preserving URL structure and non-secret values.
@@ -398,13 +497,33 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 **Section sources**
 - [skills_connector.py:71-419](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L419)
 
+### API Endpoints
+**Updated** The Tool Gateway exposes several API endpoints for tool invocation and secret delivery management:
+
+**Tool Invocation Endpoint:**
+- `POST /api/v2/tools/invoke`: Invokes registered tools with parameter validation and policy enforcement
+
+**Secret Delivery Endpoints:**
+- `GET /api/v2/secrets/delivery/{delivery_id}`: Redeems a stashed secret once for the generating identity
+- `DELETE /api/v2/secrets/delivery/{delivery_id}`: Actively destroys a stashed secret without revealing it (new in SPEC-062 enhancement)
+
+**Security Characteristics:**
+- All endpoints require authentication via bearer tokens
+- Secret delivery endpoints use owner-scoped access control
+- Oracle-free responses prevent information leakage about delivery states
+- Active destruction ensures immediate cleanup of held deliveries
+
+**Section sources**
+- [secrets.py:57-170](file://products/tool-gateway/src/tool_gateway/api/routes/secrets.py#L57-L170)
+- [router.py:1-9](file://products/tool-gateway/src/tool_gateway/api/router.py#L1-L9)
+
 ### Invocation Lifecycle and Error Handling
 - Identity resolution supports bearer tokens and synthetic dev identity when configured.
 - Policy enforcement denies without identity or matching allow rules; mutating tools additionally require tools:mutate.
 - Registry.invoke catches exceptions and returns TOOL_EXECUTION_ERROR with evidence.
 - Redaction applies deterministic masking and fails closed on overflow; audit events emitted for all outcomes.
 
-**Updated** HTTP connector follows the same error handling pattern with specific HTTP-related error codes.
+**Updated** HTTP connector follows the same error handling pattern with specific HTTP-related error codes. The SecretsConnector integrates with the existing policy and audit systems for secure password operations, including the new active destruction capability through the DELETE endpoint.
 
 ```mermaid
 flowchart TD
@@ -440,7 +559,7 @@ Emit --> Resp["JSONResponse"]
 - Sensitive query parameters masked in reported URLs for evidence.
 - Screenshots mask password-tier values to avoid leaking secrets.
 - All connector credentials are passed via configuration and never exposed in results or audit payloads.
-- **Updated** HTTP connector uses the same credential set mechanism as browser connector, supporting rotation without restart.
+- **Updated** HTTP connector uses the same credential set mechanism as browser connector, supporting rotation without restart. The SecretsConnector follows the same pattern for secure password handling, with the new DELETE endpoint providing active destruction capabilities for held deliveries.
 
 **Section sources**
 - [browser_connector.py:123-148](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L123-L148)
@@ -453,6 +572,7 @@ Emit --> Resp["JSONResponse"]
 - PolicyEngine loads bundled rules, computes content fingerprint, and evaluates actions with deny-by-default semantics.
 - AuditEmitter emits durable events asynchronously; failures do not degrade the tool path.
 - GatewayService records metrics for policy decisions, redaction spans, and token verification outcomes.
+- **Updated** The SecretsConnector integrates with the existing audit and policy systems, introducing a new `secret_delivered` audit event type and `secrets:deliver` policy action for email delivery operations. The new DELETE endpoint provides active destruction capabilities without additional audit overhead.
 
 **Section sources**
 - [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
@@ -463,7 +583,7 @@ Emit --> Resp["JSONResponse"]
 - Application wiring: app creates registry and optional browser connector; lifespan starts/stops browser pool.
 - Connectors depend on external clients (kubernetes, elasticsearch, httpx) and register tools conditionally based on configuration.
 - GatewayService depends on policy engine, token verifier, redaction, and audit emitter.
-- **Updated** HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector.
+- **Updated** HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector. The SecretsConnector depends on password policy validation and secure delivery buffer backends, with the new DELETE endpoint providing active destruction capabilities.
 
 ```mermaid
 graph LR
@@ -475,19 +595,24 @@ Reg --> Br["BrowserConnector"]
 Reg --> Inc["IncidentsConnector"]
 Reg --> Sk["SkillsConnector"]
 Reg --> Http["HttpConnector"]
+Reg --> Secrets["SecretsConnector"]
 Http --> UrlRedact["URL Redaction"]
+Secrets --> Buffer["SecretDeliveryBuffer"]
+Buffer --> Memory["InMemory Backend"]
+Buffer --> Redis["Redis Backend"]
 GS["GatewayService"] --> PE["PolicyEngine"]
 GS --> AE["AuditEmitter"]
 GS --> RD["Redaction"]
 ```
 
 **Diagram sources**
-- [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
+- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
+- [secret_delivery.py:277-327](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L277-L327)
 
 **Section sources**
-- [app.py:19-142](file://products/tool-gateway/src/tool_gateway/app.py#L19-L142)
+- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 
 ## Performance Considerations
 - Async execution: Connectors run blocking calls in executors to avoid blocking the event loop.
@@ -495,9 +620,7 @@ GS --> RD["Redaction"]
 - Parameter bounds: Time ranges, result limits, and log tail sizes are clamped to prevent resource exhaustion.
 - Redaction overhead: Redaction runs once per result; overflow detection prevents excessive processing.
 - Observability: Metrics recorded for policy decisions, redaction spans, token verification, and audit emissions.
-- **Updated** HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion.
-
-[No sources needed since this section provides general guidance]
+- **Updated** HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion. The SecretsConnector uses efficient CSPRNG generation and minimal memory footprint for ephemeral delivery handles, with the new DELETE endpoint providing fast, idempotent destruction operations.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -507,7 +630,7 @@ Common issues and diagnostics:
 - Upstream connectivity: Connectors return structured errors (e.g., K8S_NOT_CONFIGURED, ELASTIC_NOT_CONFIGURED, UPSTREAM_ERROR); check configuration and network reachability.
 - Browser flow deviations: Off-origin navigation or stale flow provenance triggers specific denial codes; navigate back to bound target or re-bind flow.
 - Redaction overflow: If too much of the result appears sensitive, outputs are withheld; tighten parameters or reduce payload size.
-- **Updated** HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems.
+- **Updated** HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems. SecretsConnector issues include password policy violations, delivery handle expiration, email delivery configuration problems, and active destruction failures. The new DELETE endpoint may fail due to authentication issues, invalid delivery IDs, or backend connectivity problems.
 
 **Section sources**
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
@@ -519,6 +642,6 @@ Common issues and diagnostics:
 - [test_tool_invoke.py:184-549](file://products/tool-gateway/tests/test_tool_invoke.py#L184-L549)
 
 ## Conclusion
-The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. Built-in connectors cover Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, and skills repositories, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
+The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. Built-in connectors cover Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, skills repositories, and secure secret delivery, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
 
-**Updated** The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking.
+**Updated** The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking. The complete implementation of SPEC-062 secure password generation and delivery system provides cryptographically strong password generation, secure one-time delivery mechanisms, and active destruction capabilities through the new DELETE endpoint. This enhancement addresses critical security requirements for operational workflows by ensuring that held deliveries can be immediately destroyed when needed, preventing potential security vulnerabilities from lingering temporary credentials.
