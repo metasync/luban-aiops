@@ -11,10 +11,10 @@ if [ -z "$PROFILE" ]; then
   exit 1
 fi
 
-if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ]; then
-  # mutating-dev (SPEC-022 R-3) and browser-dev (SPEC-049 R-7) are the
-  # committed dev postures, always wired in below — they are never
-  # switchable LLM provider profiles.
+if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ] || [ "$PROFILE" = "secrets-dev" ]; then
+  # mutating-dev (SPEC-022 R-3), browser-dev (SPEC-049 R-7) and
+  # secrets-dev (SPEC-062 R-7) are the committed dev postures, always
+  # wired in below — they are never switchable LLM provider profiles.
   echo "$PROFILE is not a switchable LLM runtime profile" >&2
   exit 1
 fi
@@ -25,8 +25,8 @@ if [ ! -d "$PROFILE_DIR" ]; then
 fi
 
 # The LLM provider profile is switchable; the mutating-dev (SPEC-022
-# R-3) and browser-dev (SPEC-049 R-7) profiles are the committed dev
-# postures and always stay wired in.
+# R-3), browser-dev (SPEC-049 R-7) and secrets-dev (SPEC-062 R-7)
+# profiles are the committed dev postures and always stay wired in.
 cat <<EOF > "$SCRIPT_DIR/dev-k8s/kustomization.yaml"
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -42,6 +42,7 @@ configMapGenerator:
     envs:
       - ../runtime-profiles/mutating-dev/mutating.env
       - ../runtime-profiles/browser-dev/browser.env
+      - ../runtime-profiles/secrets-dev/secrets.env
 patches:
   # SPEC-049: chromium-headless-shell sidecar + credential-set mount on
   # the tool-gateway pod (browser-dev posture).
