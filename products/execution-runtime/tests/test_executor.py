@@ -37,6 +37,7 @@ class _FakeAsyncClient:
         outcome = self._outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
+        outcome.headers.setdefault("x-request-id", headers["x-request-id"])
         return outcome
 
 
@@ -44,11 +45,18 @@ class _JsonResponse:
     def __init__(self, payload, status_code=200):
         self._payload = payload
         self.status_code = status_code
+        self.headers = {}
 
     def json(self):
         if isinstance(self._payload, Exception):
             raise self._payload
         return self._payload
+
+
+def _result(tool="k8s.scale_deployment", **overrides):
+    return {"tool_name": tool, "status": "success", "data": {},
+            "evidence": {"executed_at": "2026-09-23T00:00:00Z", "duration_ms": 1,
+                         "risk_level": "write", "source_system": "fixture"}, **overrides}
 
 
 def _run(coro):
@@ -62,13 +70,13 @@ class ExecutorTests(unittest.TestCase):
         patcher = mock.patch.object(
             executor.httpx,
             "AsyncClient",
-            lambda timeout=None: _FakeAsyncClient(self.outcomes, self.captured),
+            lambda **kwargs: _FakeAsyncClient(self.outcomes, self.captured),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_success_result_passes_through(self) -> None:
-        gateway_result = {"tool_name": "k8s.scale_deployment", "status": "success"}
+        gateway_result = _result()
         self.outcomes.append(_JsonResponse(gateway_result))
         result = _run(
             executor.execute_tool(
@@ -84,12 +92,23 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(call["json"]["request_id"], "req-1")
         self.assertEqual(call["json"]["parameters"], {"replicas": 3})
         self.assertEqual(call["headers"]["Authorization"], "Bearer tok")
+        self.assertEqual(call["headers"]["x-request-id"], "req-1")
+
+    def test_execution_id_is_a_header_not_connector_parameters(self) -> None:
+        self.outcomes.append(_JsonResponse(_result()))
+        execution_id = "11111111-2222-4333-8444-555555555555"
+        _run(executor.execute_tool(_settings(), "k8s.scale_deployment", {}, "tok", "original",
+                                   execution_id=execution_id))
+        self.assertEqual(self.captured[0]["headers"]["x-execution-id"], execution_id)
+        self.assertEqual(self.captured[0]["headers"]["x-request-id"], "original")
+        self.assertNotIn("execution_id", self.captured[0]["json"])
+        self.assertEqual(self.captured[0]["json"]["parameters"], {})
 
     def test_session_id_forwarded_in_payload(self) -> None:
         # SPEC-049 R-1: the signed envelope's chat session id rides the
         # gateway payload so a stateful connector keys the resumed write
         # onto the owner's session, not the approver's subject.
-        self.outcomes.append(_JsonResponse({"status": "success"}))
+        self.outcomes.append(_JsonResponse(_result("web.type")))
         _run(
             executor.execute_tool(
                 _settings(), "web.type", {"ref": 1}, "tok", "req-s",
@@ -101,7 +120,7 @@ class ExecutorTests(unittest.TestCase):
     def test_session_id_absent_when_not_provided(self) -> None:
         # A stateless tool call forwards no session id: the field is
         # omitted, never sent empty.
-        self.outcomes.append(_JsonResponse({"status": "success"}))
+        self.outcomes.append(_JsonResponse(_result()))
         _run(
             executor.execute_tool(
                 _settings(), "k8s.scale_deployment", {"replicas": 3},
@@ -116,7 +135,7 @@ class ExecutorTests(unittest.TestCase):
         # approval from a write auto-signed under a session-scoped flow
         # authority, and refuse the latter when no flow is bound any more.
         for kind in ("action", "flow"):
-            self.outcomes.append(_JsonResponse({"status": "success"}))
+            self.outcomes.append(_JsonResponse(_result("web.click")))
             _run(
                 executor.execute_tool(
                     _settings(), "web.click", {"ref": 1}, "tok", f"req-{kind}",
@@ -132,7 +151,7 @@ class ExecutorTests(unittest.TestCase):
         # An envelope signed before the field forwards nothing: the gateway
         # reads absence as "no extra refusal", so today's behavior stays the
         # default rather than a widening. The field is omitted, never sent empty.
-        self.outcomes.append(_JsonResponse({"status": "success"}))
+        self.outcomes.append(_JsonResponse(_result()))
         _run(
             executor.execute_tool(
                 _settings(), "k8s.scale_deployment", {"replicas": 3},
@@ -141,55 +160,39 @@ class ExecutorTests(unittest.TestCase):
         )
         self.assertNotIn("approval_kind", self.captured[0]["json"])
 
-    def test_timeout_maps_to_structured_timeout(self) -> None:
+    def test_timeout_is_uncertainty_not_a_tool_report(self) -> None:
         self.outcomes.append(httpx.TimeoutException("slow"))
-        result = _run(
-            executor.execute_tool(_settings(), "t.x", {}, "tok", "req-2")
-        )
-        self.assertEqual(result["status"], "error")
-        self.assertEqual(result["error"]["code"], "TIMEOUT")
-        self.assertEqual(result["request_id"], "req-2")
+        with self.assertRaisesRegex(executor.GatewayUncertain, "transport_error"):
+            _run(executor.execute_tool(_settings(), "t.x", {}, "tok", "req-2"))
+        self.assertEqual(len(self.captured), 1)
 
-    def test_transport_error_maps_to_failed_result(self) -> None:
+    def test_transport_error_is_uncertainty(self) -> None:
         self.outcomes.append(httpx.ConnectError("refused"))
-        result = _run(
-            executor.execute_tool(_settings(), "t.x", {}, "tok", "req-3")
-        )
-        self.assertEqual(result["error"]["code"], "TRANSPORT_ERROR")
+        with self.assertRaisesRegex(executor.GatewayUncertain, "transport_error"):
+            _run(executor.execute_tool(_settings(), "t.x", {}, "tok", "req-3"))
 
-    def test_non_json_body_maps_to_failed_result(self) -> None:
+    def test_non_json_body_is_uncertainty(self) -> None:
         self.outcomes.append(_JsonResponse(ValueError("not json"), 502))
-        result = _run(
-            executor.execute_tool(_settings(), "t.x", {}, "tok", "req-4")
-        )
-        self.assertEqual(result["error"]["code"], "BAD_GATEWAY_RESPONSE")
+        with self.assertRaisesRegex(executor.GatewayUncertain, "response_invalid"):
+            _run(executor.execute_tool(_settings(), "t.x", {}, "tok", "req-4"))
 
     def test_missing_gateway_url_fails_closed(self) -> None:
-        result = _run(
-            executor.execute_tool(
-                ExecutionSettings(tool_gateway_url=""), "t.x", {}, "tok", "r"
-            )
-        )
-        self.assertEqual(result["error"]["code"], "NO_GATEWAY")
+        with self.assertRaisesRegex(executor.GatewayUncertain, "gateway_not_configured"):
+            _run(executor.execute_tool(ExecutionSettings(tool_gateway_url=""), "t.x", {}, "tok", "r"))
         self.assertEqual(self.captured, [])
 
     def test_missing_delegated_token_never_calls_gateway(self) -> None:
-        result = _run(
-            executor.execute_tool(_settings(), "t.x", {}, None, "req-5")
-        )
-        self.assertEqual(result["error"]["code"], "NO_CREDENTIAL")
+        with self.assertRaisesRegex(executor.GatewayUncertain, "credential_missing"):
+            _run(executor.execute_tool(_settings(), "t.x", {}, None, "req-5"))
         self.assertEqual(self.captured, [])
 
     def test_delegated_token_never_reaches_logs(self) -> None:
-        self.outcomes.append(httpx.ConnectError("connection refused"))
-        with self.assertLogs(executor.LOGGER, level="WARNING") as captured:
-            _run(
-                executor.execute_tool(
-                    _settings(), "t.x", {}, "tok-secret", "req-6"
-                )
-            )
-        joined = "\n".join(captured.output)
-        self.assertNotIn("tok-secret", joined)
+        self.outcomes.append(httpx.ConnectError("tok-secret in upstream exception"))
+        with mock.patch.object(logging.Logger, "_log") as logged:
+            with self.assertRaises(executor.GatewayUncertain) as captured:
+                _run(executor.execute_tool(_settings(), "t.x", {}, "tok-secret", "req-6"))
+        self.assertNotIn("tok-secret", str(captured.exception))
+        self.assertNotIn("tok-secret", str(logged.call_args_list))
 
 
 class ResultStatusMappingTests(unittest.TestCase):
@@ -213,7 +216,8 @@ class ResultStatusMappingTests(unittest.TestCase):
             ),
             "failed",
         )
-        self.assertEqual(executor.map_result_status({}), "failed")
+        with self.assertRaises(KeyError):
+            executor.map_result_status({})
 
 
 if __name__ == "__main__":

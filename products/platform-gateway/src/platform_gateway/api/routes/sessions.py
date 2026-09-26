@@ -138,14 +138,37 @@ async def list_sessions_route(
 async def get_session_route(
     request: Request,
     session_id: str,
+    execution: str | None = Query(default=None, max_length=36),
+    execution_cursor: str | None = Query(default=None, max_length=2048),
+    page_size: int | None = Query(default=None, ge=1, le=100),
     x_request_id: str | None = Header(default=None),
     settings: PlatformGatewaySettings = Depends(get_settings),
 ) -> dict:
+    """Owner session detail (SPEC-022 R-1), extended with the bounded owner
+    recovery read (SPEC-063 R-5a).
+
+    ``session:read`` is enforced here; ownership is re-checked by the agent
+    layer, so a foreign or unknown session answers the same anti-enumeration
+    404 whether or not an ``execution`` id rides the query — an execution id,
+    request header, or decider identity never widens the read. The optional
+    recovery paging params (``execution`` filter, opaque ``execution_cursor``,
+    ``page_size`` bounded to the agent's 1..100) forward verbatim; omitted, the
+    proxied call is byte-identical to before. Recovery results ride the owner
+    detail only and never the approver inbox, which stays decision-only.
+    """
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, ACTION_SESSION_READ, request_id)
     user_id = identity.username  # type: ignore[union-attr]
-    response = await get_session(settings, request_id, session_id, user_id)
+    response = await get_session(
+        settings,
+        request_id,
+        session_id,
+        user_id,
+        execution=execution,
+        execution_cursor=execution_cursor,
+        page_size=page_size,
+    )
     log_event(
         LOGGER,
         "session_retrieved",

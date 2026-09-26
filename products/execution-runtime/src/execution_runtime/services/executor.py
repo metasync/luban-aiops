@@ -1,23 +1,17 @@
-"""One-shot gateway execution for handed-off requests (SPEC-038 R-3).
-
-Runs exactly one tool invocation per handoff against the tool-gateway,
-presenting the confirmer's delegated token as bearer so the gateway
-re-evaluates the approving identity (the third auth layer; the token
-itself is never logged or persisted). Timeouts and transport failures
-map onto the same structured result shapes agent-service produces, so
-the resumed-stream receipt handling cannot tell them apart.
-"""
-
+"""One non-retrying gateway exchange; transport uncertainty is not a tool report."""
 from __future__ import annotations
 
-import logging
+import asyncio
 from typing import Any
 
 import httpx
 
 from execution_runtime.core.config import ExecutionSettings
+from execution_runtime.services.execution_protocol import ProtocolError, validate
 
-LOGGER = logging.getLogger(__name__)
+
+class GatewayUncertain(ProtocolError):
+    """No trustworthy tool report; the target may still have acted."""
 
 
 async def execute_tool(
@@ -28,124 +22,49 @@ async def execute_tool(
     request_id: str,
     session_id: str | None = None,
     approval_kind: str | None = None,
+    execution_id: str | None = None,
 ) -> dict[str, Any]:
-    """Invoke one tool through the gateway and return the result dict.
-
-    Never raises: every failure mode maps onto a structured error
-    result with the forwarded ``request_id``, so the handoff route can
-    always sign a receipt for the attempt.
-    """
-    if not settings.tool_gateway_url:
-        return _error_result(
-            tool_name,
-            request_id,
-            "NO_GATEWAY",
-            "the worker has no tool-gateway endpoint configured",
-        )
-    if not delegated_token:
-        return _error_result(
-            tool_name,
-            request_id,
-            "NO_CREDENTIAL",
-            "no delegated token was forwarded for tool invocation",
-        )
-
-    payload = {
-        "tool_name": tool_name,
-        "parameters": arguments,
-        # The resumed stream's x-request-id rides the gateway call so
-        # tool_invoked events correlate with execution_completed.
-        "request_id": request_id,
-    }
-    # SPEC-049 R-1: forward the chat session id from the signed envelope so
-    # a stateful gateway connector (the browser pool) keys the resumed
-    # write-tier interaction onto the same session the owner's read-tier
-    # setup bound the flow to. It is a correlation handle, not authority —
-    # the bearer token still carries the approving identity.
+    if not settings.tool_gateway_url or not delegated_token:
+        raise GatewayUncertain("gateway_not_configured" if not settings.tool_gateway_url else "credential_missing")
+    payload = {"tool_name": tool_name, "parameters": arguments, "request_id": request_id}
     if session_id:
         payload["session_id"] = session_id
-    # SPEC-054 R-2 / ADR-0010: forward the authority provenance the handoff
-    # route just verified inside the envelope's HMAC, so the gateway's browser
-    # write path can tell a per-action approval from a write auto-signed under a
-    # session-scoped flow authority — and refuse the latter when no flow is
-    # bound any more (BROWSER_FLOW_AUTHORITY_STALE) instead of reinterpreting it.
-    # It is a provenance handle, not authority: the bearer token still carries
-    # the approving identity, the gateway never sees the signed envelope, and it
-    # treats this value as untrusted input whose only permitted effect is a
-    # refusal. Absent for envelopes predating the field, which the gateway reads
-    # as "no extra refusal" — today's behavior, never a widening.
     if approval_kind:
         payload["approval_kind"] = approval_kind
+    headers = {"Authorization": f"Bearer {delegated_token}", "x-request-id": request_id}
+    if execution_id:
+        headers["x-execution-id"] = execution_id
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.gateway_timeout_seconds
-        ) as client:
-            response = await client.post(
-                f"{settings.tool_gateway_url.rstrip('/')}/api/v2/tools/invoke",
-                json=payload,
-                headers={"Authorization": f"Bearer {delegated_token}"},
-            )
-    except httpx.TimeoutException:
-        return _error_result(
-            tool_name,
-            request_id,
-            "TIMEOUT",
-            "tool invocation timed out before the gateway answered",
-        )
-    except httpx.HTTPError as exc:
-        # Transport detail stays in the log, never the token.
-        LOGGER.warning(
-            "gateway invocation transport failure for %s: %s",
-            tool_name,
-            exc,
-        )
-        return _error_result(
-            tool_name,
-            request_id,
-            "TRANSPORT_ERROR",
-            "the tool gateway was unreachable",
-        )
-    try:
-        return response.json()
-    except ValueError:
-        LOGGER.warning(
-            "gateway invocation returned a non-JSON body for %s (status %s)",
-            tool_name,
-            response.status_code,
-        )
-        return _error_result(
-            tool_name,
-            request_id,
-            "BAD_GATEWAY_RESPONSE",
-            "the tool gateway returned an unparseable response",
-        )
+        async with asyncio.timeout(min(settings.gateway_timeout_seconds, 30)):
+            async with httpx.AsyncClient(
+                timeout=settings.gateway_timeout_seconds, follow_redirects=False,
+                trust_env=False, transport=httpx.AsyncHTTPTransport(retries=0),
+            ) as client:
+                response = await client.post(
+                    f"{settings.tool_gateway_url.rstrip('/')}/api/v2/tools/invoke",
+                    json=payload, headers=headers,
+                )
+        # Schema-valid tool failures are reports even on an HTTP error. Redirects
+        # are never followed and cannot be interpreted as successful execution.
+        if 300 <= response.status_code < 400 or response.headers.get("x-request-id") != request_id:
+            raise GatewayUncertain("response_invalid")
+        result = response.json()
+        validate("tool-result", result)
+        if (result["tool_name"] != tool_name
+                or (result["status"] == "success" and ("data" not in result or result.get("error")))
+                or (result["status"] != "success" and not result.get("error"))):
+            raise GatewayUncertain("response_invalid")
+        return result
+    except (TimeoutError, httpx.HTTPError):
+        raise GatewayUncertain("transport_error") from None
+    except (ValueError, TypeError, RecursionError):
+        raise GatewayUncertain("response_invalid") from None
 
 
 def map_result_status(result: dict[str, Any]) -> str:
-    """Map a gateway result onto the receipt status vocabulary.
-
-    Mirrors the kernel's resumed-stream mapping: ``success`` results
-    close ``succeeded``; an ``error.code`` of ``TIMEOUT`` closes
-    ``timeout``; anything else closes ``failed``.
-    """
-    if result.get("status") == "success":
+    """Map a validated tool report, never a synthetic transport error."""
+    if result["status"] == "success":
         return "succeeded"
-    error = result.get("error")
-    error = error if isinstance(error, dict) else {}
-    if error.get("code") == "TIMEOUT":
+    if (result.get("error") or {}).get("code") == "TIMEOUT":
         return "timeout"
     return "failed"
-
-
-def _error_result(
-    tool_name: str,
-    request_id: str,
-    code: str,
-    message: str,
-) -> dict[str, Any]:
-    return {
-        "tool_name": tool_name,
-        "status": "error",
-        "request_id": request_id,
-        "error": {"code": code, "message": message},
-    }

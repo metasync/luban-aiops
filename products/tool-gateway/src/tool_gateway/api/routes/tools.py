@@ -29,7 +29,7 @@ async def list_tools(
     registry: ToolRegistry = Depends(get_tool_registry),
 ) -> list[dict]:
     """Return metadata for all registered tools (gated by ``tools:list``)."""
-    request_id = resolve_request_id(x_request_id)
+    request_id = getattr(request.state, "request_id", None) or resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, "tools:list", request_id)  # type: ignore[arg-type]
     return [defn.to_dict() for defn in registry.list_definitions()]
@@ -45,6 +45,6 @@ async def invoke_tool(
     """Invoke a registered tool with policy enforcement and audit logging."""
     from tool_gateway.services.gateway_service import invoke_tool as service_invoke
 
-    request_id = resolve_request_id(x_request_id)
+    request_id = getattr(request.state, "request_id", None) or resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     return await service_invoke(settings, registry, request, identity, request_id)

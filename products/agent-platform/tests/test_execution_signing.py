@@ -17,6 +17,9 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from uuid import uuid4
+
+from agent_service.services.execution_protocol import ProtocolError, timestamp, validate_request
 
 import jsonschema
 from agentscope.message import ToolCallBlock
@@ -451,6 +454,55 @@ class ApprovalKindProvenanceTests(unittest.TestCase):
             ),
             schema,
         )
+
+
+class DurableV3SigningTests(unittest.TestCase):
+    def builders(self, **window):
+        return (
+            lambda: build_requests(_parked(), "bob", KEY, **window)[0],
+            lambda: build_flow_request("call-1", "web.click", {"ref": 1},
+                                       _flow_authority(confirm_id=str(uuid4())), KEY, **window),
+        )
+
+    def test_action_and_flow_bind_run_epoch_and_maximum_lifetime(self):
+        run, epoch = str(uuid4()), str(uuid4())
+        for builder in self.builders(run_id=run, admission_epoch=epoch):
+            request = builder()
+            validate_request(request, KEY)
+            self.assertEqual(request["run_id"], run)
+            self.assertEqual(request["admission_epoch"], epoch)
+            self.assertEqual(request["protocol_version"], 3)
+            self.assertEqual((timestamp(request["expires_at"]) - timestamp(request["requested_at"])).total_seconds(), 900)
+            for field, value in (("run_id", str(uuid4())), ("admission_epoch", str(uuid4())),
+                                 ("expires_at", request["requested_at"]), ("protocol_version", 4)):
+                with self.subTest(field=field):
+                    with self.assertRaises(ProtocolError):
+                        validate_request({**request, field: value}, KEY)
+
+    def test_incomplete_identity_or_invalid_lifetime_fails_before_signing(self):
+        run, epoch = str(uuid4()), str(uuid4())
+        windows = [dict(run_id=run), dict(admission_epoch=epoch),
+                   dict(run_id="invalid", admission_epoch=epoch),
+                   dict(run_id=run, admission_epoch="invalid")]
+        windows.extend(dict(run_id=run, admission_epoch=epoch, lifetime_seconds=value)
+                       for value in (0, -1, 901))
+        for window in windows:
+            for builder in self.builders(**window):
+                with self.subTest(window=window):
+                    with self.assertRaises(ValueError):
+                        builder()
+
+    def test_full_request_digest_includes_signature(self):
+        request = self.builders(run_id=str(uuid4()), admission_epoch=str(uuid4()))[0]()
+        self.assertNotEqual(canonical_digest(request), canonical_digest({**request, "signature": "0" * 64}))
+        self.assertEqual(sign_envelope(request, KEY), sign_envelope({**request, "signature": "0" * 64}, KEY))
+
+    def test_legacy_is_readable_but_not_executable(self):
+        request = build_requests(_parked(), "bob", KEY)[0]
+        jsonschema.validate(request, _load_schema("execution-request.schema.json"))
+        self.assertTrue(verify_envelope(request, request["signature"], KEY))
+        with self.assertRaises(ProtocolError):
+            validate_request(request, KEY)
 
 
 class BuildReceiptTests(unittest.TestCase):

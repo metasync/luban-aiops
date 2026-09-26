@@ -58,6 +58,8 @@ from agent_service.services.confirmation_records import (
 from agent_service.services.document_prose import generate_prose
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_protocol import ProtocolError
+from agent_service.services.execution_recovery import ExecutionRecovery, read_owner_recovery_page
 from agent_service.services.hitl_confirmations import (
     ConfirmationExpired,
     ConfirmationNotFound,
@@ -763,41 +765,78 @@ def _load_evidence_turns(session_id: str) -> list[EvidenceTurn] | None:
 
 def _load_confirmation_cards(
     session_id: str,
+    *,
+    user_id: str | None = None,
+    recovery_page: dict | None = None,
+    evidence_turns: list[EvidenceTurn] | None = None,
 ) -> list[ConfirmationRecordModel] | None:
     """Durable confirmation cards for the session detail (SPEC-031 R-2).
 
     ``None`` when the record store is unreadable — degrades like
     ``evidence_turns``, never a 500. Approved-execution rows ride each
-    card under ``executions`` (SPEC-037 R-4); an unreadable execution
-    store degrades to empty rows, never a card failure.
+    card under ``executions`` (SPEC-037 R-4).
+
+    SPEC-063 R-5a: the owner-scoped ledger page is already read independently
+    of these presentation stores. Merge by execution/confirmation identity;
+    missing presentation rows get a read-only recovery card. Retain the
+    original turn ordinal where available; never invent one when it is lost.
+    A missing page leaves legacy behavior unchanged (admission disabled).
     """
     try:
         records = CONFIRMATION_RECORD_STORE.load_for_session(session_id)
-    except Exception as exc:
-        LOGGER.warning(
-            "confirmation record store unreadable for session %s: %s",
-            session_id,
-            exc,
-        )
+    except Exception:
+        LOGGER.warning("confirmation record store unreadable for session %s", session_id)
+        records = None
+    if records is None and recovery_page is None:
         return None
     try:
         executions = EXECUTION_RECORD_STORE.load_for_session(session_id)
-    except Exception as exc:
-        LOGGER.warning(
-            "execution record store unreadable for session %s: %s",
-            session_id,
-            exc,
-        )
+    except Exception:
+        LOGGER.warning("execution record store unreadable for session %s", session_id)
         executions = []
+    # Never mutate a presentation store's in-memory rows during a read.
+    by_id = {row["execution_id"]: dict(row) for row in executions}
+    if recovery_page is not None:
+        if recovery_page["availability"] == "unavailable":
+            for row in by_id.values():
+                row["recovery"] = ExecutionRecovery.empty("unavailable", row["execution_id"], replay=False)
+        for projection in recovery_page["executions"]:
+            execution_id = projection["execution_id"]
+            row = by_id.get(execution_id, {"status": "requested"})
+            row.update({field: projection[field] for field in (
+                "execution_id", "confirm_id", "call_id", "session_id", "tool_name", "requested_at")})
+            row["recovery"] = projection
+            by_id[execution_id] = row
+    executions = list(by_id.values())
     by_confirm: dict[str, list[dict]] = {}
     for row in executions:
         by_confirm.setdefault(row["confirm_id"], []).append(row)
-    return [
-        ConfirmationRecordModel(
-            **record, executions=by_confirm.get(record["confirm_id"], [])
-        )
-        for record in records
-    ]
+    cards = {record["confirm_id"]: dict(record) for record in records or []}
+    for confirm_id, rows in by_confirm.items():
+        if not any(row.get("recovery", {}).get("availability") == "available"
+                   for row in rows if row.get("recovery")):
+            continue
+        old = cards.get(confirm_id)
+        if old is not None and old["status"] != "pending":
+            continue
+        # A signed registered request proves approval, but does not recover
+        # the original presentation or a missing parking ordinal.
+        call_ids = {row["call_id"] for row in rows}
+        anchors = {group.turn_index for group in evidence_turns or []
+                   if any(frame.get("confirm_id") == confirm_id or frame.get("call_id") in call_ids
+                          for frame in group.frames)}
+        cards[confirm_id] = {
+            **(old or {}), "confirm_id": confirm_id, "session_id": session_id,
+            "owner_user_id": user_id, "status": "approved", "pending_calls": [],
+            "recovery_only": True,
+            "turn_index": old.get("turn_index") if old and old.get("turn_index") is not None
+            else next(iter(anchors)) if len(anchors) == 1 else None,
+            "message": "Execution recovery; original confirmation details are unavailable.",
+        }
+    if records is None and not cards:
+        return None
+    return [ConfirmationRecordModel(**record, executions=by_confirm.get(confirm_id, []))
+            for confirm_id, record in cards.items()]
 
 
 @router.post("/sessions", response_model=AgentSession, status_code=201)
@@ -903,11 +942,29 @@ async def list_sessions_route(
 @router.get("/sessions/{session_id}", response_model=AgentSession)
 async def read_session(
     session_id: str,
+    execution: str | None = Query(None, max_length=36),
+    execution_cursor: str | None = Query(None, max_length=2048),
+    page_size: int = Query(50, ge=1, le=100),
     x_user_id: str | None = Header(None),
 ) -> AgentSession:
     user_id = _user_id(x_user_id)
     session = get_session(session_id, user_id)
     transcript_available, transcript = extract_transcript(session.session_id)
+    # SPEC-063 R-5a: the bounded owner recovery path, read from the durable
+    # ledger independently of the legacy presentation stores. ``None`` (the
+    # default, admission disabled) keeps the session detail byte-identical and
+    # reports availability ``unavailable``; a foreign/unknown session already
+    # 404'd at get_session, and an execution id, request header, or decider
+    # identity never bypasses that owner check.
+    recovery = get_runtime_kernel()._execution_recovery()
+    recovery_page = None
+    if recovery is not None:
+        try:
+            recovery_page = recovery.owner_session_recovery(
+                session_id, user_id, execution=execution, cursor=execution_cursor, page_size=page_size)
+        except ProtocolError:
+            raise HTTPException(status_code=400, detail="Invalid recovery query") from None
+    evidence_turns = _load_evidence_turns(session.session_id)
     return AgentSession(
         session_id=session.session_id,
         user_id=session.user_id or user_id,
@@ -922,8 +979,16 @@ async def read_session(
         ),
         transcript_available=transcript_available,
         transcript=transcript,
-        evidence_turns=_load_evidence_turns(session.session_id),
-        confirmations=_load_confirmation_cards(session.session_id),
+        evidence_turns=evidence_turns,
+        confirmations=_load_confirmation_cards(
+            session.session_id, user_id=user_id, recovery_page=recovery_page,
+            evidence_turns=evidence_turns,
+        ),
+        execution_recovery_availability=(
+            recovery_page["availability"] if recovery_page is not None else "unavailable"
+        ),
+        executions_truncated=recovery_page["executions_truncated"] if recovery_page else False,
+        next_execution_cursor=recovery_page["next_execution_cursor"] if recovery_page else None,
     )
 
 
@@ -1389,6 +1454,7 @@ async def graduate_session_skill(
         # The operator's replay budget rather than the module default, so the
         # twin of ``GATEWAY_BROWSER_FLOW_MAX_STEPS`` moves with it.
         max_steps=settings.skill_graduation_max_steps,
+        recovery_page=read_owner_recovery_page(session.session_id, session.user_id or ""),
     )
     if not report.graduable:
         raise HTTPException(

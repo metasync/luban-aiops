@@ -31,6 +31,11 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from agent_service.services.execution_recovery import (
+    EXECUTION_EVIDENCE_GUIDANCE,
+    execution_evidence_label,
+)
+
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from agent_service.metadata import SERVICE_VERSION
@@ -245,6 +250,8 @@ invent steps, causes, or numbers the record does not support. Never \
 include secrets, credentials, tokens, hostnames, IP addresses, or \
 customer-identifying data in the draft.
 
+{execution_guidance}
+
 {retry_hint}\
 JSON digest bundle:
 {bundle_json}
@@ -286,6 +293,7 @@ def build_skill_draft_prompt(
         anchor_source=_ANCHOR_SOURCES[anchor],
         anchor_sections=_ANCHOR_SECTIONS[anchor],
         retry_hint=retry_hint,
+        execution_guidance=EXECUTION_EVIDENCE_GUIDANCE,
         bundle_json=json.dumps(bundle, sort_keys=True, default=str),
     )
 
@@ -435,6 +443,36 @@ def assemble_markdown(
 # --- Facts-only skeleton (always format-valid) --------------------------------
 
 
+def recovery_evidence_markdown(bundle: dict[str, Any]) -> str:
+    """Keep mechanical evidence visible even if generated prose omits it."""
+    handover = bundle.get("handover") or {}
+    if not handover.get("target_verification_required"):
+        return ""
+    lines = ["## Execution evidence", "", EXECUTION_EVIDENCE_GUIDANCE, ""]
+    if handover.get("incomplete_recovery_sessions"):
+        lines.extend(["Execution recovery coverage is incomplete.", ""])
+    rows = handover.get("executions") or []
+    details: list[str] = []
+    size = len("\n".join(lines).encode())
+    truncated = len(rows) > 100
+    for row in rows[:100]:
+        facts = row.get("recovery")
+        if isinstance(facts, dict):
+            identifier = row.get("execution_id")
+            if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,256}", identifier):
+                identifier = "unrecognized execution"
+            line = f"- {identifier}: {execution_evidence_label(facts)}"
+            size += len(line.encode()) + 1
+            # Reserve room for the truncation notice; no signed input is changed.
+            if size > 7900:
+                truncated = True
+                break
+            details.append(line)
+    if truncated:
+        lines.extend(["Execution evidence is truncated; inspect the owner session for remaining records.", ""])
+    return "\n".join(lines + details).strip() + "\n\n"
+
+
 def build_skeleton(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """Deterministic facts-only draft; the degradation for any generation
     or parse failure. Contract frontmatter from session/incident facts,
@@ -468,6 +506,9 @@ def build_skeleton(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
         tags.insert(0, severity.strip()[:MAX_TAG_CHARS])
 
     lines: list[str] = ["# " + title, ""]
+    recovery_text = recovery_evidence_markdown(bundle)
+    if recovery_text:
+        lines.append(recovery_text)
     if envelope:
         lines.append("## Context")
         lines.append("")
@@ -518,7 +559,7 @@ def build_skeleton(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
             for row in executions:
                 lines.append(
                     f"| {row.get('execution_id', '')} | {row.get('tool_name', '')} "
-                    f"| {row.get('receipt_status', '')} |"
+                    f"| {execution_evidence_label(row['recovery']) if isinstance(row.get('recovery'), dict) else row.get('receipt_status', '')} |"
                 )
             lines.append("")
 
@@ -668,7 +709,11 @@ async def generate_skill_draft(
         text = (text or "").strip()
         if not text:
             raise RuntimeError("skill-draft generation returned an empty reply")
-        return parse_model_output(text)
+        parsed = parse_model_output(text)
+        if parsed is None:
+            return None
+        frontmatter, body = parsed
+        return frontmatter, recovery_evidence_markdown(bundle) + body
     except Exception as exc:  # noqa: BLE001 — fail-soft by contract
         LOGGER.warning("skill-draft generation failed: %s", exc)
         return None

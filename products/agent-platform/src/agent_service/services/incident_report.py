@@ -203,6 +203,19 @@ def document_summary(digest: dict[str, Any]) -> str | None:
         status = session.get("status")
         if status == "owner":
             parts.append("own session")
+            counts = session.get("execution_evidence_counts") or {}
+            for key, noun in (("outcome_unknown", "unknown outcome"),
+                              ("late_report", "late tool report"),
+                              ("integrity_conflict", "conflicting report"),
+                              ("dispatch_claimed", "pending outcome")):
+                if counts.get(key):
+                    parts.append(_plural(counts[key], noun))
+            recovery = session.get("execution_recovery")
+            if recovery and (recovery.get("availability") != "available"
+                             or recovery.get("executions_truncated")):
+                parts.append("execution recovery incomplete")
+            if counts.get("not_found") or counts.get("unavailable"):
+                parts.append("missing or unavailable execution evidence")
         elif status == "foreign":
             parts.append("foreign session (metadata only)")
         elif status == "foreign_denied":

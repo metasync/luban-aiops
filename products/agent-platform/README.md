@@ -249,7 +249,7 @@ HITL confirmation bridging (SPEC-020):
 - `POST /api/v2/chat/confirm` resumes the parked reply with `UserConfirmResultEvent` (approve runs the batch under the confirmer's delegated token, deny feeds the refusal back to the model), emits a `confirmation_result` frame first (echoing the decided calls), continues the paused reply on the same SSE stream, and snapshots agent state after completion
 - unknown, foreign, or already-answered confirmations answer `404`; expired entries answer `410`; a TTL-expired park is closed via `UserInterruptEvent` on the confirm attempt or the next chat turn — expiry never silently evicts a parked reply
 - the confirm route claims the entry before any headers go out, so a duplicate confirm (retry, second tab) fails closed with `404` instead of double-resuming the parked batch
-- confirmed calls are never re-asked: agentscope re-traverses the permission middleware chain for operator-approved calls (state ALLOWED), and the middleware delegates them to the built-in resolution's ALLOWED short-circuit so the approved batch executes on resume instead of re-parking
+- confirmed calls are not re-asked: agentscope re-traverses the permission middleware for ALLOWED calls, but SPEC-063 checks the durable run stop before that shortcut; approval never overrides an unresolved or stopped run
 - `AGENT_HITL_CONFIRM_TIMEOUT=0` disables bridging entirely and ASKs keep the built-in permission-middleware resolution
 - mutating tools can never bypass the bridge (SPEC-021): gateway tools carry their risk tier onto the FunctionTool, parked `confirmation_request`/`confirmation_result` frames include the per-call `risk_level` (stream schema v6), and with bridging disabled non-read tools are dropped from toolkit construction with a per-turn system notice
 
@@ -267,6 +267,33 @@ Testing note:
 
 - keep adding focused tests as the runtime surface grows
 - the current package includes a lightweight `pytest`-based starting point for runtime configuration and placeholder behavior
+
+## Durable execution and recovery (SPEC-063)
+
+Approved action and flow writes register immutable intents in Postgres before
+handoff to execution-runtime. `AGENT_EXECUTION_ADMISSION_ENABLED` defaults to
+`false`; enabling requires `AGENT_EXECUTION_STATE_DB_URL` and a matching canonical
+UUID `AGENT_EXECUTION_ADMISSION_EPOCH`. This ledger has no memory fallback and is
+independent of best-effort session, agent-state, and presentation stores.
+
+The persistent run identity survives park/resume. A stopped run, unresolved
+predecessor, or unavailable ledger blocks further automatic mutations before the
+middleware's `ALLOWED` shortcut, flow signing, handoff, and final send. Read-only
+investigation keeps its existing policy gates. A worker timeout (default 60s,
+maximum 120s) records uncertainty, not a terminal no-effect receipt.
+
+Only a verified original result, durably accepted by the agent, can mint the
+single-use, process-bound permit that releases a held secret. Metadata replay,
+late results, and reload never recreate original output or release authority.
+Owner session recovery exposes bounded facts even if presentation writes failed;
+foreign owners get no additional access and the approver inbox stays decision-only.
+New document digests and authoring decisions preserve unknown/unavailable/conflict
+states; published snapshots are not rewritten.
+
+See [recovery guidance](../../docs/guides/portal-user-guide.md#recovering-an-uncertain-execution)
+and the mandatory [cutover/restore runbook](../../docs/guides/execution-cutover-restore.md).
+The gateway/worker/agent migration is coordinated and mutation-disabled; deploying
+new binaries alone does not enable admission.
 
 ## Expected Integration Points
 

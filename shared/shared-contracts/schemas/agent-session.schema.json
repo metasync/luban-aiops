@@ -168,6 +168,10 @@
           "decided_at": {
             "type": ["string", "null"]
           },
+          "recovery_only": {
+            "type": "boolean",
+            "description": "Read-only owner recovery card whose original confirmation presentation is missing or stale. No original parking turn is implied when turn_index is null. Never added to the approver inbox."
+          },
           "executions": {
             "type": "array",
             "description": "SPEC-037 R-4: signed execution rows for this confirmation, one per approved parked call, in requested_at order; empty for pending/denied/expired records and for decided rows that predate signed execution requests.",
@@ -212,12 +216,30 @@
                 "receipt": {
                   "type": ["object", "null"],
                   "description": "Signed execution receipt envelope per execution-receipt.schema.json once the execution closed; null while requested or rejected."
+                },
+                "recovery": {
+                  "type": ["object", "null"],
+                  "description": "SPEC-063 R-5a: optional bounded owner recovery projection for this execution, shaped per execution-recovery.schema.json and read from the durable ledger independently of whether this presentation row's write succeeded. Present only when admission is enabled and the caller owns the session; null otherwise, so legacy rows are unchanged. Carries explicit availability (available/unavailable/not_found), the derived state, the signed receipt when a result is recorded, and a cursor-paged observation window (max 20) with an opaque next_observation_cursor. A recovery read is never an original response and confers no dispatch, continuation, or secret-release permit."
                 }
               }
             }
           }
         }
       }
+    },
+    "executions_truncated": {
+      "type": "boolean",
+      "description": "More ledger executions exist beyond this bounded owner-session page."
+    },
+    "next_execution_cursor": {
+      "type": ["string", "null"],
+      "maxLength": 2048,
+      "description": "Opaque owner/session-bound execution continuation. Send as execution_cursor without an execution filter. A per-execution observation cursor instead requires its matching execution filter."
+    },
+    "execution_recovery_availability": {
+      "type": ["string", "null"],
+      "enum": ["available", "unavailable", null],
+      "description": "SPEC-063 R-5a: whether the bounded owner recovery path is available for this session, computed independently of the legacy confirmation/execution presentation stores. \"unavailable\" when admission is disabled or the ledger cannot be read (never a silent empty history); null on responses that predate recovery."
     }
   }
 }

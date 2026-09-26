@@ -20,6 +20,7 @@ Luban AIOps platform.
 | [Incident Triage and Collaboration Guide](incident-guide.md) | Alertmanager wiring, incident lifecycle, running and interpreting triage, collaboration semantics |
 | [Luban-Hosted Small Model Guide](luban-llm-guide.md) | Self-hosting a small LLM (Ollama/vLLM/llama.cpp) with token auth, platform wiring, K8s hosting |
 | [Architecture Overview](architecture-overview.md) | Service topology, request flow, trust chain, RBAC model |
+| [Execution Cutover and Restore](execution-cutover-restore.md) | Gated execution-runtime downgrade, database-restore interlock, external epoch rotation, and the old-validity wait (SPEC-063 R-7b) |
 | [Troubleshooting](troubleshooting.md) | Symptom-based diagnostics for common deployment and runtime issues |
 
 ## Quick Start

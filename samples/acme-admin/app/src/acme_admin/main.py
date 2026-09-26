@@ -44,6 +44,11 @@ def missing_credential_message() -> str:
 async def lifespan(app: FastAPI):
     if not admin_password():
         raise RuntimeError(missing_credential_message())
+    acceptance_user = os.environ.get("ACME_ACCEPTANCE_USER")
+    if acceptance_user is not None:
+        from .store import STORE
+
+        STORE.seed_acceptance_user(acceptance_user)
     yield
 
 

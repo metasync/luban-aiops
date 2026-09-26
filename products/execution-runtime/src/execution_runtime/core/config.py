@@ -31,19 +31,16 @@ class ExecutionSettings:
     audit_client_id: str = "execution-runtime"
     audit_client_secret: str | None = None
     flight_retention_seconds: int = 900
+    admission_enabled: bool = False
+    admission_epoch: str = ""
 
     def __post_init__(self) -> None:
-        if self.gateway_timeout_seconds <= 0:
-            raise ValueError("EXECUTION_GATEWAY_TIMEOUT_SECONDS must be > 0.")
+        if not 0 < self.gateway_timeout_seconds <= 30:
+            raise ValueError("EXECUTION_GATEWAY_TIMEOUT_SECONDS must be > 0 and <= 30.")
         if self.state_store_backend not in _SUPPORTED_STORE_BACKENDS:
             raise ValueError(
                 f"Unknown EXECUTION_STATE_STORE_BACKEND: "
                 f"{self.state_store_backend!r} (expected 'memory' or 'postgres')"
-            )
-        if self.state_store_backend == "postgres" and not self.state_db_url:
-            raise ValueError(
-                "EXECUTION_STATE_STORE_BACKEND=postgres requires "
-                "EXECUTION_STATE_DB_URL to be set."
             )
         if self.flight_retention_seconds < 1:
             raise ValueError("EXECUTION_FLIGHT_RETENTION_SECONDS must be >= 1.")
@@ -55,6 +52,8 @@ class ExecutionSettings:
             return value or None
 
         return cls(
+            admission_enabled=os.getenv("EXECUTION_ADMISSION_ENABLED", "false").lower() == "true",
+            admission_epoch=os.getenv("EXECUTION_ADMISSION_EPOCH", "").strip(),
             execution_signing_key=_secret("EXECUTION_SIGNING_KEY"),
             handoff_token=_secret("EXECUTION_HANDOFF_TOKEN"),
             tool_gateway_url=os.getenv("TOOL_GATEWAY_URL", "").strip(),

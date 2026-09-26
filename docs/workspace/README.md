@@ -35,6 +35,9 @@ This folder contains the documents that define how the platform should be organi
 - `python-container-strategy.md`
   - defines the current Python container baseline, evaluates the environment-specific base image option, and records the recommended migration path
 
+- [mcp-exposure-spike.md](mcp-exposure-spike.md)
+  - assesses independent MCP toolsets consumed by tool-gateway; recommends retaining native connectors until a concrete use case justifies a pilot, not exposing Luban workflows or promoting an implementation spec
+
 ## Relationship To The Platform Study
 
 These documents extend the main platform study in `docs/agentic-aiops-platform/` by answering:

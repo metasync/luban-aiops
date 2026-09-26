@@ -19,7 +19,8 @@ activate them. A feature is **active** when all required variables are set to no
 | **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **HTTP service-checks (`http.*`, SPEC-058)** | `GATEWAY_HTTP_ENABLED=true`, `GATEWAY_HTTP_ALLOW_ORIGINS` (deny-by-default); `http.post` (write) additionally needs `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0` + a `tools:mutate` grant; credentials via `GATEWAY_HTTP_CREDENTIAL_SETS` (defaults to the browser path) | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
-| **Isolated execution worker (SPEC-038)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret` | agent-service, execution-runtime | **must be provisioned** (`sync-execution-handoff-secret.sh` + worker URL); absent config or any transport error fails mutating resumes closed (`worker_unavailable`) |
+| **Isolated execution worker (SPEC-038/063)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret`; durable admission below | agent-service, execution-runtime | **must be provisioned**; missing configuration refuses execution; transport loss after a possible send is uncertain, never proof of no effect |
+| **Durable mutation admission (SPEC-063)** | `AGENT_EXECUTION_STATE_DB_URL`, `AGENT_EXECUTION_ADMISSION_ENABLED=true`, `AGENT_EXECUTION_ADMISSION_EPOCH`; `EXECUTION_STATE_STORE_BACKEND=postgres`, `EXECUTION_STATE_DB_URL`, `EXECUTION_ADMISSION_ENABLED=true`, `EXECUTION_ADMISSION_EPOCH`; verified, enabled Postgres catalog with matching epoch | agent-service, execution-runtime | **disabled**; requires coordinated mutation-disabled migration/cutover and separate explicit enablement |
 | **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
 | **Secure password generation / Copy password (SPEC-062)** | `GATEWAY_SECRETS_ENABLED=true`, readable `GATEWAY_PASSWORD_POLICY_PATH`, delegation + `tools:invoke` | tool-gateway, agent-service, platform-gateway, portal | disabled (`false`); no SMTP required |
 | **Email secret delivery (SPEC-062)** | Secrets + mutating/HITL/signed execution enabled; `GATEWAY_EMAIL_HOST`, sender, TLS, optional SMTP Secret; paired gateway/agent recipient allowlists; `secrets:deliver` + `tools:mutate` | tool-gateway, agent-service, platform-gateway, policy bundle | SMTP unconfigured; inert |
@@ -184,10 +185,14 @@ parked arguments' digest and verify it at invocation (SPEC-037); without
 audited `signing_unavailable` rejection. Since SPEC-038 the verified call
 is handed off to the isolated `execution-runtime` worker, which re-verifies
 the envelope and executes under the forwarded confirmer token; without
-`AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` (or on any
-handoff transport error) the resume fails closed with an audited
-`worker_unavailable` rejection — there is no in-process fallback. See the
-[Approval and HITL Governance Guide](approval-and-hitl.md).
+`AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` the resume
+refuses execution — there is no in-process fallback. SPEC-063 additionally
+requires enabled durable admission at agent, worker, and verified Postgres
+catalog, with matching epochs. An ambiguous handoff transport failure after a
+possible send records uncertainty and stops automatic mutation continuation;
+it is not a pre-send rejection or proof of no target effect. See the
+[Approval and HITL Governance Guide](approval-and-hitl.md) and the mandatory
+[initial protocol cutover](execution-cutover-restore.md#initial-spec-063-protocol-cutover).
 
 ### Audit Ingestion Chain
 
@@ -446,7 +451,10 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_EXECUTION_SIGNING_KEY` | HMAC key for signed execution requests and receipts (SPEC-037); rides the `execution-signing-secret` via an optional `secretKeyRef` — an absent secret leaves it unset and mutating resumes fail closed (`signing_unavailable`) | **must be provisioned** | execution-signing-secret |
 | `AGENT_EXECUTION_WORKER_URL` | Internal `execution-runtime` worker endpoint for the authenticated handoff of approved mutating calls (SPEC-038); unset rejects mutating resumes with an audited `worker_unavailable` rejection — no in-process fallback | `http://execution-runtime:8000` (dev-k8s) | runtime-config |
 | `AGENT_EXECUTION_HANDOFF_TOKEN` | Static bearer token presented to the worker handoff (SPEC-038); rides the `execution-handoff-secret` via an optional `secretKeyRef` — absent secret fails mutating resumes closed (`worker_unavailable`) | **must be provisioned** | execution-handoff-secret |
-| `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` | Budget for the blocking worker handoff on the resumed stream (SPEC-038); expiry lands as the structured timeout result and a `timeout` receipt close. Must be > 0 | `60` | code default |
+| `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` | Handoff wait budget; must be > 0 and <= 120. Durable-path expiry records wait uncertainty, not a terminal worker receipt or cancellation | `60` | code default |
+| `AGENT_EXECUTION_STATE_DB_URL` | Postgres DSN for the SPEC-063 execution ledger, shared with the worker; no memory-backed mutation fallback | *(none)* | explicitly provisioned Secret/environment |
+| `AGENT_EXECUTION_ADMISSION_ENABLED` | Opt-in admission flag; enabling requires ledger DSN and epoch; effective admission also requires verified enabled catalog | `false` | code default; explicit cutover configuration |
+| `AGENT_EXECUTION_ADMISSION_EPOCH` | Externally managed UUID matching worker/catalog; not inferred from a restored snapshot | *(none)* | explicit cutover configuration |
 | `AGENT_GATEWAY_TOOL_AUTO_ALLOW` | Comma-separated dotted gateway tool names auto-approved by the permission middleware when read-only (overrides the built-in vetted list); the allow-list is the only auto-approval surface — every other tool is answered with an explicit ASK and parks for operator confirmation (SPEC-020). Mutating tools are never auto-approved regardless of this setting (SPEC-021) | built-in vetted list | code default |
 | `AGENT_HITL_CONFIRM_TIMEOUT` | HITL confirmation timeout in seconds; an expired parked batch is closed via `UserInterruptEvent` on the next confirm attempt (410) or next chat turn. `0` disables HITL confirmation bridging entirely (SPEC-020) and excludes mutating tools from the agent toolkit (SPEC-021) | `600` | code default |
 | `AGENT_BROWSER_FLOW_APPROVAL_TTL` | Seconds an operator's approval of a `write`-class browser flow unlocks subsequent `web.*` writes in that same flow (SPEC-051 R-2): the authority is scoped to the chat session **and** the approved flow's identity (`skill_id` + `origin`) and each unlocked write is auto-signed under the approving card (ADR-0007). An expired approval no longer unlocks — the next write parks again. `0` disables flow-unlock entirely, restoring the pre-SPEC-051 posture where every browser write parks its own card. Must be `>= 0`. The tool-gateway deviation guard (origin allowlist, `risk_class`, `GATEWAY_BROWSER_FLOW_MAX_STEPS`) still bounds every unlocked write regardless of this knob | `900` | code default |
@@ -467,13 +475,24 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/execution-runtime/runt
 | `EXECUTION_SIGNING_KEY` | HMAC key verifying SPEC-037 envelopes and signing receipts (shared with agent-service); unset rejects every handoff | **must be provisioned** | execution-signing-secret |
 | `EXECUTION_HANDOFF_TOKEN` | Static credential authenticating the agent-service handoff (constant-time comparison); unset rejects every handoff | **must be provisioned** | execution-handoff-secret |
 | `TOOL_GATEWAY_URL` | tool-gateway endpoint for approved executions | `http://tool-gateway:8000` | runtime-config (merged ConfigMap) |
-| `EXECUTION_GATEWAY_TIMEOUT_SECONDS` | Budget for the tool-gateway invocation | `30` | code default |
-| `EXECUTION_STATE_STORE_BACKEND` | `memory` / `postgres` receipt store | `memory` | runtime-config (`postgres` in dev-k8s) |
-| `EXECUTION_STATE_DB_URL` | Sessions-database URL (postgres backend; shared `execution_records` table) | *(none)* | runtime-config |
+| `EXECUTION_GATEWAY_TIMEOUT_SECONDS` | Tool-gateway invocation budget; must be > 0 and <= 30; expiry does not cancel remote work | `30` | code default |
+| `EXECUTION_STATE_STORE_BACKEND` | Legacy presentation-store selection; actual `postgres` ledger is mandatory for SPEC-063 admission (`memory` cannot execute mutations) | `memory` | code default (`postgres` in dev-k8s) |
+| `EXECUTION_STATE_DB_URL` | Postgres DSN shared with agent execution recovery; ledger catalog/claims/observations are distinct from historical `execution_records` | *(none)* | runtime-config in dev; protected Secret elsewhere |
+| `EXECUTION_ADMISSION_ENABLED` | Worker admission opt-in, in addition to the verified catalog flag; disabled readiness returns 503 | `false` | code default; explicit cutover configuration |
+| `EXECUTION_ADMISSION_EPOCH` | External UUID matching agent/catalog; mismatch refuses dispatch | *(none)* | explicit cutover configuration |
 | `EXECUTION_AUDIT_SERVICE_URL` | audit-service ingest URL; unset degrades to log-only auditing | *(none)* | runtime-config |
 | `EXECUTION_AUDIT_CLIENT_ID` | Audit ingest client id; must match an `AUDIT_INGEST_CLIENTS` entry | `execution-runtime` | runtime-config |
 | `EXECUTION_AUDIT_CLIENT_SECRET` | Audit ingest client secret | *(none)* | **runtime-secrets** |
-| `EXECUTION_FLIGHT_RETENTION_SECONDS` | Completed single-flight cache retention (replay without re-execution) | `900` | code default |
+| `EXECUTION_FLIGHT_RETENTION_SECONDS` | Legacy single-flight cache knob; not the durable claim retention or dispatch authority | `900` | code default |
+
+The migration CLI explicitly creates/verifies the ledger with admission disabled;
+normal startup verifies only. Postgres durability settings `fsync`,
+`full_page_writes`, and `synchronous_commit` must remain on. Session/presentation
+TTL does not release claims: the ledger protects requests through their signed
+expiry plus at least 30 days, and retains dependent run identities/stops.
+`/health/live` remains process-local; `/health/ready` distinguishes disabled,
+misconfigured, or unavailable admission. Never repair readiness by bypassing the
+[cutover and restore procedure](execution-cutover-restore.md).
 
 ### platform-gateway
 

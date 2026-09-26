@@ -689,6 +689,26 @@ class ApprovalsInboxProxyTests(WorkspaceProxyBase):
         self.assertEqual(response.json(), INBOX_PAYLOAD)
         upstream.assert_awaited_once()
 
+    def test_inbox_is_decision_only_no_recovery_surface(self) -> None:
+        # SPEC-063 R-5a/R-6b: recovery results ride the owner session detail
+        # only. The approver inbox stays decision-only — no per-row recovery
+        # projection, no executions enrichment, and no session-level recovery
+        # availability — so a decider never reads an outcome through the inbox
+        # and a recovery read never becomes a decision input.
+        upstream = AsyncMock(return_value=INBOX_PAYLOAD)
+        with (
+            self._patch_identity("approver", "approvals"),
+            patch(INBOX_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/approvals/inbox")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertNotIn("execution_recovery_availability", body)
+        for card in body["confirmations"]:
+            self.assertNotIn("recovery", card)
+            self.assertNotIn("executions", card)
+        upstream.assert_awaited_once()
+
     def test_platform_admin_allowed(self) -> None:
         upstream = AsyncMock(return_value=INBOX_PAYLOAD)
         with (

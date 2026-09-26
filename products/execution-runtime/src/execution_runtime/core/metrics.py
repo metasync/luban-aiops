@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request, Response
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
 )
@@ -59,6 +60,51 @@ AUDIT_EMITS = Counter(
     ["result"],
 )
 
+# SPEC-063 R-7c operational surface. Fixed cardinality only: bounded enum
+# labels, never identity/session/request values (observability-conventions.md).
+EXECUTION_DUPLICATE_CLAIMS = Counter(
+    "execution_duplicate_claims_total",
+    "Handoffs answered metadata-only from an existing single-use claim.",
+)
+
+EXECUTION_CONFLICTS = Counter(
+    "execution_conflicts_total",
+    "Conflicts refused without minting dispatch authority, by bounded kind.",
+    ["kind"],
+)
+
+EXECUTION_STORE_WRITE_FAILURES = Counter(
+    "execution_store_write_failures_total",
+    "Durable ledger writes that failed or were left unconfirmed.",
+)
+
+EXECUTION_ADMISSION_AVAILABLE = Gauge(
+    "execution_admission_available",
+    "1 when durable admission is enabled, the epoch matches, and the store is reachable.",
+)
+
+EXECUTION_UNRESOLVED_COUNT = Gauge(
+    "execution_unresolved_count",
+    "Claimed executions with no recorded outcome on a live run.",
+)
+
+EXECUTION_UNRESOLVED_OLDEST_AGE_SECONDS = Gauge(
+    "execution_unresolved_oldest_age_seconds",
+    "Age of the oldest unresolved claim, measured with the database clock.",
+)
+
+EXECUTION_DRAIN_STATE = Gauge(
+    "execution_drain_state",
+    "1 while the worker is draining (refusing new handoffs, unready).",
+)
+
+# Bound readiness/metrics DB reads: at most one bounded aggregate refresh per
+# interval regardless of scrape frequency (SPEC-063 R-7c).
+GAUGE_REFRESH_INTERVAL_SECONDS = 5.0
+_gauge_refresh_deadline = 0.0
+
+_CONFLICT_KINDS = frozenset({"identity", "integrity"})
+
 
 def _handler_label(request: Request) -> str:
     # Templated route path (bounded cardinality), never the raw URL.
@@ -87,6 +133,12 @@ def setup_metrics(app: FastAPI) -> None:
 
     @app.get("/metrics", include_in_schema=False)
     def metrics_endpoint() -> Response:
+        # Refresh the bounded gauges from at most one cached DB read; scraping
+        # never triggers execution work and fails open on an unreachable store.
+        refresh_ledger_gauges(
+            getattr(app.state, "ledger", None),
+            bool(getattr(app.state, "draining", False)),
+        )
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -109,3 +161,51 @@ def record_late_completion() -> None:
 def record_audit_emit(result: str) -> None:
     """Record an audit emission outcome (``ok`` or ``error``)."""
     AUDIT_EMITS.labels(result=result).inc()
+
+
+def record_duplicate() -> None:
+    """A handoff answered metadata-only from an existing single-use claim."""
+    EXECUTION_DUPLICATE_CLAIMS.inc()
+
+
+def record_conflict(kind: str) -> None:
+    """Record a refused conflict; ``kind`` is a bounded enum, never identity."""
+    EXECUTION_CONFLICTS.labels(kind=kind if kind in _CONFLICT_KINDS else "identity").inc()
+
+
+def record_store_write_failure() -> None:
+    """A durable ledger write failed or was left unconfirmed."""
+    EXECUTION_STORE_WRITE_FAILURES.inc()
+
+
+def record_drain_state(draining: bool) -> None:
+    """Publish the in-process drain state (1 while refusing new handoffs)."""
+    EXECUTION_DRAIN_STATE.set(1 if draining else 0)
+
+
+def refresh_ledger_gauges(ledger, draining: bool) -> None:
+    """Publish admission/unresolved gauges from at most one bounded DB read.
+
+    The drain gauge is in-process and always current. The DB-backed gauges are
+    refreshed at most once per :data:`GAUGE_REFRESH_INTERVAL_SECONDS` so a scrape
+    storm cannot amplify into a read storm, and the refresh fails open: an
+    unreachable store never breaks ``/metrics``. Scraping performs no execution
+    work and mints no dispatch authority (SPEC-063 R-7c).
+    """
+    global _gauge_refresh_deadline
+    record_drain_state(draining)
+    if ledger is None:
+        return
+    now = time.monotonic()
+    if now < _gauge_refresh_deadline:
+        return
+    _gauge_refresh_deadline = now + GAUGE_REFRESH_INTERVAL_SECONDS
+    try:
+        snapshot = ledger.metrics_snapshot()
+    except Exception:  # a gauge refresh must never break the scrape
+        return
+    EXECUTION_ADMISSION_AVAILABLE.set(1 if snapshot.get("admission_available") else 0)
+    EXECUTION_UNRESOLVED_COUNT.set(int(snapshot.get("unresolved_count", 0)))
+    EXECUTION_UNRESOLVED_OLDEST_AGE_SECONDS.set(
+        float(snapshot.get("oldest_unresolved_age_seconds", 0.0))
+    )

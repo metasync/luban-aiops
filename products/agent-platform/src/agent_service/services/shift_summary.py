@@ -32,6 +32,11 @@ from agent_service.services.confirmation_records import (
 )
 from agent_service.services.evidence_store import EVIDENCE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_recovery import (
+    execution_evidence_label,
+    read_owner_recovery_page,
+    summarize_execution_recovery,
+)
 from agent_service.services.session_store import SESSION_STORE
 from agent_service.services.session_transcript import extract_transcript
 
@@ -180,6 +185,63 @@ def _execution_entry(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _recovered_execution_entries(executions, page: dict) -> list[dict[str, Any]]:
+    """Legacy facts stay historical; the bounded ledger page supplies outcomes."""
+    rows = {
+        row["execution_id"]: _execution_entry(row)
+        for row in (executions or []) if row.get("execution_id")
+    }
+    projections = {row["execution_id"]: row for row in page.get("executions", [])}
+    for execution_id, projection in projections.items():
+        rows.setdefault(execution_id, {
+            "execution_id": execution_id, "call_id": projection.get("call_id"),
+            "tool_name": projection.get("tool_name"),
+        })
+    for execution_id, row in rows.items():
+        projection = projections.get(execution_id)
+        if projection is None:
+            complete = page.get("availability") == "available" and not page.get("executions_truncated")
+            projection = {"availability": "not_found" if complete else "unavailable"}
+        facts = summarize_execution_recovery(projection)
+        row["historical_status"] = row.get("status")
+        row["historical_receipt_status"] = row.get("receipt_status")
+        row["historical_digest_match"] = row.pop("digest_match", None)
+        row["recovery"] = facts
+        row["evidence_label"] = execution_evidence_label(facts)
+        row["status"] = (
+            (facts["state"] or "registered")
+            if facts["availability"] == "available" else facts["availability"]
+        )
+        row["receipt_status"] = facts["tool_report_status"]
+        row["completed_at"] = (
+            (projection.get("receipt") or {}).get("completed_at")
+            if facts["tool_report_status"] else None
+        )
+    return list(rows.values())
+
+
+def _execution_evidence_counts(rows: list[dict]) -> dict[str, int]:
+    counts = dict.fromkeys((
+        "registered", "not_dispatched", "dispatch_claimed", "outcome_unknown",
+        "result_recorded", "unavailable", "not_found", "integrity_conflict", "late_report",
+        "tool_report_succeeded", "tool_report_failed", "tool_report_timeout",
+    ), 0)
+    for row in rows:
+        facts = row.get("recovery")
+        if not isinstance(facts, dict):
+            continue
+        key = (
+            (facts["state"] or "registered")
+            if facts["availability"] == "available" else facts["availability"]
+        )
+        counts[key] += 1
+        for flag in ("integrity_conflict", "late_report"):
+            counts[flag] += int(facts[flag])
+        if facts["tool_report_status"]:
+            counts[f"tool_report_{facts['tool_report_status']}"] += 1
+    return counts
+
+
 def _open_items(
     confirmations: Any, executions: Any
 ) -> dict[str, Any]:
@@ -250,12 +312,27 @@ def _handover(entries: list[dict[str, Any]]) -> dict[str, Any]:
                     "tool_name": row.get("tool_name"),
                     "receipt_status": row.get("receipt_status"),
                     "completed_at": row.get("completed_at"),
+                    **(
+                        {"recovery": row["recovery"], "evidence_label": row["evidence_label"]}
+                        if "recovery" in row else {}
+                    ),
                 }
             )
         open_items = entry.get("open_items") or {}
-        if (open_items.get("pending_confirmations") or 0) + (
-            open_items.get("requested_executions") or 0
-        ) > 0:
+        recovery = entry.get("execution_recovery", {})
+        unresolved = any(
+            facts.get("state") in (None, "dispatch_claimed", "outcome_unknown")
+            or facts.get("availability") in ("unavailable", "not_found")
+            for row in executions_rows
+            if isinstance(facts := row.get("recovery"), dict)
+        )
+        if (
+            (open_items.get("pending_confirmations") or 0)
+            + (open_items.get("requested_executions") or 0) > 0
+            or unresolved
+            or recovery.get("availability") == "unavailable"
+            or recovery.get("executions_truncated")
+        ):
             open_sessions.append(entry.get("session_id"))
 
     # Foreign sessions stay counts-only: never titles or details.
@@ -283,7 +360,17 @@ def _handover(entries: list[dict[str, Any]]) -> dict[str, Any]:
     execution_count = len(executions) + sum(
         len(_rows(entry, "execution_receipts")) for entry in foreign
     )
+    recovery_sources = [entry["execution_recovery"] for entry in own if "execution_recovery" in entry]
+    incomplete = sum(
+        source["availability"] != "available" or source["executions_truncated"]
+        for source in recovery_sources
+    )
     return {
+        **({
+            "execution_evidence_counts": _execution_evidence_counts(executions),
+            "incomplete_recovery_sessions": incomplete,
+            "target_verification_required": True,
+        } if recovery_sources else {}),
         "covered_session_count": len(entries),
         "own_session_count": len(own),
         "foreign_session_count": len(foreign),
@@ -294,7 +381,7 @@ def _handover(entries: list[dict[str, Any]]) -> dict[str, Any]:
             "requested_executions": requested_executions,
         },
         "open_sessions": open_sessions,
-        "quiet": decided_count == 0 and execution_count == 0,
+        "quiet": decided_count == 0 and execution_count == 0 and not incomplete,
         "decisions": decisions,
         "executions": executions,
     }
@@ -336,7 +423,19 @@ def _digest_own_session(record, session_id: str) -> tuple[dict[str, Any], list[s
             else UNAVAILABLE
         ),
     }
-    entry["open_items"] = _open_items(confirmations, executions)
+    page = read_owner_recovery_page(session_id, record.user_id or "")
+    if page is not None:
+        entry["execution_recovery"] = {
+            "availability": page["availability"],
+            "executions_truncated": bool(page.get("executions_truncated")),
+            "target_verification_required": True,
+        }
+        entry["executions"] = _recovered_execution_entries(executions, page)
+        entry["execution_evidence_counts"] = _execution_evidence_counts(entry["executions"])
+        cited = list(dict.fromkeys([
+            *cited, *(row["execution_id"] for row in page.get("executions", [])),
+        ]))
+    entry["open_items"] = _open_items(confirmations, entry["executions"])
     return entry, cited
 
 
@@ -484,6 +583,20 @@ def document_summary(digest: dict[str, Any]) -> str | None:
         _plural(handover.get("decision_count") or 0, "decision"),
         _plural(handover.get("execution_count") or 0, "execution"),
     ]
+    counts = handover.get("execution_evidence_counts")
+    if isinstance(counts, dict):
+        if counts.get("outcome_unknown"):
+            parts.append(_plural(counts["outcome_unknown"], "unknown outcome"))
+        if counts.get("late_report"):
+            parts.append(_plural(counts["late_report"], "late tool report"))
+        if counts.get("integrity_conflict"):
+            parts.append(_plural(counts["integrity_conflict"], "conflicting report"))
+        if counts.get("unavailable") or counts.get("not_found"):
+            parts.append("missing or unavailable execution evidence")
+        if counts.get("dispatch_claimed"):
+            parts.append(_plural(counts["dispatch_claimed"], "pending outcome"))
+    if handover.get("incomplete_recovery_sessions"):
+        parts.append("execution recovery incomplete")
     open_items = handover.get("open_items")
     if isinstance(open_items, dict):
         open_count = (open_items.get("pending_confirmations") or 0) + (

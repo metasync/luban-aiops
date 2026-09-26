@@ -48,3 +48,4 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 | `ADR-0010` | Signed execution envelopes declare their authority provenance | `accepted` |
 | `ADR-0011` | A composition carries no authority; each sub-skill keeps its own gate | `accepted` |
 | `ADR-0012` | A generated secret is redeemed on click and rides no projection | `accepted` |
+| `ADR-0013` | [Durable single-use claims own approved execution dispatch](0013-durable-single-use-execution-claims.md) | `accepted` |

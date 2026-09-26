@@ -35,8 +35,10 @@ from agent_service.services.execution_records import (
     EXECUTION_RECORD_STORE,
     make_execution_record,
 )
+from agent_service.services.execution_recovery import ExecutionRecovery
 from agent_service.services.execution_signing import (
     REASON_ARGS_DIGEST_MISMATCH,
+    REASON_REQUEST_MISSING,
     REASON_SIGNING_UNAVAILABLE,
     build_flow_request,
     build_receipt,
@@ -236,6 +238,68 @@ class AgentKernel:
         # because HITL bridging is disabled, so streamed turns surface the
         # mutating-unavailable posture honestly.
         self._mutating_tools_excluded = False
+        # SPEC-063 R-2: agent-side durable execution recovery/admission store,
+        # built lazily and only when admission is enabled. ``None`` (the
+        # default) keeps the legacy in-process handoff path byte-identical, so
+        # a partially upgraded mutation path is never enabled by construction.
+        self._recovery: ExecutionRecovery | None = None
+        self._recovery_built = False
+
+    def _execution_recovery(self) -> ExecutionRecovery | None:
+        """The agent-side durable recovery store, or ``None`` when disabled.
+
+        Admission is disabled by default (SPEC-063 R-2a): with the flag off the
+        kernel returns ``None`` and every execution seam stays on the legacy
+        path. When enabled, ``RuntimeSettings.__post_init__`` has already
+        guaranteed a ledger DSN and epoch at startup, so this builds the store
+        once and caches it. Construction never connects (the connection factory
+        is per-call and bounded), so building is cheap and side-effect free.
+        """
+        if not self.settings.execution_admission_enabled:
+            return None
+        if not self._recovery_built:
+            self._recovery = ExecutionRecovery(
+                self.settings.execution_state_db_url,
+                self.settings.execution_signing_key,
+                self.settings.execution_admission_epoch,
+                admission_enabled=True,
+            )
+            self._recovery_built = True
+        return self._recovery
+
+    def _resolve_run_id(
+        self, recovery, session_id, owner_user_id, flow_approval=None
+    ) -> str | None:
+        """The durable run identity for this human root turn (SPEC-063 R-4).
+
+        A reused flow authority inherits its originating run across later turns;
+        otherwise a new human root turn mints one via the ledger. Returns
+        ``None`` when the identity cannot be established (store unavailable), so
+        the mutation lane fails closed rather than proceeding without a durable
+        run — a missing identity is never silently replaced.
+        """
+        inherited = getattr(flow_approval, "run_id", None) if flow_approval else None
+        if inherited:
+            return str(inherited)
+        from agent_service.services.execution_protocol import ProtocolError
+
+        try:
+            return recovery.create_run(session_id, owner_user_id)
+        except ProtocolError as exc:
+            LOGGER.warning(
+                "execution run creation failed for session %s: %s",
+                session_id,
+                exc.reason,
+            )
+            return None
+
+    def _bind_guard(self, recovery, run_id, session_id, owner_user_id):
+        """Build the turn's ``RunGuard`` bound to a resolved run identity."""
+        from agent_service.services.execution_run_guard import RunGuard, RunIdentity
+
+        return RunGuard(
+            RunIdentity(str(run_id), session_id, owner_user_id), recovery=recovery
+        )
 
     def mode(self) -> str:
         return "agentscope" if self.is_configured() else "placeholder"
@@ -1032,9 +1096,11 @@ class AgentKernel:
 
         from agent_service.services.kernel_middleware import (
             PENDING_RELEASE_DELIVERIES,
+            RELEASE_PERMITS,
             STREAM_PENDING_DELIVERIES,
             TOOL_EVIDENCE_SINK,
         )
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
             DELEGATED_TOKEN,
@@ -1093,6 +1159,19 @@ class AgentKernel:
             # context stays None, so the common hot path is behavior-preserving.
             execution_requests: dict[str, dict] = {}
             flow_approval = FLOW_APPROVALS.get(session_id)
+            # SPEC-063 R-4: resolve this root turn's durable run identity and
+            # bind the shared in-process guard BEFORE the reply stream runs, so
+            # the permission middleware's stop check and the mutation lane see
+            # it. Inert when admission is disabled (recovery is None): no run is
+            # minted, no guard is bound, and the legacy path is unchanged.
+            recovery = self._execution_recovery()
+            run_id = (
+                self._resolve_run_id(
+                    recovery, session_id, user_name, flow_approval
+                )
+                if recovery is not None
+                else None
+            )
             flow_audit_context = (
                 {
                     "settings": self.settings,
@@ -1100,6 +1179,7 @@ class AgentKernel:
                     "session_id": session_id,
                     "request_id": request_id,
                     "decider_user_id": flow_approval.decider_user_id,
+                    "observe_original": self._observe_original_step_origin,
                 }
                 if flow_approval is not None
                 else None
@@ -1112,11 +1192,23 @@ class AgentKernel:
             # middleware's release branch can never fire on a non-resumed turn.
             pending_deliveries_var = STREAM_PENDING_DELIVERIES.set([])
             release_deliveries_var = PENDING_RELEASE_DELIVERIES.set([])
+            # SPEC-063 R-4: arm the per-stream secret-release permit map the v3
+            # invocation coordinator writes into and ToolEvidenceMiddleware
+            # consumes before revealing a held portal_copy delivery. Unused and
+            # never consulted when admission is disabled (no guard is bound).
+            permits_var = RELEASE_PERMITS.set({})
             prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
             session_var = CHAT_SESSION_ID.set(session_id)
             requests_var = EXECUTION_REQUESTS.set(execution_requests)
             audit_var = EXECUTION_AUDIT_CONTEXT.set(flow_audit_context)
+            guard_var = (
+                CURRENT_RUN_GUARD.set(
+                    self._bind_guard(recovery, run_id, session_id, user_name)
+                )
+                if recovery is not None and run_id is not None
+                else None
+            )
             try:
                 async for event in agent.reply_stream(
                     user_msg_cls(name=user_name, content=effective_message)
@@ -1157,6 +1249,7 @@ class AgentKernel:
                         agent.toolkit,
                         turn_index=turn_index,
                         evidence_frames=evidence_frames,
+                        run_id=run_id,
                     )
                     if frame is not None:
                         # A parked stream ends without message_end, so this is
@@ -1218,8 +1311,11 @@ class AgentKernel:
                 CHAT_SESSION_ID.reset(session_var)
                 EXECUTION_REQUESTS.reset(requests_var)
                 EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+                if guard_var is not None:
+                    CURRENT_RUN_GUARD.reset(guard_var)
                 STREAM_PENDING_DELIVERIES.reset(pending_deliveries_var)
                 PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
+                RELEASE_PERMITS.reset(permits_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
 
             # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
@@ -1332,6 +1428,7 @@ class AgentKernel:
         toolkit: object | None = None,
         turn_index: int = 0,
         evidence_frames: list[dict[str, object]] | None = None,
+        run_id: str | None = None,
     ) -> dict[str, object] | None:
         """Register a kernel ASK park and build its confirmation_request frame.
 
@@ -1396,6 +1493,7 @@ class AgentKernel:
             browser_element_map=browser_element_map,
             browser_flow=browser_flow,
             approval_kind=approval_kind,
+            run_id=run_id,
         )
         # SPEC-054 R-3/R-4: assemble the parked payload and the card message
         # ONCE here, so the live frame below and the durable record are fed
@@ -1594,7 +1692,45 @@ class AgentKernel:
             str(call.get("call_id")): call
             for call in pending.pending_calls_payload()
         }
-        for request in build_requests(pending, decider_user_id, key):
+        # SPEC-063 R-4: an approved resume under durable admission signs a v3
+        # envelope bound to the parked batch's originating run. The identity is
+        # inherited from ``pending.run_id`` and never re-minted here; a resume
+        # missing it (e.g. a card parked before the cutover) fails closed rather
+        # than degrading to a v2 envelope that the bound v3 guard would reject
+        # mid-dispatch. Inert when admission is disabled (recovery is None).
+        sign_run_id: str | None = None
+        sign_epoch: str | None = None
+        if self._execution_recovery() is not None:
+            if not pending.run_id:
+                LOGGER.warning(
+                    "mutating resume rejected: no durable run identity on the "
+                    "parked batch (confirm_id=%s)",
+                    pending.confirm_id,
+                )
+                for call in pending.pending_calls_payload():
+                    self._emit_execution_event(
+                        "execution_rejected",
+                        "deny",
+                        {
+                            "confirm_id": pending.confirm_id,
+                            "call_id": call.get("call_id"),
+                            "tool_name": call.get("tool_name"),
+                            "reason": REASON_REQUEST_MISSING,
+                        },
+                        request_id,
+                        session_id,
+                        decider_user_id,
+                    )
+                return {}, REASON_REQUEST_MISSING
+            sign_run_id = pending.run_id
+            sign_epoch = self.settings.execution_admission_epoch
+        for request in build_requests(
+            pending,
+            decider_user_id,
+            key,
+            run_id=sign_run_id,
+            admission_epoch=sign_epoch,
+        ):
             requests_by_call[request["call_id"]] = request
             self._persist_execution_request(request)
             call = calls_by_id.get(str(request["call_id"])) or {}
@@ -1755,6 +1891,21 @@ class AgentKernel:
             # ``None`` parks the call, exactly as an absent authority would.
             return None
 
+        # SPEC-063 R-4 (T-21): gate at the flow-signing seam itself, not only at
+        # the permission middleware that precedes it. A stopped run must never
+        # auto-sign a flow-unlocked browser write — signing persists an intent
+        # registration, an authoring-trace step, and an ``execution_requested``
+        # audit, so the check belongs ahead of every one of those side effects.
+        # Fail safe: ``None`` parks the write exactly as an absent authority
+        # would, and the durable worker claim/final-send gates stay the backstop.
+        # Inert when no guard is bound (admission disabled), so the legacy
+        # flow-unlock path is byte-identical.
+        from agent_service.services.execution_run_guard import current_guard
+
+        flow_guard = current_guard()
+        if flow_guard is not None and flow_guard.stopped():
+            return None
+
         session_id = CHAT_SESSION_ID.get()
         if not session_id:
             return None
@@ -1787,12 +1938,26 @@ class AgentKernel:
         except (TypeError, ValueError):
             parsed = {}
         parameters = parsed if isinstance(parsed, dict) else {}
+        # SPEC-063 R-4: a flow-unlocked write under durable admission signs a v3
+        # envelope bound to the flow authority's run. The authority recorded at
+        # the approving card carries ``run_id``; if it predates the cutover the
+        # identity is absent, so fail safe and park (return None) rather than
+        # sign a v2 envelope the bound v3 guard would reject mid-dispatch.
+        sign_run_id: str | None = None
+        sign_epoch: str | None = None
+        if self._execution_recovery() is not None:
+            if not approval.run_id:
+                return None
+            sign_run_id = approval.run_id
+            sign_epoch = self.settings.execution_admission_epoch
         envelope = build_flow_request(
             call_id=call_id,
             tool_name=gateway_tool_name,
             parameters=parameters,
             flow_approval=approval,
             key=key,
+            run_id=sign_run_id,
+            admission_epoch=sign_epoch,
         )
         # Inject BEFORE the tool closure runs (the permission check precedes
         # acting), so _verify_execution_request finds it by call_id and
@@ -2008,6 +2173,20 @@ class AgentKernel:
             # The rejection audit already went out at the invocation
             # boundary (gateway_tools); nothing more to emit here.
             return
+        if error.get("code") == "OUTCOME_UNKNOWN":
+            # SPEC-063 R-3b (T-17): a v3 caller timeout / transport uncertainty
+            # is typed uncertainty, never a definitive outcome. The invocation
+            # coordinator already stopped the run and appended the attributed
+            # ``wait_expired`` / ``transport_uncertain`` observation to the
+            # durable ledger, where a late worker result stays appendable
+            # without deleting that observation. Writing the legacy synthetic
+            # receipt here would falsely close the v2 row as ``timeout`` /
+            # ``failed`` and contradict the unknown outcome, so the row is
+            # deliberately left unclosed (``requested``) and no completion event
+            # is emitted. The admission-disabled ``TIMEOUT`` receipt path below
+            # is unchanged, and read-tier calls never reach the coordinator, so
+            # legacy and read-tier handling stay separate.
+            return
         if frame.get("status") == "success":
             status = "succeeded"
         elif error.get("code") == "TIMEOUT":
@@ -2055,9 +2234,18 @@ class AgentKernel:
             request["decider_user_id"],
         )
 
+    def _observe_original_step_origin(self, request, original, current_request_id):
+        """Consume accepted original evidence synchronously, outside tool frames."""
+        self._observe_step_origin(
+            request, {}, "succeeded", original=original,
+            signing_key=self.settings.execution_signing_key,
+            current_request_id=current_request_id,
+        )
+
     @staticmethod
     def _observe_step_origin(
-        request: dict, frame: dict[str, object], status: str
+        request: dict, frame: dict[str, object], status: str, *,
+        original=None, signing_key=None, current_request_id=None,
     ) -> None:
         """Amend the captured step with the origin it landed on (SPEC-055 R-4).
 
@@ -2098,6 +2286,19 @@ class AgentKernel:
         already written, the audit event about to be emitted, or the resumed
         stream.
         """
+        if request.get("protocol_version") == 3:
+            from agent_service.services.execution_protocol import ProtocolError, VerifiedOriginal
+
+            if not isinstance(original, VerifiedOriginal) or not current_request_id:
+                return
+            try:
+                original.revalidate(request, signing_key)
+            except ProtocolError:
+                return
+            if original.observation["request_id"] != current_request_id:
+                return
+            frame = original.result
+            status = "succeeded" if frame.get("status") == "success" else "failed"
         if status != "succeeded":
             return
         if request.get("tool_name") not in BROWSER_WRITE_TOOLS:
@@ -2116,12 +2317,8 @@ class AgentKernel:
             AUTHORING_TRACE_STORE.record_step_origin(
                 session_id, execution_id, origin
             )
-        except Exception as exc:
-            LOGGER.warning(
-                "authoring trace origin write failed for %s: %s",
-                execution_id,
-                exc,
-            )
+        except Exception:
+            LOGGER.warning("authoring trace origin write failed")
 
     @staticmethod
     def _execution_duration_ms(request: dict) -> int:
@@ -2296,6 +2493,10 @@ class AgentKernel:
             skill_id=skill_id,
             origin=origin,
             ttl=self.settings.browser_flow_approval_ttl,
+            # SPEC-063 R-4: the flow authority retains the parked batch's
+            # originating run, so a later auto-signed write in this flow
+            # inherits the same ``run_id`` instead of minting a replacement.
+            run_id=pending.run_id,
         )
 
     async def resume_confirmation(
@@ -2338,9 +2539,11 @@ class AgentKernel:
 
         from agent_service.services.kernel_middleware import (
             PENDING_RELEASE_DELIVERIES,
+            RELEASE_PERMITS,
             STREAM_PENDING_DELIVERIES,
             TOOL_EVIDENCE_SINK,
         )
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
             DELEGATED_TOKEN,
@@ -2411,6 +2614,10 @@ class AgentKernel:
             list(pending.pending_deliveries) if confirmed else []
         )
         pending_deliveries_var = STREAM_PENDING_DELIVERIES.set([])
+        # SPEC-063 R-4: arm the secret-release permit map for the resumed stream
+        # exactly as stream_events does, so an approved gated mutation that
+        # durably commits here can reveal its held portal_copy delivery.
+        permits_var = RELEASE_PERMITS.set({})
         prose_var = CURRENT_PROSE_REDACTOR.set(prose)
         token_var = DELEGATED_TOKEN.set(bearer_token)
         session_var = CHAT_SESSION_ID.set(session_id)
@@ -2424,8 +2631,25 @@ class AgentKernel:
                 "session_id": session_id,
                 "request_id": request_id,
                 "decider_user_id": user_name,
+                "observe_original": self._observe_original_step_origin,
             }
             if confirmed
+            else None
+        )
+        # SPEC-063 R-4: rebind the guard to the parked batch's originating run.
+        # A resume NEVER mints a replacement identity — it inherits
+        # ``pending.run_id``; when admission is enabled but the identity is
+        # missing, no guard is bound here and the mutation lane fails closed at
+        # registration rather than proceeding under a fresh run. Inert when
+        # admission is disabled (recovery is None).
+        resume_recovery = self._execution_recovery()
+        guard_var = (
+            CURRENT_RUN_GUARD.set(
+                self._bind_guard(
+                    resume_recovery, pending.run_id, session_id, pending.user_id
+                )
+            )
+            if resume_recovery is not None and pending.run_id is not None
             else None
         )
         try:
@@ -2480,6 +2704,7 @@ class AgentKernel:
                     agent.toolkit,
                     turn_index=turn_index,
                     evidence_frames=evidence_frames,
+                    run_id=pending.run_id,
                 )
                 if frame is not None:
                     # A re-park ends this stream without a terminal frame, so
@@ -2566,7 +2791,10 @@ class AgentKernel:
             pending.pending_deliveries = ()
             STREAM_PENDING_DELIVERIES.reset(pending_deliveries_var)
             PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
+            RELEASE_PERMITS.reset(permits_var)
             EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+            if guard_var is not None:
+                CURRENT_RUN_GUARD.reset(guard_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
             # SPEC-031 R-1: idempotent safety net — the confirm route

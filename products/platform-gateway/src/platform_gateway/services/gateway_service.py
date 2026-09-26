@@ -376,16 +376,31 @@ async def get_session(
     request_id: str,
     session_id: str,
     user_id: str,
+    execution: str | None = None,
+    execution_cursor: str | None = None,
+    page_size: int | None = None,
 ) -> dict:
     """Proxy a session detail fetch (SPEC-022 R-1).
 
     Upstream 4xx (unknown/foreign session) passes through unchanged so
     the anti-enumeration 404 reaches the caller; transport failures and
     upstream 5xx map to 502 — the same posture as the delete proxy.
+
+    SPEC-063 R-5a: the optional recovery paging params forward verbatim so
+    the portal pages the bounded owner recovery window through this existing
+    owner-checked detail. The gateway adds no identity of its own — ``user_id``
+    is the token-derived caller, and a foreign session answers the same 404
+    whether or not an execution id rides the query.
     """
     try:
         return await agent_client.get_session(
-            settings, request_id, session_id, user_id
+            settings,
+            request_id,
+            session_id,
+            user_id,
+            execution=execution,
+            execution_cursor=execution_cursor,
+            page_size=page_size,
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

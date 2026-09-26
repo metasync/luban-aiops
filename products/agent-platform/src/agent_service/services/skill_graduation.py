@@ -51,6 +51,10 @@ from typing import Any
 
 from agent_service.services.authoring_trace import origin_of_url
 from agent_service.services.flow_approvals import BROWSER_WRITE_TOOLS
+from agent_service.services.execution_recovery import (
+    execution_evidence_label,
+    summarize_execution_recovery,
+)
 from agent_service.services.secret_params import TRACE_CREDENTIAL_PLACEHOLDER
 from agent_service.services.skill_draft import (
     MAX_BODY_BYTES,
@@ -220,6 +224,7 @@ def revalidate_blast_radius(
     target: str | None,
     declared_at: str | None = None,
     max_steps: int = DEFAULT_MAX_GRADUATION_STEPS,
+    recovery_page: dict | None = None,
 ) -> BlastRadius:
     """Re-validate a trace's blast radius before any draft is produced (R-4).
 
@@ -318,12 +323,33 @@ def revalidate_blast_radius(
     long_names: list[int] = []
     leaked: list[str] = []
 
+    recovery_rows = {
+        row["execution_id"]: row for row in (recovery_page or {}).get("executions", [])
+    }
     for step in ordered:
         position = step.get("position")
         tool_name = str(step.get("tool_name") or "")
         raw_args = step.get("args")
         args = raw_args if isinstance(raw_args, dict) else {}
         where = f"step {position} ({tool_name or 'unknown tool'})"
+
+        if recovery_page is not None:
+            # Recovery can refuse a candidate, never manufacture its original
+            # observed origin. Missing/bounded-out records remain inconclusive.
+            projection = recovery_rows.get(step.get("execution_id"), {"availability": "not_found"})
+            if recovery_page.get("availability") != "available":
+                projection = {"availability": "unavailable"}
+            facts = summarize_execution_recovery(projection)
+            if (facts["availability"] != "available"
+                    or facts["state"] != "result_recorded"
+                    or facts["tool_report_status"] != "succeeded"
+                    or facts["integrity_conflict"] or facts["late_report"]
+                    or facts["run_stopped"] or projection.get("tool_name") != tool_name):
+                refusals.append(
+                    f"{where} lacks current eligible original-response evidence: "
+                    + execution_evidence_label(facts)
+                    + " — recovery cannot verify an authoring origin or business success"
+                )
 
         holes.extend(f"{where} {path}" for path in _hole_paths(args))
         if len(tool_name) > MAX_STEP_TOOL_CHARS or not tool_name:

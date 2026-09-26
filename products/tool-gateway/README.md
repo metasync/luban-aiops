@@ -7,7 +7,7 @@
 It is responsible for:
 
 - connector normalization
-- `MCP` and tool integration
+- tool integration through native connectors
 - Kubernetes and observability connectors
 - collaboration and ticketing connectors
 - stable tool contracts and execution metadata
@@ -20,6 +20,21 @@ delegated tokens (`aud = tool-gateway`) per ADR-0004 — never the portal direct
 
 The boundary definitions live in the workspace model: [workspace-model.md](../../docs/workspace/workspace-model.md).
 
+## Approved execution boundary (SPEC-063)
+
+Execution-runtime, not this gateway, owns the durable single-use dispatch claim.
+The gateway preserves the original `x-request-id` and accepts an execution ID
+header for correlation only; neither header grants permission. Existing delegated
+identity, policy, risk tiers, origin checks, and target credentials remain enforced.
+Direct gateway callers are outside the approved-worker duplicate guarantee.
+
+Tool success is a tool report, not proof of the target's business outcome; an
+upstream HTTP error or partial effect must still be investigated. Missing audit
+events are inconclusive. Owner-only secret redemption remains destructive even
+for a wrong-owner GET (unavailable/404); owner-scoped discard is different and
+cannot be used by a wrong owner to delete a handle. Recovery metadata never
+contains a password or delivery handle and never triggers delivery.
+
 ## Ownership
 
 Recommended owner:
@@ -31,9 +46,16 @@ Recommended owner:
 This project covers:
 
 - connector abstraction and normalization
-- `MCP`-compatible tool exposure
-- read-only and future bounded-action connector pathways
+- REST tool discovery and invocation for trusted platform callers
+- read-only and bounded-action connector pathways
 - connector execution metadata and health reporting
+
+MCP-backed connectors and selective standalone toolset extraction are under
+assessment, not shipped or approved implementation scope. The
+[use-case assessment](../../docs/workspace/mcp-exposure-spike.md) recommends
+retaining native connectors until a concrete need justifies a pilot. The proposed
+direction is for tool-gateway to consume independent servers while Luban retains
+its governance; it is not external exposure of tool-gateway or Luban workflows.
 
 Current implementation artifacts:
 

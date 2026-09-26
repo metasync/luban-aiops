@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
 
 # The revision the deterministic seed sits at. `reseed()` returns here, so a
 # demo run can always prove it started from a known state.
@@ -183,6 +184,22 @@ class Store:
         """
         self._seed()
 
+    def seed_acceptance_user(self, username: str) -> None:
+        """Add one opt-in throwaway record before the live revision baseline.
+
+        No HTTP endpoint exposes this operation. A duplicate or a post-mutation
+        call fails closed; acceptance must never reseed between observations.
+        """
+        if not re.fullmatch(r"spec063-[a-z0-9][a-z0-9-]{0,23}", username):
+            raise ValueError("acceptance user must be a bounded spec063- identifier")
+        if self.revision != SEED_REVISION or username in self.users:
+            raise ValueError("acceptance user can only be seeded once before mutations")
+        self.users[username] = User(
+            username=username, full_name="Isolated acceptance fixture",
+            email=f"{username}@example.invalid", role="viewer",
+            last_modified=iso_utc(self.started_at),
+        )
+
     # --- reads -----------------------------------------------------------
 
     def all_users(self) -> list[User]:
@@ -191,7 +208,7 @@ class Store:
 
     @property
     def users_seeded(self) -> int:
-        return len(_SEED)
+        return len(self.users)
 
     def resolve(self, identifier: str) -> User:
         """Find a user by **username or email** (case-insensitive).

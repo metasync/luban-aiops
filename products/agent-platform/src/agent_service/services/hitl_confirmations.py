@@ -88,6 +88,13 @@ class PendingConfirmation:
     # a low-level registry park that predates the discriminator.
     approval_kind: str | None = None
     email_recipient_allowlist: tuple[str, ...] = ()
+    # SPEC-063 R-4: the durable execution run this parked batch belongs to,
+    # captured at park time so the resumed/approved batch signs and registers
+    # under the SAME root run rather than minting a replacement. A resume with
+    # admission enabled and no ``run_id`` fails closed. ``None`` on the legacy
+    # (admission-disabled) path. Ephemeral like the requester token: the durable
+    # run identity lives in the ledger's ``execution_runs`` row keyed by session.
+    run_id: str | None = None
     requester_delegated_token: str | None = field(default=None, repr=False)
     # SPEC-062 R-3 reveal-on-commit: portal_copy secret deliveries generated in
     # the turn that parked this card, held opaquely as ``{delivery_id, channel,
@@ -589,6 +596,7 @@ class ConfirmationRegistry:
         browser_element_map: dict[int, str] | None = None,
         browser_flow: dict | None = None,
         approval_kind: str | None = None,
+        run_id: str | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
@@ -601,6 +609,7 @@ class ConfirmationRegistry:
             browser_element_map=dict(browser_element_map or {}),
             browser_flow=dict(browser_flow or {}),
             approval_kind=approval_kind,
+            run_id=run_id,
         )
         self._by_session[session_id] = pending
         return pending

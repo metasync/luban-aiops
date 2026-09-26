@@ -8,16 +8,24 @@ server-side title minting, and the voice-readiness contract invariants
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import jsonschema
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from agent_service.api.v2 import routes as v2_routes
 from agent_service.app import create_app
 from agent_service.schemas.v2 import AgentChatRequest
 from agent_service.services import session_service, session_transcript
 from agent_service.services.agent_state_store import InMemoryAgentStateStore
+from agent_service.services.confirmation_records import (
+    CONFIRMATION_RECORD_STORE,
+    make_record,
+)
+from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_recovery import ExecutionRecovery
 from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
 from agent_service.services.session_store import InMemorySessionStore
 
@@ -697,3 +705,371 @@ def test_list_sessions_rejects_unknown_session_type(workspace):
         headers={"X-User-ID": "alice"},
     )
     assert response.status_code == 422
+
+
+# --- SPEC-063 R-5a / T-25: bounded owner recovery on the session detail ---
+#
+# These exercise the *route wiring* only: the session detail extends (never
+# replaces) with a top-level ``execution_recovery_availability`` and an optional
+# ledger-backed ``recovery`` projection on each execution row. A fake recovery
+# store stands in for ``ExecutionRecovery`` so the wiring is proven without a
+# ledger; the projection's closed-schema fidelity and owner-scoped paging are
+# proven against a real ledger by the F-24 cross-product family. The recovery
+# object is typed loosely in agent-session.schema.json (like ``receipt``), so
+# responses are validated against that contract here.
+
+_EXEC_ONE = "11111111-1111-1111-1111-111111111111"
+_EXEC_TWO = "22222222-2222-2222-2222-222222222222"
+
+
+def _clear_record_stores():
+    for store, attr in (
+        (CONFIRMATION_RECORD_STORE, "_by_confirm_id"),
+        (EXECUTION_RECORD_STORE, "_by_key"),
+    ):
+        bucket = getattr(store, attr, None)
+        if bucket is not None:
+            bucket.clear()
+
+
+def _seed_recovery_session(session_store, owner="alice"):
+    """Own a session carrying one approved card with two signed execution rows
+    (SPEC-037 R-4 shape), clearing the durable singletons first for isolation."""
+    _clear_record_stores()
+    session_id = session_store.create_session(owner).session_id
+    confirm_id = "conf-1"
+    CONFIRMATION_RECORD_STORE.save_parked(
+        make_record(
+            confirm_id,
+            session_id,
+            owner,
+            [
+                {"call_id": "call-1", "tool_name": "k8s.restart_service"},
+                {"call_id": "call-2", "tool_name": "k8s.scale_deployment"},
+            ],
+            "tools:mutate",
+            turn_index=0,
+        )
+    )
+    CONFIRMATION_RECORD_STORE.mark_resolved(
+        session_id, confirm_id, "approved", owner, "approve"
+    )
+    for call_id, execution_id, requested_at in (
+        ("call-1", _EXEC_ONE, "2026-09-24T10:00:00Z"),
+        ("call-2", _EXEC_TWO, "2026-09-24T10:00:01Z"),
+    ):
+        EXECUTION_RECORD_STORE.save_request(
+            {
+                "confirm_id": confirm_id,
+                "call_id": call_id,
+                "session_id": session_id,
+                "execution_id": execution_id,
+                "tool_name": "k8s.restart_service",
+                "requested_at": requested_at,
+                "status": "requested",
+            }
+        )
+    return SimpleNamespace(session_id=session_id, confirm_id=confirm_id, owner=owner)
+
+
+class _FakeRecovery:
+    """Stand-in for ``ExecutionRecovery``: records each ``owner_recovery`` call
+    and returns a canned projection so route wiring is exercised ledger-free."""
+
+    def __init__(self, availability="available"):
+        self.calls = []
+        self.list_calls = []
+        self.availability = availability
+        self.cursors = ExecutionRecovery("", "test-cursor-key", "")
+
+    def owner_session_recovery(self, session_id, owner_user_id, *, execution=None, cursor=None, page_size=50):
+        self.list_calls.append((session_id, owner_user_id, execution, cursor, page_size))
+        scope = ("observations", session_id, owner_user_id, execution) if execution else (
+            "executions", session_id, owner_user_id)
+        position = self.cursors._decode_cursor(scope, cursor)
+        ids = [_EXEC_ONE, _EXEC_TWO]
+        if execution:
+            ids = [execution] if execution in ids else []
+        elif position:
+            ids = ids[position:]
+        more = len(ids) > page_size
+        return {
+            "availability": self.availability,
+            "executions": [self.owner_recovery(value, session_id, owner_user_id,
+                cursor=cursor if execution else None) for value in ids[:page_size]]
+                if self.availability == "available" else [],
+            "executions_truncated": more,
+            "next_execution_cursor": self.cursors._encode_cursor(scope, page_size) if more else None,
+        }
+
+    def owner_recovery(
+        self, execution_id, session_id, owner_user_id, *, cursor=None, replay=False
+    ):
+        self.calls.append(
+            {
+                "execution_id": execution_id,
+                "session_id": session_id,
+                "owner_user_id": owner_user_id,
+                "cursor": cursor,
+            }
+        )
+        projection = ExecutionRecovery.empty(
+            self.availability,
+            execution_id,
+            as_of="2026-09-24T10:05:00Z",
+            replay=False,
+        )
+        projection["session_id"] = session_id
+        if self.availability == "available":
+            projection.update(
+                state="result_recorded",
+                confirm_id="conf-1",
+                call_id="call-1" if execution_id == _EXEC_ONE else "call-2",
+                requested_at="2026-09-24T10:00:00Z",
+                tool_name="k8s.restart_service",
+                receipt={
+                    "status": "succeeded",
+                    "completed_at": "2026-09-24T10:04:00Z",
+                },
+                observations=[{"observation_id": "1", "kind": "worker_result"}],
+            )
+        return projection
+
+
+def _patch_recovery(monkeypatch, recovery):
+    """Route ``read_session``'s kernel lookup at a fake recovery store."""
+    monkeypatch.setattr(
+        v2_routes,
+        "get_runtime_kernel",
+        lambda: SimpleNamespace(_execution_recovery=lambda: recovery),
+    )
+
+
+def _execution_rows(detail):
+    rows = {}
+    for card in detail.json()["confirmations"] or []:
+        for execution in card["executions"]:
+            rows[execution["execution_id"]] = execution
+    return rows
+
+
+def test_session_detail_recovery_inert_when_admission_disabled(workspace):
+    """Default (admission disabled): the recovery path is ``None``, so the
+    detail reports availability ``unavailable`` and every execution row stays
+    byte-identical with a null ``recovery`` (R-5a inert-by-default)."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    # No patch: the real kernel returns None because admission is disabled.
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}", headers={"X-User-ID": "alice"}
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["execution_recovery_availability"] == "unavailable"
+    rows = _execution_rows(detail)
+    assert set(rows) == {_EXEC_ONE, _EXEC_TWO}
+    assert all(row["recovery"] is None for row in rows.values())
+    jsonschema.validate(body, load_schema("agent-session.schema.json"))
+
+
+def test_session_detail_enriches_owned_executions_when_available(
+    workspace, monkeypatch
+):
+    """With a recovery store bound, the owner reads availability ``available``
+    and each execution row carries a ledger-backed projection; the owner
+    identity flows through to ``owner_recovery`` (owner-scoped read)."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}", headers={"X-User-ID": "alice"}
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["execution_recovery_availability"] == "available"
+    rows = _execution_rows(detail)
+    for execution_id in (_EXEC_ONE, _EXEC_TWO):
+        recovery = rows[execution_id]["recovery"]
+        assert recovery["availability"] == "available"
+        assert recovery["state"] == "result_recorded"
+        assert recovery["execution_id"] == execution_id
+        assert recovery["target_verification_required"] is True
+    # Both rows were read for the owner, with no cursor (no filter supplied).
+    assert {
+        (c["execution_id"], c["owner_user_id"], c["cursor"]) for c in fake.calls
+    } == {(_EXEC_ONE, "alice", None), (_EXEC_TWO, "alice", None)}
+    jsonschema.validate(body, load_schema("agent-session.schema.json"))
+
+
+def test_session_detail_execution_filter_routes_cursor_to_match(
+    workspace, monkeypatch
+):
+    """The optional ``execution`` filter selects the one execution whose
+    observation window is paged with ``execution_cursor``; every other row is
+    read with a null cursor (R-5a paging through the session-detail query)."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+    cursor = fake.cursors._encode_cursor(("observations", seeded.session_id, "alice", _EXEC_TWO), 42)
+
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}",
+        params={"execution": _EXEC_TWO, "execution_cursor": cursor},
+        headers={"X-User-ID": "alice"},
+    )
+    assert detail.status_code == 200
+    by_id = {c["execution_id"]: c["cursor"] for c in fake.calls}
+    assert by_id == {_EXEC_TWO: cursor}
+    # The filter reads only its named execution, independently of the list page.
+    rows = _execution_rows(detail)
+    assert rows[_EXEC_TWO]["recovery"]["availability"] == "available"
+    assert rows[_EXEC_ONE]["recovery"] is None
+
+
+def test_session_detail_page_size_bounds_enrichment(workspace, monkeypatch):
+    """``page_size`` bounds how many execution rows are enriched per read; the
+    row beyond the page keeps a null ``recovery`` while the session-level flag
+    stays ``available`` (the flag is independent of the row window)."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}",
+        params={"page_size": 1},
+        headers={"X-User-ID": "alice"},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["execution_recovery_availability"] == "available"
+    rows = _execution_rows(detail)
+    # requested_at order: exec-one first (enriched), exec-two beyond the page.
+    assert rows[_EXEC_ONE]["recovery"] is not None
+    assert rows[_EXEC_TWO]["recovery"] is None
+    assert [c["execution_id"] for c in fake.calls] == [_EXEC_ONE]
+    assert detail.json()["executions_truncated"] is True
+    cursor = detail.json()["next_execution_cursor"]
+    next_page = _client().get(f"/api/v2/sessions/{seeded.session_id}",
+        params={"page_size": 1, "execution_cursor": cursor}, headers={"X-User-ID": "alice"})
+    assert next_page.status_code == 200
+    assert next_page.json()["next_execution_cursor"] is None
+    assert next_page.json()["executions_truncated"] is False
+    assert _execution_rows(next_page)[_EXEC_TWO]["recovery"]["availability"] == "available"
+
+
+def test_session_detail_recovery_foreign_session_still_404(workspace, monkeypatch):
+    """An execution id / request header never bypasses ownership: a non-owner
+    read is the existing anti-enumeration 404, and no recovery projection is
+    fetched for the intruder (the owner check precedes the ledger read)."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}",
+        params={"execution": _EXEC_ONE},
+        headers={"X-User-ID": "bob"},
+    )
+    assert detail.status_code == 404
+    assert fake.calls == []
+    assert fake.list_calls == []
+
+
+def test_session_detail_availability_survives_presentation_store_outage(
+    workspace, monkeypatch
+):
+    """R-5a: ledger facts are fetched independently of the legacy presentation
+    write. An unreadable execution-record store degrades the legacy rows but
+    never hides availability — the session still reports ``available`` rather
+    than silently substituting an empty history for a recorded outcome."""
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+
+    def _boom(_session_id):
+        raise RuntimeError("presentation store down")
+
+    monkeypatch.setattr(
+        v2_routes,
+        "EXECUTION_RECORD_STORE",
+        SimpleNamespace(load_for_session=_boom),
+    )
+
+    detail = _client().get(
+        f"/api/v2/sessions/{seeded.session_id}", headers={"X-User-ID": "alice"}
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    # Availability is computed from the recovery path, not the presentation rows.
+    assert body["execution_recovery_availability"] == "available"
+    assert set(_execution_rows(detail)) == {_EXEC_ONE, _EXEC_TWO}
+    assert all(row["recovery"]["state"] == "result_recorded" for row in _execution_rows(detail).values())
+    assert body["confirmations"][0]["turn_index"] == 0
+    assert len(fake.calls) == 2
+    jsonschema.validate(body, load_schema("agent-session.schema.json"))
+
+
+@pytest.mark.parametrize("missing", ["empty", "unreadable", "pending"])
+def test_session_detail_recovers_without_confirmation_presentation(workspace, monkeypatch, missing):
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+    old = CONFIRMATION_RECORD_STORE.load_for_session(seeded.session_id)[0]
+    def records(_session_id):
+        if missing == "unreadable":
+            raise RuntimeError("presentation-canary")
+        return [{**old, "status": "pending"}] if missing == "pending" else []
+    monkeypatch.setattr(v2_routes, "CONFIRMATION_RECORD_STORE", SimpleNamespace(load_for_session=records))
+    monkeypatch.setattr(v2_routes, "EXECUTION_RECORD_STORE", SimpleNamespace(load_for_session=lambda _: []))
+    detail = _client().get(f"/api/v2/sessions/{seeded.session_id}", headers={"X-User-ID": "alice"})
+    assert detail.status_code == 200
+    body = detail.json()
+    assert set(_execution_rows(detail)) == {_EXEC_ONE, _EXEC_TWO}
+    card = body["confirmations"][0]
+    assert card["confirm_id"] == seeded.confirm_id and card["recovery_only"] is True
+    assert card["status"] == "approved" and card["pending_calls"] == []
+    assert card["turn_index"] == (0 if missing == "pending" else None)
+    assert "presentation-canary" not in detail.text
+    jsonschema.validate(body, load_schema("agent-session.schema.json"))
+
+
+def test_session_detail_truthfully_reports_ledger_outage(workspace, monkeypatch):
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    _patch_recovery(monkeypatch, _FakeRecovery("unavailable"))
+    detail = _client().get(f"/api/v2/sessions/{seeded.session_id}", headers={"X-User-ID": "alice"})
+    assert detail.status_code == 200
+    assert detail.json()["execution_recovery_availability"] == "unavailable"
+    assert set(_execution_rows(detail)) == {_EXEC_ONE, _EXEC_TWO}
+    assert all(row["recovery"]["availability"] == "unavailable" for row in _execution_rows(detail).values())
+    assert all(row.get("recovery") is None for row in EXECUTION_RECORD_STORE.load_for_session(seeded.session_id))
+
+
+@pytest.mark.parametrize("cursor_kind", ["numeric", "wrong_owner", "wrong_session", "wrong_kind", "tampered"])
+def test_session_detail_rejects_unscoped_cursors(workspace, monkeypatch, cursor_kind):
+    session_store, _ = workspace
+    seeded = _seed_recovery_session(session_store)
+    fake = _FakeRecovery()
+    _patch_recovery(monkeypatch, fake)
+    scope = ("executions", seeded.session_id, "alice")
+    if cursor_kind == "wrong_owner":
+        scope = ("executions", seeded.session_id, "bob")
+    if cursor_kind == "wrong_session":
+        scope = ("executions", "elsewhere", "alice")
+    if cursor_kind == "wrong_kind":
+        scope = ("observations", seeded.session_id, "alice", _EXEC_ONE)
+    cursor = fake.cursors._encode_cursor(scope, 1)
+    if cursor_kind == "numeric":
+        cursor = "42"
+    if cursor_kind == "tampered":
+        cursor = ("A" if cursor[0] != "A" else "B") + cursor[1:]
+    detail = _client().get(f"/api/v2/sessions/{seeded.session_id}",
+        params={"execution_cursor": cursor}, headers={"X-User-ID": "alice"})
+    assert detail.status_code == 400
+    assert fake.calls == []

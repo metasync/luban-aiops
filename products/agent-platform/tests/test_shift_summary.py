@@ -448,6 +448,142 @@ class TestHandoverSection:
         assert handover["decisions"] == []
 
 
+class TestRecoveryFacts:
+    @pytest.mark.parametrize("historical_success", [False, True])
+    def test_registered_execution_keeps_session_open(
+        self, stores, monkeypatch, historical_success
+    ):
+        session_id = "ses-registered"
+        stores["sessions"].create_session(user_id="alice", session_id=session_id)
+        if historical_success:
+            stores["executions"].save_request(
+                make_execution_record(_execution_request(session_id=session_id))
+            )
+            stores["executions"].save_receipt(
+                "cf-1", "call-1",
+                {"status": "succeeded", "completed_at": "2026-09-24T10:00:00Z"},
+                True,
+            )
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", lambda *a: {
+            "availability": "available", "executions_truncated": False,
+            "executions": [{
+                "execution_id": "exec-call-1", "tool_name": "k8s.restart_service",
+                "availability": "available", "state": None,
+                "preparation_state": "registered",
+            }],
+        })
+        digest, _ = build_digest("alice", [session_id], False)
+        [row] = digest["sessions"][0]["executions"]
+        assert row["status"] == "registered"
+        assert row["receipt_status"] is None
+        assert row["recovery"]["tool_report_status"] is None
+        assert row["historical_receipt_status"] == (
+            "succeeded" if historical_success else None
+        )
+        handover = digest["handover"]
+        assert handover["execution_evidence_counts"]["registered"] == 1
+        assert handover["execution_evidence_counts"]["tool_report_succeeded"] == 0
+        assert handover["open_sessions"] == [session_id]
+        assert handover["quiet"] is False
+        assert "Quiet shift" not in document_summary(digest)
+
+    def test_legacy_success_without_recovery_remains_closed(self, stores, monkeypatch):
+        session_id = "ses-legacy-closed"
+        stores["sessions"].create_session(user_id="alice", session_id=session_id)
+        stores["executions"].save_request(
+            make_execution_record(_execution_request(session_id=session_id))
+        )
+        stores["executions"].save_receipt(
+            "cf-1", "call-1",
+            {"status": "succeeded", "completed_at": "2026-09-24T10:00:00Z"},
+            True,
+        )
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", lambda *a: None)
+        digest, _ = build_digest("alice", [session_id], False)
+        assert "recovery" not in digest["sessions"][0]["executions"][0]
+        assert digest["handover"]["open_sessions"] == []
+
+    @pytest.mark.parametrize("variant", ["unknown", "late", "conflict", "unavailable", "missing"])
+    def test_current_facts_override_historical_success(self, stores, monkeypatch, variant):
+        from agent_service.services import incident_report
+        session_id = _seed_owner_session(stores)
+        stores["executions"].save_receipt("cf-1", "call-1", {
+            "status": "succeeded", "completed_at": "2026-09-24T10:00:00Z"}, True)
+        projection = {
+            "execution_id": "exec-call-1", "availability": "available",
+            "state": "outcome_unknown" if variant == "unknown" else "result_recorded",
+            "integrity_conflict": variant == "conflict",
+            "observe_by": "2026-09-24T10:00:00Z",
+            "receipt": {"status": "succeeded", "completed_at": "2026-09-24T10:00:01Z"},
+        }
+        page = {"availability": "unavailable" if variant == "unavailable" else "available",
+                "executions": [] if variant in {"unavailable", "missing"} else [projection]}
+        calls = []
+        def read(sid, owner):
+            calls.append((sid, owner))
+            return page
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", read)
+        digest, _ = build_digest("alice", [session_id], False)
+        entry = digest["sessions"][0]
+        row = entry["executions"][0]
+        assert calls == [(session_id, "alice")]
+        assert row["historical_receipt_status"] == "succeeded"
+        assert row["historical_digest_match"] is True
+        assert "digest_match" not in row
+        assert row["recovery"]["target_verification_required"] is True
+        if variant == "late":
+            assert row["receipt_status"] == "succeeded"
+            assert row["recovery"]["late_report"] is True
+            assert digest["handover"]["execution_evidence_counts"]["tool_report_succeeded"] == 1
+        else:
+            assert row["receipt_status"] is None
+            assert digest["handover"]["execution_evidence_counts"]["tool_report_succeeded"] == 0
+        assert row["recovery"] == digest["handover"]["executions"][0]["recovery"]
+        assert row["evidence_label"] == digest["handover"]["executions"][0]["evidence_label"]
+        assert digest["handover"]["quiet"] is False
+        summary = document_summary(digest)
+        assert {"unknown": "unknown outcome", "late": "late tool report",
+                "conflict": "conflicting report", "unavailable": "incomplete",
+                "missing": "missing or unavailable"}[variant] in summary
+        # The incident consumer reuses the same owned-session projection.
+        record = stores["sessions"].get_session(session_id)
+        incident_entry, _ = incident_report._digest_own_session(record, session_id)
+        assert incident_entry["executions"] == entry["executions"]
+        # Current reads never rewrite the historical presentation record.
+        assert stores["executions"].load_for_session(session_id)[0]["receipt"]["status"] == "succeeded"
+
+    @pytest.mark.parametrize("availability,truncated", [("unavailable", False), ("available", True)])
+    def test_incomplete_empty_recovery_is_never_a_quiet_shift(self, stores, monkeypatch, availability, truncated):
+        record = stores["sessions"].create_session(user_id="alice", session_id="ses-empty")
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", lambda *a: {
+            "availability": availability, "executions": [], "executions_truncated": truncated})
+        digest, _ = build_digest("alice", [record.session_id], False)
+        assert digest["handover"]["quiet"] is False
+        assert digest["handover"]["incomplete_recovery_sessions"] == 1
+        assert digest["handover"]["open_sessions"] == [record.session_id]
+
+    def test_ledger_only_execution_survives_presentation_store_failure(self, stores, monkeypatch):
+        session_id = _seed_owner_session(stores)
+        def failed(*a):
+            raise RuntimeError("presentation unavailable")
+        monkeypatch.setattr(stores["executions"], "load_for_session", failed)
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", lambda *a: {
+            "availability": "available", "executions": [{"execution_id": "ledger-only",
+                "tool_name": "web.click", "availability": "available", "state": "outcome_unknown"}]})
+        digest, provenance = build_digest("alice", [session_id], False)
+        assert digest["sessions"][0]["executions"][0]["status"] == "outcome_unknown"
+        assert "ledger-only" in provenance["sessions"][0]["cited_record_ids"]
+
+    def test_foreign_coverage_never_reads_owner_ledger(self, stores, monkeypatch):
+        session_id = _seed_foreign_session(stores)
+        def forbidden(*a):
+            raise AssertionError("foreign recovery must never be read")
+        monkeypatch.setattr(shift_summary, "read_owner_recovery_page", forbidden)
+        digest, _ = build_digest("alice", [session_id], True)
+        assert "execution_recovery" not in digest["sessions"][0]
+        assert "execution_evidence_counts" not in digest["handover"]
+
+
 class TestDocumentSummary:
     """SPEC-041 R-4: deterministic counts-only list summary."""
 

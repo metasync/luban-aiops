@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/execution-handoff-response.schema.json",
+  "title": "Execution Handoff Response (v3)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "kind", "request_id", "recovery", "durability"],
+  "properties": {
+    "protocol_version": {"const": 3},
+    "kind": {"enum": ["original_result", "status_only", "refused", "unavailable"]},
+    "request_id": {"$ref": "execution-observation.schema.json#/$defs/id"},
+    "recovery": {"anyOf": [{"$ref": "execution-recovery.schema.json"}, {"type": "null"}]},
+    "durability": {"enum": ["confirmed", "unconfirmed", "not_applicable"]},
+    "reason_code": {"$ref": "execution-observation.schema.json#/$defs/reason"},
+    "result": {"$ref": "tool-result.schema.json"},
+    "observation": {"$ref": "execution-observation.schema.json"}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "original_result"}}},
+     "then": {"required": ["result", "observation"], "properties": {
+       "durability": {"const": "confirmed"},
+       "observation": {"properties": {"kind": {"const": "worker_result"}}},
+       "recovery": {"type": "object", "properties": {"state": {"const": "result_recorded"}, "replay": {"const": false}}}
+     }},
+     "else": {"not": {"anyOf": [{"required": ["result"]}, {"required": ["observation"]}]}}},
+    {"if": {"properties": {"kind": {"const": "refused"}}},
+     "then": {"required": ["reason_code"], "properties": {"reason_code": {"not": {"const": "none"}}}},
+     "else": {"not": {"required": ["reason_code"]}}},
+    {"if": {"properties": {"kind": {"const": "status_only"}}},
+     "then": {"properties": {"recovery": {"type": "object", "properties": {"replay": {"const": true}}}}}},
+    {"if": {"properties": {"kind": {"const": "unavailable"}}},
+     "then": {"properties": {"durability": {"const": "unconfirmed"}, "recovery": {
+       "anyOf": [{"type": "null"}, {"type": "object", "properties": {"availability": {"const": "unavailable"}}}]
+     }}}}
+  ]
+}

@@ -19,6 +19,8 @@ import json
 import logging
 from typing import Any
 
+from agent_service.services.execution_recovery import EXECUTION_EVIDENCE_GUIDANCE
+
 LOGGER = logging.getLogger(__name__)
 
 PROSE_TIMEOUT_SECONDS = 30.0
@@ -56,6 +58,8 @@ If the handover section reports quiet=true, say plainly that the \
 shift had no recorded decisions or executions. No headings, no \
 markdown.
 
+{execution_guidance}
+
 JSON digest:
 {digest_json}
 """
@@ -89,6 +93,8 @@ triage section reports the not_triaged marker, say plainly that no \
 triage report exists. If the session section reports a marker \
 (foreign_denied, missing, unavailable), say plainly what the reader \
 will not find there. No headings, no markdown.
+
+{execution_guidance}
 
 JSON digest:
 {digest_json}
@@ -143,6 +149,7 @@ def build_prose_prompt(document_type: str, digest: dict[str, Any]) -> str:
         else _PROMPT_TEMPLATE
     )
     return template.format(
+        execution_guidance=EXECUTION_EVIDENCE_GUIDANCE,
         digest_json=json.dumps(
             {"document_type": document_type, "digest": digest},
             sort_keys=True,

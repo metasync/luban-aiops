@@ -11,6 +11,55 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.43.0 — 2026-09-26
+
+Crash-safe execution and outcome reconciliation (SPEC-063), per ADR-0013. The
+full root `make verify` is green: the real-Postgres failure campaign passed 791
+(exit 0) with every product/portal/policy/version/secret gate and clean disposable
+teardown; see [delivery evidence](docs/specs/SPEC-063-crash-safe-execution/tasks.md#delivery-closure-evidence),
+which also retains the daemon-wedge attempts (V1/V5/V6) and the V4 test-only
+fixture fix as honest history. No release tag, registry push, or shared deployment
+is implied by this local delivery.
+
+### Added
+
+- Postgres single-use dispatch claims, immutable intent/observation metadata,
+  dual execution/approved-call identity protection, and v3 signed run/epoch/expiry
+  contracts. Ambiguous commit acknowledgment grants no send permission.
+- Owner-scoped, bounded execution recovery in agent, platform-gateway, and portal;
+  explicit unknown, late, conflict, and unavailable states. New document digests
+  preserve uncertainty while published snapshots remain immutable.
+- Real-Postgres multiprocess failure campaign, deterministic crash barriers,
+  independent gateway/target counters, and coverage/negative-control gates.
+  Root verification now includes portal tests/build and the required campaign.
+- Disabled migration/cutover/epoch-rotation tools, bounded worker drain,
+  admission/readiness/uncertainty metrics, and operator recovery guidance.
+
+### Changed
+
+- Durable claims replace process-local duplicate authority. Mutations require
+  enabled agent/worker/catalog admission and matching epochs; legacy executable
+  requests are refused, historical receipts stay readable. The first protocol
+  upgrade requires a coordinated mutation-disabled cutover.
+- Unknown or unaccepted outcomes stop automatic mutating continuation. Metadata
+  replay cannot execute again, reopen a run, reconstruct original output, or
+  release a held password. Secret release requires the original validated result
+  plus durable agent acceptance and a single-use process-bound permit.
+- Request lifetime is bounded to 900 seconds by database time; claim/evidence
+  protection lasts at least 30 days after expiry independently of session cleanup.
+  At-most-one worker dispatch does not promise exactly-once target effects or
+  remote cancellation.
+
+### Fixed
+
+- Cutover wrapper refuses failed scale/wait/inventory and remaining worker/agent
+  pods instead of announcing safe replacement; nine local regression cases cover
+  the shipped shell and real decision CLI without cluster writes.
+- Isolated acceptance's held-secret test uses separate handles for destructive
+  wrong-owner probing and legitimate redemption; the original failed run remains
+  retained. Corrected S6 passed all five paths with target reconciliation and
+  cleanup. Historical 0.42.0 acceptance image provenance is unchanged.
+
 ## 0.42.0 — 2026-09-23
 
 Minor release refining **SPEC-062 R-3** delivery timing after a live-test

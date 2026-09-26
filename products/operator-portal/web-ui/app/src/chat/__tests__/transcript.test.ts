@@ -271,6 +271,32 @@ function recordOf(
 }
 
 describe("transcriptToTurns confirmation replay (SPEC-031 R-2)", () => {
+  it.each([0, null, 99])("anchors recovery-only evidence honestly for ordinal %s", (turnIndex) => {
+    const record = recordOf({ recovery_only: true, status: "approved", pending_calls: [], turn_index: turnIndex,
+      executions: [{ execution_id: "exec-1", confirm_id: "cf-9", call_id: "c-1", session_id: "s-1",
+        tool_name: "k8s.restart_pod", status: "requested" }],
+    });
+    const turns = transcriptToTurns(TWO_TURNS, null, [record]);
+    const anchored = turnIndex === 0;
+    expect(turns).toHaveLength(anchored ? 2 : 3);
+    expect(turns[1].confirmations).toEqual([]);
+    const target = turns[anchored ? 0 : 2];
+    expect(target.confirmations[0].executions?.[0].executionId).toBe("exec-1");
+    expect(target.confirmations[0].note).toBe("Read-only execution evidence. Original confirmation details are unavailable.");
+    expect(target.confirmationPending).toBe(false);
+    if (!anchored) expect(target.userMessage).toBe("Execution recovery — original turn unavailable");
+  });
+
+  it("does not treat a synthetic recovery turn as a known original anchor", () => {
+    const turns = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ recovery_only: true, status: "approved", turn_index: null }),
+      recordOf({ confirm_id: "cf-10", recovery_only: true, status: "approved", turn_index: 2 }),
+    ]);
+    expect(turns).toHaveLength(4);
+    expect(turns[2].confirmations.map((card) => card.confirmId)).toEqual(["cf-9"]);
+    expect(turns[3].confirmations.map((card) => card.confirmId)).toEqual(["cf-10"]);
+  });
+
   it("attaches a pending record to the last turn as an actionable card", () => {
     const turns = transcriptToTurns(TWO_TURNS, null, [recordOf()]);
     expect(turns).toHaveLength(2);

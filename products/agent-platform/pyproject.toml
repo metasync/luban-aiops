@@ -1,6 +1,6 @@
 [project]
 name = "agent-service"
-version = "0.42.0"
+version = "0.43.0"
 description = "Runtime service for the Luban AIOps agent platform."
 requires-python = ">=3.11"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
   "agentscope-runtime>=1.1,<2.0",
   "apscheduler>=3.11,<4.0",
   "fastapi>=0.115,<1.0",
+  "jsonschema>=4.23,<5.0",
   "opentelemetry-exporter-otlp-proto-http>=1.25,<2.0",
   "opentelemetry-instrumentation-fastapi>=0.46b0",
   "opentelemetry-instrumentation-httpx>=0.46b0",
@@ -28,7 +29,6 @@ agent-service-native = "agent_service.native_service:run"
 [dependency-groups]
 dev = [
   "fakeredis>=2.26,<3.0",
-  "jsonschema>=4.23,<5.0",
   "pytest>=8.3,<9.0"
 ]
 

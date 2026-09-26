@@ -215,6 +215,61 @@ class ToolInvokeEndpointTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_execution_header_is_audit_only_and_request_header_wins(self) -> None:
+        execution_id = "11111111-2222-4333-8444-555555555555"
+        with _patch_jwks(), patch("tool_gateway.services.gateway_service.emit_audit_event") as emit:
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={"tool_name": "test.echo", "parameters": {}, "request_id": "body-forged"},
+                headers={"Authorization": f"Bearer {_mint_delegated('operator')}",
+                         "x-request-id": "original-attempt", "x-execution-id": execution_id},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-request-id"], "original-attempt")
+        self.assertEqual(response.json()["data"]["request_id"], "original-attempt")
+        self.assertNotIn("execution_id", response.json()["data"])
+        event = emit.call_args.args[1]
+        self.assertEqual(event["request_id"], "original-attempt")
+        self.assertEqual(event["details"]["execution_id"], execution_id)
+
+    def test_execution_header_grants_neither_identity_nor_mutation_permission(self) -> None:
+        registry = ToolRegistry(allow_mutating=True)
+        registry.register(_WriteTool())
+        self.client.app.state.tool_registry = registry
+        headers = {"x-execution-id": "11111111-2222-4333-8444-555555555555",
+                   "x-request-id": "denied-attempt"}
+        payload = {"tool_name": "test.mutate", "parameters": {}}
+        missing = self.client.post("/api/v2/tools/invoke", json=payload, headers=headers)
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(missing.headers["x-request-id"], "denied-attempt")
+        with _patch_jwks(), patch("tool_gateway.services.gateway_service.emit_audit_event") as emit:
+            denied = self.client.post("/api/v2/tools/invoke", json=payload,
+                headers={**headers, "Authorization": f"Bearer {_mint_delegated('read-only-observer')}"})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.headers["x-request-id"], "denied-attempt")
+        self.assertEqual(emit.call_args.args[1]["details"]["execution_id"], headers["x-execution-id"])
+
+    def test_invalid_execution_headers_are_not_audited(self) -> None:
+        for value in ("secret-canary", "x" * 4096, "https://example.invalid/password"):
+            with self.subTest(value_length=len(value)), _patch_jwks(), patch(
+                "tool_gateway.services.gateway_service.emit_audit_event"
+            ) as emit, patch("tool_gateway.app.log_event") as log:
+                response = self.client.post("/api/v2/tools/invoke",
+                    json={"tool_name": "test.echo", "parameters": {}},
+                    headers={"Authorization": f"Bearer {_mint_delegated('operator')}",
+                             "x-execution-id": value})
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("execution_id", emit.call_args.args[1]["details"])
+            self.assertNotIn(value, str(log.call_args_list))
+            self.assertEqual(response.headers["x-request-id"], response.json()["data"]["request_id"])
+
+    def test_unsafe_request_header_is_replaced_consistently(self) -> None:
+        with _patch_jwks():
+            response = self._invoke(_mint_delegated("operator"), "test.echo", {}, "x" * 257)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.headers["x-request-id"], "x" * 257)
+        self.assertEqual(response.headers["x-request-id"], response.json()["data"]["request_id"])
+
     def test_invoke_success_operator(self) -> None:
         with _patch_jwks():
             response = self._invoke(

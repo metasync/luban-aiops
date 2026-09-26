@@ -114,6 +114,25 @@ afterEach(() => {
 });
 
 describe("usePendingDecisionPoll (SPEC-032)", () => {
+  it("preserves the recovery page and cancels stale-page decision reads", async () => {
+    let resolve: (detail: SessionDetail) => void = () => {};
+    mockGetSession.mockImplementationOnce(() => new Promise<SessionDetail>((done) => { resolve = done; }))
+      .mockResolvedValue(detailOf());
+    const applyDetail = vi.fn();
+    const { rerender } = renderHook(({ executionCursor }) => usePendingDecisionPoll({
+      sessionId: "s-1", turns: [turnOf()], streaming: false, executionCursor, applyDetail,
+    }), { initialProps: { executionCursor: "page-two" } });
+    await tick();
+    expect(mockGetSession).toHaveBeenLastCalledWith("s-1", expect.any(AbortSignal), { executionCursor: "page-two" });
+    const signal = mockGetSession.mock.calls[0][1] as AbortSignal;
+    rerender({ executionCursor: "page-three" });
+    expect(signal.aborted).toBe(true);
+    await act(async () => { resolve(detailOf({ confirmations: [recordOf({ status: "approved" })] })); });
+    expect(applyDetail).not.toHaveBeenCalled();
+    await tick();
+    expect(mockGetSession).toHaveBeenLastCalledWith("s-1", expect.any(AbortSignal), { executionCursor: "page-three" });
+  });
+
   it("re-seeds the timeline when an external decision moves the state", async () => {
     const pending = detailOf();
     const decided = detailOf({

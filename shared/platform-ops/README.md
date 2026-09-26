@@ -35,6 +35,19 @@ Current implementation artifacts:
 
 The current implementation provides a single development Kubernetes overlay under a durable `gitops/` root. The `dev-k8s` overlay deploys all platform services (agent-platform, tool-gateway, identity-broker, operator-portal, Redis) into the `dev-luban-aiops` namespace. Provider choice is modeled as a separate shared runtime profile layer so the active profile remains reviewable and Git-diffable. The source manifests are grouped by shared infrastructure and product ownership so the overlay stays maintainable as the workspace grows.
 
+## Execution reliability operations (SPEC-063)
+
+- `e2e/execution-failure-test.sh` runs the required disposable Postgres/process
+  campaign; missing prerequisites and incomplete coverage fail, never skip to green.
+- `gitops/execution-cutover.sh` guards deliberate downgrade/unknown-version changes
+  with operator-confirmed disabled mutations and verified empty sender inventory.
+- `gitops/rotate-execution-epoch.sh` updates only the DSN-selected disabled catalog;
+  it neither configures consumer epochs nor enables admission.
+- The [cutover/restore runbook](../../docs/guides/execution-cutover-restore.md)
+  defines the mandatory first protocol upgrade, old-sender accounting, restore wait,
+  and limits. Stock deploy does not automate that procedure. No wrapper proves
+  exactly-once remote effects or cancellation of already dispatched work.
+
 ## Expected Integration Points
 
 - all deployable `products/` services

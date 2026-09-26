@@ -19,6 +19,7 @@ logged.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -142,3 +143,59 @@ async def handoff(
         reason,
         f"execution worker rejected the handoff ({response.status_code})",
     )
+
+
+async def handoff_original(request, arguments, delegated_token, settings, attempt_request_id):
+    """v3 exchange: raw output leaves this boundary only as a verified original.
+
+    The invocation coordinator must register first and durably accept afterward.
+    Exceptions (including cancellation) never mean the target did not act.
+    """
+    from agent_service.services.execution_protocol import (
+        ProtocolError, SAFE_REQUEST_ID, validate, validate_original, validate_request,
+    )
+    from agent_service.services.execution_signing import canonical_digest
+
+    key = getattr(settings, "execution_signing_key", None)
+    validate_request(request, key)
+    worker_url = getattr(settings, "execution_worker_url", None)
+    token = getattr(settings, "execution_handoff_token", None)
+    if not worker_url or not token:
+        raise ProtocolError("gateway_not_configured")
+    if not isinstance(delegated_token, str) or not delegated_token.strip():
+        raise ProtocolError("credential_missing")
+    if not isinstance(arguments, dict) or canonical_digest(arguments) != request["args_digest"]:
+        raise ProtocolError("args_digest_mismatch")
+    if not isinstance(attempt_request_id, str) or not SAFE_REQUEST_ID.fullmatch(attempt_request_id):
+        raise ProtocolError("bad_request")
+    timeout = getattr(settings, "execution_worker_timeout_seconds", 60.0)
+    if not isinstance(timeout, (int, float)) or not 0 < timeout <= 120:
+        raise ProtocolError("bad_request")
+    try:
+        async with asyncio.timeout(timeout):
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False,
+                                         transport=httpx.AsyncHTTPTransport(retries=0)) as client:
+                response = await client.post(
+                    worker_url.rstrip("/") + HANDOFF_PATH,
+                    headers={"Authorization": f"Bearer {token}", "x-request-id": attempt_request_id},
+                    json={"request": request, "arguments": arguments, "delegated_token": delegated_token},
+                )
+        if response.headers.get("x-request-id") != attempt_request_id:
+            raise ProtocolError("response_invalid")
+        payload = response.json()
+        validate("execution-handoff-response", payload)
+        if payload["request_id"] != attempt_request_id:
+            raise ProtocolError("response_invalid")
+    except (TimeoutError, httpx.TimeoutException):
+        raise ProtocolError("wait_expired") from None
+    except httpx.HTTPError:
+        raise ProtocolError("transport_error") from None
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise ProtocolError("response_invalid") from None
+    if payload["kind"] != "original_result":
+        # A separate durable read may establish scoped refusal. An arbitrary
+        # error response or replay is never usable original output.
+        raise ProtocolError("metadata_replay" if payload["kind"] == "status_only" else "transport_error")
+    if response.status_code != 200:
+        raise ProtocolError("response_invalid")
+    return validate_original(payload, request, key, attempt_request_id, attempt_request_id)

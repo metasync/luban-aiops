@@ -1561,6 +1561,34 @@ def _graduate(client: TestClient, session_id: str, user: str = "alice"):
     )
 
 
+@pytest.mark.parametrize("variant", ["unknown", "late", "conflict", "unavailable", "missing", "stopped", "no_origin", "original"])
+def test_graduation_requires_current_evidence_without_inventing_an_origin(monkeypatch, variant):
+    client = TestClient(create_app())
+    session_id = _make_session(client, "alice")
+    AUTHORING_TRACE_STORE.declare_target(session_id, TARGET)
+    _seed_trace(session_id, count=1, origin=None if variant == "no_origin" else TARGET)
+    calls = _wire_route(monkeypatch)
+    projection = {"execution_id": "exec-1", "tool_name": "web.click", "availability": "available",
+        "state": "outcome_unknown" if variant == "unknown" else "result_recorded",
+        "integrity_conflict": variant == "conflict", "run_stopped": variant == "stopped",
+        "observe_by": "2026-09-24T10:00:00Z",
+        "receipt": {"status": "succeeded", "completed_at": "2026-09-24T10:00:01Z" if variant == "late" else "2026-09-24T10:00:00Z"}}
+    reads = []
+    def read(sid, owner):
+        reads.append((sid, owner))
+        return {"availability": "unavailable" if variant == "unavailable" else "available",
+                "executions": [] if variant == "missing" else [projection]}
+    monkeypatch.setattr(v2_routes, "read_owner_recovery_page", read)
+    before = AUTHORING_TRACE_STORE.load_for_session(session_id)
+    response = _graduate(client, session_id)
+    assert reads == [(session_id, "alice")]
+    assert response.status_code == (200 if variant == "original" else 409)
+    assert calls["validate"] == (1 if variant == "original" else 0)
+    if variant != "original":
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id) == before
+        assert AUTHORING_TRACE_STORE.trace_status(session_id) == TRACE_DRAFT
+
+
 class TestGraduateRoute:
     def test_a_scoped_session_graduates_into_a_validated_draft(
         self, monkeypatch, _audit

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/execution-receipt.schema.json",
+  "title": "Execution Receipt (v1)",
+  "description": "Signed execution receipt written after the executed tool result lands (SPEC-037 R-1). Closes one signed execution request with the outcome. The signature is the HMAC-SHA256 hex over the canonical JSON of every other field in the envelope (sorted keys, no insignificant whitespace), keyed by the same platform execution-signing key that signed the request.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "execution_id",
+    "status",
+    "outcome_digest",
+    "request_id",
+    "completed_at",
+    "signature"
+  ],
+  "properties": {
+    "execution_id": {
+      "type": "string",
+      "description": "The execution request this receipt closes (execution-request.schema.json)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["succeeded", "failed", "timeout"],
+      "description": "Execution outcome mapped from the tool result."
+    },
+    "outcome_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex of the canonical JSON of the tool result the receipt was built from."
+    },
+    "request_id": {
+      "type": "string",
+      "description": "The correlating x-request-id of the resumed stream that executed the call; joins the receipt to the audit trail without a new audit dimension."
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp (RFC 3339) of receipt construction after the tool result landed."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "HMAC-SHA256 hex over the canonical JSON of the envelope excluding this field."
+    }
+  }
+}

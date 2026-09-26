@@ -40,6 +40,8 @@ import {
   declareSkillTarget,
   getSession,
   graduateSessionSkill,
+  type ExecutionRecovery,
+  type SessionDetail,
   type SessionSummary,
   type SkillDraftResponse,
   type SkillGraduationResponse,
@@ -70,6 +72,7 @@ import { ComposerSelectionBar } from "./ComposerSelectionBar";
 import { SkillDraftPreviewModal } from "./SkillDraftPreview";
 import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
+import { useRecoveryPoll } from "./useRecoveryPoll";
 import {
   VOICE_LANGUAGES,
   loadVoiceLanguage,
@@ -352,6 +355,325 @@ function executionDigestNote(execution: ExecutionReceipt): string {
   return "";
 }
 
+// --- SPEC-063 R-5a: owner-facing recovery vocabulary ----------------------
+// These labels describe only what the durable ledger can *prove* about an
+// execution — never what the operator is allowed to do. A recovery read is
+// not an original response, so there is deliberately no retry, reset,
+// mark-success, or reveal-old-password affordance anywhere in this block:
+// the only guidance offered is to verify the target system independently.
+
+export const RECOVERY_VOCABULARY = {
+  availability: ["available", "unavailable", "not_found"],
+  state: [null, "not_dispatched", "dispatch_claimed", "outcome_unknown", "result_recorded"],
+  source: ["agent", "worker"],
+  kind: ["claim_committed", "wait_expired", "transport_uncertain", "pre_dispatch_refused",
+    "worker_result", "result_persistence_unconfirmed", "response_accepted", "run_stopped", "duplicate_seen"],
+  reason: ["none", "unauthorized", "bad_request", "signing_unavailable", "signature_invalid",
+    "args_digest_mismatch", "request_missing", "identity_conflict", "protocol_unsupported",
+    "request_expired", "request_not_yet_valid", "lifetime_invalid", "admission_disabled",
+    "epoch_mismatch", "store_unavailable", "schema_invalid", "claim_commit_unconfirmed",
+    "gateway_not_configured", "credential_missing", "wait_expired", "transport_error",
+    "response_invalid", "receipt_unconfirmed", "run_stopped", "predecessor_unresolved",
+    "send_lock_unavailable", "shutdown", "integrity_conflict", "metadata_replay"],
+  receipt: ["succeeded", "failed", "timeout"],
+} as const;
+
+function recoveryId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,256}$/.test(value) ? value : undefined;
+}
+
+function recoveryTime(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= 40 &&
+    /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+    Number.isFinite(Date.parse(value)) ? value : undefined;
+}
+
+// A recorded result is "late" when its durable completion lands after the
+// observation deadline the card was polling against — the outcome exists and
+// is readable now, but it was not visible while the window was open.
+function isLateRecoveryReport(recovery: ExecutionRecovery): boolean {
+  const completed = recoveryTime(recovery.receipt?.completed_at);
+  const observed = recoveryTime(recovery.observe_by);
+  if (!completed || !observed) return false;
+  const completedAt = Date.parse(completed);
+  const deadline = Date.parse(observed);
+  return (
+    Number.isFinite(completedAt) &&
+    Number.isFinite(deadline) &&
+    completedAt > deadline
+  );
+}
+
+function recoveryLabel(recovery: ExecutionRecovery): {
+  color: string;
+  label: string;
+  note: string;
+} {
+  if (recovery.availability === "not_found") {
+    return { color: "default", label: "recovery not found",
+      note: "No execution was found in this owner's session. Missing evidence does not establish whether the target changed." };
+  }
+  if (recovery.availability !== "available") {
+    return {
+      color: "default",
+      label: "recovery unavailable",
+      note: "The outcome ledger could not be read. This is not evidence either way — the action may or may not have run. Verify the target system independently.",
+    };
+  }
+  if (recovery.integrity_conflict) {
+    return {
+      color: "error",
+      label: "conflicting reports",
+      note: "The ledger holds reports that could not be reconciled into one outcome, so the result is treated as unknown. Verify the target system independently before acting again.",
+    };
+  }
+  switch (recovery.state) {
+    case "result_recorded": {
+      const status = recovery.receipt?.status;
+      if (status !== "succeeded" && status !== "failed" && status !== "timeout") {
+        return { color: "warning", label: "outcome unknown",
+          note: "The recorded report is incomplete or unrecognized. Verify the target system independently." };
+      }
+      const late = isLateRecoveryReport(recovery);
+      const verb =
+        status === "failed"
+          ? "tool failure recorded"
+          : status === "timeout"
+            ? "timeout recorded"
+            : "tool report recorded";
+      return {
+        color: status === "succeeded" ? "success" : "warning",
+        label: late ? `late ${verb}` : verb,
+        note: late
+          ? "A durable tool report landed after the observation window closed. It is recorded and readable now; it was not visible while the card was polling. This is the recorded report, not a live re-run."
+          : "The worker's tool result was durably recorded. This is the recorded report, not a live re-run.",
+      };
+    }
+    case "dispatch_claimed":
+      return {
+        color: "processing",
+        label: "dispatch claimed",
+        note: "A worker claimed this dispatch but no tool result has been durably recorded yet, so the outcome is still open. Verify the target system independently before acting again.",
+      };
+    case "outcome_unknown":
+      return {
+        color: "warning",
+        label: "outcome unknown",
+        note: "The available evidence does not establish one durable tool outcome. The action may still be running or may have completed. Verify the target system independently.",
+      };
+    case "not_dispatched":
+      return {
+        color: "default",
+        label: "not dispatched",
+        note: "This submission was positively refused before dispatch. That does not establish the outcome of any other attempt.",
+      };
+    case null:
+      return {
+        color: "default",
+        label: "registered — dispatch not established",
+        note: "The signed request was registered. Registration alone does not prove that the target did nothing; the handoff may be unresolved.",
+      };
+    default:
+      return { color: "warning", label: "outcome unknown",
+        note: "The recovery state is unrecognized. Verify the target system independently." };
+  }
+}
+
+// Read-only recovery detail: the label note, the correlating times and IDs,
+// the replay/missing-output explanation, history truncation, and the
+// independent-verification guidance. Rendered as escaped text only.
+function RecoveryDetail({
+  recovery,
+  label,
+  busy,
+  paged,
+  onPage,
+}: {
+  recovery: ExecutionRecovery;
+  label: { label: string; note: string };
+  busy: boolean;
+  paged: boolean;
+  onPage: (cursor?: string) => void;
+}) {
+  const requestId = recovery.attempt_request_id ?? recovery.receipt?.request_id;
+  const facts: Array<[string, string]> = [];
+  for (const [name, value] of [
+    ["Execution", recovery.execution_id], ["Approval", recovery.confirm_id],
+    ["Run", recovery.run_id], ["Original request", requestId],
+  ]) {
+    const safe = recoveryId(value);
+    if (name && safe) facts.push([name, safe]);
+  }
+  for (const [name, value] of [
+    ["Requested", recovery.requested_at], ["Claimed", recovery.claimed_at],
+    ["Observe by", recovery.observe_by], ["Completed", recovery.receipt?.completed_at],
+    ["Read at", recovery.as_of],
+  ]) {
+    const safe = recoveryTime(value);
+    if (name && safe) facts.push([name, safe]);
+  }
+  const observations = Array.isArray(recovery.observations) ? recovery.observations : [];
+  const truncated = recovery.observations_truncated || observations.length > 20;
+  return (
+    <details className="confirm-execution-recovery">
+      <summary>Recovery detail</summary>
+      <div className="recovery-note">{label.note}</div>
+      {facts.length > 0 ? (
+        <dl className="recovery-facts">
+          {facts.map(([name, value]) => (
+            <div className="recovery-fact" key={name}>
+              <dt>{name}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {recovery.replay ? (
+        <div className="recovery-note">
+          This is a replayed recovery read of the durable ledger, not the
+          original live response.
+        </div>
+      ) : null}
+      <div className="recovery-note">
+        Recovery contains signed metadata only, never original tool output or a previously held secret.
+        Missing output is inconclusive.
+      </div>
+      {recovery.run_stopped ? <div className="recovery-note">
+        This run is stopped. Work already running at the target is not necessarily canceled.
+      </div> : null}
+      {observations.length > 0 ? <ol aria-label="Execution observations">
+        {observations.slice(0, 20).map((fact, index) => {
+          const kind = RECOVERY_VOCABULARY.kind.find((value) => value === fact?.kind);
+          const source = RECOVERY_VOCABULARY.source.find((value) => value === fact?.source);
+          const reason = RECOVERY_VOCABULARY.reason.find((value) => value === fact?.reason_code);
+          const id = recoveryId(fact?.observation_id);
+          const request = recoveryId(fact?.request_id);
+          return <li key={`${id ?? "unrecognized"}:${index}`}>
+            <strong>{kind ?? "unrecognized observation"}</strong> — {source ?? "unknown source"} at {recoveryTime(fact?.observed_at) ?? "unknown time"}
+            {request ? <span> · Request: {request}</span> : null}
+            {reason ? <span> · Reason: {reason}</span> : null}
+            {id ? <code> · {id}</code> : null}
+          </li>;
+        })}
+      </ol> : null}
+      {truncated ? (
+        <div className="recovery-note">
+          Observation history is bounded to 20 entries per page in recorded order.
+          {recovery.next_observation_cursor
+            ? " More observations remain in the ledger."
+            : " Additional observations exceeded the retention bound."}
+        </div>
+      ) : null}
+      {recovery.next_observation_cursor ? <Button size="small" disabled={busy}
+        onClick={() => onPage(recovery.next_observation_cursor!)}>Next observation page</Button> : null}
+      {paged ? <Button size="small" disabled={busy} onClick={() => onPage()}>First observation page</Button> : null}
+      {recovery.target_verification_required ? (
+        <div className="recovery-note">
+          Verify the target system independently before acting again — this
+          recovery read is not proof of the current state.
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function ExecutionRow({ execution, sessionId, busy }: {
+  execution: ExecutionReceipt; sessionId?: string | null; busy: boolean;
+}) {
+  const [page, setPage] = useState<{ source: ExecutionRecovery | undefined; value: ExecutionRecovery; cursor?: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setLoading(false);
+    setError(false);
+    return () => { requestRef.current?.abort(); requestRef.current = null; };
+  }, [sessionId, execution.executionId, execution.recovery, busy]);
+  const recovery = page?.source === execution.recovery ? page?.value : execution.recovery;
+  const label = recovery ? recoveryLabel(recovery) : null;
+  const loadPage = async (cursor?: string) => {
+    if (!sessionId || busy || requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setLoading(true);
+    setError(false);
+    try {
+      const detail = await getSession(sessionId, controller.signal, {
+        execution: execution.executionId, executionCursor: cursor, pageSize: 1,
+      });
+      if (controller.signal.aborted) return;
+      const found = detail.session_id === sessionId ? detail.confirmations?.flatMap((card) => card.executions ?? [])
+        .find((row) => row.execution_id === execution.executionId)?.recovery : null;
+      if (!found || found.availability !== "available") { setError(true); return; }
+      setPage({ source: execution.recovery, value: found, cursor });
+    } catch {
+      if (!controller.signal.aborted) setError(true);
+    } finally {
+      if (!controller.signal.aborted) { requestRef.current = null; setLoading(false); }
+    }
+  };
+  const status = EXECUTION_STATUS[execution.status] ?? EXECUTION_STATUS.requested;
+  const note = executionDigestNote(execution);
+  return <div className="confirm-execution">
+    <Tag color={status.color}>{recovery ? `Historical: ${status.label}` : status.label}</Tag>
+    {label ? <Tag color={label.color} data-testid="recovery-label">{label.label}</Tag> : null}
+    <strong>{execution.toolName || execution.callId}</strong>
+    {note ? <span className="confirm-execution-note">{note}</span> : null}
+    {recovery && label ? <RecoveryDetail recovery={recovery} label={label}
+      busy={busy || loading} paged={Boolean(page?.source === execution.recovery && page?.cursor)}
+      onPage={(cursor) => void loadPage(cursor)} /> : null}
+    {error ? <span role="status">Recovery page could not be read. The last readable view is retained; missing evidence is inconclusive.</span> : null}
+  </div>;
+}
+
+export function RecoveryPager({ sessionId, detail, cursor, busy, onPage, onBusy }: {
+  sessionId: string | null; detail?: SessionDetail; cursor?: string; busy: boolean;
+  onPage: (detail: SessionDetail, cursor?: string) => void; onBusy: (busy: boolean) => void;
+}) {
+  const requestRef = useRef<AbortController | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const onBusyRef = useRef(onBusy);
+  onBusyRef.current = onBusy;
+  useEffect(() => {
+    setError(false);
+    setLoading(false);
+    return () => { requestRef.current?.abort(); requestRef.current = null; onBusyRef.current(false); };
+  }, [sessionId, busy]);
+  const load = async (next?: string) => {
+    if (!sessionId || busy || requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setLoading(true);
+    onBusyRef.current(true);
+    setError(false);
+    try {
+      const fresh = await getSession(sessionId, controller.signal, next ? { executionCursor: next } : undefined);
+      if (controller.signal.aborted) return;
+      if (fresh.session_id !== sessionId || fresh.execution_recovery_availability !== "available") {
+        setError(true); return;
+      }
+      onPage(fresh, next);
+    } catch {
+      if (!controller.signal.aborted) setError(true);
+    } finally {
+      if (!controller.signal.aborted) {
+        requestRef.current = null; setLoading(false); onBusyRef.current(false);
+      }
+    }
+  };
+  if (!sessionId || detail?.session_id !== sessionId) return null;
+  return <div className="recovery-pagination">
+    {detail.execution_recovery_availability === "unavailable" ? <Alert type="warning" showIcon
+      title="Execution recovery is unavailable. This does not mean there were no executions; verify the target independently." /> : null}
+    {detail.executions_truncated ? <span>More execution recovery records are available. </span> : null}
+    {detail.next_execution_cursor ? <Button disabled={busy || loading}
+      onClick={() => void load(detail.next_execution_cursor!)}>Next execution page</Button> : null}
+    {cursor ? <Button disabled={busy || loading} onClick={() => void load()}>First execution page</Button> : null}
+    {error ? <span role="status">Recovery page could not be read. The last readable page is retained.</span> : null}
+  </div>;
+}
+
 export function ConfirmationCardView({
   card,
   canDecide,
@@ -561,20 +883,8 @@ export function ConfirmationCardView({
       ))}
       {card.executions && card.executions.length > 0 ? (
         <div className="confirm-executions">
-          {card.executions.map((execution) => {
-            const status =
-              EXECUTION_STATUS[execution.status] ?? EXECUTION_STATUS.requested;
-            const note = executionDigestNote(execution);
-            return (
-              <div className="confirm-execution" key={execution.executionId}>
-                <Tag color={status.color}>{status.label}</Tag>
-                <strong>{execution.toolName || execution.callId}</strong>
-                {note ? (
-                  <span className="confirm-execution-note">{note}</span>
-                ) : null}
-              </div>
-            );
-          })}
+          {card.executions.map((execution) => <ExecutionRow key={execution.executionId}
+            execution={execution} sessionId={card.sessionId} busy={busy} />)}
         </div>
       ) : null}
       {card.status === "pending" ? (
@@ -1283,13 +1593,13 @@ export default function ChatView({
   const chat = useChatStream();
   const [draft, setDraft] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [recoveryPage, setRecoveryPage] = useState<{ detail: SessionDetail; cursor?: string } | null>(null);
+  const [recoveryPageBusy, setRecoveryPageBusy] = useState(false);
+  const currentRecoveryPage = recoveryPage?.detail.session_id === chat.sessionId ? recoveryPage : null;
   // Explicit empty-transcript note (SPEC-023 R-3): a resumed session whose
   // transcript_available is false tells the operator so, rather than
   // silently showing the generic placeholder.
   const [transcriptNote, setTranscriptNote] = useState<string | null>(null);
-  // Sessions whose transcript was already loaded this tab; switching back
-  // restores the in-memory cache without another fetch.
-  const loadedRef = useRef(new Set<string>());
   // Sessions the server reported as unknown (404). Their ids must never
   // prime the stream pointer: sending against them would fail, so the
   // next message auto-creates a fresh session instead (legacy flow).
@@ -1364,8 +1674,7 @@ export default function ChatView({
     return () => controller.abort();
   }, [authenticated]);
 
-  // Session switch: load the transcript once per tab, then let the stream
-  // hook's per-session cache take over on subsequent switches.
+  // Session switch: re-read durable recovery even when a transcript is cached.
   useEffect(() => {
     if (chat.sessionId === activeSessionId) {
       catchingUpRef.current = false;
@@ -1383,17 +1692,15 @@ export default function ChatView({
       setSession(null);
       return;
     }
-    if (loadedRef.current.has(activeSessionId)) {
-      setSession(activeSessionId);
-      return;
-    }
+    // Recovery must be re-read on return, even if a transcript is cached.
     const controller = new AbortController();
     const target = activeSessionId;
     setHistoryLoading(true);
     getSession(target, controller.signal)
       .then((detail) => {
         if (controller.signal.aborted) return;
-        loadedRef.current.add(target);
+        if (detail.session_id !== target) throw new Error("Session identity mismatch");
+        setRecoveryPage({ detail });
         if (!detail.transcript_available && (detail.transcript ?? []).length === 0) {
           setTranscriptNote("This session has no recorded transcript yet.");
         }
@@ -1419,6 +1726,7 @@ export default function ChatView({
           // detail, so parked/decided cards survive a re-login.
           seeded,
         );
+        chat.reseedTurns(target, seeded);
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
@@ -1432,10 +1740,8 @@ export default function ChatView({
           setSession(null);
           return;
         }
-        // Any other failure (transient gateway blip, expired token) must
-        // not be cached as "empty": leave the miss out of loadedRef so
-        // switching away and back retries the fetch, and tell the
-        // operator why the history is missing.
+        // A transient failure must not be remembered as a missing session.
+        // Returning to it performs a fresh read and can recover the history.
         setTranscriptNote(
           error instanceof ApiError && error.status === 401
             ? "Session history is unavailable because your sign-in expired. Sign in again to restore it."
@@ -1462,9 +1768,11 @@ export default function ChatView({
   const { settling } = usePendingDecisionPoll({
     sessionId: chat.sessionId,
     turns: chat.turns,
-    streaming: chat.streaming,
+    streaming: chat.streaming || recoveryPageBusy || historyLoading,
+    executionCursor: currentRecoveryPage?.cursor,
     applyDetail: (detail) => {
       if (!chat.sessionId) return;
+      setRecoveryPage({ detail, cursor: currentRecoveryPage?.cursor });
       const reseeded = transcriptToTurns(
         detail.transcript ?? [],
         detail.evidence_turns,
@@ -1486,6 +1794,31 @@ export default function ChatView({
       }
       // SPEC-034 R-2: the session panel learns the decision at the same
       // moment the transcript does, instead of at the next 30s poll tick.
+      void refresh();
+    },
+  });
+
+  // SPEC-063 R-5a: bounded recovery polling for unsettled executions on a
+  // decided card. A dispatch that was claimed but not yet durably recorded
+  // (or whose outcome is unknown) can still settle — a late worker report may
+  // land after the card first rendered — so while the owner watches, refresh
+  // every 2s for at most 120s, then show refresh guidance. Shares the
+  // transcript re-seed path; a recovery-only change adds no transcript
+  // content, so it triggers no arrival flash.
+  const { recoveryPolling, recoveryGuidance } = useRecoveryPoll({
+    sessionId: chat.sessionId,
+    turns: chat.turns,
+    streaming: chat.streaming || recoveryPageBusy || historyLoading,
+    executionCursor: currentRecoveryPage?.cursor,
+    applyDetail: (detail) => {
+      if (!chat.sessionId) return;
+      setRecoveryPage({ detail, cursor: currentRecoveryPage?.cursor });
+      const reseeded = transcriptToTurns(
+        detail.transcript ?? [],
+        detail.evidence_turns,
+        detail.confirmations,
+      );
+      chat.reseedTurns(chat.sessionId, reseeded);
       void refresh();
     },
   });
@@ -1715,6 +2048,32 @@ export default function ChatView({
             )}
           </div>
         ) : null}
+        {/* SPEC-063 R-5a: recovery polling state for unsettled executions.
+            While a bounded window is open, say so; once it lapses with the
+            outcome still unsettled, offer refresh guidance instead of
+            polling forever. Neither state exposes a retry/reset/reveal
+            control — a late durable result stays readable on refresh. */}
+        <RecoveryPager sessionId={chat.sessionId} detail={currentRecoveryPage?.detail}
+          cursor={currentRecoveryPage?.cursor} busy={chat.streaming || historyLoading}
+          onBusy={setRecoveryPageBusy} onPage={(detail, cursor) => {
+            if (detail.session_id !== chat.sessionId || chat.streaming) return;
+            setRecoveryPage({ detail, cursor });
+            chat.reseedTurns(detail.session_id, transcriptToTurns(detail.transcript ?? [], detail.evidence_turns, detail.confirmations));
+          }} />
+        {recoveryPolling ? (
+          <Alert
+            type="info"
+            showIcon
+            title="Refreshing an unfinished execution outcome…"
+          />
+        ) : null}
+        {recoveryGuidance ? (
+          <Alert
+            type="warning"
+            showIcon
+            title="An execution outcome is still unsettled. Automatic refreshing paused — reload or return to this session to check again. Verify the target system independently before acting."
+          />
+        ) : null}
         <div className="chat-messages" ref={scrollRef}>
           {!authenticated ? (
             <div className="chat-placeholder">
@@ -1736,7 +2095,7 @@ export default function ChatView({
                 key={turn.id}
                 turn={turn}
                 canDecide={canDecide}
-                busy={chat.streaming}
+                busy={chat.streaming || historyLoading || recoveryPageBusy}
                 justArrived={arrival !== null && index >= arrival.from}
                 // Only the span's start group re-types its reply (from
                 // the already-seen offset); later groups arrive complete

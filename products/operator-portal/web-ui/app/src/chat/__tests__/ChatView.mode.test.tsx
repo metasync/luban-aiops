@@ -24,6 +24,7 @@ import {
   vi,
 } from "vitest";
 import type { ChatTurn } from "../../stream/useChatStream";
+import type { ExecutionRecovery, SessionDetail } from "../../api/sessions";
 import type {
   SessionMode,
   SessionWorkspace,
@@ -35,11 +36,13 @@ const {
   mockUseChatStream,
   mockCreateDevelopmentSession,
   mockCreateAndOpen,
+  mockGetSession,
 } = vi.hoisted(() => ({
   mockUseAuth: vi.fn(),
   mockUseChatStream: vi.fn(),
   mockCreateDevelopmentSession: vi.fn(),
   mockCreateAndOpen: vi.fn(),
+  mockGetSession: vi.fn(),
 }));
 
 vi.mock("../../auth/AuthContext", () => ({ useAuth: mockUseAuth }));
@@ -52,11 +55,7 @@ vi.mock("../../stream/useChatStream", () => ({
 }));
 
 vi.mock("../../api/sessions", () => ({
-  getSession: vi.fn(async () => ({
-    session_id: "ses-fixed",
-    transcript: [],
-    transcript_available: false,
-  })),
+  getSession: mockGetSession,
   createSkillDraft: vi.fn(),
   declareSkillTarget: vi.fn(),
   graduateSessionSkill: vi.fn(),
@@ -179,6 +178,10 @@ beforeEach(() => {
   mockUseChatStream.mockReset();
   mockCreateDevelopmentSession.mockReset();
   mockCreateAndOpen.mockReset();
+  mockGetSession.mockReset();
+  mockGetSession.mockImplementation(async (sessionId: string) => ({
+    session_id: sessionId, transcript: [], transcript_available: false,
+  }));
   mockCreateAndOpen.mockResolvedValue("ses-new");
   mockCreateDevelopmentSession.mockResolvedValue({
     ok: true,
@@ -186,6 +189,63 @@ beforeEach(() => {
   });
   signIn();
   streamOf([], null);
+});
+
+describe("ChatView durable recovery integration (SPEC-063)", () => {
+  function recoverySession(sessionId: string, state: ExecutionRecovery["state"]): SessionDetail {
+    return {
+      session_id: sessionId, user_id: "op-one", title: "Recovery", status: "active",
+      created_at: "2026-09-24T10:00:00Z", last_active_at: null, pending_confirmation: false,
+      session_type: "operation", transcript_available: true,
+      transcript: [{ role: "user", content: "Restart the workload" }],
+      execution_recovery_availability: "available",
+      confirmations: [{ confirm_id: "cf-1", session_id: sessionId, owner_user_id: "op-one",
+        status: "approved", pending_calls: [], turn_index: 0,
+        executions: [{ execution_id: "exec-1", call_id: "call-1", confirm_id: "cf-1",
+          session_id: sessionId, tool_name: "k8s.restart_pod", status: "requested",
+          recovery: { availability: "available", state, execution_id: "exec-1", replay: true,
+            run_stopped: false, integrity_conflict: false, target_verification_required: true,
+            observations: [], observations_truncated: false,
+            receipt: state === "result_recorded" ? { status: "succeeded" } : null },
+        }],
+      }],
+    };
+  }
+
+  it("re-reads a cached session and shows a first-fetch late result", async () => {
+    const actual = await vi.importActual<typeof import("../../stream/useChatStream")>("../../stream/useChatStream");
+    mockUseChatStream.mockImplementation(actual.useChatStream);
+    const workspace = workspaceOf("operation");
+    const first = recoverySession("ses-op-1", "dispatch_claimed");
+    mockGetSession.mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({ ...first, session_id: "ses-op-2", confirmations: [] })
+      .mockResolvedValueOnce(recoverySession("ses-op-1", "result_recorded"));
+    const view = render(<ChatView workspace={workspace} />);
+    expect(await screen.findByText("dispatch claimed")).toBeTruthy();
+    await act(async () => { view.rerender(<ChatView workspace={{ ...workspace, activeSessionId: "ses-op-2" }} />); });
+    expect(screen.queryByText("dispatch claimed")).toBeNull();
+    await act(async () => { view.rerender(<ChatView workspace={workspace} />); });
+    expect(await screen.findByText("tool report recorded")).toBeTruthy();
+    expect(screen.queryByText("dispatch claimed")).toBeNull();
+    expect(mockGetSession.mock.calls.map(([id]) => id)).toEqual(["ses-op-1", "ses-op-2", "ses-op-1"]);
+  });
+
+  it("seeds the selected execution page into the real transcript", async () => {
+    const actual = await vi.importActual<typeof import("../../stream/useChatStream")>("../../stream/useChatStream");
+    mockUseChatStream.mockImplementation(actual.useChatStream);
+    const first = { ...recoverySession("ses-op-1", "result_recorded"),
+      executions_truncated: true, next_execution_cursor: "page-two" };
+    const second = recoverySession("ses-op-1", "outcome_unknown");
+    mockGetSession.mockResolvedValueOnce(first).mockResolvedValueOnce(second).mockResolvedValueOnce(first);
+    render(<ChatView workspace={workspaceOf("operation")} />);
+    expect(await screen.findByText("tool report recorded")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Next execution page" })); });
+    expect(await screen.findByText("outcome unknown")).toBeTruthy();
+    expect(mockGetSession).toHaveBeenLastCalledWith("ses-op-1", expect.any(AbortSignal), { executionCursor: "page-two" });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "First execution page" })); });
+    expect(await screen.findByText("tool report recorded")).toBeTruthy();
+    expect(screen.queryByText("outcome unknown")).toBeNull();
+  });
 });
 
 describe("ChatView authoring controls by mode (SPEC-056 R-3)", () => {

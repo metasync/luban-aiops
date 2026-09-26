@@ -102,6 +102,51 @@ GET_PAYLOAD = {
     ],
 }
 
+# SPEC-063 R-5a: an enriched owner detail — the top-level availability flag
+# plus a per-execution recovery projection riding the confirmation card's
+# executions array. Relayed verbatim; the aligned SessionRecord mirror accepts
+# it (extra="forbid"), and the loose ``confirmations`` cards carry the nested
+# recovery object without a dedicated gateway model.
+RECOVERY_PAYLOAD = {
+    **GET_PAYLOAD,
+    "execution_recovery_availability": "available",
+    "executions_truncated": True,
+    "next_execution_cursor": "opaque-owner-scoped-cursor",
+    "confirmations": [
+        {
+            **GET_PAYLOAD["confirmations"][0],
+            "executions": [
+                {
+                    "execution_id": "11111111-1111-4111-8111-111111111111",
+                    "call_id": "call-9",
+                    "confirm_id": "cf-1",
+                    "session_id": "ses-1",
+                    "tool_name": "k8s.restart_service",
+                    "status": "succeeded",
+                    "requested_at": "2026-08-22T10:04:10Z",
+                    "completed_at": "2026-08-22T10:04:20Z",
+                    "digest_match": True,
+                    "reject_reason": None,
+                    "receipt": {"status": "succeeded"},
+                    "recovery": {
+                        "recovery_version": 1,
+                        "availability": "available",
+                        "state": "result_recorded",
+                        "execution_id": "11111111-1111-4111-8111-111111111111",
+                        "session_id": "ses-1",
+                        "tool_name": "k8s.restart_service",
+                        "target_verification_required": True,
+                        "receipt": {"status": "succeeded"},
+                        "observations": [],
+                        "observations_truncated": False,
+                        "next_observation_cursor": None,
+                    },
+                }
+            ],
+        }
+    ],
+}
+
 
 def _identity(role: str) -> IdentityContext:
     return IdentityContext(
@@ -293,6 +338,149 @@ class GetSessionProxyTests(SessionWorkspaceProxyBase):
             response = self.client.get(f"{SESSIONS_PATH}/ses-1")
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["detail"], "agent service unavailable")
+
+    # --- SPEC-063 R-5a / T-26: bounded owner recovery through the proxy ---
+
+    def test_recovery_paging_params_forward_verbatim(self) -> None:
+        # The optional recovery paging params ride the existing owner-checked
+        # detail; the gateway forwards them verbatim and adds no identity of
+        # its own (user_id stays the token-derived caller).
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(
+                f"{SESSIONS_PATH}/ses-1",
+                params={
+                    "execution": "11111111-1111-4111-8111-111111111111",
+                    "execution_cursor": "42",
+                    "page_size": 20,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        _, args, kwargs = upstream.mock_calls[0]
+        self.assertEqual(args[2], "ses-1")
+        self.assertEqual(args[3], "operator.user")
+        self.assertEqual(
+            kwargs["execution"], "11111111-1111-4111-8111-111111111111"
+        )
+        self.assertEqual(kwargs["execution_cursor"], "42")
+        self.assertEqual(kwargs["page_size"], 20)
+
+    def test_omitted_recovery_params_forward_as_none(self) -> None:
+        # Omitted, the proxied call is byte-identical to before SPEC-063: no
+        # recovery params, so the agent returns the un-enriched detail.
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(f"{SESSIONS_PATH}/ses-1")
+        self.assertEqual(response.status_code, 200)
+        _, _args, kwargs = upstream.mock_calls[0]
+        self.assertIsNone(kwargs["execution"])
+        self.assertIsNone(kwargs["execution_cursor"])
+        self.assertIsNone(kwargs["page_size"])
+
+    def test_recovery_projection_passes_through_verbatim(self) -> None:
+        # The enriched owner detail (availability flag + per-row recovery) is
+        # relayed untouched, and the aligned mirror accepts the new top-level
+        # field while the loose confirmation cards carry the nested projection.
+        upstream = AsyncMock(return_value=RECOVERY_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(f"{SESSIONS_PATH}/ses-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), RECOVERY_PAYLOAD)
+        self.assertEqual(
+            response.json()["execution_recovery_availability"], "available"
+        )
+        from platform_gateway.schemas.api import SessionRecord
+
+        record = SessionRecord(**response.json())
+        self.assertEqual(record.execution_recovery_availability, "available")
+        self.assertTrue(record.executions_truncated)
+        self.assertEqual(record.next_execution_cursor, "opaque-owner-scoped-cursor")
+        self.assertEqual(
+            record.confirmations[0]["executions"][0]["recovery"]["state"],
+            "result_recorded",
+        )
+
+    def test_foreign_session_404_passes_through_with_execution_param(self) -> None:
+        # An execution id never widens the read: a foreign session is the same
+        # anti-enumeration 404, and the proxy still forwards the token-derived
+        # owner rather than any identity taken from the execution id.
+        upstream = AsyncMock(side_effect=_status_error(404))
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(
+                f"{SESSIONS_PATH}/ses-foreign",
+                params={"execution": "11111111-1111-4111-8111-111111111111"},
+            )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"], "agent service rejected the session fetch"
+        )
+        _, args, kwargs = upstream.mock_calls[0]
+        self.assertEqual(args[3], "operator.user")
+        self.assertEqual(
+            kwargs["execution"], "11111111-1111-4111-8111-111111111111"
+        )
+
+    def test_forged_execution_id_denied_before_upstream_for_ungranted_role(
+        self,
+    ) -> None:
+        # A forged/unknown execution id is only an opaque filter: an ungranted
+        # role is still denied at the policy boundary before any upstream call,
+        # so the id can never become an authorization or an identity.
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("auditor"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(
+                f"{SESSIONS_PATH}/ses-1", params={"execution": "forged-id"}
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["action"], "session:read")
+        upstream.assert_not_called()
+
+    def test_oversized_recovery_queries_refused_before_upstream(self) -> None:
+        for params in ({"execution": "x" * 37}, {"execution_cursor": "x" * 2049}):
+            with self.subTest(params=list(params)):
+                upstream = AsyncMock(return_value=GET_PAYLOAD)
+                with self._patch_identity("operator"), patch(GET_PATCH, upstream):
+                    response = self.client.get(f"{SESSIONS_PATH}/ses-1", params=params)
+                self.assertEqual(response.status_code, 422)
+                upstream.assert_not_called()
+
+    def test_invalid_scoped_cursor_400_passes_through(self) -> None:
+        upstream = AsyncMock(side_effect=_status_error(400))
+        with self._patch_identity("operator"), patch(GET_PATCH, upstream):
+            response = self.client.get(
+                f"{SESSIONS_PATH}/ses-1", params={"execution_cursor": "wrong-scope"}
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(upstream.call_args.kwargs["execution_cursor"], "wrong-scope")
+
+    def test_page_size_out_of_bounds_returns_422(self) -> None:
+        # The gateway mirrors the agent's 1..100 page-size bound, so an
+        # out-of-range value is a 422 at the edge before any upstream call.
+        upstream = AsyncMock(return_value=GET_PAYLOAD)
+        with (
+            self._patch_identity("operator"),
+            patch(GET_PATCH, upstream),
+        ):
+            response = self.client.get(
+                f"{SESSIONS_PATH}/ses-1", params={"page_size": 101}
+            )
+        self.assertEqual(response.status_code, 422)
+        upstream.assert_not_called()
 
 
 class DeleteSessionProxyTests(SessionWorkspaceProxyBase):

@@ -192,6 +192,17 @@ class SessionRecord(BaseModel):
     # SPEC-024 R-3: model id pinned on the session by the most recent turn;
     # null when the session never selected a model.
     model: str | None = None
+    # SPEC-063 R-5a: whether the bounded owner recovery path is available for
+    # this session, relayed verbatim from agent-service. Computed independently
+    # of the legacy confirmation/execution presentation stores; ``unavailable``
+    # when admission is disabled or the ledger cannot be read (never a silent
+    # empty history), null on responses that predate recovery. The per-row
+    # recovery projections ride the loose ``confirmations`` cards above.
+    execution_recovery_availability: Literal["available", "unavailable"] | None = (
+        None
+    )
+    executions_truncated: bool = False
+    next_execution_cursor: str | None = Field(default=None, max_length=2048)
 
 
 class IdentityContext(BaseModel):

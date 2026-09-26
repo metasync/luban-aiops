@@ -191,8 +191,25 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 secret-delivery-demo: ## Run the local sample handoff proof (uv + installed portal npm dependencies; no cluster)
 	@sh $(SAMPLES_DIR)/acme-admin/password-reset/demo/demo.sh --secret-delivery-local
 
+.PHONY: execution-failure-test
+execution-failure-test: ## Prove crash safety with disposable Postgres and independent processes
+	@sh $(E2E_DIR)/execution-failure-test.sh
+
+.PHONY: execution-acceptance
+execution-acceptance: ## Run separately authorized isolated acme-admin acceptance (no live defaults)
+	@python3 $(SAMPLES_DIR)/acme-admin/execution_acceptance.py $(ACCEPTANCE_ARGS)
+
+# SPEC-063 R-8c: the operator-portal SPA is not a uv product, so `make test`
+# never covers it. The delivery gate runs its full Vitest suite (which fails on
+# zero tests, so there is no skip/zero-tests green path) and its typechecked
+# production build. No integration skip toggle is accepted as a release pass.
+.PHONY: portal-test
+portal-test: ## Run the operator-portal SPA unit suite and production build (vitest + tsc/vite)
+	@$(MAKE) -C products/operator-portal test || exit 1
+	@$(MAKE) -C products/operator-portal web-build || exit 1
+
 .PHONY: verify
-verify: test overlays validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo ## Verification gate: tests + overlays + policy + scenarios + version + vocabulary + password-policy + local handoff demo
+verify: test overlays validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test execution-failure-test ## Verification gate: product, contract, policy, overlay, portal, secret-delivery, and execution failure proofs
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

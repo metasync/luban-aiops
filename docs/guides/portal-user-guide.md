@@ -243,6 +243,53 @@ tools with collapsible parameters.
 The full four-layer model (policy bundle, risk tiers, auto-allow, HITL) is
 in [Approval and HITL Governance](approval-and-hitl.md).
 
+### Recovering an uncertain execution
+
+When SPEC-063 durable admission is enabled, an execution on a decided card
+has a **Recovery detail** expander. This is an owner-scoped read of durable
+metadata, not a new tool run. It can appear even when the original response
+or the older presentation record never arrived. The Approvals inbox remains
+decision-only; possessing an execution ID does not grant access to recovery.
+
+| Card label | What the evidence establishes |
+| --- | --- |
+| registered — dispatch not established | A signed request exists; registration alone does not prove that the target did nothing. |
+| not dispatched | This submission was positively refused before dispatch; other attempts are not accounted for by that fact. |
+| dispatch claimed | One worker consumed the dispatch right; the target outcome is still open. |
+| outcome unknown | No single durable tool outcome is established; work may still be running or may already have completed. |
+| tool report recorded / tool failure recorded / timeout recorded | The worker durably recorded that tool report. Tool success is not proof of business success; failure or timeout does not prove no effect. |
+| late tool report | A report arrived after the observation deadline. It does not clear a stopped run or restore a lost original response. |
+| conflicting reports | The signed facts do not establish one outcome. Treat the result as unknown. |
+| recovery unavailable / recovery not found | Evidence is unreadable or missing, not evidence that nothing ran. Historical receipt labels do not override this. |
+
+Before considering another action:
+
+1. Open the owner's session and inspect the current state, observation history,
+   timestamps, execution/approval/run IDs, and **Original request** ID. History
+   is bounded to 20 observations per page; use the observation and execution
+   page controls when more records remain. A truncation or unavailable notice
+   means coverage is incomplete.
+2. Correlate the original request with available audit records. A duplicate
+   recovery request has its own request ID; it does not replace the original.
+   Missing audit or tool output is inconclusive: audit delivery can fail while
+   a durable result and a real target effect still exist.
+3. Account for remote work already accepted or still running. A stopped run
+   prevents subsequent platform mutations; it does **not** cancel work at the
+   target. Independently verify the target's current state using an authorized
+   read or its own records, not merely the tool's success envelope.
+4. Only after resolving that uncertainty, consider a **fresh, separately
+   approved action** with the normal policy and target checks. Recovery has no
+   retry, reset, mark-success, or old-secret reveal control. Approving another
+   card, reloading, or restarting cannot resume a stopped run.
+
+The first recovery page polls about every two seconds for at most two minutes
+while an outcome is open. Polling pauses in hidden views and stops on session
+change or teardown; reaching the polling limit is not a terminal outcome.
+A later reload can show a late durable report. Recovery never reconstructs
+original tool output, a held password, continuation authority, or a successful
+authoring origin. Newly generated documents retain uncertainty and incomplete
+coverage; published documents remain historical snapshots, not live status.
+
 ## Approvals (Control)
 
 The Approvals view is the designated approver's cross-session inbox

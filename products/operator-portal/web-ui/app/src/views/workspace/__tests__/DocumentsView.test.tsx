@@ -935,6 +935,104 @@ describe("DocumentsView AI one-liner blurb (v0.23.3)", () => {
   });
 });
 
+describe("DocumentsView recovery snapshots (SPEC-063 T-29)", () => {
+  const cases = [
+    ["outcome_unknown", "Outcome unknown", "Unknown outcomes"],
+    ["late_report", "Tool report recorded — tool reported succeeded — late report", "Late tool reports"],
+    ["integrity_conflict", "Outcome unknown — conflicting reports", "Conflicting reports"],
+    ["unavailable", "Recovery unavailable", "Unavailable evidence"],
+  ];
+
+  function recoveryDocument(key: string, label: string, incident = false): OperationDocument {
+    const base = incident ? incidentReportDoc : busyOwn;
+    const row = {
+      execution_id: "exec-recovery", tool_name: "restart_service",
+      status: key, historical_status: "completed", historical_receipt_status: "succeeded",
+      receipt_status: key === "late_report" ? "succeeded" : null,
+      recovery: { availability: key === "unavailable" ? "unavailable" : "available" },
+      evidence_label: label,
+    };
+    const source = {
+      session_id: "ses-1", coverage: "owner", status: "owner", executions: [row],
+      execution_evidence_counts: { [key]: 1 }, target_verification_required: true,
+      incomplete_recovery_sessions: key === "unavailable" ? 1 : 0,
+      open_items: { pending_confirmations: 0, requested_executions: 0 },
+      open_sessions: [], quiet: false,
+    };
+    return {
+      ...base,
+      digest: incident
+        ? { ...base.digest, session: source }
+        : { ...base.digest, sessions: [source], handover: source },
+    };
+  }
+
+  it.each(cases)("retains %s in the drawer, execution rows, and export", async (key, label, countLabel) => {
+    const snapshot = recoveryDocument(key, label);
+    const before = JSON.stringify(snapshot);
+    mockListDocuments.mockResolvedValue([snapshot]);
+    mockGetDocument.mockResolvedValue(snapshot);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    expect(screen.getByText("Execution evidence — snapshot at generation")).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${countLabel}: 1`))).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Executions" }));
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByText("Historical: completed")).toBeTruthy();
+    if (key !== "late_report") expect(screen.queryByText("succeeded")).toBeNull();
+    const markdown = buildDocumentMarkdown(snapshot);
+    expect(markdown).toContain("## Execution evidence");
+    expect(markdown).toContain(`${countLabel}: 1`);
+    expect(markdown).toContain(label);
+    expect(markdown).toContain("Missing evidence is inconclusive");
+    expect(markdown).toContain("Recovery does not authorize retries, continuation, or secret release");
+    expect(JSON.stringify(snapshot)).toBe(before);
+    expect(mockListSessions).not.toHaveBeenCalled();
+  });
+
+  it("includes incident recovery coverage in the drawer and export", async () => {
+    const snapshot = recoveryDocument("unavailable", "Recovery unavailable", true);
+    mockListDocuments.mockResolvedValue([snapshot]);
+    mockGetDocument.mockResolvedValue(snapshot);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    expect(screen.getByText(/Unavailable evidence: 1/)).toBeTruthy();
+    expect(screen.getByText(/Execution recovery coverage is incomplete/)).toBeTruthy();
+    expect(buildDocumentMarkdown(snapshot)).toContain("Unavailable evidence: 1");
+  });
+
+  it("does not equate closed execution records with verified target outcomes", async () => {
+    const snapshot = recoveryDocument("result_recorded", "Tool report recorded");
+    mockListDocuments.mockResolvedValue([snapshot]);
+    mockGetDocument.mockResolvedValue(snapshot);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    fireEvent.click(screen.getByRole("tab", { name: "Open items" }));
+    expect(screen.getByText(/Tool reports still require independent target verification/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing is open/)).toBeNull();
+  });
+
+  it("does not add current recovery facts to an old published snapshot", async () => {
+    const before = JSON.stringify(foreignPublished);
+    mockListDocuments.mockResolvedValue([foreignPublished]);
+    render(<DocumentsView workspace={workspaceStub} />);
+    await flush();
+    fireEvent.click(screen.getByText("View"));
+    await flush();
+    expect(screen.queryByText("Execution evidence — snapshot at generation")).toBeNull();
+    expect(buildDocumentMarkdown(foreignPublished)).not.toContain("## Execution evidence");
+    expect(JSON.stringify(foreignPublished)).toBe(before);
+    expect(mockListSessions).not.toHaveBeenCalled();
+    expect(mockGetDocument).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("buildDocumentMarkdown (SPEC-040 R-4)", () => {
   it("serializes metadata, provenance, digest, and narrative", () => {
     const markdown = buildDocumentMarkdown(foreignPublished);

@@ -110,6 +110,9 @@ function attachEvidence(turns: ChatTurn[], groups: EvidenceTurn[]): void {
 // Attribution note for replayed decided cards (SPEC-031 R-2): the card
 // shows who decided and when, mirroring the live FINAL_NOTES wording.
 function attributionNote(record: ConfirmationRecord): string {
+  if (record.recovery_only) {
+    return "Read-only execution evidence. Original confirmation details are unavailable.";
+  }
   if (record.status === "expired") {
     return "This confirmation expired before a decision was applied.";
   }
@@ -236,6 +239,10 @@ export function confirmationRecordToCard(
         status: row.status,
         digestMatch: row.digest_match ?? null,
         rejectReason: row.reject_reason ?? undefined,
+        // SPEC-063 R-5a: carry the owner recovery projection through to the
+        // decided card so it can render the durable ledger state. Absent on
+        // legacy rows and inbox records (decision-metadata-only surface).
+        recovery: row.recovery ?? undefined,
       }),
     );
     if (executions.length > 0) {
@@ -250,6 +257,7 @@ function attachConfirmations(
   records: ConfirmationRecord[],
   makeTurn: (userMessage: string) => ChatTurn,
 ): void {
+  const transcriptLength = turns.length;
   for (const record of records ?? []) {
     const card = confirmationRecordToCard(record);
     // SPEC-033 R-3: records parked after the anchoring spec carry the
@@ -260,11 +268,11 @@ function attachConfirmations(
     // unrecoverable) gets a synthetic turn so parked requests stay
     // visible.
     const anchored =
-      typeof record.turn_index === "number"
+      typeof record.turn_index === "number" && record.turn_index < transcriptLength
         ? turns[record.turn_index]
         : undefined;
-    const target = anchored ?? turns[turns.length - 1] ?? (() => {
-      const synthetic = makeTurn("");
+    const target = anchored ?? (!record.recovery_only ? turns[turns.length - 1] : undefined) ?? (() => {
+      const synthetic = makeTurn(record.recovery_only ? "Execution recovery — original turn unavailable" : "");
       turns.push(synthetic);
       return synthetic;
     })();

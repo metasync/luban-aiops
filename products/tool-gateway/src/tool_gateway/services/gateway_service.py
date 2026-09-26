@@ -12,6 +12,7 @@ from tool_gateway.core.metrics import (
     record_token_verification,
 )
 from tool_gateway.core.observability import log_event
+from tool_gateway.core.request_context import execution_correlation
 from tool_gateway.metadata import SERVICE_NAME, SERVICE_VERSION
 from tool_gateway.schemas.api import IdentityContext
 from tool_gateway.services.audit_emitter import build_audit_event, emit_audit_event
@@ -166,6 +167,8 @@ async def invoke_tool(
     from fastapi.responses import JSONResponse
 
     body = await request.json()
+    # SPEC-063 R-5b: a syntactically bounded correlation hint, not authority.
+    correlation = execution_correlation(request.headers.get("x-execution-id"))
     tool_name = body.get("tool_name", "")
     parameters = body.get("parameters", {})
     # Chat-session correlation handle (SPEC-049 R-1). Injected by trusted
@@ -206,6 +209,7 @@ async def invoke_tool(
                     "action": "tools:invoke",
                     "decision": "deny",
                     "reason": "no identity context",
+                    **correlation,
                 },
             ),
         )
@@ -241,6 +245,7 @@ async def invoke_tool(
                     "decision": "deny",
                     "reason": decision.reason,
                     "matched_rule_ids": decision.matched_rule_ids,
+                    **correlation,
                 },
             ),
         )
@@ -282,6 +287,7 @@ async def invoke_tool(
                         "tool_name": tool_name,
                         "risk_level": target.definition.risk_level,
                         "matched_rule_ids": mutate_decision.matched_rule_ids,
+                        **correlation,
                     },
                 ),
             )
@@ -329,6 +335,7 @@ async def invoke_tool(
                             "tool_name": tool_name,
                             "risk_level": target.definition.risk_level,
                             "matched_rule_ids": extra_decision.matched_rule_ids,
+                            **correlation,
                         },
                     ),
                 )
@@ -396,6 +403,7 @@ async def invoke_tool(
         sub=identity.subject,
         act=identity.actor,
         redacted_spans=redacted_spans,
+        **correlation,
     )
 
     # Durable audit trail (SPEC-013 R-3): mirror the audit log, fire-and-forget.
@@ -415,6 +423,7 @@ async def invoke_tool(
                 "duration_ms": result.evidence.get("duration_ms", 0),
                 "risk_level": result.evidence.get("risk_level", "read"),
                 "redacted_spans": redacted_spans,
+                **correlation,
             },
         ),
     )

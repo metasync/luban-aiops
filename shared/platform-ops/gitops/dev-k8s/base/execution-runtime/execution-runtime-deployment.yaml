@@ -7,6 +7,12 @@ spec:
   # so the deployment pins exactly one replica; scaling requires a
   # durable flight registry first.
   replicas: 1
+  # SPEC-063 R-7c: Recreate cutover posture — the old pod is fully terminated
+  # before the new one starts, so no old/new executable overlap can co-dispatch.
+  # Overlap safety is still proven (F-32) because the single-use claim, not the
+  # rollout strategy, is the actual dispatch authority.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: execution-runtime
@@ -19,6 +25,11 @@ spec:
         prometheus.io/path: /metrics
         prometheus.io/port: "8000"
     spec:
+      # SPEC-063 R-7c: a 45s pod grace bounds the whole termination (preStop +
+      # SIGTERM + the worker's 35s graceful drain), leaving headroom before
+      # SIGKILL. On SIGTERM the worker refuses new handoffs, marks unready, and
+      # terminates without releasing any claim.
+      terminationGracePeriodSeconds: 45
       # Service-link env vars (EXECUTION_RUNTIME_PORT=tcp://…) collide with
       # the service's own port setting; service discovery uses DNS names.
       enableServiceLinks: false
@@ -26,6 +37,13 @@ spec:
         - name: execution-runtime
           image: luban-aiops/execution-runtime:dev-local
           imagePullPolicy: IfNotPresent
+          # SPEC-063 R-7c: a short preStop pause lets the endpoint controller
+          # drop this pod before SIGTERM, so in-flight handoffs are not routed
+          # here during the drain. 5s preStop + 35s drain fits the 45s grace.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000

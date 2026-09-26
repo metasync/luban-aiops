@@ -364,6 +364,71 @@ def test_execution_worker_timeout_validation():
         RuntimeSettings(execution_worker_timeout_seconds=0.0)
 
 
+def test_execution_worker_timeout_cap():
+    """SPEC-063 R-7c: the agent handoff budget is capped at 120s so a worker's
+    bounded 35s drain always completes inside the caller's own timeout."""
+    assert RuntimeSettings(execution_worker_timeout_seconds=120.0).execution_worker_timeout_seconds == 120.0
+    with pytest.raises(ValueError, match="WORKER_TIMEOUT_SECONDS must be <= 120"):
+        RuntimeSettings(execution_worker_timeout_seconds=120.5)
+
+
+def test_execution_admission_settings_defaults(monkeypatch):
+    """SPEC-063 R-2a: admission is disabled by default; no DSN/epoch."""
+    monkeypatch.delenv("AGENT_EXECUTION_STATE_DB_URL", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_ADMISSION_ENABLED", raising=False)
+    monkeypatch.delenv("AGENT_EXECUTION_ADMISSION_EPOCH", raising=False)
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_admission_enabled is False
+    assert settings.execution_state_db_url is None
+    assert settings.execution_admission_epoch is None
+
+
+def test_execution_admission_settings_read_env(monkeypatch):
+    monkeypatch.setenv(
+        "AGENT_EXECUTION_STATE_DB_URL", "postgres://agent@ledger:5432/exec"
+    )
+    monkeypatch.setenv("AGENT_EXECUTION_ADMISSION_ENABLED", "true")
+    monkeypatch.setenv("AGENT_EXECUTION_ADMISSION_EPOCH", "epoch-7")
+    settings = RuntimeSettings.from_env()
+    assert settings.execution_admission_enabled is True
+    assert settings.execution_state_db_url == "postgres://agent@ledger:5432/exec"
+    assert settings.execution_admission_epoch == "epoch-7"
+
+
+def test_execution_admission_enabled_requires_dsn_and_epoch():
+    """Enabling admission without both a DSN and an epoch fails startup closed."""
+    with pytest.raises(ValueError, match="ADMISSION_ENABLED requires both"):
+        RuntimeSettings(execution_admission_enabled=True)
+    with pytest.raises(ValueError, match="ADMISSION_ENABLED requires both"):
+        RuntimeSettings(
+            execution_admission_enabled=True,
+            execution_state_db_url="postgres://agent@ledger:5432/exec",
+        )
+    with pytest.raises(ValueError, match="ADMISSION_ENABLED requires both"):
+        RuntimeSettings(
+            execution_admission_enabled=True,
+            execution_admission_epoch="epoch-7",
+        )
+
+
+def test_execution_admission_enabled_with_dsn_and_epoch_is_accepted():
+    settings = RuntimeSettings(
+        execution_admission_enabled=True,
+        execution_state_db_url="postgres://agent@ledger:5432/exec",
+        execution_admission_epoch="epoch-7",
+    )
+    assert settings.execution_admission_enabled is True
+
+
+def test_execution_admission_blank_env_is_unset(monkeypatch):
+    """A blank DSN/epoch normalizes to None, so a stray enable still fails."""
+    monkeypatch.setenv("AGENT_EXECUTION_STATE_DB_URL", "   ")
+    monkeypatch.setenv("AGENT_EXECUTION_ADMISSION_EPOCH", "")
+    monkeypatch.setenv("AGENT_EXECUTION_ADMISSION_ENABLED", "true")
+    with pytest.raises(ValueError, match="ADMISSION_ENABLED requires both"):
+        RuntimeSettings.from_env()
+
+
 def test_native_service_settings_reads_env(monkeypatch):
     monkeypatch.setenv("AGENTSCOPE_REDIS_HOST", "redis.internal")
     monkeypatch.setenv("AGENTSCOPE_REDIS_PORT", "6380")

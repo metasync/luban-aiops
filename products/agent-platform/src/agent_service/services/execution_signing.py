@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agent_service.services.flow_approvals import FlowApproval
@@ -71,6 +71,10 @@ def build_requests(
     pending: PendingConfirmation,
     decider_user_id: str,
     key: str,
+    *,
+    run_id: str | None = None,
+    admission_epoch: str | None = None,
+    lifetime_seconds: int = 900,
 ) -> list[dict[str, Any]]:
     """One signed execution request per parked tool call (SPEC-037 R-2).
 
@@ -100,6 +104,8 @@ def build_requests(
             "args_digest": canonical_digest(call["parameters"]),
             "requested_at": _utc_now_iso(),
         }
+        if run_id is not None or admission_epoch is not None:
+            envelope.update(_execution_window(envelope["requested_at"], run_id, admission_epoch, lifetime_seconds))
         envelope["signature"] = sign_envelope(envelope, key)
         requests.append(envelope)
     return requests
@@ -111,6 +117,10 @@ def build_flow_request(
     parameters: dict[str, Any],
     flow_approval: FlowApproval,
     key: str,
+    *,
+    run_id: str | None = None,
+    admission_epoch: str | None = None,
+    lifetime_seconds: int = 900,
 ) -> dict[str, Any]:
     """Sign one auto-unlocked browser write under a flow authority (SPEC-051 R-3).
 
@@ -145,8 +155,19 @@ def build_flow_request(
         "args_digest": canonical_digest(parameters),
         "requested_at": _utc_now_iso(),
     }
+    if run_id is not None or admission_epoch is not None:
+        envelope.update(_execution_window(envelope["requested_at"], run_id, admission_epoch, lifetime_seconds))
     envelope["signature"] = sign_envelope(envelope, key)
     return envelope
+
+
+def _execution_window(requested_at, run_id, admission_epoch, lifetime_seconds):
+    if not run_id or not admission_epoch or not 0 < lifetime_seconds <= 900:
+        raise ValueError("executable requests require run, epoch, and bounded lifetime")
+    expires = datetime.fromisoformat(requested_at.replace("Z", "+00:00")) + timedelta(seconds=lifetime_seconds)
+    return {"protocol_version": 3, "run_id": str(uuid.UUID(run_id)),
+            "admission_epoch": str(uuid.UUID(admission_epoch)),
+            "expires_at": expires.isoformat().replace("+00:00", "Z")}
 
 
 def build_receipt(

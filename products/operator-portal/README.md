@@ -124,6 +124,23 @@ Current browser baseline capabilities:
   `tools:list`) and Skills inventory (`GET /api/v1/skills`, gateway-held
   query credential under `skills:read`) with source/tag filters (SPEC-019)
 
+## Execution recovery (SPEC-063)
+
+Decided cards in the owner's transcript expose read-only **Recovery detail**:
+current state, bounded observation history, late results, integrity conflicts,
+and explicit unavailable status. Session reads carry cursor paging; visibility-aware
+polling is bounded to 120-second windows and rejects stale session responses.
+The approver inbox remains decision-only. No retry, reset-claim, mark-success,
+or secret-reveal control is added; reload never reconstructs a lost original result.
+
+New document digests and Markdown exports retain execution uncertainty. Existing
+published snapshots remain unchanged. A successful tool report is not independent
+verification of target effects; operators must account for possibly running work.
+See [the recovery guide](../../docs/guides/portal-user-guide.md#recovering-an-uncertain-execution).
+
+`make portal-test` at the repository root runs the full Vitest suite and typechecked
+production build; both are required by `make verify`.
+
 ## Expected Integration Points
 
 - `identity-broker` for `SSO` and normalized identity context

@@ -38,6 +38,14 @@ byte-identical to the deny-by-default posture. It is wired into `dev-k8s`
 permanently (`select-runtime-profile.sh` preserves it when switching LLM
 profiles) and is never selected as the sole runtime profile.
 
+The gateway profile does **not** enable SPEC-063 durable execution admission.
+Agent and worker admission default to disabled and require a verified Postgres
+ledger, matching externally configured epoch, and separate explicit enablement.
+The first SPEC-063 deployment requires the coordinated mutation-disabled
+[cutover procedure](../../../../docs/guides/execution-cutover-restore.md), even
+though its coordinated version is an upgrade. Profile selection is not a
+migration, safety check, or authorization to restore mutation execution.
+
 ## Browser web-check dev posture
 
 `browser-dev` is **not** an LLM provider profile: it is the committed

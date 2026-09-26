@@ -373,6 +373,103 @@ async def _handoff_execution(
         return _rejection_result(tool_name, exc.reason)
 
 
+def _stash_release_permit(call_id: str | None, permit: Any) -> None:
+    """Record a v3 secret-release permit for the middleware gate (SPEC-063 R-4).
+
+    The permit is single-use and PID-bound; it rides a per-stream contextvar map
+    keyed by ``call_id`` and is consumed by ``ToolEvidenceMiddleware`` immediately
+    before a held portal_copy delivery is emitted. Inert when the map is not
+    armed (legacy/admission-disabled path), so the legacy trigger is unchanged.
+    """
+    if not call_id:
+        return
+    from agent_service.services.kernel_middleware import RELEASE_PERMITS
+
+    permits = RELEASE_PERMITS.get()
+    if permits is None:
+        return
+    permits[call_id] = permit
+
+
+def _uncertain_result(tool_name: str, reason: str | None) -> dict[str, Any]:
+    """Structured result for an invocation whose remote outcome is unknown.
+
+    SPEC-063 R-3: a transport error, timeout, invalid/replayed original, or a
+    failed durable completion after a possible send is NEVER reported as "not
+    executed" — the target may have partially or fully acted. The coordinator has
+    already stopped the run; no dependent step may proceed on this result.
+    """
+    return {
+        "tool_name": tool_name,
+        "status": "error",
+        "request_id": str(uuid.uuid4()),
+        "error": {
+            "code": "OUTCOME_UNKNOWN",
+            "message": (
+                "the execution outcome is unknown: the action may have "
+                "partially or fully taken effect and was not retried. Verify "
+                "the target state before any dependent step."
+            ),
+            "reason": reason or "transport_error",
+        },
+    }
+
+
+async def _invoke_v3(
+    tool_name: str,
+    call_id: str | None,
+    arguments: dict[str, Any],
+    delegated_token: str | None,
+    guard: Any,
+) -> dict[str, Any]:
+    """Run one approved mutating call through the v3 durable coordinator.
+
+    Registers the intent in-lane, dispatches via ``handoff_original`` (raw output
+    returns only as a verified original), durably accepts, and mints a
+    secret-release permit on success. Any protocol failure stops the run and
+    yields a blocked (pre-dispatch refusal) or uncertain (post-send) result —
+    never a false "not executed" for an outcome that may have occurred.
+    """
+    from agent_service.services.execution_invocation import (
+        coordinate_v3_invocation,
+    )
+
+    context = EXECUTION_AUDIT_CONTEXT.get() or {}
+    settings = context.get("settings")
+    request_id = context.get("request_id")
+    requests_map = EXECUTION_REQUESTS.get() or {}
+    envelope = requests_map.get(call_id) if call_id else None
+    if envelope is None or not request_id:
+        # No signed envelope or attempt id to coordinate under — fail closed
+        # before any send. This is a positive pre-dispatch refusal.
+        _audit_execution_rejected(tool_name, call_id, "request_missing")
+        return _rejection_result(tool_name, "request_missing")
+    outcome = await coordinate_v3_invocation(
+        guard=guard,
+        envelope=envelope,
+        arguments=arguments,
+        delegated_token=delegated_token,
+        settings=settings,
+        attempt_request_id=str(request_id),
+        current_request_id=str(request_id),
+    )
+    if outcome.status == "original":
+        if outcome.permit is not None:
+            _stash_release_permit(call_id, outcome.permit)
+        observe_original = context.get("observe_original")
+        if callable(observe_original) and outcome.original is not None:
+            try:
+                observe_original(envelope, outcome.original, str(request_id))
+            except Exception:
+                LOGGER.warning("authoring original evidence unavailable")
+        return outcome.result
+    if outcome.status == "blocked":
+        reason = outcome.reason or "request_missing"
+        _audit_execution_rejected(tool_name, call_id, reason)
+        return _rejection_result(tool_name, reason)
+    return _uncertain_result(tool_name, outcome.reason)
+
+
 def _make_tool_fn(
     gateway_url: str,
     name: str,
@@ -420,9 +517,24 @@ def _make_tool_fn(
                     content=[TextBlock(text=json.dumps(result, default=str))],
                     metadata={"gateway_result": result},
                 )
-            result = await _handoff_execution(
-                name, call_id, kwargs, DELEGATED_TOKEN.get()
-            )
+            # SPEC-063 R-2/R-3: when a durable run guard is bound (admission
+            # enabled) route the verified mutating call through the v3
+            # coordinator — register-in-lane, dispatch via handoff_original,
+            # durably accept, and mint a secret-release permit on success. A
+            # protocol failure stops the run and yields a blocked (pre-dispatch
+            # refusal) or uncertain (post-send) result, never a false "not
+            # executed". With no guard bound the legacy handoff is unchanged.
+            from agent_service.services.execution_run_guard import current_guard
+
+            guard = current_guard()
+            if guard is not None:
+                result = await _invoke_v3(
+                    name, call_id, kwargs, DELEGATED_TOKEN.get(), guard
+                )
+            else:
+                result = await _handoff_execution(
+                    name, call_id, kwargs, DELEGATED_TOKEN.get()
+                )
             return ToolChunk(
                 content=[TextBlock(text=json.dumps(result, default=str))],
                 metadata={"gateway_result": result},

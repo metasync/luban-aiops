@@ -1,6 +1,7 @@
 // Typed models for the platform SSE stream contract (stream schema v6).
 // SPEC-023 R-2: these models are the only representation of the wire
 // format that views consume — nothing outside src/stream/ parses frames.
+import type { ExecutionRecovery } from "../api/sessions";
 
 export interface ToolEvidence {
   executedAt?: string;
@@ -188,4 +189,8 @@ export interface ExecutionReceipt {
   status: ExecutionReceiptStatus;
   digestMatch?: boolean | null;
   rejectReason?: string;
+  // SPEC-063 R-5a: the owner-scoped recovery projection for this execution,
+  // seeded from the session-detail row. Read-only and never an original
+  // response; undefined on live cards, legacy rows, and inbox records.
+  recovery?: ExecutionRecovery;
 }

@@ -73,6 +73,18 @@ PENDING_RELEASE_DELIVERIES: ContextVar[list | None] = ContextVar(
     "PENDING_RELEASE_DELIVERIES",
     default=None,
 )
+# SPEC-063 R-4 secret-release permits: a per-stream map of call_id -> the typed
+# single-use ``SecretReleasePermit`` minted by the v3 invocation coordinator from
+# a durably accepted original successful response. When a run guard is bound
+# (admission enabled), ``ToolEvidenceMiddleware`` releases a held portal_copy
+# delivery only after consuming the permit for that call and re-checking the run
+# latch — a tool frame's ``status: success`` plus ``EXECUTION_REQUESTS``
+# membership is no longer sufficient. ``None`` (legacy/admission-disabled) keeps
+# the existing status+membership trigger unchanged.
+RELEASE_PERMITS: ContextVar[dict | None] = ContextVar(
+    "RELEASE_PERMITS",
+    default=None,
+)
 
 # Built-in agentscope task tools (SPEC-018 R-5). Names match the kernel's
 # tool names; these tools mutate only session-local agent state and are
@@ -292,6 +304,27 @@ class GatewayPermissionMiddleware(MiddlewareBase):
         tool = input_kwargs.get("tool")
         name = getattr(tool, "name", None)
         tool_call = input_kwargs.get("tool_call")
+        # SPEC-063 R-4: consult the run stop BEFORE the ALLOWED shortcut. A
+        # stopped run's mutating call is denied outright — a fresh confirmation
+        # alone must never clear a stop, and a stale ALLOWED state carried into a
+        # resumed stream must not auto-execute. Read-only and kernel-local tools
+        # stay on their existing governed path. Inert when no guard is bound
+        # (every non-execution turn), so existing behavior is unchanged.
+        if (
+            name not in KERNEL_LOCAL_TOOL_NAMES
+            and not (tool is not None and getattr(tool, "is_read_only", False))
+        ):
+            from agent_service.services.execution_run_guard import current_guard
+
+            guard = current_guard()
+            if guard is not None and guard.stopped():
+                return PermissionDecision(
+                    behavior=PermissionBehavior.DENY,
+                    message=(
+                        "execution run is stopped; refusing mutating call "
+                        "(SPEC-063 R-4). A new confirmation cannot clear a stop."
+                    ),
+                )
         if getattr(tool_call, "state", None) == ToolCallState.ALLOWED:
             # SPEC-020 resume: the operator already confirmed this exact
             # call. Agentscope re-traverses the middleware chain for
@@ -508,17 +541,57 @@ class ToolEvidenceMiddleware(MiddlewareBase):
             # — the moment the held Copy-password button is revealed. On a deny,
             # a gated-call failure, or an expiry nothing is emitted and the
             # delivery burns silently.
+            #
+            # SPEC-063 R-4: when a run guard is bound (durable admission enabled)
+            # the status+membership trigger is necessary but NOT sufficient —
+            # release additionally requires consuming the single-use permit the
+            # v3 coordinator minted from a durably accepted original success, and
+            # a final run-latch check immediately before emission. The legacy
+            # (no-guard) path is unchanged.
             release = PENDING_RELEASE_DELIVERIES.get()
             if (
                 release
                 and frame["status"] == "success"
                 and call_id in (EXECUTION_REQUESTS.get() or {})
+                and self._permit_secret_release(call_id)
             ):
                 for held in list(release):
                     await sink.put({"type": "secret_delivery", **held})
                 release.clear()
         finally:
             CURRENT_CALL_ID.reset(call_token)
+
+    @staticmethod
+    def _permit_secret_release(call_id: str) -> bool:
+        """SPEC-063 R-4 secret-release gate for one committed gated call.
+
+        Legacy path (no bound guard): the existing status+membership trigger is
+        the whole gate, so return True. v3 path (guard bound): require a typed
+        single-use permit for this ``call_id``, re-check the run latch
+        immediately before emission, and consume the permit exactly once. A
+        missing permit, a spent permit, or a stopped run releases nothing — the
+        held delivery burns.
+        """
+        from agent_service.services.execution_run_guard import current_guard
+
+        guard = current_guard()
+        if guard is None:
+            return True
+        permits = RELEASE_PERMITS.get() or {}
+        permit = permits.get(call_id)
+        if permit is None:
+            return False
+        # Re-check the latch immediately before emission (R-4): a stop that
+        # landed after the permit was minted still bars the reveal.
+        if guard.stopped():
+            return False
+        try:
+            permit.consume()
+        except TypeError:
+            # Already spent, or forged across a process boundary — never emit.
+            return False
+        permits.pop(call_id, None)
+        return True
 
     @staticmethod
     def _resolve_tool(agent: Any, name: str) -> Any:

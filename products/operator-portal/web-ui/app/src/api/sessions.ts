@@ -122,6 +122,7 @@ export interface ConfirmationRecord {
   // the session-detail surface carries them (the inbox stays
   // decision-metadata-only), and legacy records render an empty list.
   executions?: ExecutionRecord[] | null;
+  recovery_only?: boolean;
 }
 
 export interface ExecutionRecord {
@@ -135,6 +136,82 @@ export interface ExecutionRecord {
   completed_at?: string | null;
   digest_match?: boolean | null;
   reject_reason?: string | null;
+  // SPEC-063 R-5a: the owner-scoped recovery projection for this execution,
+  // fetched from the durable ledger independently of the legacy presentation
+  // rows above. Absent/null when recovery is unavailable or the row predates
+  // the field; it is a *read*, never an original response, and confers no
+  // dispatch, continuation, or secret-release right.
+  recovery?: ExecutionRecovery | null;
+}
+
+// SPEC-063 R-5a: one bounded observation in an owner recovery projection.
+// Read-only wire shape (snake_case, straight from the ledger); the portal
+// renders a representative subset and never reconstructs authority from it.
+export interface RecoveryObservation {
+  observation_id: string;
+  source: "agent" | "worker" | (string & {});
+  kind:
+    | "claim_committed"
+    | "wait_expired"
+    | "transport_uncertain"
+    | "pre_dispatch_refused"
+    | "worker_result"
+    | "result_persistence_unconfirmed"
+    | "response_accepted"
+    | "run_stopped"
+    | "duplicate_seen"
+    | (string & {});
+  observed_at: string;
+  request_id?: string;
+  reason_code?: string;
+  tool_status?: "success" | "error" | "denied" | (string & {});
+}
+
+// SPEC-063 R-5a: the durable receipt embedded in a `result_recorded`
+// recovery projection — a subset of execution-receipt.schema.json. The
+// portal shows outcome, completion time, and the correlating request id;
+// the digest and signature are audit detail and are not rendered.
+export interface RecoveryReceipt {
+  status: "succeeded" | "failed" | "timeout" | (string & {});
+  completed_at?: string | null;
+  request_id?: string | null;
+}
+
+// SPEC-063 R-5a: the owner-scoped recovery projection riding an execution
+// row of the session detail (wire shape mirrors execution-recovery.schema
+// v1). `state` is the durable outcome the ledger can prove; `availability`
+// distinguishes a readable ledger (`available`) from one that could not be
+// read (`unavailable`) or an execution the owner cannot see (`not_found`).
+export interface ExecutionRecovery {
+  availability: "available" | "unavailable" | "not_found";
+  state:
+    | "not_dispatched"
+    | "dispatch_claimed"
+    | "outcome_unknown"
+    | "result_recorded"
+    | null;
+  // Present only when the request was registered but never dispatched
+  // (state null); it never coexists with a dispatch outcome.
+  preparation_state?: "registered";
+  execution_id: string | null;
+  confirm_id?: string | null;
+  call_id?: string | null;
+  run_id?: string | null;
+  attempt_request_id?: string | null;
+  tool_name?: string | null;
+  requested_at?: string | null;
+  expires_at?: string | null;
+  claimed_at?: string | null;
+  observe_by?: string | null;
+  as_of?: string | null;
+  replay: boolean;
+  run_stopped: boolean;
+  integrity_conflict: boolean;
+  target_verification_required: boolean;
+  receipt?: RecoveryReceipt | null;
+  observations: RecoveryObservation[];
+  observations_truncated: boolean;
+  next_observation_cursor?: string | null;
 }
 
 export interface SessionSummary {
@@ -166,6 +243,13 @@ export interface SessionDetail extends SessionSummary {
   // transcript; empty list when the session parked none, null when the
   // record store is unreadable (degraded, never a failure).
   confirmations?: ConfirmationRecord[] | null;
+  // SPEC-063 R-5a: whether the durable recovery ledger was readable for
+  // this owner detail. `unavailable` degrades the recovery rows to a
+  // "could not be read" state without hiding the historical presentation
+  // facts; absent on responses that predate the field.
+  execution_recovery_availability?: "available" | "unavailable" | null;
+  executions_truncated?: boolean;
+  next_execution_cursor?: string | null;
 }
 
 export interface SessionListResponse {
@@ -191,12 +275,34 @@ export async function listSessions(
   return response.sessions ?? [];
 }
 
+// SPEC-063 R-5a: optional recovery paging on the owner session detail. The
+// `execution` filter selects an observation page only *after* the server-side
+// owner check, so an execution id never widens the read; `executionCursor` is
+// an opaque continuation cursor binding session/owner/keyset position; and
+// `pageSize` bounds the executions enriched per fetch (server default 50,
+// maximum 100). Omitted, the call is byte-identical to the legacy fetch.
+export interface SessionRecoveryQuery {
+  execution?: string;
+  executionCursor?: string;
+  pageSize?: number;
+}
+
 export async function getSession(
   sessionId: string,
   signal?: AbortSignal,
+  recovery?: SessionRecoveryQuery,
 ): Promise<SessionDetail> {
+  const params = new URLSearchParams();
+  if (recovery?.execution) params.set("execution", recovery.execution);
+  if (recovery?.executionCursor) {
+    params.set("execution_cursor", recovery.executionCursor);
+  }
+  if (recovery?.pageSize != null) {
+    params.set("page_size", String(recovery.pageSize));
+  }
+  const query = params.toString();
   return requestJson<SessionDetail>(
-    `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/v1/sessions/${encodeURIComponent(sessionId)}${query ? `?${query}` : ""}`,
     { signal },
   );
 }

@@ -122,11 +122,16 @@ class TestInMemoryStore:
 
     def test_cap_evicts_oldest_per_owner(self) -> None:
         store = InMemoryOperationDocumentStore()
+        now = datetime.now(timezone.utc)
         for index in range(PER_OWNER_CAP + 3):
+            # Timestamps must be relative to now: create() sweeps rows older
+            # than RETENTION_DAYS, so a hardcoded date would silently age out
+            # once the wall clock passes it and corrupt the cap assertion.
+            stamp = now - timedelta(minutes=PER_OWNER_CAP + 3 - index)
             store.create(
                 _doc(
                     f"doc-{index:02d}",
-                    created_at=f"2026-08-27T{index % 24:02d}:{index % 60:02d}:00Z",
+                    created_at=stamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 )
             )
         rows = store.list_for_owner("alice")

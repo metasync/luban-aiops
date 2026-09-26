@@ -237,7 +237,7 @@ interface ExecutionRow {
   key: string;
   sessionId: string;
   tool: string;
-  status: string;
+  status: ReactNode;
   receipt: ReactNode;
   completedAt: string;
 }
@@ -256,7 +256,16 @@ function collectExecutionRows(sessions: DigestMap[]): ExecutionRow[] {
         key: `${sessionId}:${textOrDash(record.execution_id)}:${rows.length}`,
         sessionId,
         tool: textOrDash(record.tool_name),
-        status: textOrDash(record.status),
+        status: asMap(record.recovery) ? (
+          <span>
+            {textOrDash(record.evidence_label)}
+            {record.historical_status ? (
+              <Typography.Text type="secondary" style={{ display: "block" }}>
+                Historical: {textOrDash(record.historical_status)}
+              </Typography.Text>
+            ) : null}
+          </span>
+        ) : textOrDash(record.status),
         receipt:
           record.digest_match === false ? (
             <span>
@@ -274,6 +283,44 @@ function collectExecutionRows(sessions: DigestMap[]): ExecutionRow[] {
     }
   }
   return rows;
+}
+
+const EXECUTION_EVIDENCE_NOTE =
+  "Tool reports are not independently verified business outcomes. " +
+  "Missing evidence is inconclusive. Account for work that may still be " +
+  "running and independently verify the target. Recovery does not authorize " +
+  "retries, continuation, or secret release.";
+
+function documentExecutionEvidence(document: OperationDocument): string | null {
+  const digest = asMap(document.digest) ?? {};
+  const source = asMap(digest.handover) ?? asMap(digest.session);
+  const counts = asMap(source?.execution_evidence_counts);
+  if (!counts) return null;
+  const labels: Record<string, string> = {
+    registered: "Registered",
+    not_dispatched: "Not dispatched",
+    dispatch_claimed: "Pending outcomes",
+    outcome_unknown: "Unknown outcomes",
+    result_recorded: "Recorded tool reports",
+    unavailable: "Unavailable evidence",
+    not_found: "Missing evidence",
+    integrity_conflict: "Conflicting reports",
+    late_report: "Late tool reports",
+    tool_report_succeeded: "Tool reported success",
+    tool_report_failed: "Tool reported failure",
+    tool_report_timeout: "Tool reported timeout",
+  };
+  const parts = Object.entries(labels)
+    .filter(([key]) => typeof counts[key] === "number" && (counts[key] as number) > 0)
+    .map(([key, label]) => `${label}: ${counts[key]}`);
+  const recovery = asMap(source?.execution_recovery);
+  if (
+    source?.incomplete_recovery_sessions || recovery?.executions_truncated ||
+    (recovery && recovery.availability !== "available")
+  ) {
+    parts.push("Execution recovery coverage is incomplete.");
+  }
+  return [...parts, EXECUTION_EVIDENCE_NOTE].join(" · ");
 }
 
 function HandoverTab({ handover }: { handover: DigestMap }) {
@@ -489,8 +536,9 @@ function OpenItemsTab({ handover }: { handover: DigestMap | null }) {
   ) {
     return (
       <Typography.Text type="secondary">
-        Nothing is open — every confirmation was decided and every
-        execution closed during this shift.
+        {handover.target_verification_required
+          ? "No pending approvals or unresolved execution records in this snapshot. Tool reports still require independent target verification."
+          : "Nothing is open — every confirmation was decided and every execution closed during this shift."}
       </Typography.Text>
     );
   }
@@ -1470,6 +1518,10 @@ export function buildDocumentMarkdown(document: OperationDocument): string {
     lines.push(`> ${document.blurb}`);
     lines.push("");
   }
+  const executionEvidence = documentExecutionEvidence(document);
+  if (executionEvidence) {
+    lines.push("## Execution evidence", "", executionEvidence, "");
+  }
   lines.push("## Provenance");
   lines.push("");
   if (document.provenance?.incident_id) {
@@ -1807,6 +1859,15 @@ export default function DocumentsView({
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                 Published {dayjs(selected.published_at).fromNow()}
               </Typography.Text>
+            ) : null}
+            {documentExecutionEvidence(selected) ? (
+              <Alert
+                type="warning"
+                showIcon
+                title="Execution evidence — snapshot at generation"
+                description={documentExecutionEvidence(selected)}
+                style={{ marginBottom: 12 }}
+              />
             ) : null}
             {selected.blurb ?? selected.summary ? (
               // v0.23.3: the one-line story rides the detail card too —

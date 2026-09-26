@@ -185,6 +185,11 @@ class FlowApproval:
     origin: str
     ttl: float
     approved_at: float = field(default_factory=time.monotonic)
+    # SPEC-063 R-4: the durable execution run this flow authority originated
+    # from. A reused flow retains its originating run across later turns, so a
+    # subsequent auto-signed write inherits the same ``run_id`` rather than
+    # minting a replacement. ``None`` when admission is disabled (legacy path).
+    run_id: str | None = None
 
     def is_expired(self) -> bool:
         """True when the authority no longer unlocks writes.
@@ -223,6 +228,7 @@ class FlowApprovalStore:
         skill_id: str,
         origin: str,
         ttl: float,
+        run_id: str | None = None,
     ) -> FlowApproval:
         approval = FlowApproval(
             session_id=session_id,
@@ -232,6 +238,7 @@ class FlowApprovalStore:
             skill_id=skill_id,
             origin=origin,
             ttl=ttl,
+            run_id=run_id,
         )
         self._by_session[session_id] = approval
         return approval

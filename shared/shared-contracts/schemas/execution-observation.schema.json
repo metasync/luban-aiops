@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/execution-observation.schema.json",
+  "title": "Execution Observation (v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9_.:-]+$"},
+    "uuid": {"type": "string", "format": "uuid", "maxLength": 36},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "time": {"type": "string", "format": "date-time", "maxLength": 40},
+    "reason": {"enum": [
+      "none", "unauthorized", "bad_request", "signing_unavailable", "signature_invalid",
+      "args_digest_mismatch", "request_missing", "identity_conflict", "protocol_unsupported",
+      "request_expired", "request_not_yet_valid", "lifetime_invalid", "admission_disabled",
+      "epoch_mismatch", "store_unavailable", "schema_invalid", "claim_commit_unconfirmed",
+      "gateway_not_configured", "credential_missing", "wait_expired", "transport_error",
+      "response_invalid", "receipt_unconfirmed", "run_stopped", "predecessor_unresolved",
+      "send_lock_unavailable", "shutdown", "integrity_conflict", "metadata_replay"
+    ]}
+  },
+  "required": ["observation_version", "observation_id", "execution_id", "run_id", "request_digest",
+               "source", "kind", "observed_at", "attempt_request_id", "request_id", "reason_code", "signature"],
+  "properties": {
+    "observation_version": {"const": 1},
+    "observation_id": {"$ref": "#/$defs/uuid"},
+    "execution_id": {"$ref": "#/$defs/uuid"},
+    "run_id": {"$ref": "#/$defs/uuid"},
+    "request_digest": {"$ref": "#/$defs/digest"},
+    "source": {"enum": ["agent", "worker"]},
+    "kind": {"enum": ["claim_committed", "wait_expired", "transport_uncertain", "pre_dispatch_refused",
+                       "worker_result", "result_persistence_unconfirmed", "response_accepted", "run_stopped", "duplicate_seen"]},
+    "observed_at": {"$ref": "#/$defs/time"},
+    "attempt_request_id": {"$ref": "#/$defs/id"},
+    "request_id": {"$ref": "#/$defs/id"},
+    "reason_code": {"$ref": "#/$defs/reason"},
+    "signature": {"$ref": "#/$defs/digest"},
+    "claim_owner_id": {"$ref": "#/$defs/uuid"},
+    "receipt_digest": {"$ref": "#/$defs/digest"},
+    "tool_status": {"enum": ["success", "error", "denied"]},
+    "receipt": {"allOf": [
+      {"$ref": "execution-receipt.schema.json"},
+      {"properties": {"execution_id": {"$ref": "#/$defs/uuid"},
+                       "request_id": {"$ref": "#/$defs/id"}, "completed_at": {"$ref": "#/$defs/time"}}}
+    ]}
+  },
+  "allOf": [
+    {"if": {"properties": {"source": {"const": "agent"}}},
+     "then": {"properties": {"kind": {"enum": ["wait_expired", "transport_uncertain", "pre_dispatch_refused", "response_accepted", "run_stopped"]}}},
+     "else": {"properties": {"kind": {"enum": ["claim_committed", "transport_uncertain", "pre_dispatch_refused", "worker_result", "result_persistence_unconfirmed", "run_stopped", "duplicate_seen"]}}}},
+    {"if": {"properties": {"kind": {"const": "worker_result"}}},
+     "then": {"required": ["receipt", "receipt_digest", "claim_owner_id", "tool_status"]},
+     "else": {"not": {"anyOf": [{"required": ["receipt"]}, {"required": ["tool_status"]}]}}},
+    {"if": {"properties": {"kind": {"enum": ["claim_committed", "worker_result"]}}},
+     "then": {"required": ["claim_owner_id"]},
+     "else": {"not": {"required": ["claim_owner_id"]}}},
+    {"if": {"properties": {"kind": {"enum": ["response_accepted", "worker_result"]}}},
+     "then": {"required": ["receipt_digest"]},
+     "else": {"not": {"required": ["receipt_digest"]}}}
+  ]
+}

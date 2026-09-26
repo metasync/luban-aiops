@@ -35,6 +35,35 @@ These manifests do not yet provide:
 - autoscaling
 - durable `Redis` persistence beyond the pod lifecycle
 
+## SPEC-063 execution admission and first cutover
+
+The 0.43.0 protocol requires a coordinated, mutation-disabled
+[cutover](../../../../docs/guides/execution-cutover-restore.md). Stock `make deploy`
+is not this procedure: it does not migrate the ledger, set its external epoch,
+invoke the downgrade guard, or authorize admission. Its rollout wait expects
+readiness, while the disabled worker intentionally reports 503 readiness and
+healthy process liveness. Do not enable mutations just to satisfy that wait.
+
+- Agent: explicitly provision `AGENT_EXECUTION_STATE_DB_URL`,
+  `AGENT_EXECUTION_ADMISSION_EPOCH`, and `AGENT_EXECUTION_ADMISSION_ENABLED`
+  (defaults false).
+- Worker: actual Postgres at `EXECUTION_STATE_DB_URL`, matching
+  `EXECUTION_ADMISSION_EPOCH`, and `EXECUTION_ADMISSION_ENABLED` (defaults false).
+- Catalog: explicitly migrate/verify with admission disabled; enable only after
+  old senders are stopped, matching consumers are deployed, evidence is reconciled,
+  and operational approval is granted. No memory-backed mutation fallback.
+- Keep one worker replica and `Recreate`; 5s preStop plus 35s drain fits the 45s
+  pod grace. Durable claims, not replica count, provide duplicate protection.
+  Process termination never cancels downstream work or releases a claim.
+- The `mutating-dev` profile only opts the gateway into tool availability/RBAC;
+  it does not enable durable execution. The new settings are not automatically
+  provisioned by the existing secret-sync/deploy path.
+
+Downgrade and database restore require disabled recovery, external epoch/credential
+management, old-sender inventory, and the documented validity wait. A direct old
+image deployment or same-epoch snapshot restoration bypasses those operational
+checks and is not a safe executable rollback.
+
 ## Expected Images
 
 The base deployment manifest uses neutral placeholder image tags:
@@ -621,9 +650,9 @@ permanently: the overlay merges the profile's
 `GATEWAY_MUTATING_TOOLS_ENABLED=true` into the `platform-runtime-config`
 ConfigMap and applies the pod-delete Role/RoleBinding that rides the
 profile (`mutating-dev/tool-gateway-pod-delete.yaml` — delete on pods,
-`dev-luban-aiops` only). A fresh clone deployed via `make deploy` yields
-the opted-in dev posture with no manual steps; any overlay without the
-profile stays byte-identical to the deny-by-default base.
+`dev-luban-aiops` only). This opts in the gateway posture, not SPEC-063
+execution admission: the ledger and both consumers still require the coordinated
+cutover above. Any overlay without the profile retains the deny-by-default base.
 
 ```bash
 # Deploy the opted-in dev posture (profile already wired into dev-k8s)

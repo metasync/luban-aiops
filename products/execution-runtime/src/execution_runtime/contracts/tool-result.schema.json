@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/tool-result.schema.json",
+  "title": "Tool Result (v1)",
+  "description": "Structured response envelope returned by tool invocation. Contains the tool-specific data payload, execution evidence for audit and provenance, and an optional error object.",
+  "type": "object",
+  "required": ["tool_name", "status", "evidence"],
+  "properties": {
+    "tool_name": {
+      "type": "string",
+      "description": "The tool that was invoked."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "error", "denied"],
+      "description": "Outcome: success (data populated), error (error populated), denied (policy rejection)."
+    },
+    "data": {
+      "type": "object",
+      "description": "Tool-specific result payload. Present when status is success.",
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Execution provenance metadata for audit and UI rendering.",
+      "required": ["executed_at", "duration_ms", "risk_level", "source_system"],
+      "properties": {
+        "executed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when execution completed."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock execution time in milliseconds."
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": ["read", "write", "admin"],
+          "description": "Risk classification of the invoked tool."
+        },
+        "source_system": {
+          "type": "string",
+          "description": "Identifier of the external system that provided the data, e.g. kubernetes."
+        }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": ["object", "null"],
+      "description": "Error details. Present when status is error or denied.",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Machine-readable error code, e.g. K8S_NOT_CONFIGURED, TOOL_NOT_FOUND."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error description."
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

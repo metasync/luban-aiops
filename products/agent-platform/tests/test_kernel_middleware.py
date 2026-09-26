@@ -391,6 +391,78 @@ class GatewayPermissionMiddlewareTests(unittest.TestCase):
         self.assertEqual(decision.behavior, PermissionBehavior.ASK)
         self.assertEqual(calls, [])
 
+    def _stopped_guard(self):
+        from agent_service.services.execution_run_guard import (
+            RunGuard,
+            RunIdentity,
+            RunStopLatch,
+        )
+
+        latch = RunStopLatch()
+        guard = RunGuard(RunIdentity("run-stopped", "s", "o"), latch=latch)
+        guard.mark_stopped("wait_expired")
+        return guard
+
+    def test_stopped_run_denies_mutating_call_before_allowed_shortcut(self) -> None:
+        """SPEC-063 R-4: a stopped run's mutating call is DENIED before the
+        ALLOWED shortcut, so a stale confirmation carried into a resumed stream
+        cannot auto-execute. The built-in resolution is never reached."""
+        from agentscope.message import ToolCallState
+        from agentscope.permission import PermissionBehavior
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+
+        mw = GatewayPermissionMiddleware()
+        tool = _StubTool("k8s_restart_pod", is_read_only=False)
+        tool_call = SimpleNamespace(state=ToolCallState.ALLOWED)
+        token = CURRENT_RUN_GUARD.set(self._stopped_guard())
+        try:
+            decision, calls = self._decide(mw, tool, tool_call=tool_call)
+        finally:
+            CURRENT_RUN_GUARD.reset(token)
+        self.assertEqual(decision.behavior, PermissionBehavior.DENY)
+        self.assertEqual(calls, [])  # ALLOWED shortcut never delegated
+
+    def test_stopped_run_leaves_read_only_and_task_tools_on_their_path(self) -> None:
+        """Read-tier and kernel-local tools stay governed on their existing path;
+        only mutating calls are denied by the stop."""
+        from agentscope.permission import PermissionBehavior
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+
+        mw = GatewayPermissionMiddleware()
+        token = CURRENT_RUN_GUARD.set(self._stopped_guard())
+        try:
+            ro_decision, _ = self._decide(
+                mw, _StubTool("k8s_list_pods", is_read_only=True),
+            )
+            task_decision, _ = self._decide(
+                mw, _StubTool("TaskCreate", is_read_only=False),
+            )
+        finally:
+            CURRENT_RUN_GUARD.reset(token)
+        self.assertEqual(ro_decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(task_decision.behavior, PermissionBehavior.ALLOW)
+
+    def test_no_bound_guard_is_inert(self) -> None:
+        """With no guard bound (every non-execution turn) the ALLOWED shortcut
+        behaves exactly as before: it delegates to the built-in resolution."""
+        from agentscope.message import ToolCallState
+        from agentscope.permission import (
+            PermissionBehavior,
+            PermissionDecision,
+        )
+
+        mw = GatewayPermissionMiddleware()
+        tool = _StubTool("k8s_restart_pod", is_read_only=False)
+        tool_call = SimpleNamespace(state=ToolCallState.ALLOWED)
+        already_allowed = PermissionDecision(
+            behavior=PermissionBehavior.ALLOW, message="Already allowed.",
+        )
+        decision, calls = self._decide(
+            mw, tool, next_decision=already_allowed, tool_call=tool_call,
+        )
+        self.assertEqual(decision.behavior, PermissionBehavior.ALLOW)
+        self.assertEqual(len(calls), 1)
+
     def test_task_tools_always_allowed(self) -> None:
         """R-5: state-local task tools must never hit the interactive ASK
         gate on a headless stream."""
@@ -1126,6 +1198,106 @@ class MiddlewareCompositionTests(unittest.TestCase):
             if isinstance(mw, ToolEvidenceMiddleware)
         ][0]
         self.assertEqual(evidence._data_max_chars, 456)
+
+
+class SecretReleasePermitGateTests(unittest.TestCase):
+    """SPEC-063 R-4: ``ToolEvidenceMiddleware._permit_secret_release`` gates a
+    held portal_copy reveal. Legacy (no bound guard) releases on the existing
+    status+membership trigger; v3 (guard bound) additionally requires consuming
+    a single-use permit minted from a durably accepted original success, with a
+    final run-latch re-check immediately before emission."""
+
+    def _gate(self, call_id="call-1"):
+        return ToolEvidenceMiddleware._permit_secret_release(call_id)
+
+    def _guard(self, *, stopped=False):
+        from agent_service.services.execution_run_guard import (
+            RunGuard,
+            RunIdentity,
+            RunStopLatch,
+        )
+
+        latch = RunStopLatch()
+        guard = RunGuard(RunIdentity("run-1", "ses-1", "alice"), latch=latch)
+        if stopped:
+            guard.mark_stopped("wait_expired")
+        return guard
+
+    def _permit(self):
+        class _Permit:
+            def __init__(self):
+                self.consumed = False
+
+            def consume(self):
+                if self.consumed:
+                    raise TypeError("secret-release permit is single-use")
+                self.consumed = True
+
+        return _Permit()
+
+    def test_no_guard_releases_on_the_legacy_trigger(self) -> None:
+        # No CURRENT_RUN_GUARD bound => the permit gate is inert and the
+        # status+membership trigger alone decides (legacy path unchanged).
+        self.assertTrue(self._gate())
+
+    def test_v3_without_a_permit_withholds(self) -> None:
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+        from agent_service.services.kernel_middleware import RELEASE_PERMITS
+
+        gtoken = CURRENT_RUN_GUARD.set(self._guard())
+        ptoken = RELEASE_PERMITS.set({})
+        try:
+            self.assertFalse(self._gate())
+        finally:
+            RELEASE_PERMITS.reset(ptoken)
+            CURRENT_RUN_GUARD.reset(gtoken)
+
+    def test_v3_with_a_permit_consumes_once_and_releases(self) -> None:
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+        from agent_service.services.kernel_middleware import RELEASE_PERMITS
+
+        permit = self._permit()
+        gtoken = CURRENT_RUN_GUARD.set(self._guard())
+        ptoken = RELEASE_PERMITS.set({"call-1": permit})
+        try:
+            self.assertTrue(self._gate())
+            self.assertTrue(permit.consumed)
+            self.assertNotIn("call-1", RELEASE_PERMITS.get())
+            # Spent and popped: a second reveal for the same call withholds.
+            self.assertFalse(self._gate())
+        finally:
+            RELEASE_PERMITS.reset(ptoken)
+            CURRENT_RUN_GUARD.reset(gtoken)
+
+    def test_v3_stopped_run_withholds_and_does_not_consume(self) -> None:
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+        from agent_service.services.kernel_middleware import RELEASE_PERMITS
+
+        permit = self._permit()
+        gtoken = CURRENT_RUN_GUARD.set(self._guard(stopped=True))
+        ptoken = RELEASE_PERMITS.set({"call-1": permit})
+        try:
+            self.assertFalse(self._gate())
+            # The latch re-check precedes consumption, so the permit survives.
+            self.assertFalse(permit.consumed)
+            self.assertIn("call-1", RELEASE_PERMITS.get())
+        finally:
+            RELEASE_PERMITS.reset(ptoken)
+            CURRENT_RUN_GUARD.reset(gtoken)
+
+    def test_v3_spent_permit_withholds(self) -> None:
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+        from agent_service.services.kernel_middleware import RELEASE_PERMITS
+
+        permit = self._permit()
+        permit.consume()  # already spent before the reveal is attempted
+        gtoken = CURRENT_RUN_GUARD.set(self._guard())
+        ptoken = RELEASE_PERMITS.set({"call-1": permit})
+        try:
+            self.assertFalse(self._gate())
+        finally:
+            RELEASE_PERMITS.reset(ptoken)
+            CURRENT_RUN_GUARD.reset(gtoken)
 
 
 if __name__ == "__main__":

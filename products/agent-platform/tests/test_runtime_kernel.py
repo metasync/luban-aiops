@@ -10,6 +10,12 @@ from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
+from agent_service.services.execution_run_guard import (
+    CURRENT_RUN_GUARD,
+    RunGuard,
+    RunIdentity,
+    RunStopLatch,
+)
 from agent_service.services.execution_signing import (
     canonical_digest,
     verify_envelope,
@@ -1587,6 +1593,35 @@ class TestSignFlowExecution:
         assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
         assert requests == {}
 
+    def test_fails_safe_on_stopped_run(self, monkeypatch):
+        """SPEC-063 R-4 (T-21): a stopped run never auto-signs a flow-unlocked
+        write. The gate at the flow-signing seam fails safe (``None`` ⇒ the write
+        parks) ahead of the intent registration, authoring-trace step, and
+        ``execution_requested`` audit, so a stopped run leaves no trace of a
+        request that was never made — independent of the permission middleware
+        that also denies it first."""
+        audits = _capture_flow_audits(monkeypatch)
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        kernel = self._kernel()
+        session_id = "ses-sign-9"
+        _record_authority(session_id)
+        _record_context(session_id)
+        requests: dict = {}
+        tool_call = ToolCallBlock(id="call-1", name="web_click", input='{"ref": 1}')
+        latch = RunStopLatch()
+        guard = RunGuard(RunIdentity("run-stopped", session_id, "alice"), latch=latch)
+        guard.mark_stopped("wait_expired")
+        token = CURRENT_RUN_GUARD.set(guard)
+        try:
+            assert _run_signer(kernel, tool_call, "web.click", session_id, requests) is None
+        finally:
+            CURRENT_RUN_GUARD.reset(token)
+        assert requests == {}
+        # No intent/trace/audit side effect escaped the stopped run.
+        assert EXECUTION_RECORD_STORE.load_for_session(session_id) == []
+        assert [a for a in audits if a["event_type"] == "execution_requested"] == []
+
 
 # --- SPEC-054 R-2: flow authority invalidation -------------------------------
 
@@ -2494,6 +2529,46 @@ class TestObserveStepOrigin:
         assert len(records) == 1
         assert records[0]["status"] == receipt_status
 
+    def test_an_uncertain_v3_outcome_writes_no_definitive_receipt(
+        self, monkeypatch
+    ):
+        """SPEC-063 R-3b (T-17): a v3 caller timeout / transport uncertainty
+        surfaces as ``OUTCOME_UNKNOWN`` and must never close the v2 execution
+        row with a synthetic ``timeout``/``failed`` receipt. The attributed
+        ``wait_expired`` observation the coordinator appended to the durable
+        ledger is the record, and a late worker result must stay appendable
+        there; a definitive receipt here would contradict the unknown outcome.
+        The row is left ``requested`` (unclosed) and no completion audit fires.
+        """
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._kernel()
+        session_id = "ses-origin-uncertain"
+        requests = self._signed_browser_write(kernel, session_id)
+
+        kernel._observe_tool_result(
+            {
+                "type": "tool_result",
+                "tool_name": "web.click",
+                "call_id": "call-w1",
+                "status": "error",
+                "request_id": "req-9",
+                "error": {"code": "OUTCOME_UNKNOWN", "reason": "wait_expired"},
+            },
+            requests,
+        )
+
+        records = EXECUTION_RECORD_STORE.load_for_session(session_id)
+        assert len(records) == 1
+        assert records[0]["status"] == "requested"
+        assert records[0]["receipt"] is None
+        assert not [
+            a for a in audits if a["event_type"] == "execution_completed"
+        ]
+        # An unknown outcome is never corroborated as having landed.
+        assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
+            "flow_origin"
+        ] is None
+
     def test_a_non_browser_step_is_left_unobserved(self):
         kernel = self._kernel()
         session_id = "ses-origin-k8s"
@@ -2655,6 +2730,158 @@ class TestObserveStepOrigin:
         assert AUTHORING_TRACE_STORE.load_for_session(session_id)[0][
             "flow_origin"
         ] == "https://admin.internal"
+
+
+class TestExecutionAdmissionCutover:
+    """SPEC-063 R-4a (T-08): under disabled-by-default durable admission the
+    signing seams stamp the v3 run/epoch/expiry window onto every executable
+    envelope, and a batch or flow authority missing its durable run identity
+    fails closed (resume) or fails safe (park) rather than signing a v2 envelope
+    a bound v3 guard would reject mid-dispatch. Inert when admission is off."""
+
+    _EPOCH = "22222222-2222-4222-8222-222222222222"
+    _RUN_ID = "11111111-1111-4111-8111-111111111111"
+
+    @pytest.fixture(autouse=True)
+    def _isolate_stores(self):
+        traces = getattr(AUTHORING_TRACE_STORE, "_by_session", None)
+        targets = getattr(AUTHORING_TRACE_STORE, "_targets", None)
+        records = getattr(EXECUTION_RECORD_STORE, "_by_key", None)
+        CONFIRMATION_REGISTRY._by_session.clear()
+        FLOW_APPROVALS.clear_all()
+        FLOW_CONTEXTS.clear_all()
+        for space in (traces, targets, records):
+            if space is not None:
+                space.clear()
+        yield
+        for space in (traces, targets, records):
+            if space is not None:
+                space.clear()
+
+    def _admission_kernel(self):
+        return AgentKernel(settings=RuntimeSettings(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+            execution_admission_enabled=True,
+            execution_state_db_url="postgresql://u:p@127.0.0.1:1/db",
+            execution_admission_epoch=self._EPOCH,
+        ))
+
+    def _legacy_kernel(self):
+        return AgentKernel(settings=RuntimeSettings(
+            api_key="test-key",
+            execution_signing_key=FLOW_SIGNING_KEY,
+            browser_flow_approval_ttl=900,
+        ))
+
+    def _pending(self, session_id, *, run_id=None):
+        call = ToolCallBlock(
+            id="call-1", name="k8s.restart_service", input='{"ns": "ops"}'
+        )
+        return CONFIRMATION_REGISTRY.register(
+            session_id, "alice", "reply-1", [call], 600,
+            risk_levels=_risk_snapshot(call), run_id=run_id,
+        )
+
+    def test_resume_batch_signs_the_v3_window_under_admission(self):
+        kernel = self._admission_kernel()
+        session_id = "ses-v3-resume"
+        pending = self._pending(session_id, run_id=self._RUN_ID)
+
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", True, "req-9", session_id
+        )
+
+        assert rejection is None
+        envelope = requests["call-1"]
+        assert envelope["protocol_version"] == 3
+        assert envelope["run_id"] == self._RUN_ID
+        assert envelope["admission_epoch"] == self._EPOCH
+        assert envelope["expires_at"]
+        # The window sits inside the HMAC, so it is a signed fact.
+        assert verify_envelope(
+            envelope, envelope["signature"], FLOW_SIGNING_KEY
+        )
+
+    def test_resume_missing_run_identity_fails_closed(self, monkeypatch):
+        from agent_service.services.execution_signing import (
+            REASON_REQUEST_MISSING,
+        )
+
+        audits = _capture_flow_audits(monkeypatch)
+        kernel = self._admission_kernel()
+        session_id = "ses-v3-resume-norunid"
+        pending = self._pending(session_id)  # run_id None: a pre-cutover card
+
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", True, "req-9", session_id
+        )
+
+        assert requests == {}
+        assert rejection == REASON_REQUEST_MISSING
+        rejected = [
+            a for a in audits if a["event_type"] == "execution_rejected"
+        ]
+        assert len(rejected) == 1
+        assert rejected[0]["details"]["reason"] == REASON_REQUEST_MISSING
+
+    def test_admission_disabled_signs_the_legacy_v2_envelope(self):
+        kernel = self._legacy_kernel()
+        session_id = "ses-v2-resume"
+        pending = self._pending(session_id)
+
+        requests, rejection = kernel._prepare_executions(
+            pending, "bob-approver", True, "req-9", session_id
+        )
+
+        assert rejection is None
+        envelope = requests["call-1"]
+        # No v3 window: the legacy envelope is byte-for-byte unchanged.
+        assert "protocol_version" not in envelope
+        assert "run_id" not in envelope
+        assert "expires_at" not in envelope
+
+    def test_flow_write_signs_the_v3_window_under_admission(self):
+        kernel = self._admission_kernel()
+        session_id = "ses-v3-flow"
+        FLOW_APPROVALS.record(
+            session_id=session_id, confirm_id="conf-approving",
+            owner_user_id="alice", decider_user_id="bob-approver",
+            skill_id="samples/password-reset", origin="http://admin.local",
+            ttl=900.0, run_id=self._RUN_ID,
+        )
+        _record_context(session_id)
+        requests: dict = {}
+
+        envelope = _run_signer(
+            kernel,
+            ToolCallBlock(id="call-w1", name="web_click", input='{"ref": 1}'),
+            "web.click", session_id, requests,
+        )
+
+        assert envelope is not None
+        assert envelope["protocol_version"] == 3
+        assert envelope["run_id"] == self._RUN_ID
+        assert envelope["admission_epoch"] == self._EPOCH
+        assert envelope["approval_kind"] == "flow"
+
+    def test_flow_authority_without_run_identity_parks(self):
+        kernel = self._admission_kernel()
+        session_id = "ses-v3-flow-norunid"
+        _record_authority(session_id)  # run_id defaults to None
+        _record_context(session_id)
+        requests: dict = {}
+
+        envelope = _run_signer(
+            kernel,
+            ToolCallBlock(id="call-w1", name="web_click", input='{"ref": 1}'),
+            "web.click", session_id, requests,
+        )
+
+        # Fails safe: park rather than sign a v2 envelope under a v3 guard.
+        assert envelope is None
+        assert requests == {}
 
 
 # --- SPEC-055 R-5: replaying a graduated executable flow --------------------
@@ -2990,4 +3217,90 @@ class TestGraduatedFlowReplay:
         assert requests["call-web"] is browser
         assert [a["event_type"] for a in audits] == ["execution_requested"]
         assert audits[0]["details"]["call_id"] == "call-web"
+
+
+def test_execution_recovery_factory_inert_when_admission_disabled():
+    """SPEC-063 R-2a: disabled admission yields no recovery store (legacy path)."""
+    kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+    assert kernel.settings.execution_admission_enabled is False
+    assert kernel._execution_recovery() is None
+    # Repeated calls stay None and never build a store.
+    assert kernel._execution_recovery() is None
+    assert kernel._recovery_built is False
+
+
+def test_execution_recovery_factory_builds_and_caches_when_enabled():
+    from agent_service.services.execution_recovery import ExecutionRecovery
+
+    kernel = AgentKernel(
+        settings=RuntimeSettings(
+            api_key=None,
+            execution_signing_key="signing-key-1",
+            execution_admission_enabled=True,
+            execution_state_db_url="postgres://agent@ledger:5432/exec",
+            execution_admission_epoch="epoch-7",
+        )
+    )
+    recovery = kernel._execution_recovery()
+    assert isinstance(recovery, ExecutionRecovery)
+    # Cached: a second call returns the same instance, built once.
+    assert kernel._execution_recovery() is recovery
+    assert kernel._recovery_built is True
+
+
+class _FakeRunRecovery:
+    """Stand-in for ExecutionRecovery's run-minting surface (no DB)."""
+
+    def __init__(self, *, run_id="run-minted", raise_on_create=None):
+        self._run_id = run_id
+        self._raise = raise_on_create
+        self.create_calls = []
+
+    def create_run(self, session_id, owner_user_id):
+        self.create_calls.append((session_id, owner_user_id))
+        if self._raise is not None:
+            raise self._raise
+        return self._run_id
+
+
+def test_resolve_run_id_inherits_flow_authority_without_minting():
+    """SPEC-063 R-4: a reused flow retains its originating run."""
+    kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+    recovery = _FakeRunRecovery()
+    flow_approval = SimpleNamespace(run_id="run-origin")
+    run_id = kernel._resolve_run_id(
+        recovery, "ses-1", "alice", flow_approval=flow_approval
+    )
+    assert run_id == "run-origin"
+    assert recovery.create_calls == []  # never minted a replacement
+
+
+def test_resolve_run_id_mints_for_a_new_root_turn():
+    kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+    recovery = _FakeRunRecovery(run_id="run-new")
+    run_id = kernel._resolve_run_id(recovery, "ses-1", "alice")
+    assert run_id == "run-new"
+    assert recovery.create_calls == [("ses-1", "alice")]
+
+
+def test_resolve_run_id_returns_none_when_store_unavailable():
+    """A failed mint yields no identity, so the lane fails closed (never mints)."""
+    from agent_service.services.execution_protocol import ProtocolError
+
+    kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+    recovery = _FakeRunRecovery(raise_on_create=ProtocolError("store_unavailable"))
+    assert kernel._resolve_run_id(recovery, "ses-1", "alice") is None
+
+
+def test_bind_guard_carries_the_resolved_run_identity():
+    from agent_service.services.execution_run_guard import RunGuard
+
+    kernel = AgentKernel(settings=RuntimeSettings(api_key=None))
+    recovery = _FakeRunRecovery()
+    guard = kernel._bind_guard(recovery, "run-1", "ses-1", "alice")
+    assert isinstance(guard, RunGuard)
+    assert guard.run_id == "run-1"
+    assert guard.identity.session_id == "ses-1"
+    assert guard.identity.owner_user_id == "alice"
+    assert guard.stopped() is False
 

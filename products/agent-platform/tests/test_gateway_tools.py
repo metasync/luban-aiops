@@ -658,6 +658,80 @@ class ExecutionRequestVerificationTests(unittest.TestCase):
         )
         self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")
 
+    def test_bound_guard_routes_through_the_v3_coordinator(self) -> None:
+        """SPEC-063 R-2/R-3: with a durable run guard bound (admission enabled)
+        a verified mutating call routes through the v3 coordinator, never the
+        legacy handoff or the inline gateway."""
+        from agent_service.services.execution_run_guard import (
+            CURRENT_RUN_GUARD,
+            RunGuard,
+            RunIdentity,
+        )
+
+        fn = self._mutating_fn()
+        guard = RunGuard(RunIdentity("run-1", "ses-1", "alice"))
+        with patch(
+            "agent_service.tools.gateway_tools._invoke_v3",
+            new_callable=AsyncMock,
+        ) as mock_v3, patch(
+            "agent_service.tools.gateway_tools._handoff_execution",
+            new_callable=AsyncMock,
+        ) as mock_handoff, patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_v3.return_value = {"status": "success"}
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-1")
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            token_var = DELEGATED_TOKEN.set("confirmer-token")
+            guard_var = CURRENT_RUN_GUARD.set(guard)
+            try:
+                chunk = _run(fn(name="web-1"))
+            finally:
+                CURRENT_RUN_GUARD.reset(guard_var)
+                DELEGATED_TOKEN.reset(token_var)
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_invoke.assert_not_called()
+        mock_handoff.assert_not_awaited()
+        mock_v3.assert_awaited_once_with(
+            "k8s.delete_pod", "call-1", {"name": "web-1"}, "confirmer-token",
+            guard,
+        )
+        self.assertEqual(chunk.metadata["gateway_result"]["status"], "success")
+
+    def test_no_guard_keeps_the_legacy_handoff(self) -> None:
+        """Without a bound guard (admission disabled) the verified mutating call
+        takes the unchanged legacy handoff and never the v3 coordinator."""
+        fn = self._mutating_fn()
+        with patch(
+            "agent_service.tools.gateway_tools._invoke_v3",
+            new_callable=AsyncMock,
+        ) as mock_v3, patch(
+            "agent_service.tools.gateway_tools._handoff_execution",
+            new_callable=AsyncMock,
+        ) as mock_handoff:
+            mock_handoff.return_value = {"status": "success"}
+            requests_var = EXECUTION_REQUESTS.set(
+                {"call-1": self._request({"name": "web-1"})}
+            )
+            call_var = CURRENT_CALL_ID.set("call-1")
+            audit_var = EXECUTION_AUDIT_CONTEXT.set(self._worker_audit_context())
+            token_var = DELEGATED_TOKEN.set("confirmer-token")
+            try:
+                _run(fn(name="web-1"))
+            finally:
+                DELEGATED_TOKEN.reset(token_var)
+                EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+                CURRENT_CALL_ID.reset(call_var)
+                EXECUTION_REQUESTS.reset(requests_var)
+        mock_v3.assert_not_awaited()
+        mock_handoff.assert_awaited_once()
+
     def test_reordered_arguments_still_match(self) -> None:
         fn = self._mutating_fn()
         signed = self._request({"force": True, "name": "web-1"})

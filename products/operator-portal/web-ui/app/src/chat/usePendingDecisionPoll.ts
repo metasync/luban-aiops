@@ -69,6 +69,7 @@ export interface PendingDecisionPollOptions {
   sessionId: string | null;
   turns: ChatTurn[];
   streaming: boolean;
+  executionCursor?: string;
   // Re-seeds the timeline from the authoritative detail; ChatView routes
   // this through the same transcriptToTurns path the initial load uses.
   applyDetail: (detail: SessionDetail) => void;
@@ -85,6 +86,7 @@ export function usePendingDecisionPoll({
   sessionId,
   turns,
   streaming,
+  executionCursor,
   applyDetail,
 }: PendingDecisionPollOptions): PendingDecisionPollResult {
   const pending = hasPendingCard(turns);
@@ -95,6 +97,8 @@ export function usePendingDecisionPoll({
   streamingRef.current = streaming;
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
+  const cursorRef = useRef(executionCursor);
+  cursorRef.current = executionCursor;
   const applyRef = useRef(applyDetail);
   applyRef.current = applyDetail;
   // Deadline (epoch ms) of the settle window, 0 when inactive. Applying a
@@ -114,6 +118,7 @@ export function usePendingDecisionPoll({
       settleSessionRef.current === sessionId;
     if (!pending && !settling_) return;
     const capturedSession = sessionId;
+    const controller = new AbortController();
     let stopped = false;
     // Baseline capture: the first tick records the current state without
     // applying, so only a genuine move re-seeds the timeline.
@@ -125,11 +130,14 @@ export function usePendingDecisionPoll({
         return;
       }
       try {
-        const detail = await getSession(capturedSession);
+        const detail = await getSession(capturedSession, controller.signal,
+          executionCursor ? { executionCursor } : undefined);
         if (
           stopped ||
           streamingRef.current ||
-          sessionRef.current !== capturedSession
+          sessionRef.current !== capturedSession ||
+          cursorRef.current !== executionCursor ||
+          detail.session_id !== capturedSession
         ) {
           return;
         }
@@ -209,6 +217,7 @@ export function usePendingDecisionPoll({
     window.addEventListener("focus", kick);
     return () => {
       stopped = true;
+      controller.abort();
       if (timer !== undefined) window.clearInterval(timer);
       document.removeEventListener("visibilitychange", kick);
       window.removeEventListener("focus", kick);
@@ -216,7 +225,7 @@ export function usePendingDecisionPoll({
       // deliberately survives (it continues on the pending → settled
       // rerun) and is scoped to its session via settleSessionRef.
     };
-  }, [sessionId, streaming, pending]);
+  }, [sessionId, streaming, pending, executionCursor]);
 
   // Clear settling when the session changes or streaming starts (the
   // operator's own decide() flow handles the indicator via stream state).

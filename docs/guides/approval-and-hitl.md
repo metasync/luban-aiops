@@ -317,12 +317,11 @@ tamper-evident execution chain:
   (`args_digest_mismatch`) and blocks the invocation — the kernel's
   ALLOWED state alone never suffices for a mutating call. Read-only
   tools carry no envelope and skip the check entirely.
-- **Durable records and signed receipts.** Each execution is recorded
-  beside its confirmation record (same Postgres posture, keyed
-  `confirm_id` + `call_id`); after the tool result lands, a signed
-  receipt — status (`succeeded` / `failed` / `timeout`), the resume's
-  `x-request-id`, and a digest of the executed result — closes the
-  record. The session detail carries an additive owner-scoped
+- **Durable records and signed receipts.** Historical SPEC-037 records remain
+  readable beside their confirmation. SPEC-063 uses a separate Postgres ledger:
+  a single-use claim precedes dispatch, and signed worker observations precede an
+  original-result response. Caller timeout is a separate observation, not a final
+  worker receipt or proof of no target effect. The session detail carries an additive owner-scoped
   `executions` array per decided card, and decided cards in the owner
   transcript render a read-only receipt badge (status plus the
   digest-match result). The approver inbox stays
@@ -344,8 +343,8 @@ see the next section.
 
 Approved mutating executions run in the dedicated `execution-runtime`
 worker, the only platform component that performs approved mutating tool
-invocations. It inherits the SPEC-037 envelope contract verbatim and adds a
-second, independent verification point:
+invocations on the approved worker path. SPEC-063 extends the envelope with
+protocol version, run identity, epoch, and expiry, retaining independent verification:
 
 - **Authenticated internal handoff.** After the invocation-boundary digest
   check passes, agent-service posts the signed request plus the invoked
@@ -357,33 +356,42 @@ second, independent verification point:
 - **Fail-closed on every missing credential.** An unset worker signing key
   or handoff token rejects every handoff; an unset
   `AGENT_EXECUTION_WORKER_URL` / `AGENT_EXECUTION_HANDOFF_TOKEN` on
-  agent-service, or any handoff transport error, rejects the mutating resume
-  with an audited `worker_unavailable` rejection. There is no fallback to
-  in-process execution.
+  agent-service refuses handoff. A transport failure after possible send is
+  uncertain, not proof of rejection or no effect. There is no in-process fallback.
 - **Unchanged identity posture.** The worker invokes the tool-gateway with
   the forwarded confirmer delegated token; policy, risk tiers, and audit
-  attribution are evaluated exactly as before. The worker never retries and
-  never re-executes — single-flight idempotency keyed by `execution_id`
-  makes double execution structurally impossible.
-- **Blocking bounded await.** The resumed stream blocks until the worker
-  answers, bounded by `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` (default
-  60s): a handoff timeout lands as the structured timeout result and the
-  record closes with a `timeout` receipt. The worker authors the signed
-  receipt and closes the shared `execution_records` row first-write-wins;
-  the kernel's SPEC-037 close path stays as a no-op safety net.
-- **Infrastructure-enforced isolation.** The worker ships as its own
-  Deployment (`replicas: 1` — the in-process single-flight registry is
-  authoritative precisely because there is one replica) with a ClusterIP
-  Service, its own secrets, and no HTTPRoute or gateway route: it is
-  reachable only inside the cluster and exposes no portal or LLM surface.
+  attribution are evaluated exactly as before. The Postgres claim protects
+  `execution_id` and `(confirm_id, call_id)` across process loss/overlap. A consumed
+  claim is never reclaimed, retried, or taken over. This guarantees at most one
+  worker dispatch attempt per approved call, not exactly-once business effects.
+- **Blocking bounded await.** `AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS` defaults
+  to 60s and is capped at 120s. A missing trustworthy result becomes uncertainty;
+  late receipts remain visible without erasing the wait-expiry observation.
+  Duplicate responses carry metadata only, never reconstructed tool output.
+- **Infrastructure-enforced isolation.** The worker has its own single-replica
+  `Recreate` Deployment, ClusterIP Service, credentials, and no external route.
+  One replica is an operational posture, not the duplicate-prevention authority.
+  Gateway budget is at most 30s; shutdown drains up to 35s in a 45s pod grace.
 
-**Crash-window recovery query.** If an `execution_requested` event never
-gains a matching `execution_completed` (for example the agent pod died
-mid-handoff), correlate the `confirm_id` and forwarded `x-request-id` from
-`execution_requested` against tool-gateway `tool_invoked` events to
-determine whether the call actually reached the gateway. The worker has no
-retry path — the query is operator-run, and its answer decides whether the
-approved action needs a fresh confirmation.
+**Crash-window recovery (SPEC-063).** Open the owner's session Recovery detail
+and inspect current state, IDs, timestamps, and bounded observation history.
+Correlate available audit events by the original `x-request-id` and execution ID,
+but missing audit events or a missing receipt are inconclusive. Account for
+possibly running downstream work and independently read the target state before
+considering any fresh, separately approved action. Pod termination is not remote
+cancellation. An unresolved outcome stays unknown when evidence cannot resolve it.
+
+Unknown/unavailable outcomes stop automatic mutations for that run, including
+already-approved batches and flow signing. No retry/reset/mark-success control is
+provided. Only a verified original result durably accepted by the agent can release
+a held secret through a single-use permit; recovery, replay, or late receipts
+cannot reveal it. A possibly successful reset with lost delivery needs explicit
+recovery, never automatic repetition. Read-only tools retain their existing gates.
+
+Admission is disabled by default and requires matching agent/worker configuration,
+a verified Postgres catalog, and a separately provisioned epoch. Follow the
+[cutover/restore runbook](execution-cutover-restore.md); memory fallback and
+mutation-enabled mixed-version upgrade are unsupported.
 
 ### Voice-readiness: modality is never privilege (SPEC-022 R-2, SPEC-023 R-4)
 

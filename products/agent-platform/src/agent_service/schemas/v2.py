@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 __all__ = [
     "AgentChatRequest",
@@ -218,6 +218,72 @@ class EvidenceTurn(BaseModel):
     frames: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ExecutionRecoveryModel(BaseModel):
+    """Bounded owner recovery projection for one execution (SPEC-063 R-5a).
+
+    Mirrors the closed ``execution-recovery.schema.json``. ``availability``
+    is always explicit: ``available`` (a derived ``state`` plus a cursor-paged
+    observation window), ``not_found`` (no execution owned by this caller in
+    this session — anti-enumeration, no distinguishing detail), or
+    ``unavailable`` (admission disabled or the ledger cannot be read; never
+    rendered as an empty/fallback history). ``state``/``receipt`` are computed
+    over the full validated observation set, so the bounded ``observations``
+    window (≤20) and its opaque ``next_observation_cursor`` never change the
+    reported outcome. ``preparation_state`` is present only for a
+    registered-but-undispatched intent. A recovery read is never an original
+    response and confers no dispatch, continuation, or secret-release permit.
+    """
+
+    recovery_version: Literal[1] = 1
+    availability: Literal["available", "unavailable", "not_found"]
+    state: (
+        Literal[
+            "not_dispatched",
+            "dispatch_claimed",
+            "outcome_unknown",
+            "result_recorded",
+        ]
+        | None
+    ) = None
+    preparation_state: Literal["registered"] | None = None
+    execution_id: str | None = None
+    confirm_id: str | None = None
+    call_id: str | None = None
+    session_id: str | None = None
+    run_id: str | None = None
+    admission_epoch: str | None = None
+    tool_name: str | None = None
+    attempt_request_id: str | None = None
+    request_digest: str | None = None
+    requested_at: str | None = None
+    expires_at: str | None = None
+    claimed_at: str | None = None
+    observe_by: str | None = None
+    as_of: str | None = None
+    replay: bool = False
+    run_stopped: bool = False
+    integrity_conflict: bool = False
+    target_verification_required: bool = True
+    receipt: dict[str, Any] | None = None
+    observations: list[dict[str, Any]] = Field(default_factory=list)
+    observations_truncated: bool = False
+    next_observation_cursor: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _dump_closed(self, handler):
+        """Reproduce the closed recovery schema byte-faithfully.
+
+        ``preparation_state`` is present only for a registered-but-undispatched
+        intent; the schema forbids it elsewhere (and forbids a ``null`` value),
+        so drop it when unset rather than emitting ``preparation_state: null``.
+        Every other field is required by the schema and stays, including nulls.
+        """
+        data = handler(self)
+        if data.get("preparation_state") is None:
+            data.pop("preparation_state", None)
+        return data
+
+
 class ExecutionRecordModel(BaseModel):
     """Signed execution lifecycle row for one approved parked call (SPEC-037 R-4).
 
@@ -241,6 +307,11 @@ class ExecutionRecordModel(BaseModel):
     digest_match: bool | None = None
     reject_reason: str | None = None
     receipt: dict[str, Any] | None = None
+    # SPEC-063 R-5a: optional ledger-backed recovery projection for this
+    # execution, fetched independently of whether this presentation row's
+    # write succeeded. Null when admission is disabled (inert-by-default) so
+    # the legacy row is byte-identical; populated only for the owner.
+    recovery: ExecutionRecoveryModel | None = None
 
 
 class ConfirmationRecordModel(BaseModel):
@@ -284,6 +355,8 @@ class ConfirmationRecordModel(BaseModel):
     # per approved parked call); empty for pending/denied/expired records
     # and for decided rows that predate signed execution requests.
     executions: list[ExecutionRecordModel] = Field(default_factory=list)
+    # Read-only ledger fallback, never persisted or sent to the approver inbox.
+    recovery_only: bool = False
 
 
 class AgentSession(BaseModel):
@@ -315,6 +388,16 @@ class AgentSession(BaseModel):
     # current state; decided cards stay visible and read-only. Null when
     # the record store is unreadable (degrades like evidence_turns).
     confirmations: list[ConfirmationRecordModel] | None = None
+    # SPEC-063 R-5a: whether the bounded owner recovery path is available for
+    # this session (``available``/``unavailable``), computed independently of
+    # the legacy confirmation/execution presentation stores. Null on surfaces
+    # that predate recovery; ``unavailable`` when admission is disabled or the
+    # ledger cannot be read — never a silent empty history.
+    execution_recovery_availability: Literal["available", "unavailable"] | None = (
+        None
+    )
+    executions_truncated: bool = False
+    next_execution_cursor: str | None = Field(default=None, max_length=2048)
 
 
 class AgentSessionSummary(BaseModel):

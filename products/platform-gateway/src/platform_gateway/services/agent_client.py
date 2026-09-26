@@ -65,11 +65,35 @@ async def get_session(
     request_id: str,
     session_id: str,
     user_id: str,
+    execution: str | None = None,
+    execution_cursor: str | None = None,
+    page_size: int | None = None,
 ) -> dict:
+    """Fetch the owner session detail (SPEC-022 R-1).
+
+    SPEC-063 R-5a: the optional recovery paging params (``execution`` filter,
+    opaque ``execution_cursor``, ``page_size``) forward verbatim as upstream
+    query params so the portal pages the bounded owner recovery window through
+    the existing session detail rather than a worker API. Omitted, the call
+    shape is byte-identical to before and the agent returns the un-enriched
+    detail. Ownership stays the agent's to enforce against ``user_id`` (the
+    token-derived identity): an execution id is never an identity and never
+    widens the read.
+    """
+    params = {
+        name: value
+        for name, value in (
+            ("execution", execution),
+            ("execution_cursor", execution_cursor),
+            ("page_size", page_size),
+        )
+        if value is not None
+    }
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.get(
             f"{settings.agent_service_url}/api/v2/sessions/{session_id}",
             headers=_headers(request_id, user_id),
+            params=params or None,
         )
     response.raise_for_status()
     return response.json()

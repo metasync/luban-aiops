@@ -197,6 +197,16 @@ class RuntimeSettings:
     execution_worker_url: str | None = None
     execution_handoff_token: str | None = None
     execution_worker_timeout_seconds: float = 60.0
+    # Durable execution admission (SPEC-063 R-1/R-2): the agent-side ledger DSN,
+    # admission epoch, and enable flag. Disabled by default — a partially
+    # upgraded mutation path must never be enabled (plan, Status and Approach).
+    # When enabled the agent registers immutable intents, binds a persistent run
+    # identity, and validates original worker responses before any continuation
+    # or secret release. A missing DSN or epoch fails startup closed rather than
+    # silently degrading to the legacy in-process handoff.
+    execution_state_db_url: str | None = None
+    execution_admission_enabled: bool = False
+    execution_admission_epoch: str | None = None
     # Browser flow-unlock authority TTL (SPEC-051 R-2): seconds an operator's
     # approval of a mutating browser flow unlocks subsequent web.* writes in
     # that same flow — scoped to the session and the approved flow's identity
@@ -311,10 +321,27 @@ class RuntimeSettings:
             raise ValueError("AGENT_MODEL_DISCOVERY_REFRESH_SECONDS must be >= 1.")
         if self.model_discovery_timeout_seconds <= 0:
             raise ValueError("AGENT_MODEL_DISCOVERY_TIMEOUT_SECONDS must be > 0.")
-        # Isolated execution worker validation (SPEC-038 R-4).
+        # Isolated execution worker validation (SPEC-038 R-4). SPEC-063 R-7c
+        # caps the agent handoff budget at 120s so a worker's bounded drain
+        # (<=35s inside a 45s pod grace) always completes within the agent wait.
         if self.execution_worker_timeout_seconds <= 0:
             raise ValueError(
                 "AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS must be > 0."
+            )
+        if self.execution_worker_timeout_seconds > 120:
+            raise ValueError(
+                "AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS must be <= 120."
+            )
+        # Durable execution admission validation (SPEC-063 R-2a): enabling
+        # admission without both a ledger DSN and an epoch would let the agent
+        # fall back to the legacy in-process handoff silently, so it fails
+        # startup instead of degrading the mutation path.
+        if self.execution_admission_enabled and (
+            not self.execution_state_db_url or not self.execution_admission_epoch
+        ):
+            raise ValueError(
+                "AGENT_EXECUTION_ADMISSION_ENABLED requires both "
+                "AGENT_EXECUTION_STATE_DB_URL and AGENT_EXECUTION_ADMISSION_EPOCH."
             )
         # Browser flow-unlock authority validation (SPEC-051 R-2).
         if self.browser_flow_approval_ttl < 0:
@@ -496,6 +523,14 @@ class RuntimeSettings:
             ),
             execution_worker_timeout_seconds=float(
                 os.getenv("AGENT_EXECUTION_WORKER_TIMEOUT_SECONDS", "60")
+            ),
+            execution_state_db_url=_optional_str("AGENT_EXECUTION_STATE_DB_URL"),
+            execution_admission_enabled=(
+                os.getenv("AGENT_EXECUTION_ADMISSION_ENABLED", "false").lower()
+                == "true"
+            ),
+            execution_admission_epoch=_optional_str(
+                "AGENT_EXECUTION_ADMISSION_EPOCH"
             ),
             browser_flow_approval_ttl=int(
                 os.getenv("AGENT_BROWSER_FLOW_APPROVAL_TTL", "900")

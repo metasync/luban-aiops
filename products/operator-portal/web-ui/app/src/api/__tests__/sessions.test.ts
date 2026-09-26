@@ -8,6 +8,7 @@ import { ApiError } from "../client";
 import {
   createSession,
   declareSkillTarget,
+  getSession,
   graduateSessionSkill,
   listSessions,
 } from "../sessions";
@@ -255,5 +256,39 @@ describe("listSessions session_type scope (SPEC-056 R-2 / R-4)", () => {
   it("returns the sessions array, defaulting to empty when absent", async () => {
     stubFetch({}, []);
     await expect(listSessions(undefined, "operation")).resolves.toEqual([]);
+  });
+});
+
+describe("getSession (SPEC-063 R-5a recovery paging)", () => {
+  it("is byte-identical to the legacy fetch when no recovery query is given", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-1" }, calls);
+    await getSession("ses-1");
+    expect(pathOf(calls[0].url)).toBe("/api/v1/sessions/ses-1");
+  });
+
+  it("appends the execution filter, cursor and page size when provided", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-1" }, calls);
+    await getSession("ses-1", undefined, {
+      execution: "exec-1",
+      executionCursor: "42",
+      pageSize: 25,
+    });
+    const path = pathOf(calls[0].url);
+    expect(path).toContain("/api/v1/sessions/ses-1?");
+    expect(path).toContain("execution=exec-1");
+    expect(path).toContain("execution_cursor=42");
+    expect(path).toContain("page_size=25");
+  });
+
+  it("omits absent recovery params rather than sending empty values", async () => {
+    const calls: FetchCall[] = [];
+    stubFetch({ session_id: "ses-1" }, calls);
+    await getSession("ses-1", undefined, { pageSize: 50 });
+    const path = pathOf(calls[0].url);
+    expect(path).toBe("/api/v1/sessions/ses-1?page_size=50");
+    expect(path).not.toContain("execution=");
+    expect(path).not.toContain("execution_cursor=");
   });
 });

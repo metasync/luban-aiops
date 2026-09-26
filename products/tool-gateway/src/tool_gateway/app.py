@@ -8,7 +8,7 @@ from tool_gateway.api.router import router
 from tool_gateway.core.config import get_settings
 from tool_gateway.core.metrics import setup_metrics
 from tool_gateway.core.observability import configure_logging, log_event
-from tool_gateway.core.request_context import resolve_request_id
+from tool_gateway.core.request_context import execution_correlation, resolve_request_id
 from tool_gateway.core.telemetry import setup_telemetry
 from tool_gateway.metadata import SERVICE_NAME, SERVICE_TITLE, SERVICE_VERSION
 from tool_gateway.tools.registry import ToolRegistry
@@ -212,14 +212,17 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         request_id = resolve_request_id(request.headers.get("x-request-id"))
+        request.state.request_id = request_id
         started_at = time.perf_counter()
         response = await call_next(request)
+        response.headers["x-request-id"] = request_id
         duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
         log_event(
             LOGGER,
             "http_request",
             service="tool-gateway",
             request_id=request_id,
+            **execution_correlation(request.headers.get("x-execution-id")),
             method=request.method,
             path=request.url.path,
             status_code=response.status_code,

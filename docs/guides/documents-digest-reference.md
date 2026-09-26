@@ -82,6 +82,20 @@ When a source store is temporarily unreadable at creation time, the
 affected section reports `unavailable` instead of failing the whole
 document; the portal shows a *unavailable* tag on the session card.
 
+### Execution uncertainty (SPEC-063)
+
+Newly generated shift summaries and incident handovers consult the durable
+execution recovery projection. An `outcome_unknown`, late result, integrity
+conflict, or unavailable store stays explicit; a missing receipt is not a
+successful execution or proof that nothing happened. A recorded successful tool
+report still requires independent verification of the target's business state.
+Late evidence cannot restart a stopped run or authorize another mutation.
+
+Recovery contributes bounded metadata, not original arguments, output, tokens,
+passwords, or delivery handles. Existing owner/foreign coverage restrictions
+still apply. Published documents remain immutable snapshots: late evidence
+appears in a newly generated document, never by rewriting an earlier one.
+
 ### The handover section
 
 The handover skeleton is the shift story in numbers, assembled from the

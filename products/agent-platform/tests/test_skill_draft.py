@@ -426,6 +426,66 @@ class TestPostprocess:
 # --- Facts-only skeleton (always format-valid) -----------------------------
 
 
+@pytest.mark.parametrize("availability,state,conflict,late", [
+    ("available", "outcome_unknown", False, False),
+    ("available", "result_recorded", False, True),
+    ("available", "outcome_unknown", True, False),
+    ("unavailable", None, False, False),
+])
+def test_recovery_uncertainty_survives_skeleton_prompt_and_generated_body(availability, state, conflict, late):
+    from agent_service.services.execution_recovery import EXECUTION_EVIDENCE_GUIDANCE, execution_evidence_label
+    from agent_service.services.document_prose import build_prose_prompt
+    facts = {"availability": availability, "state": state, "integrity_conflict": conflict,
+             "late_report": late, "tool_report_status": "succeeded" if late else None}
+    bundle = _bundle()
+    bundle["handover"].update(target_verification_required=True, incomplete_recovery_sessions=1,
+        executions=[{"execution_id": "exec-uncertain", "tool_name": "web.click", "recovery": facts}])
+    _, skeleton = build_skeleton(bundle)
+    label = execution_evidence_label(facts)
+    assert label in skeleton
+    assert "coverage is incomplete" in skeleton
+    assert EXECUTION_EVIDENCE_GUIDANCE in build_skill_draft_prompt(bundle)
+    for document_type in ("shift_summary", "incident_report"):
+        assert EXECUTION_EVIDENCE_GUIDANCE in build_prose_prompt(document_type, bundle)
+    model_text = '```skill-frontmatter\n{"title":"Draft","description":"Draft facts"}\n```\nModel omitted all execution evidence.'
+    result = asyncio.run(generate_skill_draft(_FakeKernel(_model_returning(model_text)), bundle))
+    assert result is not None
+    assert label in result[1]
+    assert result[1].index(label) < result[1].index("Model omitted")
+
+
+@pytest.mark.parametrize("count,id_size", [(1000, 36), (100, 256)])
+def test_recovery_evidence_bounds_preserve_guidance_after_utf8_truncation(count, id_size):
+    from copy import deepcopy
+    from agent_service.services.execution_recovery import EXECUTION_EVIDENCE_GUIDANCE
+    from agent_service.services.skill_draft import recovery_evidence_markdown
+    bundle = _bundle()
+    bundle["handover"].update(target_verification_required=True, incomplete_recovery_sessions=1,
+        executions=[{"execution_id": str(index).zfill(id_size), "recovery": {
+            "availability": "available", "state": "outcome_unknown"}} for index in range(count)])
+    before = deepcopy(bundle)
+    evidence = recovery_evidence_markdown(bundle)
+    assert len(evidence.encode()) <= 8192
+    assert "Execution evidence is truncated" in evidence
+    assert "coverage is incomplete" in evidence
+    assert EXECUTION_EVIDENCE_GUIDANCE in evidence
+    _, safe = postprocess({"title": "Draft", "description": "d"}, evidence + "雪" * MAX_BODY_BYTES)
+    assert len(safe.encode()) <= MAX_BODY_BYTES
+    assert evidence in safe
+    assert "�" not in safe
+    assert bundle == before
+
+
+def test_recovery_evidence_does_not_stringify_unsafe_identifiers():
+    from agent_service.services.skill_draft import recovery_evidence_markdown
+    secret = "https://invalid.test/?token=private-canary"
+    bundle = {"handover": {"target_verification_required": True, "executions": [
+        {"execution_id": secret, "recovery": {"availability": "available", "state": []}}]}}
+    text = recovery_evidence_markdown(bundle)
+    assert (secret in text) is False
+    assert "unrecognized execution: Outcome unknown" in text
+
+
 class TestSkeleton:
     def test_skeleton_is_format_valid(self) -> None:
         frontmatter, body = build_skeleton(_bundle())

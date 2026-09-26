@@ -445,3 +445,40 @@ def test_the_failure_message_is_the_one_the_lifespan_raises(
         with TestClient(create_app()):
             pass  # pragma: no cover
     assert str(excinfo.value) == missing_credential_message()
+
+
+def test_acceptance_user_is_opt_in_startup_only(monkeypatch, password):
+    monkeypatch.setenv("ACME_ACCEPTANCE_USER", "spec063-accept")
+    seed = _seed_fingerprint()
+    with TestClient(create_app()) as client:
+        client.auth = ("admin", password)
+        user = client.get("/api/users/spec063-accept").json()
+        assert user["revision"] == 0 and user["locked"] is False
+        assert user["password_changed_at"] is None
+        assert client.get("/healthz").json()["users_seeded"] == 5
+        assert client.post("/api/users/spec063-accept/lock").json()["revision"] == 1
+        assert client.get("/api/users/carol").json()["revision"] == 0
+    assert seed != _seed_fingerprint()
+
+
+@pytest.mark.parametrize("username", ["", "carol", "../carol", "spec063-", "spec063-" + "a" * 25])
+def test_acceptance_user_rejects_invalid_names(monkeypatch, username):
+    monkeypatch.setenv("ACME_ACCEPTANCE_USER", username)
+    seed = _seed_fingerprint()
+    with pytest.raises(ValueError):
+        with TestClient(create_app()):
+            pass
+    assert _seed_fingerprint() == seed
+
+
+def test_acceptance_user_cannot_overwrite_or_follow_mutations():
+    from acme_admin.store import Store
+
+    store = Store()
+    store.seed_acceptance_user("spec063-accept")
+    with pytest.raises(ValueError):
+        store.seed_acceptance_user("spec063-accept")
+    store.lock("spec063-accept")
+    with pytest.raises(ValueError):
+        store.seed_acceptance_user("spec063-another")
+    assert store.resolve("spec063-accept").revision == 1

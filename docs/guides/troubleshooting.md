@@ -29,6 +29,25 @@ kubectl -n dev-luban-aiops exec deployment/<service-name> -- \
 
 ---
 
+## Symptom: Worker is alive but unready, or execution recovery is uncertain
+
+SPEC-063 separates process liveness from safe mutation admission. A 200 from
+`/health/live` with 503 from `/health/ready` is expected while admission is
+explicitly disabled. Do not enable it merely to make a rollout green.
+
+| Symptom | Check and safe response |
+|---|---|
+| Worker remains unready | Inspect the bounded readiness reason. Check actual Postgres connectivity/backend, schema verification, signing/handoff configuration, both service admission flags, and the catalog's admission flag/epoch. Runtime startup never creates or repairs the ledger. |
+| `epoch_mismatch` after a restore | Keep mutations disabled. Reconcile the external epoch and retained evidence through the [cutover/restore runbook](execution-cutover-restore.md); a restored same-epoch snapshot cannot detect its own rollback. |
+| Disconnect, timeout, or `outcome_unknown` after approval | Reload the owner's session and inspect recovery history. Correlate execution ID and original request ID with gateway/target evidence; a missing receipt or audit event is inconclusive. Never retry/reset the consumed claim. |
+| Recovery reports unavailable | Treat this as a failed status read, not empty history or success. Restore the dependency's availability without enabling mutations or clearing run stops. Read-only investigation keeps existing policy gates. |
+| A late success appears but the run remains stopped | Expected: metadata recovery does not recreate the original response or reopen continuation. Account for still-running downstream work and independently verify the target before considering a fresh, separately approved action. |
+| Copy password never appears after an interrupted reset | Held delivery requires the original validated result and durable agent acceptance. Restart, replay, uncertainty, or lost acceptance cannot release it; the hold is discarded or expires. Recovery cannot reconstruct the password. |
+
+Use readiness metadata and scoped logs, not raw environment/Secret dumps: never
+paste DSNs, tokens, passwords, or delivery bodies into troubleshooting artifacts.
+Stopping a worker does not cancel remote work or release its dispatch claim.
+
 ## Symptom: "Agent says access not granted" or "no tools available"
 
 **Most likely cause:** Token delegation secrets are missing or mismatched.
