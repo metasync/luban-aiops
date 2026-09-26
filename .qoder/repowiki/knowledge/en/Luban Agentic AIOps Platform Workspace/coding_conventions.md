@@ -1,5 +1,6 @@
-- Each product under `products/` is self-contained with its own `src/<package>/`, `tests/`, `Dockerfile`, `Makefile`, `pyproject.toml`, and `.python-version`, enabling standalone `make -C products/<name> help` invocations.
-- Cross-cutting concerns (policy bundles, schema definitions, version pinning) live in `shared/shared-contracts` and are consumed by products through explicit copy or script-based sync targets rather than direct imports.
-- Product services follow a uniform internal layout of `api/`, `core/`, `schemas/`, `services/`, and an `app.py` + `main.py` entrypoint pair, making new products discoverable by convention.
-- Build and runtime defaults are centralized in `mk/defaults.mk` using `?=` assignment so command-line overrides always win, and included both by the root Makefile and per-product fragments.
-- Spec-driven development is enforced by numbering artifacts sequentially: specs under `docs/specs/SPEC-NNN-*` with plan/spec/tasks triads, ADRs under `docs/adr/`, and release notes dated and prefixed to match delivered work.
+- Each product follows an identical layout of `src/<product>/api/`, `core/`, `schemas/`, `services/`, plus `app.py`, `main.py`, and `metadata.py`, enabling uniform discovery and testing across services.
+- Cross-cutting concerns are externalized into `shared/shared-contracts` (schemas, policies, SQL, validation scripts) rather than duplicated inside products, keeping services dependency-light.
+- Policy bundles are authored once as canonical YAML in `shared/shared-contracts/policies/` and synced to consumers via the `sync-policy` Make target, ensuring a single source of truth for default and password policies.
+- Product versions are kept lockstep with the root `VERSION` file and enforced by `validate-version`, so coordinated image tags and deployments stay consistent across all services.
+- Spec-driven development is enforced by structured `docs/specs/SPEC-NNN/` directories containing plan/spec/tasks, with ADRs in `docs/adr/` and release notes in `docs/agentic-aiops-platform/release-notes/` documenting each delivered slice.
+- Verification gates are centralized in the root `Makefile` and delegate to per-product Makefiles, so CI and local development share the same `test`, `lint`, `build`, and `deploy` surfaces.
