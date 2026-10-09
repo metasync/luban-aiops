@@ -15,6 +15,7 @@
 - [test_oauth_client.py](file://products/tool-gateway/tests/test_oauth_client.py)
 - [test_auth_resolution.py](file://products/tool-gateway/tests/test_auth_resolution.py)
 - [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
+- [test_credential_redaction.py](file://products/tool-gateway/tests/test_credential_redaction.py)
 </cite>
 
 ## Update Summary
@@ -25,6 +26,7 @@
 - Updated component analysis to reflect actual implementation structure
 - Enhanced test coverage documentation with comprehensive test files
 - Updated architecture diagrams to show the complete delivered system
+- **Added post-delivery security hardening details**: token type validation, non-HTTPS warnings, and improved redaction precision
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,17 +34,18 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Post-Delivery Security Hardening](#post-delivery-security-hardening)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 SPEC-068 defines the target-agnostic substrate that extends the tool-gateway's outbound credential model beyond HTTP Basic. It adds an optional per-set `scheme` (`basic`, `bearer`, or `oauth2_client_credentials`) and a connector-local OAuth2 `client_credentials` token client, exposed through one reusable async auth-resolution seam. The change is additive: existing `basic` sets remain byte-for-byte unchanged, and the extension is inert until a non-`basic` set is provisioned.
 
 The substrate is the first concrete form of the platform's External Execution Identity on the outbound plane. It does not mint a platform delegation token, introduce a new signing authority, or add a dependency; the OAuth2 grant is implemented as a single form-encoded POST over the already-present `httpx`. Its first consumer is SPEC-058's `http_connector` (`http.get` / `http.post`), and its second consumer is the ServiceNow MCP-ingestion pilot (SPEC-067).
 
-**Status**: Delivered 2026-10-08 as v0.47.0 with complete implementation including auth resolution system, OAuth2 client credentials, and comprehensive test coverage.
+**Status**: Delivered 2026-10-08 as v0.47.0 with complete implementation including auth resolution system, OAuth2 client credentials, comprehensive test coverage, and post-delivery security hardening enhancements.
 
 **Section sources**
 - [spec.md:1-58](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L1-L58)
@@ -64,6 +67,7 @@ SPEC-068 is scoped to one product and three existing modules plus two new implem
 | Tests | `products/tool-gateway/tests/test_oauth_client.py` | Comprehensive OAuth2 token client tests |
 | Tests | `products/tool-gateway/tests/test_auth_resolution.py` | Auth resolution seam unit tests |
 | Tests | `products/tool-gateway/tests/test_http_connector.py` | Integration tests for the complete flow |
+| Tests | `products/tool-gateway/tests/test_credential_redaction.py` | Secret handling and redaction verification |
 
 ```mermaid
 graph TB
@@ -84,7 +88,7 @@ BrowserConn --> CredSets
 - [spec.md:243-267](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L243-L267)
 - [plan.md:12-35](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L12-L35)
 - [credential_sets.py:1-157](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L1-L157)
-- [oauth_client.py:1-232](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L1-L232)
+- [oauth_client.py:1-256](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L1-L256)
 - [auth_resolution.py:1-113](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py#L1-L113)
 - [http_connector.py:368-402](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L368-L402)
 
@@ -99,9 +103,9 @@ SPEC-068 is organized around five requirements, each with explicit acceptance cr
 | Requirement | Purpose | Key Acceptance Criteria | Status |
 |---|---|---|---|
 | R-1 | Per-set `scheme` field and generalized parsing | `basic` is default and byte-identical; unknown schemes are ignored with a warning; scheme-specific required fields are validated; browser flows referencing non-`basic` sets fail closed | ✅ Delivered |
-| R-2 | Connector-local OAuth2 `client_credentials` token client | In-memory cache keyed by set name; near-expiry refresh; `client_secret_basic` and `client_secret_post`; no secret in logs/results/evidence; structured gateway error on failure | ✅ Delivered |
+| R-2 | Connector-local OAuth2 `client_credentials` token client | In-memory cache keyed by set name; near-expiry refresh; `client_secret_basic` and `client_secret_post`; no secret in logs/results/evidence; structured gateway error on failure; **token_type validation enforced** | ✅ Delivered |
 | R-3 | Reusable outbound auth-resolution seam | One async resolver for `basic`, `bearer`, and `oauth2_client_credentials`; returns both `httpx.Auth` and raw bearer token/header; credential/config failures map to structured gateway errors | ✅ Delivered |
-| R-4 | Secret-handling invariants | Existing redaction vocabularies cover new names; `_PROJECTED_HEADERS` excludes `authorization`/`set-cookie`; every failure mode fails closed | ✅ Delivered |
+| R-4 | Secret-handling invariants | Existing redaction vocabularies cover new names; `_PROJECTED_HEADERS` excludes `authorization`/`set-cookie`; every failure mode fails closed; **improved redaction precision** | ✅ Delivered |
 | R-5 | Provisioning and config wiring reuse | Extended sets ride the existing `credential-sets.json` + `sync-browser-credentials.sh` model; no new mandatory environment variable; dev overlay remains green | ✅ Delivered |
 
 **Section sources**
@@ -138,14 +142,14 @@ Transport --> Api
 - [spec.md:143-172](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L143-L172)
 - [plan.md:60-109](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L60-L109)
 - [credential_sets.py:97-157](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L97-L157)
-- [oauth_client.py:81-232](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L232)
+- [oauth_client.py:81-256](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L256)
 - [auth_resolution.py:69-113](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py#L69-L113)
 
 The current codebase implements the complete SPEC-068 substrate: `CredentialSetStore` loads generalized per-scheme sets from a JSON file, `OAuth2TokenClient` handles OAuth2 token acquisition with caching, and `resolve_outbound_auth` provides the reusable async resolver that `HttpConnector._resolve_auth` delegates to.
 
 **Section sources**
 - [credential_sets.py:97-157](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L97-L157)
-- [oauth_client.py:81-232](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L232)
+- [oauth_client.py:81-256](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L256)
 - [auth_resolution.py:69-113](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py#L69-L113)
 - [http_connector.py:368-402](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L368-L402)
 
@@ -206,6 +210,8 @@ Key behaviors:
 | Optional parameters | `scope`, `audience`, `resource` sent when configured |
 | Failure handling | Unreachable, timeout, non-2xx, or response without `access_token` → structured gateway error |
 | Secret exposure | `client_secret` and `access_token` never logged, persisted, serialized into results, or emitted as evidence |
+| **Token type validation** | **Enforces `token_type` must be "Bearer"; rejects unsupported types with structured error** |
+| **Security hardening** | **Logs warning for non-HTTPS token URLs while maintaining backward compatibility** |
 
 ```mermaid
 sequenceDiagram
@@ -220,6 +226,7 @@ else Cache miss or near expiry
 Resolver->>Client : Acquire token(client_id, client_secret, token_url, variant, options)
 Client->>Endpoint : POST application/x-www-form-urlencoded
 Endpoint-->>Client : {access_token, token_type, expires_in}
+Client->>Client : Validate token_type == "Bearer"
 Client->>Cache : Store access_token with expiry
 Cache-->>Resolver : access_token
 end
@@ -230,13 +237,13 @@ Resolver-->>Resolver : Attach bearer token outbound
 - [spec.md:116-141](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L116-L141)
 - [plan.md:60-87](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L60-L87)
 - [tasks.md:30-47](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/tasks.md#L30-L47)
-- [oauth_client.py:123-221](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L123-L221)
+- [oauth_client.py:123-245](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L123-L245)
 
 **Section sources**
 - [spec.md:116-141](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L116-L141)
 - [plan.md:60-87](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L60-L87)
 - [tasks.md:30-47](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/tasks.md#L30-L47)
-- [oauth_client.py:81-232](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L232)
+- [oauth_client.py:81-256](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L256)
 
 ### R-3: Reusable Outbound Auth-Resolution Seam
 The `resolve_outbound_auth` function in `auth_resolution.py` serves as the central resolver, replacing the synchronous `HttpConnector._resolve_auth` with one reusable async resolver covering all three schemes. The resolver exposes:
@@ -293,7 +300,7 @@ resolve_outbound_auth --> BearerAuth : "creates for bearer tokens"
 **Diagram sources**
 - [http_connector.py:368-402](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L368-L402)
 - [credential_sets.py:97-157](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L97-L157)
-- [oauth_client.py:81-232](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L232)
+- [oauth_client.py:81-256](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L81-L256)
 - [auth_resolution.py:34-113](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py#L34-L113)
 - [spec.md:143-172](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L143-L172)
 - [plan.md:89-109](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L89-L109)
@@ -314,6 +321,8 @@ Every secret-bearing value introduced by SPEC-068 — `client_secret`, `access_t
 
 Tests assert that a token value never survives into a URL projection, tool result, evidence field, audit record, or log line. Missing, malformed, expired, or unresolvable credential state fails closed on every scheme.
 
+**Updated** Enhanced documentation precision for redaction mechanisms, clarifying that the existing vocabulary already covers new secret-bearing names without requiring additional canonical field sets.
+
 **Section sources**
 - [spec.md:174-196](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L174-L196)
 - [plan.md:111-126](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L111-L126)
@@ -329,6 +338,58 @@ The dev default remains the `acme-admin` Basic set, so existing `make deploy` be
 - [spec.md:198-218](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L198-L218)
 - [plan.md:128-140](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L128-L140)
 - [tasks.md:83-94](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/tasks.md#L83-L94)
+
+## Post-Delivery Security Hardening
+
+Following the initial delivery of SPEC-068 in v0.47.0, post-delivery review identified and addressed three Low-priority security enhancements that strengthen specification compliance while maintaining backward compatibility:
+
+### Token Type Validation Enhancement (SPEC-068 R-2)
+
+**Change**: Enhanced token type validation to strictly enforce that OAuth2 responses return `token_type: "Bearer"` for the `client_credentials` grant.
+
+**Implementation Details**:
+- The `OAuth2TokenClient` now validates the `token_type` field from OAuth2 responses
+- Non-Bearer token types are rejected with a structured `CREDENTIAL_ACQUISITION_FAILED` error
+- Omitted `token_type` values are tolerated as "Bearer" for leniency with RFC 6749-compliant servers
+- Case-insensitive comparison ensures robustness across different server implementations
+
+**Security Impact**: Prevents mis-attachment of non-Bearer tokens as Bearer headers downstream, ensuring protocol compliance and preventing potential security vulnerabilities from incorrect token type handling.
+
+**Section sources**
+- [oauth_client.py:220-236](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L220-L236)
+- [test_oauth_client.py:173-203](file://products/tool-gateway/tests/test_oauth_client.py#L173-L203)
+
+### Non-HTTPS Token URL Warning System
+
+**Change**: Added security warning logging for non-HTTPS token URLs while maintaining backward compatibility for development environments.
+
+**Implementation Details**:
+- The `OAuth2TokenClient` checks if `token_url` starts with `https://`
+- Non-HTTPS URLs trigger a warning log entry naming only the credential set (never the URL or secrets)
+- The warning is informational only - requests still proceed to support local mock OAuth endpoints
+- Log entries explicitly avoid exposing sensitive information like URLs or client secrets
+
+**Security Impact**: Provides operators with visibility into potentially insecure configurations while maintaining flexibility for development and testing scenarios where HTTP OAuth endpoints may be necessary.
+
+**Section sources**
+- [oauth_client.py:152-157](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L152-L157)
+- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-L312)
+
+### Improved Redaction Documentation Precision
+
+**Change**: Enhanced documentation and testing precision for secret redaction mechanisms, clarifying how existing vocabulary covers new secret-bearing names.
+
+**Implementation Details**:
+- Clarified that `url_redaction.SECRET_QUERY_PARAMS` uses substring matching, catching `client_secret` and `access_token` without explicit listing
+- Documented that `redaction._VALUE_PATTERNS` covers exact key names and value shapes (Bearer tokens, JWT patterns)
+- Enhanced test coverage in `test_credential_redaction.py` to verify all four surfaces: URL projections, tool results, evidence fields, and audit records
+- Confirmed that `make validate-secret-vocabulary` remains green without requiring new canonical field sets
+
+**Security Impact**: Strengthens confidence in secret protection mechanisms and provides clearer guidance for future additions to the credential scheme vocabulary.
+
+**Section sources**
+- [test_credential_redaction.py:1-26](file://products/tool-gateway/tests/test_credential_redaction.py#L1-L26)
+- [spec.md:183-192](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L183-L192)
 
 ## Dependency Analysis
 SPEC-068 is intentionally narrow:
@@ -371,6 +432,8 @@ The substrate is designed to avoid unnecessary overhead:
 - **Near-expiry refresh:** Refresh triggers before expiry so calls do not ride expired tokens.
 - **Single-flight concurrency:** Concurrent callers for one set share one in-flight fetch, avoiding thundering herds against the token endpoint.
 - **Minimal logging:** Secrets are never logged; failures log only exception classes.
+- **Token type validation overhead:** Minimal string comparison for `token_type` validation.
+- **Security warning overhead:** Simple URL prefix check with conditional logging.
 
 These characteristics make the substrate suitable for repeated use by multiple consumers (HTTP tools, then MCP ingestion adapters) without introducing a centralized bottleneck.
 
@@ -398,15 +461,15 @@ These characteristics make the substrate suitable for repeated use by multiple c
 - [plan.md:53-58](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L53-L58)
 
 ### Symptom: Token acquisition fails with a gateway error
-**Likely cause:** The token endpoint is unreachable, times out, returns non-2xx, or omits `access_token`.  
+**Likely cause:** The token endpoint is unreachable, times out, returns non-2xx, omits `access_token`, or returns an unsupported `token_type`.  
 **Expected behavior:** A structured gateway error is returned; no fabricated token is used and no unauthenticated fallback occurs.  
-**Action:** Validate `token_url`, client credentials, and the selected `client_auth` variant; inspect the token endpoint independently using the same client-auth method.
+**Action:** Validate `token_url`, client credentials, and the selected `client_auth` variant; inspect the token endpoint independently using the same client-auth method. Check for non-HTTPS token URL warnings in logs.
 
 **Section sources**
 - [spec.md:136-141](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L136-L141)
 - [plan.md:74-77](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L74-L77)
 - [tasks.md:40-44](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/tasks.md#L40-L44)
-- [oauth_client.py:182-221](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L182-L221)
+- [oauth_client.py:182-245](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L182-L245)
 
 ### Symptom: A credential value appears in logs, results, or evidence
 **Likely cause:** A new secret-bearing name was introduced but not covered by the existing redaction vocabulary, or a response header was projected.  
@@ -428,11 +491,22 @@ These characteristics make the substrate suitable for repeated use by multiple c
 - [plan.md:53-55](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L53-L55)
 - [test_http_connector.py:600-701](file://products/tool-gateway/tests/test_http_connector.py#L600-L701)
 
+### Symptom: Non-HTTPS token URL warnings appear in logs
+**Likely cause:** The OAuth2 token endpoint is configured with HTTP instead of HTTPS.  
+**Expected behavior:** A warning is logged naming only the credential set; the request proceeds normally for development compatibility.  
+**Action:** For production deployments, update the `token_url` to use HTTPS. For development environments, the warning can be safely ignored as it's designed to support local mock OAuth endpoints.
+
+**Section sources**
+- [oauth_client.py:152-157](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L152-L157)
+- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-L312)
+
 ## Conclusion
 SPEC-068 delivers a small, self-contained substrate that makes the tool-gateway capable of authenticating outbound calls with more than HTTP Basic. It does so without centralizing authority, adding dependencies, or changing the policy, audit, or execution-safety contracts. The substrate is additive, fail-closed, and secret-safe, and it prepares the platform for every MCP-ingestion pilot that needs an external target's outbound execution identity.
 
-**Delivered Status**: The implementation is complete and released as v0.47.0, with all five requirements (R-1 through R-5) fully implemented, tested, and verified. The substrate includes the generalized credential parsing, OAuth2 token client, reusable auth resolution seam, comprehensive secret handling, and provisioning integration.
+**Delivered Status**: The implementation is complete and released as v0.47.0, with all five requirements (R-1 through R-5) fully implemented, tested, and verified. The substrate includes the generalized credential parsing, OAuth2 token client, reusable auth resolution seam, comprehensive secret handling, provisioning integration, and post-delivery security hardening enhancements.
 
 Its next step is consumption by downstream pilots like SPEC-067, which can select among the already-shipped schemes rather than waiting to define one. The substrate stands ready to support additional OAuth2-compatible targets as they emerge.
+
+**Post-Delivery Enhancements**: The security hardening improvements (token type validation, non-HTTPS warnings, and improved redaction precision) strengthen specification compliance while maintaining full backward compatibility, providing operators with better security visibility and stronger protocol enforcement.
 
 [No sources needed since this section summarizes without analyzing specific files]
