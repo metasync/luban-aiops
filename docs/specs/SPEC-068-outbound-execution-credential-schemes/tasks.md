@@ -99,7 +99,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] All acceptance criteria in `spec.md` verified; `make verify` green (incl.
       `validate-secret-vocabulary` asserted unchanged, `overlays`, `portal-test`).
 - [x] A `basic`-set regression proves the `acme-admin` sample path is byte-identical and
-      **no new dependency** was added (both lockfiles unchanged).
+      **no new dependency** was added (the lockfiles move only on the version bump).
 - [x] Living state docs updated (see spec `Impact`): `products/tool-gateway/README.md`,
       `docs/guides/architecture-overview.md`, `identity-and-authorization-design.md`
       §Service Identity Model, and the delivery-roadmap (substrate delivered; SPEC-067

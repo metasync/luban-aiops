@@ -300,6 +300,14 @@ skipped):
 
 ## Changelog
 
+- 2026-10-09: **post-delivery review polish, folded into v0.47.0 ahead of tagging.** A
+  code & doc review of the `v0.46.0..HEAD` train returned PASSED-WITH-NITS (123 tests
+  green, no blockers); three Low nits addressed with no requirement change: R-2's
+  `token_type` is now genuinely honored (`oauth_client` fails closed with
+  `CREDENTIAL_ACQUISITION_FAILED` on a non-Bearer type; an omitted one is tolerated as
+  Bearer); a non-https `token_url` now logs a cleartext-secret warning (warn-only, so a
+  local mock OAuth endpoint over http still works); and the R-4 redaction-test docstring
+  plus the `tasks.md` lockfile annotation were tightened for precision.
 - 2026-10-08: **delivered** (status `approved` → `delivered`). R-1–R-5 implemented in
   `products/tool-gateway` (new `tools/oauth_client.py` + `tools/auth_resolution.py`;
   generalized `tools/credential_sets.py` and `http_connector._resolve_auth`) with unit

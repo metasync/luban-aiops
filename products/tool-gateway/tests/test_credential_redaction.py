@@ -2,10 +2,11 @@
 
 SPEC-068 introduces three secret-bearing names — an OAuth ``client_secret``, an
 acquired ``access_token``, and a static bearer ``token``. This module proves the
-platform's **existing** redaction already covers every one of them across the
-surfaces R-4 names (a URL projection, a tool result, an evidence field), so no
-new redaction vocabulary was needed and ``make validate-secret-vocabulary`` is
-untouched.
+platform's **existing** redaction already covers every one of them across all
+four surfaces R-4 names — a URL projection, a tool result, an evidence field,
+and audit (the audit record is built from that same redacted result/evidence,
+so the token-absence proven here extends to it) — so no new redaction
+vocabulary was needed and ``make validate-secret-vocabulary`` is untouched.
 
 Two layers do the work, and the tests pin both:
 

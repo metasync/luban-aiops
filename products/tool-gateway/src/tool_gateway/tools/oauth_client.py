@@ -149,6 +149,12 @@ class OAuth2TokenClient:
             # never produce an unauthenticated or half-formed token request.
             LOGGER.warning("oauth2 credential set %r is incomplete", name)
             return None, self._error(name, "incomplete oauth2 credential set")
+        # SPEC-068 hardening: ``token_url`` is trusted operator config, but a
+        # plain-http endpoint would put ``client_secret`` on the wire in the
+        # clear, so warn (never refuse — a local mock OAuth endpoint over http
+        # is legitimate in dev). Names only the set, never the URL.
+        if not token_url.lower().startswith("https://"):
+            LOGGER.warning("oauth2 credential set %r has a non-https token_url", name)
         client_auth = entry.get("client_auth") or CLIENT_AUTH_BASIC
         if client_auth not in _CLIENT_AUTH_VARIANTS:
             LOGGER.warning(
@@ -210,6 +216,24 @@ class OAuth2TokenClient:
                 "oauth2 token response carried no access_token for set %r", name
             )
             return None, self._error(name, "token response carried no access_token")
+
+        # SPEC-068 R-2: honor ``token_type``. The client_credentials grant
+        # yields a Bearer token; a server returning any other type would have
+        # it mis-attached as a ``Bearer`` header downstream, so fail closed
+        # rather than silently downgrading. An omitted ``token_type`` is
+        # tolerated as Bearer (RFC 6749 requires it, but leniency here must
+        # never become an unauthenticated or wrong-scheme call).
+        token_type = (
+            payload.get("token_type") if isinstance(payload, dict) else None
+        )
+        if token_type is not None and str(token_type).strip().lower() != "bearer":
+            LOGGER.warning(
+                "oauth2 token response carried an unsupported token_type for set %r",
+                name,
+            )
+            return None, self._error(
+                name, "token response carried an unsupported token_type"
+            )
 
         expires_in = _coerce_expires_in(
             payload.get("expires_in") if isinstance(payload, dict) else None

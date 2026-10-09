@@ -170,6 +170,38 @@ class ClientAuthVariantTests(unittest.TestCase):
             self.assertNotIn(key, captured["body"])
 
 
+class TokenTypeTests(unittest.TestCase):
+    """SPEC-068 R-2: ``token_type`` is honored, not ignored."""
+
+    def test_unsupported_token_type_fails_closed(self) -> None:
+        # A non-Bearer type fails closed rather than being mis-attached as a
+        # Bearer header downstream, and the rejected token never surfaces.
+        tok, err = _run(_client(lambda r: httpx.Response(
+            200, json={"access_token": ACCESS_TOKEN, "token_type": "MAC"}
+        )).acquire("s", _entry()))
+        self.assertIsNone(tok)
+        self.assertEqual(err[0], CREDENTIAL_ACQUISITION_FAILED)
+        self.assertEqual(err[2], "error")
+        self.assertNotIn(ACCESS_TOKEN, err[1])
+        self.assertNotIn(CLIENT_SECRET, err[1])
+
+    def test_token_type_is_case_insensitive(self) -> None:
+        tok, err = _run(_client(lambda r: httpx.Response(
+            200, json={"access_token": ACCESS_TOKEN, "token_type": "bearer"}
+        )).acquire("s", _entry()))
+        self.assertEqual(tok, ACCESS_TOKEN)
+        self.assertIsNone(err)
+
+    def test_absent_token_type_is_tolerated_as_bearer(self) -> None:
+        # RFC 6749 requires token_type, but a lenient server omitting it must
+        # still yield a usable Bearer token — never an unauthenticated call.
+        tok, err = _run(_client(lambda r: httpx.Response(
+            200, json={"access_token": ACCESS_TOKEN}
+        )).acquire("s", _entry()))
+        self.assertEqual(tok, ACCESS_TOKEN)
+        self.assertIsNone(err)
+
+
 class FailClosedTests(unittest.TestCase):
     def _assert_acquisition_error(self, client, entry=None) -> None:
         tok, err = _run(client.acquire("s", entry or _entry()))
@@ -264,6 +296,20 @@ class SecretHandlingTests(unittest.TestCase):
         self.assertNotIn(ACCESS_TOKEN, joined)
         self.assertNotIn(CLIENT_SECRET, err[1])
         self.assertNotIn(ACCESS_TOKEN, err[1])
+
+    def test_non_https_token_url_warns_but_proceeds(self) -> None:
+        # SPEC-068 hardening: a plain-http token_url warns (never refuses, so a
+        # local mock OAuth endpoint still works); the URL and secret stay out of
+        # the log — only the set name is named.
+        with self.assertLogs(_LOG, level="WARNING") as cap:
+            tok, err = _run(_client(lambda r: _ok()).acquire(
+                "s", _entry(token_url="http://auth.example/token")))
+        self.assertEqual(tok, ACCESS_TOKEN)  # warn-only: the call still succeeds
+        self.assertIsNone(err)
+        joined = "\n".join(cap.output)
+        self.assertIn("non-https token_url", joined)
+        self.assertNotIn("auth.example", joined)  # the URL is never logged
+        self.assertNotIn(CLIENT_SECRET, joined)
 
 
 if __name__ == "__main__":
