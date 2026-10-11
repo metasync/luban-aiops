@@ -212,8 +212,14 @@ Acceptance criteria:
 - **Write-tier ServiceNow operations** (mutations). These stay behind the existing
   HITL one-gate-per-flow (ADR-0007) and signed-execution (SPEC-037) path and belong
   to a later slice, not this read-tier pilot.
-- **Ansible and Windows pilots.** Risk-ordered staging puts them after ServiceNow;
-  each is a separate spec (the backlog row names "one connector spec per pilot").
+- **Ansible and Windows pilots.** Each is a separate spec (the backlog row names "one
+  connector spec per pilot"). The read-tier **Ansible** pilot is now drafted as
+  [SPEC-069](../SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md) and — because
+  this ServiceNow pilot is PDI-blocked — is **re-sequenced ahead of it for
+  implementation** (2026-10-11): SPEC-069 builds the **generic** ingestion adapter this
+  spec's R-2 assumed it would build first, so R-2 later reduces to a ServiceNow-specific
+  binding of an already-proven adapter. This is a sequencing change, not a supersession.
+  Windows remains a later spec needing its own boundary study.
 - **The inbound machine-consumer `client_credentials` grant / stable-API
   productization.** That is the parked, trust-model-blocked row (no human
   owner/approver); it needs a machine-*subject* token identity-broker cannot mint.
@@ -302,6 +308,17 @@ preferences). None of the three blocks SPEC-068.
 
 ## Changelog
 
+- 2026-10-11: **Cross-reference — re-sequenced behind
+  [SPEC-069](../SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md) for
+  implementation.** Because this pilot's three remaining Open Questions (OQ-1, OQ-4,
+  OQ-5) are all PDI-gated on a real ServiceNow tenant, the
+  [MCP-ingestion re-sequencing memo](../../workspace/mcp-ingestion-resequencing-spike.md)
+  (2026-10-11) re-orders the R6 pilots so a read-tier **Ansible** pilot (SPEC-069) is
+  implemented **first**. SPEC-069 builds the **generic** MCP-ingestion adapter this
+  spec's R-2 consumes, so on delivery R-2 reduces to a ServiceNow-specific binding of an
+  already-proven adapter. This is a **sequencing** change, **not** a supersession:
+  SPEC-067 stays `draft` with its OQs intact and returns to active sequencing when its
+  PDI unblocks. Non-Goals updated to point at SPEC-069. No implementation authorized.
 - 2026-10-08: **OQ-2 resolved by operator decision — extract the credential
   substrate.** The outbound execution-credential extension originally drafted as R-1
   was extracted to a standalone target-agnostic spec,

@@ -6,6 +6,15 @@ Roadmap home: [Exploration Backlog](../agentic-aiops-platform/delivery-roadmap.m
 Builds on: [mcp-exposure-spike.md](mcp-exposure-spike.md) (2026-09-23). That assessment established the trust boundary (§5) and the ingestion invariants (§6); this memo **inherits them and does not restate them**. Where the two differ, this memo is the current direction for *ingestion*.
 Evidence baseline: repository at v0.45.0 (R5 closed, `117bb5d`); static code/manifest inspection plus the 2026-09-23 memo. **No MCP server has been installed, tested, or deployed.**
 Promoted to: [SPEC-067 ServiceNow ITSM MCP-ingestion pilot](../specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md) — `draft` 2026-10-06, the first (ServiceNow, read-tier) of the staged pilots this memo recommends, with R6 framed as its release theme. Drafting authorizes no implementation, pilot, ADR, or adapter; three Open Questions block `approved` (OQ-1, OQ-4, OQ-5 — all PDI-gated; OQ-2 resolved 2026-10-08 by extracting the outbound-credential substrate to [SPEC-068](../specs/SPEC-068-outbound-execution-credential-schemes/spec.md), OQ-3 resolved 2026-10-07 — official `mcp` SDK against ServiceNow's own MCP server, REST fallback), and Ansible/Windows remain separate later specs.
+Re-sequenced 2026-10-11: §6's ServiceNow → Ansible → Windows *implementation* order was
+re-ordered by the [MCP-ingestion re-sequencing memo](mcp-ingestion-resequencing-spike.md)
+so a **read-tier Ansible** pilot
+([SPEC-069](../specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md), `draft`
+2026-10-11) is built **first** — SPEC-067 (ServiceNow) is PDI-blocked, and Ansible's
+read-only discovery tier (inventory / `gather_facts` / job-template + log reads, per §6.2's
+escape hatch — `--check` reclassified as **not** read-tier by SPEC-069 OQ-3) neutralizes the
+blast-radius objection that ranked it 2nd. This memo's architecture (§4–§5) is unchanged
+and is inherited by SPEC-069; SPEC-067 is re-sequenced, **not** superseded.
 
 ## 1. Question and recommendation
 
@@ -159,6 +168,11 @@ action is a gated mutating flow. Two hard problems:
   legitimate but deliberate expansion of "diagnose before act / read before
   write," and must be gated accordingly. If a read/inventory/`--check` (dry-run)
   capability exists, stage it first as read-tier.
+  *(Correction, SPEC-069 OQ-3, 2026-10-11: the `--check`/dry-run clause above is **not** a
+  sound read-tier boundary — `check_mode: false` bypasses `--check`, and some modules do not
+  reflect real results until executed. SPEC-069 narrows the read tier to pure reads
+  (inventory / facts / job-template + log / health) and treats dry-run as an action-layer
+  preview only.)*
 
 ### 6.3 Windows UI automation — strongest pattern precedent, hardest topology
 It is the native-app analog of the shipped browser tools (SPEC-049→061): a UI
@@ -230,3 +244,13 @@ build a replacement.
   with per-target risk analysis. Inherits `mcp-exposure-spike.md` §5–§6.
   **Assessment only — no implementation, pilot, ADR, or spec promotion, and no
   approval of any of these, is part of this memo.**
+- 2026-10-11, re-sequencing + §6.2 `--check` correction: the header records that §6's
+  ServiceNow → Ansible → Windows implementation order was re-ordered by the
+  [MCP-ingestion re-sequencing memo](mcp-ingestion-resequencing-spike.md) so a read-tier
+  Ansible pilot
+  ([SPEC-069](../specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md)) is built
+  first. SPEC-069 OQ-3 (operator direction) also found the §6.2 escape-hatch `--check`
+  (dry-run) clause is **not** a sound read-tier boundary (`check_mode: false` bypasses it;
+  some modules do not reflect results until executed), so the read tier is narrowed to pure
+  reads and dry-run becomes an action-layer preview. Assessment unchanged — no
+  implementation authorized.
