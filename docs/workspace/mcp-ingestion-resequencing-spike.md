@@ -24,10 +24,13 @@ redaction assertions green. **No Ansible MCP server has been installed, tested, 
 deployed.**
 Promoted to: [SPEC-069 Ansible read-tier MCP-ingestion
 pilot](../specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md) — `draft`
-2026-10-11. Drafting authorizes no implementation. Its five Open Questions were
+2026-10-11, **approved 2026-10-12** (implementation authorized to begin; commit/push,
+deployment, and any version bump remain separate gates). Its five Open Questions were
 **resolved by operator direction 2026-10-11** (see §8); what remains is Stage-0
-verification facts about the Ansible target plus a production-path dependency on a
-SPEC-068 follow-up delegation substrate — not design preferences.
+verification facts about the Ansible target plus a production-path dependency on
+[SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md) (the outbound
+user-delegated-identity substrate, extracted from OQ-4 and numbered 2026-10-12; itself
+`draft`) — not design preferences.
 
 ## 1. Question and recommendation
 
@@ -183,7 +186,8 @@ minimal read-tier operation set:
   **no** playbook-run / runbook-execution / mutation tool exposed.
 - **Attribute + fail closed:** requester + acting-service identity + target + tool +
   outcome per call, with **user-delegated identity to the targets** as the production
-  governance model (OQ-4; mechanism in a SPEC-068 follow-up substrate); unreachable /
+  governance model (OQ-4; mechanism in
+  [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md)); unreachable /
   timeout / error → a failed outcome, never a fabricated result.
 - **Validate against the dev cluster** using the §3 mock-target harness pattern (a mock
   managed host in-cluster), so CI makes no live external call.
@@ -199,8 +203,9 @@ This memo authorizes **no** implementation. Recommended next decisions, in order
    dev-cluster feasibility) before `approved`. — **Done 2026-10-11:** all five were
    resolved by operator direction (see §8 and the SPEC-069 Open Questions); `--check`
    safety resolved **against** read-tier admission, and the credential/audience question
-   resolved to **user-delegated identity to the targets** with the mechanism extracted to a
-   SPEC-068 follow-up substrate. What remains is Stage-0 verification facts, not decisions.
+   resolved to **user-delegated identity to the targets** with the mechanism extracted to
+   [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md). What remains is
+   Stage-0 verification facts, not decisions.
 3. **Build the generic connector under SPEC-069** so SPEC-067's R-2 becomes a
    ServiceNow-specific configuration of an already-proven adapter, not a first
    implementation against a waitlisted target.
@@ -222,8 +227,9 @@ replacement, and ServiceNow returns to first place whenever its PDI unblocks.
 > open-source server behind a **server-agnostic** connector (AAP = production target);
 > OQ-2 → **two-layer** model (this spec = read-only discovery; runbooks-as-typed-tools =
 > write-tier fast-follow); OQ-3 → `--check` is **not** a read-tier boundary (removed);
-> OQ-4 → **user-delegated identity to the targets** (mechanism → a SPEC-068 follow-up
-> substrate); OQ-5 → **self-contained in-cluster validation**.
+> OQ-4 → **user-delegated identity to the targets** (mechanism →
+> [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md)); OQ-5 →
+> **self-contained in-cluster validation**.
 
 - **Transport/server (architectural fork):** which Ansible MCP server does the connector
   consume — a self-hosted open-source server deployed in-cluster (supply-chain +
@@ -267,3 +273,14 @@ replacement, and ServiceNow returns to first place whenever its PDI unblocks.
   governance model with the mechanism in a SPEC-068 follow-up substrate (OQ-4), and
   **self-contained in-cluster validation** (OQ-5). Still **assessment only** — no
   implementation authorized.
+- 2026-10-12, SPEC-069 approved + SPEC-070 numbered: SPEC-069 was **approved** (status
+  `draft` → `approved`; implementation authorized to begin per the SPEC-066 precedent — the
+  residual items are checkable Stage-0 verification tasks, not blocking Open Questions), its
+  target version pinned to v0.48.0 (the `VERSION` bump itself a separate release gate). The
+  outbound user-delegated-identity substrate this memo referenced as "a SPEC-068 follow-up"
+  (OQ-4) is now numbered
+  **[SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md)** (`draft`); its
+  OQ-1 mechanism + OQ-2 ADR-scope block its own approval and it forces **ADR-0015**
+  (expected, not yet drafted). The header/§6/§7/§8 forward pointers now name it. This memo
+  remains **assessment only** — commit/push, deployment, and any version bump are separate
+  gates.

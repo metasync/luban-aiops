@@ -300,6 +300,16 @@ skipped):
 
 ## Changelog
 
+- 2026-10-12: **user-delegated successor extracted (no change to this delivered spec).**
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) (`draft`) was extracted
+  from [SPEC-069](../SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md) OQ-4 as the
+  **user-delegated** counterpart to this substrate: SPEC-068's schemes (`basic` / `bearer`
+  / `oauth2_client_credentials`) are **service/machine** grants with no user subject, and
+  the operator's directive to carry **user-delegated identity to the targets** needs an
+  outbound credential with a user subject. SPEC-070 extends this spec's `credential_set`
+  `scheme` mechanism and auth-resolution seam **additively**; nothing here changes, and this
+  entry is a forward pointer only. SPEC-070 is the platform's first outbound user-delegated
+  trust relationship and so forces **ADR-0015** (expected; not yet drafted).
 - 2026-10-09: **post-delivery review polish, folded into v0.47.0 ahead of tagging.** A
   code & doc review of the `v0.46.0..HEAD` train returned PASSED-WITH-NITS (123 tests
   green, no blockers); three Low nits addressed with no requirement change: R-2's

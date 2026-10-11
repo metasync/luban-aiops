@@ -2,15 +2,17 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: luban-platform-team
 - created: 2026-10-11
 - release slice: **R6 — External System Integration via MCP Ingestion** (second target
   slice, **re-sequenced ahead of SPEC-067 for implementation**; see the [delivery
   roadmap](../../agentic-aiops-platform/delivery-roadmap.md#r6-external-system-integration-via-mcp-ingestion))
-- target version: unversioned while `draft` — the version is pinned only at approval
-  (the platform is at v0.47.0; SPEC-068 shipped the R6 outbound-credential substrate at
-  v0.47.0).
+- target version: **v0.48.0** — pinned at approval (2026-10-12). The platform is at
+  v0.47.0 (SPEC-068 shipped the R6 outbound-credential substrate there); like SPEC-066/068,
+  this pilot's read-only dev slice is self-contained enough to ship at its own minor bump.
+  The `VERSION` file bump itself is a separate release gate, crossed neither by approval nor
+  by implementation.
 - related ADRs: **none at draft for this read-only slice.** Adopting the official `mcp`
   Python SDK as the ingestion transport is inherited from
   [SPEC-067](../SPEC-067-servicenow-mcp-ingestion-pilot/spec.md) OQ-3 (resolved
@@ -21,7 +23,10 @@
   here: (1) the **Layer-2 runbook-typed-tool** fast-follow will engage ADR-0007
   (one HITL gate per mutating flow) and ADR-0011 / SPEC-057 (no control flow in the
   kernel) — see Non-Goals; (2) the **outbound user-delegated identity** mechanism (OQ-4)
-  is extracted to a SPEC-068 follow-up substrate and any trust-model ADR lives there.
+  is extracted to
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), where the trust-model
+  ADR it forces (**ADR-0015, expected**) lives — this read-only slice itself adds no
+  signing authority and needs no ADR.
 - lineage: promoted from the
   [MCP-ingestion re-sequencing memo](../../workspace/mcp-ingestion-resequencing-spike.md)
   §1/§3/§4/§6 (the self-provisioning ranking, the read-tier-neutralizes-blast-radius
@@ -32,8 +37,10 @@
   OQ-3). **Depends on**
   [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (delivered
   v0.47.0) for the outbound execution-credential substrate, and — for the **production**
-  user-delegated path only — on a **SPEC-068 follow-up substrate** (outbound
-  user-delegated identity; number assigned at its own drafting). **Re-sequences** — does
+  user-delegated path only — on
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) (the outbound
+  user-delegated-identity substrate, extracted from this pilot's OQ-4; itself `draft`).
+  **Re-sequences** — does
   *not* supersede — [SPEC-067](../SPEC-067-servicenow-mcp-ingestion-pilot/spec.md),
   which stays `draft` and PDI-gated. Builds on
   [SPEC-007](../SPEC-007-tool-execution-framework/spec.md) (the
@@ -51,15 +58,19 @@
 > this spec is the **read-only discovery layer**, runbooks-as-typed-tools is a separate
 > **write-tier fast-follow**; OQ-3 **`--check` dry-run is not a sound read-tier boundary**
 > and is removed from the read tier; OQ-4 **user-delegated identity to the targets** is the
-> governance model, with the mechanism extracted to a **SPEC-068 follow-up substrate**;
+> governance model, with the mechanism extracted to
+> **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)**;
 > OQ-5 **self-contained in-cluster validation** confirmed. What remains is **Stage-0
 > verification facts** (exact server artifact + license/provenance, the concrete read
 > operation set + argument shapes, what AAP's MCP server auth accepts) recorded as tasks in
-> `tasks.md`, plus the **production-path dependency** on the follow-up delegation substrate.
-> `plan.md`/`tasks.md` stay banner-marked provisional until Stage 0 is run and the operator
-> ratifies approval. Unlike SPEC-067, **no remaining item is gated on an external
-> provider** — that self-provisionability is the entire reason this pilot is sequenced
-> first.
+> `tasks.md`, plus the **production-path dependency** on
+> [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md). Unlike SPEC-067, **no
+> remaining item is gated on an external provider** — that self-provisionability is the
+> entire reason this pilot is sequenced first. **Approved by the operator 2026-10-12;
+> implementation authorized to begin** (the SPEC-066 precedent: the residual items are
+> checkable Stage-0 verification tasks, not blocking Open Questions). The
+> `plan.md`/`tasks.md` provisional banners are lifted. Commit/push, deployment, and any
+> version bump remain separate authorization boundaries **not** granted by this approval.
 
 ## Summary
 
@@ -140,9 +151,10 @@ read tier, **no infrastructure blast radius**.
   shipped schemes (`basic` / `bearer` / `oauth2_client_credentials`) are **service/machine**
   grants with **no user subject**, so this needs an **outbound user-delegated credential**
   (OAuth2 Token Exchange RFC 8693 / on-behalf-of, per-user OAuth authorization, or
-  shared-IdP SSO) that exists nowhere today. It is extracted as a **reusable SPEC-068
-  follow-up substrate** — mirroring how SPEC-068 was itself extracted from SPEC-067 — and is
-  a dependency of the **production** path; SPEC-069 dev-validates against the self-hosted
+  shared-IdP SSO) that exists nowhere today. It is extracted as
+  **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** — a reusable substrate
+  mirroring how SPEC-068 was itself extracted from SPEC-067 — and is a dependency of the
+  **production** path; SPEC-069 dev-validates against the self-hosted
   server's own auth meanwhile.
 - **It de-risks SPEC-067 rather than competing with it.** Building the *generic*
   ingestion adapter here — against a target we control — means SPEC-067's R-2 becomes a
@@ -152,9 +164,9 @@ read tier, **no infrastructure blast radius**.
 ## Requirements
 
 Each requirement is stable once the spec is `approved` and carries testable acceptance
-criteria. R-1 is a dependency pointer (SPEC-068 for dev; the follow-up delegation substrate
-for production); R-2–R-6 are provisional on the Stage-0 verification facts and are written
-to be finalized at approval.
+criteria. R-1 is a dependency pointer (SPEC-068 for dev;
+[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) for production); R-2–R-6
+remain provisional on the Stage-0 verification facts and are finalized as Stage 0 closes.
 
 ### R-1: Outbound identity, credential, and target topology
 
@@ -164,8 +176,9 @@ execution-credential substrate delivered by
 **development** — never a pilot-local re-implementation — **or** through no credential at
 all if Stage-0 selects a loopback-bound sidecar topology isolated by NetworkPolicy (the
 browser-engine model). The **production** governance target is a **user-delegated** outbound
-identity (OQ-4), which depends on a **SPEC-068 follow-up substrate** (outbound
-user-delegated credential) that this pilot records as a dependency but does not build.
+identity (OQ-4), which depends on
+[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) (the outbound
+user-delegated-identity substrate) that this pilot records as a dependency but does not build.
 
 Acceptance criteria:
 
@@ -176,8 +189,9 @@ Acceptance criteria:
   possibly no outbound credential) or a NetworkPolicy-isolated in-cluster Service (a
   SPEC-068 `bearer` credential). Whichever is chosen, the endpoint is **operator
   configuration, never a model-selected argument**.
-- The **production user-delegated identity** is recorded as a **dependency on a SPEC-068
-  follow-up substrate** (number assigned at its own drafting); SPEC-069 does **not**
+- The **production user-delegated identity** is recorded as a **dependency on
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (itself `draft`);
+  SPEC-069 does **not**
   implement token exchange / OBO itself. The dev path runs against the self-hosted server's
   own auth, so SPEC-069's read-only discovery slice is **not blocked** on that substrate.
 - SPEC-068's secret-handling invariants (redaction, fail-closed, no secret in audit/logs)
@@ -251,7 +265,8 @@ Acceptance criteria:
   ADR-0004's `sub`-user / `act`-service delegation and the identity model's
   separate-identity logging.
 - The **production** path attributes each call to the requesting user end to end (per-user
-  target RBAC), realized through the R-1 follow-up delegation substrate; AAP's MCP server
+  target RBAC), realized through the R-1 dependency
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); AAP's MCP server
   natively supports this by inheriting the user's RBAC. In **dev** (self-hosted server)
   Luban-side attribution to the principal is still recorded even though the target-side
   identity is the dev server's own — the audit record makes this distinction explicit
@@ -306,7 +321,9 @@ Acceptance criteria:
   spec** (number assigned at its own drafting — **not** reserved here). It must first solve
   the [MCP-ingestion memo](../../workspace/mcp-ingestion-spike.md) §6.2 **bundled N-step
   mutation** blast-radius, uncertain-outcome, and idempotency problems, and it depends on
-  the OQ-4 delegation substrate. It stays behind the existing HITL one-gate-per-flow
+  the OQ-4 delegation substrate
+  ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)). It stays behind the
+  existing HITL one-gate-per-flow
   (ADR-0007), action-card (SPEC-054), signed-execution (SPEC-037), isolated-worker
   (SPEC-038), and durable-claim (SPEC-063) machinery. **SPEC-069 establishes the
   server-agnostic connector and the typed-tool model this fast-follow extends, but builds no
@@ -319,8 +336,9 @@ Acceptance criteria:
   action-layer preview.
 - **Building the outbound user-delegated identity mechanism.** OQ-4's user-delegated
   identity to the targets is the recorded governance **target**, but the **mechanism**
-  (token exchange / OBO / per-user OAuth / SSO) is extracted to a **SPEC-068 follow-up
-  substrate** and is **not** implemented here. SPEC-069 dev-validates against the
+  (token exchange / OBO / per-user OAuth / SSO) is extracted to
+  **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** and is **not**
+  implemented here. SPEC-069 dev-validates against the
   self-hosted server's own auth.
 - **Superseding SPEC-067 (ServiceNow).** This pilot **re-sequences** implementation order
   only. SPEC-067 stays `draft` and PDI-gated; it is not replaced, and it returns to
@@ -353,11 +371,12 @@ Acceptance criteria:
   managed-host deployment, overlay, and any credential-set entry). The outbound-credential
   code (`credential_sets.py`, `http_connector.py`, `oauth_client.py`) is delivered by
   **SPEC-068**, on which this pilot depends; the **production** user-delegated path
-  additionally depends on a **SPEC-068 follow-up substrate** (out of scope here).
+  additionally depends on
+  **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (out of scope here).
 - contracts touched: the policy bundle (new read-tier Ansible tool names). The
   credential-file shape and secret-vocabulary work belong to SPEC-068 and are inherited
-  unchanged; the follow-up delegation substrate will add an outbound user-delegated
-  credential shape of its own.
+  unchanged; [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) will add an
+  outbound user-delegated credential shape of its own.
 - identity / policy / audit / execution safety impact: **consumes** SPEC-068's outbound
   execution credential for dev (the External Execution Identity's second concrete form) and
   records **user-delegated identity to the targets** as the production governance target;
@@ -374,8 +393,9 @@ Acceptance criteria:
 
 All five Open Questions that blocked `approved` at drafting were **resolved by operator
 direction on 2026-10-11**. What remains is **Stage-0 verification facts** (checkable, not
-decisions — recorded as tasks in `tasks.md`) and **one production-path dependency** (the
-follow-up delegation substrate). Following the SPEC-066/067 precedent, checkable facts are
+decisions — recorded as tasks in `tasks.md`) and **one production-path dependency**
+([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)). Following the
+SPEC-066/067 precedent, checkable facts are
 Stage-0 tasks rather than blocking Open Questions.
 
 - **OQ-1 — RESOLVED (operator direction 2026-10-11): develop against a self-hosted
@@ -386,8 +406,8 @@ Stage-0 tasks rather than blocking Open Questions.
   community AWX MCP server, or a thin mock MCP server — with real AAP read-only-mode
   validation as an operator Stage-0 step. *Residual Stage-0 facts:* pin the exact server
   artifact and pass a supply-chain/license/provenance review before pinning (R-2/R-6);
-  confirm what auth AAP's MCP server accepts for the delegated path (feeds the follow-up
-  substrate).
+  confirm what auth AAP's MCP server accepts for the delegated path (feeds
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)).
 - **OQ-2 — RESOLVED (operator direction 2026-10-11): two-layer model.** The read-only tier
   is a **must** for troubleshooting and agent↔Ansible interaction (Layer 1, this spec);
   runbooks are additionally exposed as **typed tools** the agent can call (Layer 2), under
@@ -407,11 +427,11 @@ Stage-0 tasks rather than blocking Open Questions.
   **requesting user's delegated identity all the way to the targets**, so the agent never
   acts on its own authority. **Consequence:** SPEC-068's `client_credentials` is a
   service/machine grant with **no user subject**, so this needs an **outbound user-delegated
-  credential** that exists nowhere today. It is **extracted as a reusable SPEC-068 follow-up
-  substrate** (R-1 dependency for the production path); SPEC-069 dev-validates against the
-  self-hosted server's own auth and is **not blocked**. *The mechanism decision (OAuth2 Token
-  Exchange RFC 8693 / OBO, per-user OAuth authorization, or shared-IdP SSO) lives in that
-  follow-up substrate, not here.*
+  credential** that exists nowhere today. It is **extracted as
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (R-1 dependency for the
+  production path); SPEC-069 dev-validates against the self-hosted server's own auth and is
+  **not blocked**. *The mechanism decision (OAuth2 Token Exchange RFC 8693 / OBO, per-user
+  OAuth authorization, or shared-IdP SSO) lives in SPEC-070, not here.*
 - **OQ-5 — RESOLVED (operator direction 2026-10-11): self-contained validation.** The
   operator wants self-hosted/self-contained validation: the whole pilot is validated against
   the local dev-k8s cluster by deploying the self-hosted Ansible MCP server + a **mock
@@ -420,6 +440,16 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-12: **approved by the operator** (status `draft` → `approved`); implementation
+  authorized to begin (the SPEC-066 precedent — the residual items are checkable Stage-0
+  verification tasks, not blocking Open Questions). Target version pinned to **v0.48.0**
+  (the `VERSION` bump itself remains a separate release gate). The outbound user-delegated-
+  identity follow-up substrate referenced throughout is now numbered
+  **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (`draft`; its OQ-1
+  mechanism + OQ-2 ADR scope block its own approval, and it forces **ADR-0015**); R-1's
+  production-path dependency now names it. The `plan.md`/`tasks.md` provisional banners are
+  lifted. Commit/push, deployment, and any version bump remain separate authorization
+  boundaries not granted by this approval. No implementation has started.
 - 2026-10-11: created as `draft`; full scaffold (`spec.md` + `plan.md` + `tasks.md`)
   authored together per the SPEC-064/065/066/067 precedent, with `plan.md`/`tasks.md`
   banner-marked provisional because five Open Questions blocked `approved` and the source

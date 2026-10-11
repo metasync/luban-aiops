@@ -2,23 +2,25 @@
 
 Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
 
-> **Provisional — do not implement.** SPEC-069 is `draft`. The **five Open Questions were
-> resolved by operator direction on 2026-10-11** (OQ-1 self-hosted open-source server behind
-> a server-agnostic connector; OQ-2 two-layer model — this spec is the read-only discovery
-> layer; OQ-3 `--check` removed from the read tier; OQ-4 user-delegated identity to the
-> targets, mechanism extracted to a SPEC-068 follow-up substrate; OQ-5 self-contained
+> **Approved — implementation authorized to begin.** SPEC-069 is `approved` (operator,
+> 2026-10-12). The **five Open Questions were resolved by operator direction on 2026-10-11**
+> (OQ-1 self-hosted open-source server behind a server-agnostic connector; OQ-2 two-layer
+> model — this spec is the read-only discovery layer; OQ-3 `--check` removed from the read
+> tier; OQ-4 user-delegated identity to the targets, mechanism extracted to
+> [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); OQ-5 self-contained
 > in-cluster validation). What remains is **Stage-0 verification facts** (exact server
 > artifact + license/provenance, the concrete read-operation set + argument shapes, what
-> AAP's MCP server auth accepts) and **one production-path dependency** (the follow-up
-> delegation substrate), so this list is provisional and may change when Stage 0 closes at
-> approval. R-1 is not built here — it is a dependency on the delivered
+> AAP's MCP server auth accepts) and **one production-path dependency**
+> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `draft`), so
+> R-2–R-6 below stay provisional on the Stage-0 facts and firm up as Stage 0 closes. R-1 is
+> not built here — it is a dependency on the delivered
 > [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0) for dev and
-> on the follow-up substrate for the production user-delegated path. Nothing here is
-> authorized: approval, implementation, commit/push, deployment, and any version bump are each
-> separate authorization boundaries. **Stage 0 is read-only and is the first thing to execute
-> once the spec is approved** — the OQ-1 server-artifact choice determines whether R-2 builds
-> the MCP adapter or the native fallback, so no target-specific implementation should start
-> before Stage 0 closes.
+> on [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) for the production
+> user-delegated path. Approval authorizes implementation to begin; commit/push, deployment,
+> and any version bump remain separate authorization boundaries **not** granted here. **Stage
+> 0 is read-only and is the first thing to execute now that the spec is approved** — the OQ-1
+> server-artifact choice determines whether R-2 builds the MCP adapter or the native
+> fallback, so no target-specific implementation should start before Stage 0 closes.
 
 ## Stage 0 — Verify (read-only; pins the residual OQ facts; confirms the SPEC-068 dependency and the topology)
 
@@ -32,9 +34,10 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
       setup reads, job-template listing, job log/status monitoring, environment health.
       **Confirm no `--check`/dry-run operation is admitted** (OQ-3 resolved).
 - [ ] Confirm what auth **AAP's MCP server** accepts for the delegated path (OQ-1/OQ-4
-      residual) — record against R-1/R-4 as the input the **SPEC-068 follow-up delegation
-      substrate** will consume; note that the production user-delegated path depends on that
-      substrate (not built here) and that AAP's MCP server natively inherits user RBAC.
+      residual) — record against R-1/R-4 as the input
+      **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** will consume; note
+      that the production user-delegated path depends on that substrate (not built here) and
+      that AAP's MCP server natively inherits user RBAC.
 - [ ] Confirm the **self-contained** validation topology (OQ-5 resolved) — the self-hosted
       Ansible MCP server + a **mock managed host** deploy in-cluster (the SPEC-068 live-check
       pattern) so CI makes no live external call; record the topology (loopback sidecar vs
@@ -46,21 +49,22 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [ ] Pin the official `mcp` Python SDK version and run the supply-chain/license review
       before adding it as a direct tool-gateway dependency (inherited from SPEC-067 OQ-3).
 
-## R-1: Outbound identity, credential, and topology (dependency on SPEC-068 + follow-up — not built here)
+## R-1: Outbound identity, credential, and topology (dependency on SPEC-068 + SPEC-070 — not built here)
 
 The dev credential-scheme extension is delivered by
 [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0); its
 parsing, token client, resolver seam, redaction, fail-closed, and provisioning tasks live
-in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential is a
-**SPEC-068 follow-up substrate** (separate spec, number assigned at its drafting) and is
+in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential is
+**[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (separate spec) and is
 **not** built here.
 
 - [ ] Gate: SPEC-068 is delivered (it is — v0.47.0); the Ansible connector resolves any
       **dev** credential through SPEC-068's resolver seam (no pilot-local re-implementation),
       or uses a loopback sidecar with no outbound credential per the Stage-0 topology.
-- [ ] Record the **production user-delegated identity** as a dependency on the SPEC-068
-      follow-up substrate (OQ-4); confirm the read-only discovery slice is **not blocked** on
-      it (dev runs against the self-hosted server's own auth).
+- [ ] Record the **production user-delegated identity** as a dependency on
+      [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) (OQ-4); confirm the
+      read-only discovery slice is **not blocked** on it (dev runs against the self-hosted
+      server's own auth).
 
 ## R-2: Server-agnostic MCP-ingestion connector + Ansible read-only binding (the generic adapter)
 
@@ -101,8 +105,9 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       Ansible call (`products/tool-gateway/`), keeping requester and acting-service separate
       per ADR-0004 `sub`/`act`.
 - [ ] Record the **dev-vs-production per-user-RBAC distinction** (OQ-4): production
-      attributes each call to the requesting user end to end (via the R-1 follow-up
-      substrate; AAP inherits user RBAC); dev records Luban-side attribution to the principal
+      attributes each call to the requesting user end to end (via the R-1 dependency
+      [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); AAP inherits user
+      RBAC); dev records Luban-side attribution to the principal
       while the target-side identity is the self-hosted server's own — the audit record makes
       this explicit rather than implying target-side per-user RBAC the dev topology lacks.
 - [ ] Tests: audit record carries all five fields + the delegation distinction; no
@@ -144,8 +149,9 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       resolutions in `spec.md`.
 - [ ] SPEC-068 (the dev outbound credential substrate, delivered v0.47.0) confirmed present;
       the connector resolves any dev credential through its resolver seam. The production
-      user-delegated path's dependency on the SPEC-068 follow-up substrate is recorded (and
-      does not block this read-only slice).
+      user-delegated path's dependency on
+      [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) is recorded (and does
+      not block this read-only slice).
 - [ ] All acceptance criteria in `spec.md` verified; `make verify` green (incl.
       `portal-test`, `validate-policy-scenarios`, `validate-secret-vocabulary`,
       `overlays`).
@@ -161,6 +167,7 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 - [ ] Spec index in `docs/specs/README.md` updated; spec status set to `delivered`. Note in
       the delivery record that SPEC-067 (ServiceNow) remains `draft`/PDI-gated and reuses
       this pilot's generic adapter — re-sequenced, not superseded — and that the **Layer-2
-      runbook-typed-tool fast-follow** and the **outbound user-delegated-identity substrate**
-      are separate specs (numbers assigned at their own drafting) building on this adapter
-      and on SPEC-068 respectively.
+      runbook-typed-tool fast-follow** (number assigned at its own drafting) and the
+      **outbound user-delegated-identity substrate**
+      ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `draft`) are
+      separate specs building on this adapter and on SPEC-068 respectively.
