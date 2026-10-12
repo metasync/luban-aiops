@@ -25,7 +25,8 @@
   kernel) — see Non-Goals; (2) the **outbound user-delegated identity** mechanism (OQ-4)
   is extracted to
   [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), where the trust-model
-  ADR it forces (**ADR-0015, expected**) lives — this read-only slice itself adds no
+  ADR it forces (**[ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md),
+  accepted 2026-10-12**) lives — this read-only slice itself adds no
   signing authority and needs no ADR.
 - lineage: promoted from the
   [MCP-ingestion re-sequencing memo](../../workspace/mcp-ingestion-resequencing-spike.md)
@@ -39,7 +40,7 @@
   v0.47.0) for the outbound execution-credential substrate, and — for the **production**
   user-delegated path only — on
   [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) (the outbound
-  user-delegated-identity substrate, extracted from this pilot's OQ-4; itself `draft`).
+  user-delegated-identity substrate, extracted from this pilot's OQ-4; itself `approved`).
   **Re-sequences** — does
   *not* supersede — [SPEC-067](../SPEC-067-servicenow-mcp-ingestion-pilot/spec.md),
   which stays `draft` and PDI-gated. Builds on
@@ -190,7 +191,7 @@ Acceptance criteria:
   SPEC-068 `bearer` credential). Whichever is chosen, the endpoint is **operator
   configuration, never a model-selected argument**.
 - The **production user-delegated identity** is recorded as a **dependency on
-  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (itself `draft`);
+  [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** (itself `approved`);
   SPEC-069 does **not**
   implement token exchange / OBO itself. The dev path runs against the self-hosted server's
   own auth, so SPEC-069's read-only discovery slice is **not blocked** on that substrate.

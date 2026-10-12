@@ -284,3 +284,13 @@ replacement, and ServiceNow returns to first place whenever its PDI unblocks.
   (expected, not yet drafted). The header/§6/§7/§8 forward pointers now name it. This memo
   remains **assessment only** — commit/push, deployment, and any version bump are separate
   gates.
+- 2026-10-12, SPEC-070 approved + ADR-0015 accepted: the outbound user-delegated-identity
+  substrate numbered above was **approved** (status `draft` → `approved`; target **v0.49.0**).
+  Its OQ-1 resolved to **(c) per-user OAuth 2.x authorization-code, connector-local**, OQ-2
+  to **no identity-broker mint**, and OQ-3 was answered by research (Red Hat AAP's MCP server
+  takes per-user OAuth auth-code / PATs and inherits user RBAC; no OIDC discovery /
+  token-exchange / OBO in 2.6);
+  **[ADR-0015](../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)** is
+  **accepted**. This does not change SPEC-069's read-only **dev** slice (it validates against
+  the self-hosted server's own auth). Still **assessment only** — no implementation,
+  commit/push, deployment, or version bump authorized by this memo.

@@ -11,7 +11,7 @@
 > in-cluster validation). What remains is **Stage-0 verification facts** (exact server
 > artifact + license/provenance, the concrete read-operation set + argument shapes, what
 > AAP's MCP server auth accepts) and **one production-path dependency**
-> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `draft`) — so
+> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`) — so
 > R-2–R-6 below stay provisional on the Stage-0 facts and firm up as Stage 0 closes. R-1 is
 > not built here — it is a dependency on the delivered
 > [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0) for dev

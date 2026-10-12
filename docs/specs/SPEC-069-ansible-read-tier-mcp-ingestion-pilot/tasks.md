@@ -11,7 +11,7 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 > in-cluster validation). What remains is **Stage-0 verification facts** (exact server
 > artifact + license/provenance, the concrete read-operation set + argument shapes, what
 > AAP's MCP server auth accepts) and **one production-path dependency**
-> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `draft`), so
+> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`), so
 > R-2–R-6 below stay provisional on the Stage-0 facts and firm up as Stage 0 closes. R-1 is
 > not built here — it is a dependency on the delivered
 > [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0) for dev and
@@ -33,21 +33,61 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
       (OQ-2 residual) — record against R-2/R-3: inventory host/group listing, `gather_facts`/
       setup reads, job-template listing, job log/status monitoring, environment health.
       **Confirm no `--check`/dry-run operation is admitted** (OQ-3 resolved).
-- [ ] Confirm what auth **AAP's MCP server** accepts for the delegated path (OQ-1/OQ-4
+- [x] Confirm what auth **AAP's MCP server** accepts for the delegated path (OQ-1/OQ-4
       residual) — record against R-1/R-4 as the input
       **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** will consume; note
       that the production user-delegated path depends on that substrate (not built here) and
       that AAP's MCP server natively inherits user RBAC.
-- [ ] Confirm the **self-contained** validation topology (OQ-5 resolved) — the self-hosted
+- [x] Confirm the **self-contained** validation topology (OQ-5 resolved) — the self-hosted
       Ansible MCP server + a **mock managed host** deploy in-cluster (the SPEC-068 live-check
       pattern) so CI makes no live external call; record the topology (loopback sidecar vs
       in-cluster Service) against R-1/R-6. AAP read-only-mode validation is a documented
       operator step **outside CI**.
-- [ ] Confirm SPEC-068 (the delivered dev credential substrate, v0.47.0) is present and that
+- [x] Confirm SPEC-068 (the delivered dev credential substrate, v0.47.0) is present and that
       OQ-5's topology either needs no credential (loopback) or a scheme SPEC-068 ships
       (`bearer`).
 - [ ] Pin the official `mcp` Python SDK version and run the supply-chain/license review
       before adding it as a direct tool-gateway dependency (inherited from SPEC-067 OQ-3).
+      **Finding (2026-10-12):** license reviewed — MIT (`modelcontextprotocol/python-sdk`,
+      v2 line); the exact version pin lands at R-2 with the direct dependency + `uv.lock`.
+
+### Stage-0 findings (recorded 2026-10-12)
+
+Desk research plus the SPEC-070 approval closed the pure-fact Stage-0 items (3/4/5);
+the two items that need a hands-on artifact pin + supply-chain review (1/6) stay open for
+implementation, and the read-only operation set's per-tool argument shapes (2) follow the
+item-1 artifact choice.
+
+- **AAP MCP-server auth (item 3 — resolved).** Red Hat AAP's MCP server authenticates each
+  user via **OAuth 2.x authorization-code** (or a **PAT**) against **AAP Gateway's own**
+  authorization server (`/o/authorize/`, `/o/token/`) and **inherits the requesting user's
+  RBAC**; AAP 2.6 enforces **no PKCE** and provides **no automatic OIDC discovery**, and
+  documents authorization-code + password grants — **not** RFC 8693 token-exchange or OBO.
+  This is exactly the fact **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)**
+  OQ-3 consumed to resolve its mechanism to per-user OAuth authorization-code
+  ([ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md),
+  accepted 2026-10-12). Source: Red Hat AAP 2.6 "Authenticate with OAuth" MCP-server docs.
+- **Self-contained topology (item 4 — confirmed).** The dev slice validates against a
+  **self-hosted Ansible MCP server + a mock managed host** deployed in-cluster (the SPEC-068
+  ephemeral-mock live-check pattern) so **CI makes no live external call**; AAP
+  read-only-mode validation is a documented operator step **outside CI**. The
+  loopback-sidecar-vs-in-cluster-Service pick is recorded at R-6.
+- **SPEC-068 present (item 5 — confirmed).** The dev outbound-credential substrate is
+  delivered (**v0.47.0**); the topology needs either no credential (loopback) or a `bearer`
+  scheme SPEC-068 already ships.
+- **`mcp` SDK license (item 6 — license reviewed, version pin open).** The official SDK is
+  `modelcontextprotocol/python-sdk`, **MIT-licensed** (v2 line) — the license review passes;
+  the **exact version pin** lands at R-2 when the direct dependency + `uv.lock` are added.
+- **Dev server artifact (item 1 — open, needs hands-on review).** The server-agnostic
+  connector dev-validates against a **self-hosted/mock** stand-in. Candidate landscape:
+  **AWX** (open-source AAP Tower upstream, REST API v2) with the community **awx-mcp**
+  server, **redhat-cop/ansible.mcp_builder** (MCP servers in Ansible Execution Environments),
+  or a **thin mock MCP server**; the official **AAP** MCP server is **licensed** (not free
+  for dev), so it is the production target, not the dev stand-in. Do **not** select
+  `ansible-collections/ansible.mcp` — that is the opposite direction (Ansible as an MCP
+  *client*). The exact artifact choice + its SPDX license/provenance review is a hands-on
+  implementation step: the dev transport it selects determines whether R-2 builds the MCP
+  adapter or the native `ansible-inventory` fallback.
 
 ## R-1: Outbound identity, credential, and topology (dependency on SPEC-068 + SPEC-070 — not built here)
 
@@ -169,5 +209,5 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       this pilot's generic adapter — re-sequenced, not superseded — and that the **Layer-2
       runbook-typed-tool fast-follow** (number assigned at its own drafting) and the
       **outbound user-delegated-identity substrate**
-      ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `draft`) are
+      ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`) are
       separate specs building on this adapter and on SPEC-068 respectively.

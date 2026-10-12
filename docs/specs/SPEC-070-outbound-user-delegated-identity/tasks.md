@@ -2,38 +2,46 @@
 
 Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
 
-> **Provisional — do not implement.** SPEC-070 is `draft`; **OQ-1** (mechanism) and
-> **OQ-2** (broker-minting / ADR-0015 scope) block `approved`, and **OQ-3** (what AAP
-> accepts) is a Stage-0 live fact that constrains OQ-1. Stage 0 must complete — and
-> ADR-0015 must be written — before any R-1..R-6 build task is concrete. No implementation,
-> commit/push, deployment, or version bump is authorized by this `draft`.
+> **Approved — implementation authorized (2026-10-12).** SPEC-070 is `approved`: **OQ-1**
+> resolved to **(c) per-user OAuth 2.x authorization-code, connector-local**, **OQ-2** to
+> **no identity-broker mint**, and **OQ-3** answered by research (Red Hat AAP's MCP server
+> takes per-user OAuth auth-code / PATs and inherits user RBAC). ADR-0015 is **accepted**
+> and indexed. Stage 0 is therefore **complete**; the R-1..R-6 build tasks below are
+> concrete against the pinned mechanism. Commit/push, deployment, and any version bump
+> remain **separate** authorization boundaries **not** granted by approval.
 
-## Stage 0 — decide the mechanism, then write ADR-0015 (gates everything)
+## Stage 0 — decide the mechanism, then write ADR-0015 (COMPLETE 2026-10-12)
 
-- [ ] **OQ-3 (live fact):** determine what the first production target accepts for
-      user-delegated auth — Red Hat AAP's MCP server uses "dual-layer auth inheriting user
-      RBAC"; confirm whether it takes a federated user assertion, a token-exchanged token, or
-      per-user AAP credentials. Record the evidence (mirrors SPEC-067 OQ-1 / SPEC-069 OQ-1).
-- [ ] **OQ-1 (decision):** pick the delegation mechanism — (a) connector-local RFC 8693
-      token exchange, (b) on-behalf-of, (c) per-user OAuth authorization-code, or
-      (d) shared-IdP SSO/federation — constrained by the OQ-3 fact. Pin the scheme name +
-      required fields (R-1) and the grant shape (R-2).
-- [ ] **OQ-2 (decision):** determine whether the chosen mechanism requires the
-      identity-broker to mint a new outbound-facing token (new audience/claim class →
-      `identity-token.schema.json` change) or can stay connector-local reusing the inbound
-      delegated token as `subject_token`.
-- [ ] **Write ADR-0015** (`docs/adr/0015-<slug>.md`, status `proposed` → `accepted` per the
-      ADR conventions): record the outbound user-delegated trust decision, the mechanism, the
-      alternatives considered, and the no-elevation / no-downgrade consequences. Add it to
-      `docs/adr/README.md`'s index.
-- [ ] **OQ-4 (decision, only if OQ-1 = per-user OAuth):** decide where user-scoped refresh
-      tokens live and how consent/rotation/revocation are handled — a new user-scoped store
-      is its own reviewed capability, not an ad-hoc file.
-- [ ] **OQ-5 (decision):** pin the self-contained dev-validation topology (mock IdP
-      supporting the grant, vs a self-hosted Keycloak + AWX), tying to SPEC-069 OQ-5.
-- [ ] Flip `spec.md` status `draft` → `approved`, pin the target version, and lift the
-      `Provisional` banners on `plan.md`/`tasks.md` — **only after** OQ-1/OQ-2 resolve and
-      ADR-0015 is accepted (separate operator authorization).
+- [x] **OQ-3 (live fact) — RESOLVED:** Red Hat AAP's MCP server takes **per-user OAuth 2.x
+      authorization-code / PATs** against AAP Gateway's own authorization server and
+      **inherits the requesting user's RBAC**; 2.6 has **no OIDC discovery** and documents
+      authorization-code + password grants — **not** token-exchange or OBO. Evidence recorded
+      in ADR-0015 (researched 2026-10-12).
+- [x] **OQ-1 (decision) — RESOLVED to (c) per-user OAuth authorization-code** (operator,
+      2026-10-12), constrained by the OQ-3 fact. Scheme provisionally named
+      `oauth2_authorization_code`; R-1 fields and the R-2 grant shape are pinned in
+      `spec.md`/`plan.md`. (a)/(b) rejected, (d) deferred — see ADR-0015.
+- [x] **OQ-2 (decision) — RESOLVED to no identity-broker mint.** The mechanism stays
+      **connector-local**; the target issues the user-bound token. `identity-token.schema.json`
+      is **unchanged**; the broker's inbound `sub` is only read to look up the user's refresh
+      token. See ADR-0015.
+- [x] **Write ADR-0015** — done:
+      `docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md`, status
+      **`accepted`** (2026-10-12), recording the trust decision, mechanism, alternatives, and
+      the no-elevation / no-downgrade consequences; indexed in `docs/adr/README.md`.
+- [x] **OQ-4 (decision) — IN SCOPE (OQ-1 = c forces it):** a **new user-scoped credential
+      store** holds per-user refresh tokens — encrypted at rest, in-memory on use, rotatable,
+      revocable, redaction-covered (ADR-0015). The direction is decided; the concrete backend
+      + consent/rotation/revocation flow is an R-6 implementation task, its own reviewed
+      capability (not an ad-hoc file).
+- [x] **OQ-5 (decision) — RESOLVED in direction:** with authorization-code (not token
+      exchange), dev validation uses a mock OAuth authorization server — a **self-hosted
+      Keycloak** fronting **AWX** as the in-cluster stand-in (ties to SPEC-069 OQ-5); unit /
+      integration tests use `httpx.MockTransport`. The concrete harness is pinned in the R-2
+      test tasks.
+- [x] Flip `spec.md` status `draft` → **`approved`**, target version pinned to **v0.49.0**,
+      and the `Provisional` banners on `plan.md`/`tasks.md` lifted — done 2026-10-12 after
+      OQ-1/OQ-2/OQ-3 resolved and ADR-0015 was accepted (operator authorization).
 
 ## R-1: User-delegated outbound credential scheme (additive over SPEC-068)
 

@@ -444,7 +444,14 @@ a waitlisted instance. This is a
 and returns to active sequencing whenever its PDI unblocks. SPEC-069 is **approved**
 (2026-10-12) — implementation authorized to begin (the SPEC-066 precedent: the residual
 items are checkable Stage-0 verification tasks, not blocking Open Questions); commit/push,
-deployment, and any version bump remain separate gates not granted by approval.
+deployment, and any version bump remain separate gates not granted by approval. Its OQ-4
+mechanism was extracted to
+[SPEC-070 outbound user-delegated identity](../specs/SPEC-070-outbound-user-delegated-identity/spec.md),
+**approved 2026-10-12** (target **v0.49.0**;
+[ADR-0015](../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md) accepted):
+per-user OAuth 2.x authorization-code resolved **connector-locally** against the target's
+own token endpoint, **no identity-broker mint**, plus a new user-scoped credential store —
+the production user-delegated path SPEC-069's read-only **dev** slice does not block on.
 
 The theme's central scoping finding (recorded in the
 [machine-consumer credential memo](../workspace/machine-consumer-credential-model-spike.md)):
