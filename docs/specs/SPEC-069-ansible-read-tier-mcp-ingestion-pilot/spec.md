@@ -61,10 +61,11 @@
 > and is removed from the read tier; OQ-4 **user-delegated identity to the targets** is the
 > governance model, with the mechanism extracted to
 > **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)**;
-> OQ-5 **self-contained in-cluster validation** confirmed. What remains is **Stage-0
-> verification facts** (exact server artifact + license/provenance, the concrete read
-> operation set + argument shapes, what AAP's MCP server auth accepts) recorded as tasks in
-> `tasks.md`, plus the **production-path dependency** on
+> OQ-5 **self-contained in-cluster validation** confirmed. What remained at approval was
+> **Stage-0 verification facts** (exact server artifact + license/provenance, the concrete
+> read operation set + argument shapes, what AAP's MCP server auth accepts) recorded as tasks
+> in `tasks.md` — **Stage 0 has since closed (2026-10-13; see the changelog + Stage-0
+> findings)** — plus the **production-path dependency** on
 > [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md). Unlike SPEC-067, **no
 > remaining item is gated on an external provider** — that self-provisionability is the
 > entire reason this pilot is sequenced first. **Approved by the operator 2026-10-12;
@@ -167,7 +168,9 @@ read tier, **no infrastructure blast radius**.
 Each requirement is stable once the spec is `approved` and carries testable acceptance
 criteria. R-1 is a dependency pointer (SPEC-068 for dev;
 [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) for production); R-2–R-6
-remain provisional on the Stage-0 verification facts and are finalized as Stage 0 closes.
+were provisional on the Stage-0 verification facts — **Stage 0 closed 2026-10-13** (all six
+verify items resolved + recorded in `tasks.md`), so they are finalized; each tool's exact
+`parameters_schema` still lands at R-2.
 
 ### R-1: Outbound identity, credential, and target topology
 
@@ -209,8 +212,10 @@ beside the native `k8s.*`/`elastic.*`/`web.*`/`http.*` connectors. The adapter i
 adapter binds to a self-hosted AWX/mock server in dev and to AAP's read-only-mode server in
 production without adapter-code changes. The `mcp` dependency is added to **tool-gateway
 only**; the agent-platform kernel never becomes an MCP client. *(Transport direction
-inherited from SPEC-067 OQ-3; server artifact and exact read-operation set provisional on
-Stage-0.)*
+inherited from SPEC-067 OQ-3; server artifact + read-operation set **pinned by Stage-0
+2026-10-13** — real AWX + the MIT `SurgeX-Labs/awx-mcp-server`, the read-only op set +
+argument shapes recorded in `tasks.md` — with each tool's exact `parameters_schema`
+finalizing at R-2.)*
 
 Acceptance criteria:
 
@@ -393,9 +398,9 @@ Acceptance criteria:
 ## Open Questions
 
 All five Open Questions that blocked `approved` at drafting were **resolved by operator
-direction on 2026-10-11**. What remains is **Stage-0 verification facts** (checkable, not
-decisions — recorded as tasks in `tasks.md`) and **one production-path dependency**
-([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)). Following the
+direction on 2026-10-11**. What remained was the **Stage-0 verification facts** (checkable,
+not decisions — recorded as tasks in `tasks.md`; **Stage 0 closed 2026-10-13**) and **one
+production-path dependency** ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)). Following the
 SPEC-066/067 precedent, checkable facts are
 Stage-0 tasks rather than blocking Open Questions.
 
@@ -441,6 +446,17 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-13: **Stage 0 closed** (verification complete; **no status change** — still
+  `approved`). All six Stage-0 verify items are resolved and recorded in `tasks.md`: the
+  dev-server artifact (OQ-1 residual) is **real AWX + the MIT `SurgeX-Labs/awx-mcp-server`**,
+  self-hosted in-cluster (operator pick; the native `ansible-inventory` fallback is **not**
+  taken — a suitable MIT MCP server exists, so the substrate **is** proven on this target);
+  the read-only operation set + per-tool argument shapes (OQ-2 residual) are pinned (the
+  chosen server's 3 mutating tools stay denied; its missing host-facts tool is deferred to
+  R-2, not faked); and the `mcp` SDK is **`mcp==2.3.0`, MIT** (the exact pin lands at R-2 in
+  tool-gateway's lockfile only). The R-2–R-6 provisional-on-Stage-0 hedges are finalized
+  accordingly. Implementation (R-2 onward), commit/push, deployment, and any version bump
+  remain separate authorization boundaries **not** crossed here.
 - 2026-10-12: **approved by the operator** (status `draft` → `approved`); implementation
   authorized to begin (the SPEC-066 precedent — the residual items are checkable Stage-0
   verification tasks, not blocking Open Questions). Target version pinned to **v0.48.0**

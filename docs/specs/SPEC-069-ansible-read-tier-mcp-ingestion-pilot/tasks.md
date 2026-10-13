@@ -8,31 +8,47 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 > model — this spec is the read-only discovery layer; OQ-3 `--check` removed from the read
 > tier; OQ-4 user-delegated identity to the targets, mechanism extracted to
 > [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); OQ-5 self-contained
-> in-cluster validation). What remains is **Stage-0 verification facts** (exact server
-> artifact + license/provenance, the concrete read-operation set + argument shapes, what
-> AAP's MCP server auth accepts) and **one production-path dependency**
-> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`), so
-> R-2–R-6 below stay provisional on the Stage-0 facts and firm up as Stage 0 closes. R-1 is
+> in-cluster validation). **Stage 0 closed 2026-10-13** — all six verify items are resolved
+> and recorded in the Stage-0 findings below (dev artifact = real AWX + the MIT
+> `SurgeX-Labs/awx-mcp-server`; the read-operation set + per-tool argument shapes pinned;
+> `mcp==2.3.0` MIT confirmed; AAP auth, the self-contained topology, and the SPEC-068
+> dependency confirmed), so **R-2–R-6 are unblocked** — each tool's exact `parameters_schema`
+> still finalizes at R-2. The one production-path dependency
+> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`) does
+> not gate this read-only dev slice. R-1 is
 > not built here — it is a dependency on the delivered
 > [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0) for dev and
 > on [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) for the production
 > user-delegated path. Approval authorizes implementation to begin; commit/push, deployment,
 > and any version bump remain separate authorization boundaries **not** granted here. **Stage
-> 0 is read-only and is the first thing to execute now that the spec is approved** — the OQ-1
-> server-artifact choice determines whether R-2 builds the MCP adapter or the native
-> fallback, so no target-specific implementation should start before Stage 0 closes.
+> 0 was read-only and was the first thing executed at approval**; its OQ-1 server-artifact
+> choice resolved to the **MCP-adapter path** (real AWX + the MIT `SurgeX-Labs/awx-mcp-server`),
+> **not** the native `ansible-inventory` fallback, so R-2 target-specific implementation is
+> now unblocked.
 
 ## Stage 0 — Verify (read-only; pins the residual OQ facts; confirms the SPEC-068 dependency and the topology)
 
-- [ ] Pin the exact **self-hosted** Ansible MCP-server artifact (AWX + community AWX MCP
+- [x] Pin the exact **self-hosted** Ansible MCP-server artifact (AWX + community AWX MCP
       server, or a thin mock MCP server) and run the supply-chain/license/provenance review
       (OQ-1 residual) — record the chosen dev transport against R-2/R-6. If no self-hosted MCP
       server passes review, record the native-fallback decision and that the MCP substrate was
       **not** proven on this target.
-- [ ] Fix the **read-only discovery** operation set + each tool's argument-validation shape
+      **Resolved (2026-10-13, operator pick): real AWX + the MIT `SurgeX-Labs/awx-mcp-server`,
+      self-hosted in-cluster** (details + supply-chain/license/provenance review in the Stage-0
+      closure findings below). A suitable MIT MCP server exists, so the native
+      `ansible-inventory` fallback is **not** taken — the MCP substrate **is** proven on this
+      target. R-2/R-6 cautions: the server's 3 mutating tools stay denied, and R-6 budgets for
+      AWX's weight.
+- [x] Fix the **read-only discovery** operation set + each tool's argument-validation shape
       (OQ-2 residual) — record against R-2/R-3: inventory host/group listing, `gather_facts`/
       setup reads, job-template listing, job log/status monitoring, environment health.
       **Confirm no `--check`/dry-run operation is admitted** (OQ-3 resolved).
+      **Resolved (2026-10-13):** the minimal admitted set + per-tool `parameters_schema` shapes
+      are pinned in the Stage-0 closure findings below (mapped from the chosen server's
+      read-only tools); **no `--check`/dry-run and no mutating tool is admitted**. One honest
+      gap: the chosen `awx-mcp-server` exposes **no host `gather_facts`/facts tool**, so live
+      fact gathering is deferred to R-2 (native fallback or a later server tool) rather than
+      faked (OQ-5).
 - [x] Confirm what auth **AAP's MCP server** accepts for the delegated path (OQ-1/OQ-4
       residual) — record against R-1/R-4 as the input
       **[SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md)** will consume; note
@@ -46,17 +62,22 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 - [x] Confirm SPEC-068 (the delivered dev credential substrate, v0.47.0) is present and that
       OQ-5's topology either needs no credential (loopback) or a scheme SPEC-068 ships
       (`bearer`).
-- [ ] Pin the official `mcp` Python SDK version and run the supply-chain/license review
+- [x] Pin the official `mcp` Python SDK version and run the supply-chain/license review
       before adding it as a direct tool-gateway dependency (inherited from SPEC-067 OQ-3).
       **Finding (2026-10-12):** license reviewed — MIT (`modelcontextprotocol/python-sdk`,
       v2 line); the exact version pin lands at R-2 with the direct dependency + `uv.lock`.
+      **Resolved (2026-10-13):** current stable is **`mcp==2.3.0`** (MIT, `requires-python
+      >=3.10`; tool-gateway `>=3.11`, repo `.python-version` 3.12 — compatible). Pin at R-2 in
+      **tool-gateway's** `pyproject.toml` + `uv.lock` only; the kernel lockfile is untouched.
 
-### Stage-0 findings (recorded 2026-10-12)
+### Stage-0 findings (2026-10-12; items 1/2/6 closed 2026-10-13)
 
-Desk research plus the SPEC-070 approval closed the pure-fact Stage-0 items (3/4/5);
-the two items that need a hands-on artifact pin + supply-chain review (1/6) stay open for
-implementation, and the read-only operation set's per-tool argument shapes (2) follow the
-item-1 artifact choice.
+Desk research plus the SPEC-070 approval closed the pure-fact Stage-0 items (3/4/5) on
+2026-10-12. The two items that needed a hands-on artifact pin + supply-chain review (1/6),
+and the read-operation set whose per-tool argument shapes follow the item-1 choice (2), were
+**closed 2026-10-13** — the operator picked **real AWX + the MIT `SurgeX-Labs/awx-mcp-server`**
+as the dev/CI target. All six Stage-0 verify items are now resolved; the findings below are
+the record.
 
 - **AAP MCP-server auth (item 3 — resolved).** Red Hat AAP's MCP server authenticates each
   user via **OAuth 2.x authorization-code** (or a **PAT**) against **AAP Gateway's own**
@@ -75,19 +96,61 @@ item-1 artifact choice.
 - **SPEC-068 present (item 5 — confirmed).** The dev outbound-credential substrate is
   delivered (**v0.47.0**); the topology needs either no credential (loopback) or a `bearer`
   scheme SPEC-068 already ships.
-- **`mcp` SDK license (item 6 — license reviewed, version pin open).** The official SDK is
-  `modelcontextprotocol/python-sdk`, **MIT-licensed** (v2 line) — the license review passes;
-  the **exact version pin** lands at R-2 when the direct dependency + `uv.lock` are added.
-- **Dev server artifact (item 1 — open, needs hands-on review).** The server-agnostic
-  connector dev-validates against a **self-hosted/mock** stand-in. Candidate landscape:
-  **AWX** (open-source AAP Tower upstream, REST API v2) with the community **awx-mcp**
-  server, **redhat-cop/ansible.mcp_builder** (MCP servers in Ansible Execution Environments),
-  or a **thin mock MCP server**; the official **AAP** MCP server is **licensed** (not free
-  for dev), so it is the production target, not the dev stand-in. Do **not** select
-  `ansible-collections/ansible.mcp` — that is the opposite direction (Ansible as an MCP
-  *client*). The exact artifact choice + its SPDX license/provenance review is a hands-on
-  implementation step: the dev transport it selects determines whether R-2 builds the MCP
-  adapter or the native `ansible-inventory` fallback.
+- **`mcp` SDK (item 6 — RESOLVED 2026-10-13).** The official SDK is
+  `modelcontextprotocol/python-sdk`, **MIT-licensed** — the license/provenance review passes.
+  Current stable is **`mcp==2.3.0`** (`requires-python >=3.10`; tool-gateway `>=3.11`, repo
+  `.python-version` 3.12 — compatible). The **exact pin lands at R-2** in **tool-gateway's**
+  `pyproject.toml` + `uv.lock` only; the kernel lockfile is untouched (`mcp` stays
+  transitive-only there via AgentScope).
+- **Dev server artifact (item 1 — RESOLVED 2026-10-13, operator pick).** The server-agnostic
+  connector dev-validates against a **self-hosted** stand-in. Supply-chain/license/provenance
+  review of the candidate landscape:
+  - **`SurgeX-Labs/awx-mcp-server`** (PyPI `awx-mcp-server`) — **MIT** ✓; third-party/community
+    provenance (not official Red Hat); a **16-tool read-write** surface over AWX REST API v2;
+    needs a real AWX instance behind it. **← chosen.**
+  - **`ansible/ansible.mcp_builder`** (ex-`redhat-cop`) — **GPL-3.0-or-later**, Ansible-org
+    **Technology Preview**, and the **wrong shape**: a collection that builds Execution
+    Environments containing *AWS/Azure/GitHub* MCP servers, not an Ansible-target read server.
+    Noted as the production EE-packaging mechanism AAP uses, not a dev stand-in.
+  - **thin mock MCP server** — trivial provenance, exact read-only surface, matches the
+    SPEC-068 ephemeral-mock pattern; **not** chosen as primary (the operator preferred
+    real-AWX fidelity), retained as an option if AWX's weight becomes a CI problem.
+  - official **AAP** MCP server — **licensed**, the **production** target (operator read-only
+    validation outside CI), not a free dev stand-in. Do **not** select
+    `ansible-collections/ansible.mcp` (opposite direction — Ansible as an MCP *client*).
+
+  **Decision: real AWX + the MIT `SurgeX-Labs/awx-mcp-server`, self-hosted in-cluster** (so CI
+  still makes no live external call, OQ-5). A suitable MIT MCP server exists, so the
+  MCP-ingestion substrate **is** proven on this target and the native `ansible-inventory`
+  fallback is **not** taken (it stays documented). Two recorded cautions for R-2/R-6: (1) the
+  server's **3 mutating tools — `job_launch`, `job_cancel`, `project_update` — MUST be denied**
+  by the admission allowlist (never named in the bundle at any tier); (2) R-6 must budget for
+  **AWX's weight** (Postgres/Redis/web/task containers) in the dev-k8s overlay.
+- **Read-only operation set + argument shapes (item 2 — RESOLVED 2026-10-13).** The admitted
+  set is **read-only discovery only**, kept **minimal** (memo §2: "a large catalog is not
+  itself a use case"), mapped from the chosen server's read tools to canonical `ansible.*`
+  typed tools (category `ansible`, `risk_level: read`), each with a JSON-Schema
+  `parameters_schema` (the SPEC-007 `ToolDefinition` shape; exact schemas finalized at R-2).
+  Pinned admitted set + argument shapes, one per named capability:
+  - **inventory host/group listing** — `ansible.list_inventories` `{ name_filter?: string,
+    limit?: int }`; `ansible.get_inventory` `{ inventory: string }` (required; hosts/groups
+    within an inventory)
+  - **job-template listing** — `ansible.list_job_templates` `{ name_filter?: string, limit?: int }`
+  - **job log/status monitoring** — `ansible.get_job` `{ job_id: string }` (required; status);
+    `ansible.get_job_stdout` `{ job_id: string, tail?: int }` (required `job_id`; log)
+  - **environment health** — `ansible.get_environment_health` `{}` (maps the server's
+    `env_test` / `env_get_active`)
+
+  **Server read tools NOT admitted** (no use case yet; admit later only on a named need):
+  `get_job_template`, `list_jobs`, `job_events`, `list_projects`. **Denied / never admitted:**
+  the mutating `job_launch`, `job_cancel`, `project_update` (write tier — absent from the
+  bundle), any playbook-run/runbook-execution name (Layer-2 fast-follow), and **any
+  `--check`/dry-run** operation (OQ-3 — the server exposes none; none admitted). **Gap
+  recorded:** the server exposes **no host `gather_facts`/facts tool**, so the spec's
+  "`gather_facts`/setup reads" capability is **deferred to R-2** (a native
+  `ansible-inventory`/facts fallback or a later server tool) rather than faked (OQ-5 "defer,
+  don't fake"). Argument shapes follow the `k8s.*` connector convention; server-advertised
+  metadata never sets tier (R-2 invariant).
 
 ## R-1: Outbound identity, credential, and topology (dependency on SPEC-068 + SPEC-070 — not built here)
 
@@ -185,8 +248,10 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 
 ## Delivery Gate
 
-- [ ] Stage 0 residual facts recorded; all five Open Questions show their 2026-10-11 operator
-      resolutions in `spec.md`.
+- [x] Stage 0 residual facts recorded; all five Open Questions show their 2026-10-11 operator
+      resolutions in `spec.md`. **Stage 0 closed 2026-10-13** — all six verify items resolved
+      (dev artifact = real AWX + MIT `SurgeX-Labs/awx-mcp-server`; read-op set + argument
+      shapes pinned; `mcp==2.3.0` MIT confirmed).
 - [ ] SPEC-068 (the dev outbound credential substrate, delivered v0.47.0) confirmed present;
       the connector resolves any dev credential through its resolver seam. The production
       user-delegated path's dependency on

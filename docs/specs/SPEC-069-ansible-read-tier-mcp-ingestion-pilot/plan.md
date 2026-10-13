@@ -8,19 +8,23 @@
 > `--check` removed from the read tier; OQ-4 user-delegated identity to the targets,
 > mechanism extracted to
 > [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); OQ-5 self-contained
-> in-cluster validation). What remains is **Stage-0 verification facts** (exact server
-> artifact + license/provenance, the concrete read-operation set + argument shapes, what
-> AAP's MCP server auth accepts) and **one production-path dependency**
-> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`) — so
-> R-2–R-6 below stay provisional on the Stage-0 facts and firm up as Stage 0 closes. R-1 is
+> in-cluster validation). **Stage 0 closed 2026-10-13** — all six verify items are resolved
+> and recorded in the SPEC-069 `tasks.md` Stage-0 findings (dev artifact = real AWX + the MIT
+> `SurgeX-Labs/awx-mcp-server`; the read-operation set + per-tool argument shapes pinned;
+> `mcp==2.3.0` MIT confirmed; AAP auth, the self-contained topology, and the SPEC-068
+> dependency confirmed), so **R-2–R-6 are unblocked** — each tool's exact `parameters_schema`
+> still finalizes at R-2. The one production-path dependency
+> ([SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md), itself `approved`) does
+> not gate this read-only dev slice. R-1 is
 > not built here — it is a dependency on the delivered
 > [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) (v0.47.0) for dev
 > and on [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) for the production
 > user-delegated path. Approval authorizes implementation to begin; commit/push, deployment,
 > and any version bump remain separate authorization boundaries **not** granted here.
-> **Stage 0 (verification) is the first thing to execute now that the spec is approved** —
-> the OQ-1 server-artifact choice determines whether R-2 builds an MCP adapter or the native
-> fallback, so no target-specific implementation should start before Stage 0 closes.
+> **Stage 0 (verification) was the first thing executed at approval**; its OQ-1
+> server-artifact choice resolved to the **MCP-adapter path** (real AWX + the MIT
+> `SurgeX-Labs/awx-mcp-server`), **not** the native `ansible-inventory` fallback, so R-2
+> target-specific implementation is now unblocked.
 
 ## Approach
 
@@ -34,9 +38,11 @@ target (dependent on
 adapter +
 typed-tool model that [SPEC-067](../SPEC-067-servicenow-mcp-ingestion-pilot/spec.md) will
 later configure for ServiceNow and that the **Layer-2 runbook-typed-tool fast-follow** will
-extend — rather than either building blind. R-2–R-6 are provisional until Stage 0 pins the
-server artifact (OQ-1), the read-operation set (OQ-2), and what AAP's MCP server auth
-accepts (OQ-4 residual). The stages are ordered so the connector is validated against an
+extend — rather than either building blind. **Stage 0 closed 2026-10-13**, pinning the server
+artifact (OQ-1 → real AWX + the MIT `SurgeX-Labs/awx-mcp-server`), the read-operation set +
+argument shapes (OQ-2), and AAP's MCP-server auth (OQ-4 residual), so R-2–R-6 are no longer
+provisional (each tool's exact `parameters_schema` still finalizes at R-2). The stages are
+ordered so the connector is validated against an
 in-cluster mock target before any live infrastructure is touched.
 
 0. **Verify** (Stage 0) — read-only. Pin the residual facts the OQ resolutions left as
