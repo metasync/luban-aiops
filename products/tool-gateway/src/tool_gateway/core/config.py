@@ -48,6 +48,15 @@ DEFAULT_SECRET_DELIVERY_REDIS_PORT = 6379
 DEFAULT_SECRET_DELIVERY_REDIS_DB = 2
 DEFAULT_EMAIL_PORT = 587
 
+# Ansible MCP-ingestion defaults (SPEC-069 R-2). Off by default; the generic,
+# server-agnostic adapter is inert until a flag is enabled and an endpoint is
+# wired. The streamable-HTTP transport matches the self-hosted awx-mcp-server
+# (and AAP's read-only-mode MCP server); ``stdio`` covers a local server
+# process. The timeout mirrors the HTTP connector default.
+DEFAULT_ANSIBLE_MCP_TRANSPORT = "streamable_http"
+DEFAULT_ANSIBLE_MCP_TIMEOUT_MS = 10000
+DEFAULT_ANSIBLE_NATIVE_EXECUTABLE = "ansible-inventory"
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -157,6 +166,28 @@ class GatewaySettings:
     email_use_tls: bool = True
     email_recipient_allowlist: tuple[str, ...] = ()
     email_strict_allowlist: bool = False
+    # Ansible MCP-ingestion connector (SPEC-069 R-2): off by default. The
+    # generic, server-agnostic adapter binds a self-hosted Ansible MCP server
+    # (dev) or AAP read-only mode (production) over the official ``mcp`` SDK.
+    # The admitted read-only tool set + tiers are gateway-owned binding config
+    # (``ingestion/ansible_binding.py``), never server-advertised metadata; the
+    # adapter treats everything the server says as untrusted. The optional
+    # credential set resolves through the SPEC-068 seam (a loopback sidecar
+    # needs none). ``ansible_native_enabled`` is the OQ-1 fallback — a read-only
+    # ``ansible-inventory`` shell-out (no ``--check``) used only when no MCP
+    # server is wired; it does not prove the MCP substrate. Endpoint, inventory
+    # source, and executable path are operator configuration, never model args.
+    ansible_mcp_enabled: bool = False
+    ansible_mcp_transport: str = DEFAULT_ANSIBLE_MCP_TRANSPORT
+    ansible_mcp_url: str = ""
+    ansible_mcp_command: str = ""
+    ansible_mcp_args: tuple[str, ...] = ()
+    ansible_mcp_timeout_ms: int = DEFAULT_ANSIBLE_MCP_TIMEOUT_MS
+    ansible_mcp_credential_set: str = ""
+    ansible_mcp_credential_sets_path: str = ""
+    ansible_native_enabled: bool = False
+    ansible_inventory_path: str = ""
+    ansible_native_executable: str = DEFAULT_ANSIBLE_NATIVE_EXECUTABLE
 
     def __post_init__(self) -> None:
         """Fail fast on a password-policy override that would *weaken* the floor.
@@ -182,6 +213,10 @@ class GatewaySettings:
                 raise ValueError("Redis and SMTP ports must be between 1 and 65535")
         if self.secret_delivery_redis_db < 0:
             raise ValueError("Redis database must be nonnegative")
+        if self.ansible_mcp_transport not in {"streamable_http", "stdio"}:
+            raise ValueError(
+                "GATEWAY_ANSIBLE_MCP_TRANSPORT must be streamable_http or stdio"
+            )
         if self.password_min_length is None and self.password_required_classes is None:
             return
         from tool_gateway.tools.password_policy import (
@@ -415,6 +450,39 @@ class GatewaySettings:
             ),
             email_strict_allowlist=_env_bool(
                 "GATEWAY_EMAIL_STRICT_ALLOWLIST", "false"
+            ),
+            # Ansible MCP-ingestion knobs (SPEC-069 R-2). Off by default; the
+            # credential-set path falls back to the http/browser mount so one
+            # synced secret can serve it, and no inline credential value is ever
+            # accepted. Transport is validated in ``__post_init__``.
+            ansible_mcp_enabled=_env_bool("GATEWAY_ANSIBLE_MCP_ENABLED", "false"),
+            ansible_mcp_transport=os.getenv(
+                "GATEWAY_ANSIBLE_MCP_TRANSPORT", DEFAULT_ANSIBLE_MCP_TRANSPORT
+            ).strip().lower(),
+            ansible_mcp_url=os.getenv("GATEWAY_ANSIBLE_MCP_URL", ""),
+            ansible_mcp_command=os.getenv("GATEWAY_ANSIBLE_MCP_COMMAND", ""),
+            ansible_mcp_args=_env_optional_tuple("GATEWAY_ANSIBLE_MCP_ARGS") or (),
+            ansible_mcp_timeout_ms=int(
+                os.getenv(
+                    "GATEWAY_ANSIBLE_MCP_TIMEOUT_MS",
+                    str(DEFAULT_ANSIBLE_MCP_TIMEOUT_MS),
+                )
+            ),
+            ansible_mcp_credential_set=os.getenv(
+                "GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET", ""
+            ),
+            ansible_mcp_credential_sets_path=(
+                os.getenv("GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS", "")
+                or os.getenv("GATEWAY_HTTP_CREDENTIAL_SETS", "")
+                or os.getenv("GATEWAY_BROWSER_CREDENTIAL_SETS", "")
+            ),
+            ansible_native_enabled=_env_bool(
+                "GATEWAY_ANSIBLE_NATIVE_ENABLED", "false"
+            ),
+            ansible_inventory_path=os.getenv("GATEWAY_ANSIBLE_INVENTORY_PATH", ""),
+            ansible_native_executable=os.getenv(
+                "GATEWAY_ANSIBLE_NATIVE_EXECUTABLE",
+                DEFAULT_ANSIBLE_NATIVE_EXECUTABLE,
             ),
         )
 

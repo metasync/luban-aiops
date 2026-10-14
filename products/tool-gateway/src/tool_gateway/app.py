@@ -164,6 +164,34 @@ def _build_tool_registry(
         secrets_connector.register_tools(registry)
         LOGGER.info("secrets connector registered")
 
+    if settings.ansible_mcp_enabled:
+        # SPEC-069 R-2: the generic, server-agnostic MCP-ingestion adapter bound
+        # to the Ansible read-only config (admitted read tools only; the server's
+        # mutating tools are never in the allowlist). No app-lifecycle hooks —
+        # the MCP session is opened per call and fails closed — so it is
+        # registered here and not added to the returned tuple; the tuple shape is
+        # unchanged.
+        from tool_gateway.ingestion.ansible_binding import (
+            build_ansible_mcp_connector,
+        )
+
+        ansible_connector = build_ansible_mcp_connector(settings)
+        ansible_connector.register_tools(registry)
+        LOGGER.info("ansible MCP-ingestion connector registered")
+    elif settings.ansible_native_enabled:
+        # SPEC-069 R-2 OQ-1 fallback: a read-only ``ansible-inventory`` shell-out
+        # (no MCP substrate, no ``--check``), mutually exclusive with the MCP
+        # path. Topology only — never host vars/facts.
+        from tool_gateway.ingestion.ansible_native import AnsibleNativeConnector
+
+        ansible_connector = AnsibleNativeConnector(
+            inventory_path=settings.ansible_inventory_path,
+            executable=settings.ansible_native_executable,
+            timeout_ms=settings.ansible_mcp_timeout_ms,
+        )
+        ansible_connector.register_tools(registry)
+        LOGGER.info("ansible native read-only connector registered")
+
     return registry, browser_connector
 
 
