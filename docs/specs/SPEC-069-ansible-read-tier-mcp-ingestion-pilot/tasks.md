@@ -144,7 +144,7 @@ the record.
   **Server read tools NOT admitted** (no use case yet; admit later only on a named need):
   `get_job_template`, `list_jobs`, `job_events`, `list_projects`. **Denied / never admitted:**
   the mutating `job_launch`, `job_cancel`, `project_update` (write tier — absent from the
-  bundle), any playbook-run/runbook-execution name (Layer-2 fast-follow), and **any
+  admission allowlist), any playbook-run/runbook-execution name (Layer-2 fast-follow), and **any
   `--check`/dry-run** operation (OQ-3 — the server exposes none; none admitted). **Gap
   recorded:** the server exposes **no host `gather_facts`/facts tool**, so the spec's
   "`gather_facts`/setup reads" capability is **deferred to R-2** (a native
@@ -171,22 +171,23 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 
 ## R-2: Server-agnostic MCP-ingestion connector + Ansible read-only binding (the generic adapter)
 
-- [ ] Add the official `mcp` SDK as a direct tool-gateway dependency
+- [x] Add the official `mcp` SDK as a direct tool-gateway dependency
       (`products/tool-gateway/pyproject.toml` + `uv.lock`; kernel lockfile untouched).
-- [ ] Add the **generic, server-agnostic** MCP ingestion adapter that consumes an MCP server
+- [x] Add the **generic, server-agnostic** MCP ingestion adapter that consumes an MCP server
       and maps discovered tools into the SPEC-007 `BaseTool`/`ToolDefinition`/`ToolRegistry`
-      seam as **typed tools**, admitting only policy-named tools and treating server metadata
+      seam as **typed tools**, admitting only allowlisted tools (the allowlist is gateway
+      connector config, not a per-tool-name policy-bundle entry) and treating server metadata
       as untrusted (`products/tool-gateway/src/tool_gateway/`). Tool admission + tier mapping
       are **configuration**, not adapter code — so the same adapter binds a self-hosted
       AWX/mock server (dev), AAP read-only mode (production), a future ServiceNow binding
       (SPEC-067), and the Layer-2 runbook-tool binding.
-- [ ] Add the Ansible **read-only** target binding (endpoint, admitted read tool names, tier
+- [x] Add the Ansible **read-only** target binding (endpoint, admitted read tool names, tier
       mapping); authenticate the MCP session via the R-1 dev credential scheme or loopback;
       implement the native read-only fallback connector (`ansible-inventory` shell-out, **no
       `--check`**) for the OQ-1 fallback path.
-- [ ] Wire calls through the existing signed-tool path (SPEC-037); confirm no new kernel
+- [x] Wire calls through the existing signed-tool path (SPEC-037); confirm no new kernel
       seam and the kernel is never an MCP client.
-- [ ] Tests: tools register as typed tools and are callable; **read-tier-only** (no
+- [x] Tests: tools register as typed tools and are callable; **read-tier-only** (no
       playbook-run/runbook-execution/mutating operation exposed, **no `--check`/dry-run tool
       admitted**); **server-agnostic** (the same adapter maps a self-hosted server's tools and
       an AAP read-only config without adapter-code change); server-advertised metadata never
@@ -196,11 +197,22 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 
 ## R-3: Deny-by-default policy coverage for Ansible tools
 
-- [ ] Name each admitted Ansible read tool at **read tier** in the canonical bundle
-      (`shared/shared-contracts/policies/`); sync via `make sync-policy`. Assert no
-      write/admin, playbook-run, or runbook-execution Ansible name exists.
-- [ ] Add policy scenario coverage; keep `make validate-policy-scenarios`,
-      `make validate-policy`, and `make policy-diff` green.
+- [x] **No policy-bundle change — the bundle is action-based, not per-tool-name.** The
+      canonical bundle (`shared/shared-contracts/policies/policy-default.yaml`) authorizes
+      role × action (`tools:list`/`tools:invoke`/`tools:mutate`/`secrets:deliver`) and names
+      no tool. Each admitted Ansible tool registers at **read tier**, which the gateway maps
+      to `tools:invoke` alone (never `tools:mutate`) — the same existing `allow-operators-tools`
+      grant that `k8s.*`/`http.*` read tools already ride — so `make sync-policy` is **not**
+      invoked and the bundle stays byte-identical.
+- [x] **Deny-by-default is enforced at the gateway admission allowlist** (connector config),
+      not the bundle: an unlisted server tool is never registered, so invoking it returns
+      `TOOL_NOT_FOUND`. No write/admin, playbook-run, runbook-execution, or `--check`/dry-run
+      Ansible name is admitted (structurally absent from the allowlist), so no Ansible tool can
+      ever derive `tools:mutate`.
+- [x] Proven by the gateway tool tests
+      (`products/tool-gateway/tests/test_ansible_mcp_ingestion.py`: read-tier-only registration
+      + the deny-by-default allowlist). `make validate-policy-scenarios`, `make validate-policy`,
+      and `make policy-diff` stay green **unchanged** (no bundle edit → no drift).
 
 ## R-4: Audit fidelity and user-delegated attribution
 

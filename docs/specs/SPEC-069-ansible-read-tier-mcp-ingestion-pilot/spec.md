@@ -229,10 +229,10 @@ Acceptance criteria:
   signed-tool path (SPEC-037) with **no new kernel seam**. **No `--check`/dry-run and no
   mutating operation is admitted** (OQ-3; see R-5).
 - **Tool metadata advertised by the MCP server is untrusted input.** The adapter admits
-  only tools explicitly named in the policy bundle and never auto-registers whatever the
-  server advertises; a server-declared annotation, `readOnlyHint`, or description never
-  sets a tool's tier or grants approval (the MCP-exposure spike's "remote annotations
-  never auto-approve" invariant, applied to ingestion).
+  only tools explicitly named in the gateway admission allowlist (connector config) and never
+  auto-registers whatever the server advertises; a server-declared annotation, `readOnlyHint`,
+  or description never sets a tool's tier or grants approval (the MCP-exposure spike's "remote
+  annotations never auto-approve" invariant, applied to ingestion).
 - The MCP protocol is never hand-rolled. A gateway-owned **native** read-only Ansible
   connector (`ansible-inventory` shell-out, not MCP) is the documented **fallback** if
   Stage-0 (OQ-1) finds no suitable MCP server passes the supply-chain / license review.
@@ -242,19 +242,25 @@ Acceptance criteria:
 
 ### R-3: Deny-by-default policy coverage for Ansible tools
 
-Ansible tools are deny-by-default until the policy bundle names them, and each named read
-tool resolves to read tier.
+Ansible tools are deny-by-default at the **gateway admission allowlist**, and each admitted
+tool resolves to read tier. The policy bundle is **action-based** (role × action), not a
+per-tool-name allowlist, so R-3 requires **no bundle change**: read-tier tools ride the
+existing `tools:invoke` grant exactly as the `k8s.*`/`http.*` read tools already do.
 
 Acceptance criteria:
 
-- An unlisted Ansible tool is denied (deny-by-default preserved).
-- Each named read tool resolves to **read tier**; no admitted tool resolves to write or
-  admin tier. A playbook-run / runbook-execution / mutation tool name is **absent** from the
-  bundle (it belongs to the Layer-2 fast-follow at write tier).
-- The policy-bundle scenario suite (`make validate-policy-scenarios`) gains coverage for
-  the new tool names; `make validate-policy` and `make policy-diff` stay green after the
-  bundle change is synced (authored canonically in `shared/shared-contracts/policies/`,
-  never edited in place).
+- An unlisted Ansible tool is denied: it is never registered (the allowlist is connector
+  config, not a bundle entry), so invoking it returns `TOOL_NOT_FOUND` — deny-by-default
+  preserved without naming any tool in the bundle.
+- Each admitted tool resolves to **read tier** (`risk_level="read"`), which the gateway maps
+  to `tools:invoke` alone, never `tools:mutate`; no admitted tool resolves to write or admin
+  tier. A playbook-run / runbook-execution / mutation / `--check` name is **absent from the
+  allowlist** (it belongs to the Layer-2 fast-follow at write tier), so no Ansible tool can
+  derive `tools:mutate`.
+- With no bundle edit, `make sync-policy` is not invoked and `make validate-policy-scenarios`,
+  `make validate-policy`, and `make policy-diff` stay green **unchanged** (no drift, bundle
+  byte-identical); the read-tier-only and deny-by-default invariants are asserted by the
+  gateway tool tests instead of a per-tool-name scenario.
 
 ### R-4: Audit fidelity and user-delegated attribution
 

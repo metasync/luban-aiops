@@ -63,7 +63,8 @@ in-cluster mock target before any live infrastructure is touched.
 2. **Connect** (Stage 2, R-2 + R-3) — the **server-agnostic** MCP-SDK ingestion adapter +
    the Ansible **read-only** binding (native read-only connector as the OQ-1 fallback),
    reusing the SPEC-007 registry seam and establishing the typed-tool model, plus
-   deny-by-default policy-bundle coverage.
+   deny-by-default admission at the gateway allowlist (no policy-bundle change — the bundle
+   is action-based).
 3. **Attribute** (Stage 3, R-4 + R-5) — audit fidelity (requester + acting service +
    target + tool + outcome + the dev-vs-production per-user-RBAC distinction) and the
    fail-closed/no-fabrication guardrail (with dry-run explicitly excluded from the read
@@ -122,8 +123,9 @@ in-cluster mock target before any live infrastructure is touched.
   is exactly what lets the same adapter bind to a self-hosted AWX/mock server in dev, to
   **AAP's read-only-mode** server in production, and later to a ServiceNow binding (SPEC-067)
   and the **Layer-2 runbook-tool** binding, all without re-building the adapter. Governance
-  stays tool-gateway-side: the adapter admits only tools explicitly named in the policy
-  bundle and treats server-advertised metadata as untrusted. The kernel calls them through
+  stays tool-gateway-side: the adapter admits only tools explicitly named in the gateway
+  admission allowlist (connector config) and treats server-advertised metadata as untrusted.
+  The kernel calls them through
   the existing signed-tool path (SPEC-037); no new kernel seam, and the kernel never becomes
   an MCP client. `mcp` is added to tool-gateway only — its lockfile is separate from the
   kernel's transitive AgentScope pin.
@@ -145,12 +147,18 @@ in-cluster mock target before any live infrastructure is touched.
 
 ### R-3: Deny-by-default policy coverage for Ansible tools
 
-- affected files / modules: `shared/shared-contracts/policies/` (canonical bundle), synced
-  to consumers via `make sync-policy`; the policy scenario suite.
-- chosen approach: name each admitted Ansible read tool in the bundle at **read tier**;
-  unlisted tools (and any playbook-run/runbook-execution/mutation name) stay denied. Add
-  scenario coverage so `make validate-policy-scenarios` asserts the new names resolve as read
-  tier and that no write/admin Ansible name exists.
+- affected files / modules: **none in the policy bundle.** The canonical bundle
+  (`shared/shared-contracts/policies/policy-default.yaml`) is action-based (role × action:
+  `tools:list`/`tools:invoke`/`tools:mutate`/`secrets:deliver`) and names no tool, so there is
+  nothing to add and `make sync-policy` is not invoked. Deny-by-default lives at the
+  tool-gateway admission allowlist (connector config); read-tier-only is a property of the
+  admitted set, asserted by the gateway tool tests.
+- chosen approach: **faithful reinterpretation** — register each admitted Ansible tool at
+  **read tier**, which the gateway maps to `tools:invoke` alone (never `tools:mutate`), riding
+  the existing `allow-operators-tools` grant the `k8s.*`/`http.*` read tools already use. An
+  unlisted tool (and any playbook-run/runbook-execution/mutation/`--check` name) is never
+  registered, so it is denied by absence (`TOOL_NOT_FOUND`). `make validate-policy-scenarios`,
+  `make validate-policy`, and `make policy-diff` stay green unchanged (no bundle edit → no drift).
 
 ### R-4: Audit fidelity and user-delegated attribution
 
@@ -258,14 +266,15 @@ Ansible/AAP, not the kernel, so it does not collide with ADR-0011 / SPEC-057.
 
 - deployment or configuration changes required: the self-hosted Ansible MCP server + mock
   managed-host deployment in the dev-k8s overlay; any credential-set entry (delivered through
-  SPEC-068's provisioning model); a synced policy-bundle update naming the Ansible read tools;
+  SPEC-068's provisioning model); **no policy-bundle change** (the action-based bundle already
+  grants read-tier tools `tools:invoke`);
   a new direct `mcp` dependency in tool-gateway's lockfile.
 - backward compatibility: the SPEC-068 substrate is already shipped and inert until a
   non-`basic` set exists; this pilot adds only the ingestion adapter + Ansible read-only
-  binding + policy entries, so no current behavior moves. The adapter is inert without a
-  named, policy-admitted Ansible tool.
+  binding + admission allowlist, so no current behavior moves. The adapter is inert without an
+  allowlisted Ansible tool.
 - rollback approach: remove the Ansible credential set / MCP-server deployment and its
-  policy entries; the adapter is inert without them, so rollback needs no code revert (the
+  admission allowlist; the adapter is inert without them, so rollback needs no code revert (the
   `mcp` dependency can stay pinned-but-unused or be dropped). SPEC-068's additive scheme
   code is unaffected by this pilot's rollback. Because the adapter is generic and
   server-agnostic, rolling back the Ansible binding does not affect any future ServiceNow
