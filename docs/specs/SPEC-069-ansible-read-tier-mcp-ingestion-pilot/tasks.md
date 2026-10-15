@@ -216,29 +216,29 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 
 ## R-4: Audit fidelity and user-delegated attribution
 
-- [ ] Emit requester + acting-service identity + target system + tool name + outcome per
+- [x] Emit requester + acting-service identity + target system + tool name + outcome per
       Ansible call (`products/tool-gateway/`), keeping requester and acting-service separate
       per ADR-0004 `sub`/`act`.
-- [ ] Record the **dev-vs-production per-user-RBAC distinction** (OQ-4): production
+- [x] Record the **dev-vs-production per-user-RBAC distinction** (OQ-4): production
       attributes each call to the requesting user end to end (via the R-1 dependency
       [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md); AAP inherits user
       RBAC); dev records Luban-side attribution to the principal
       while the target-side identity is the self-hosted server's own — the audit record makes
       this explicit rather than implying target-side per-user RBAC the dev topology lacks.
-- [ ] Tests: audit record carries all five fields + the delegation distinction; no
+- [x] Tests: audit record carries all five fields + the delegation distinction; no
       secret/token/`client_secret` appears in audit or logs
       (`products/tool-gateway/tests/`).
 
 ## R-5: Fail-closed and no-fabrication guardrail (dry-run is never read-tier)
 
-- [ ] Map transport/timeout/HTTP-error to a failed outcome with a reason + a
+- [x] Map transport/timeout/HTTP-error to a failed outcome with a reason + a
       target-unavailable audit attribution; never an empty "success"
       (`products/tool-gateway/`).
-- [ ] Assert **no read-tier tool invokes `--check`/dry-run** and the admitted read set
+- [x] Assert **no read-tier tool invokes `--check`/dry-run** and the admitted read set
       contains no operation whose safety depends on check mode (OQ-3); document that any
       dry-run preview is a **Layer-2 action-tier** concern (a fact about a plan), never a
       read-tier guarantee.
-- [ ] Tests: simulated outage/timeout yields a failed outcome, not a fabricated result; the
+- [x] Tests: simulated outage/timeout yields a failed outcome, not a fabricated result; the
       admitted read-tool set contains no dry-run/`--check` operation
       (`products/tool-gateway/tests/`).
 

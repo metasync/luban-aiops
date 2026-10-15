@@ -173,7 +173,14 @@ in-cluster mock target before any live infrastructure is touched.
   MCP server natively inherits the user's RBAC). In dev (self-hosted server) Luban-side
   attribution to the principal is still recorded, but the record makes the **dev-vs-production
   per-user-RBAC distinction explicit** rather than implying target-side per-user RBAC the dev
-  topology does not provide.
+  topology does not provide. **Delivered:** `gateway_service.invoke_tool` (the single audit
+  choke point) mirrors `evidence.source_system` into the `tool_invoked` details as
+  `target_system`, and folds in an opt-in, duck-typed `audit_attribution(result)` that the
+  connectors expose; the Ansible connectors report `target_identity_mode` (`acting_service`
+  here — `user_delegated` is SPEC-070's reserved production value) alongside the
+  already-separate top-level `subject` (sub = requester) and `actor` (act = acting service). No
+  new audit event type: `details` is free-form (`additionalProperties: true`), so the closed
+  `event_type` vocabulary and the audit-service model are untouched.
 
 ### R-5: Fail-closed and no-fabrication guardrail (dry-run is never read-tier)
 
@@ -184,7 +191,15 @@ in-cluster mock target before any live infrastructure is touched.
   exclusion (OQ-3):** no read-tier tool invokes `--check`; the admitted read set contains no
   operation whose safety depends on check mode. Where the Layer-2 fast-follow later offers a
   dry-run preview, it is surfaced as a fact about a *plan* (a "not checkable" module reported
-  honestly), never as an executed mutation and never as a read-tier guarantee.
+  honestly), never as an executed mutation and never as a read-tier guarantee. **Delivered:** the
+  connectors already fail closed to a structured `error` (never a fabricated success);
+  `audit_attribution` additionally tags the reachability codes (`MCP_TRANSPORT_ERROR`,
+  `MCP_SDK_UNAVAILABLE`; native `ANSIBLE_INVENTORY_TIMEOUT`, `ANSIBLE_EXECUTABLE_NOT_FOUND`,
+  `ANSIBLE_INVENTORY_ERROR`) with a `failure_class=target_unavailable` in the `tool_invoked`
+  details — distinct from the separate `policy_decision`/`deny` event, and deliberately *not*
+  applied to a server-reported `MCP_TOOL_ERROR` (the target answered) or a config gap
+  (`ANSIBLE_NOT_CONFIGURED`). The native argv is pinned to `ansible-inventory -i <src> --list`
+  (no `--check`/`--diff`), and the admitted MCP set contains no check-mode-dependent operation.
 
 ### R-6: Target provisioning and overlay wiring
 
