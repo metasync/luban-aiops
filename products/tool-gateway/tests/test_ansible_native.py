@@ -14,8 +14,10 @@ from unittest.mock import MagicMock, patch
 
 from tool_gateway.ingestion.ansible_native import (
     AnsibleNativeConnector,
+    ListInventoryHostsTool,
     _parse_topology,
 )
+from tool_gateway.tools.base import ToolResult, build_evidence, make_error_result
 from tool_gateway.tools.registry import ToolRegistry
 
 _SUBPROCESS = "tool_gateway.ingestion.ansible_native.subprocess.run"
@@ -126,6 +128,59 @@ class TopologyParserTests(unittest.TestCase):
         from tool_gateway.ingestion.ansible_native import AnsibleInventoryError
         with self.assertRaises(AnsibleInventoryError):
             _parse_topology("[1, 2, 3]")
+
+
+class NativeAuditAttributionTests(unittest.TestCase):
+    """SPEC-069 R-4/R-5: the fallback reports the acting-service target-identity
+    mode and attributes a reachability failure ``target_unavailable`` — but not a
+    gateway config gap (``ANSIBLE_NOT_CONFIGURED``)."""
+
+    def _tool(self) -> ListInventoryHostsTool:
+        return ListInventoryHostsTool(AnsibleNativeConnector(inventory_path="/tmp/inv"))
+
+    def test_success_attribution_is_identity_mode_only(self) -> None:
+        ok = ToolResult(
+            tool_name="ansible.list_inventory_hosts", status="success",
+            data={}, evidence=build_evidence("read", "ansible", 1),
+        )
+        self.assertEqual(
+            self._tool().audit_attribution(ok),
+            {"target_identity_mode": "acting_service"},
+        )
+
+    def test_timeout_attribution_is_target_unavailable(self) -> None:
+        err = make_error_result(
+            "ansible.list_inventory_hosts", "ANSIBLE_INVENTORY_TIMEOUT",
+            "timed out", source_system="ansible",
+        )
+        self.assertEqual(
+            self._tool().audit_attribution(err),
+            {"target_identity_mode": "acting_service",
+             "failure_class": "target_unavailable"},
+        )
+
+    def test_config_gap_is_not_target_unavailable(self) -> None:
+        err = make_error_result(
+            "ansible.list_inventory_hosts", "ANSIBLE_NOT_CONFIGURED",
+            "unset", source_system="ansible",
+        )
+        self.assertNotIn("failure_class", self._tool().audit_attribution(err))
+
+
+class NativeNoCheckModeTests(unittest.TestCase):
+    """SPEC-069 R-5 / OQ-3: the fallback argv is pinned read-only — never --check."""
+
+    def test_argv_is_pinned_read_only_inventory_listing(self) -> None:
+        registry = ToolRegistry()
+        AnsibleNativeConnector(inventory_path="/tmp/inv").register_tools(registry)
+        with patch(_SUBPROCESS, return_value=_completed(stdout=_INVENTORY_JSON)) as run:
+            _run(registry.invoke("ansible.list_inventory_hosts", {}, {}))
+        # Exactly the read-only inventory listing: no --check/--diff/dry-run flag
+        # can appear because the argv is fixed to these four tokens.
+        self.assertEqual(
+            run.call_args[0][0],
+            ["ansible-inventory", "-i", "/tmp/inv", "--list"],
+        )
 
 
 if __name__ == "__main__":

@@ -53,6 +53,22 @@ LOGGER = logging.getLogger(__name__)
 # makes no live external call, OQ-5); production uses ``_open_mcp_session``.
 SessionOpener = Callable[["McpTransport", "str | None"], "AsyncIterator[Any]"]
 
+# SPEC-069 R-4: how the managed target sees the caller's identity. This pilot
+# (and the whole dev / self-hosted topology) addresses the target with the
+# **acting service's** own credential or a loopback session — Luban still records
+# attribution to the requesting principal, but the target does *not* enforce that
+# user's own RBAC. The reserved alternative, ``"user_delegated"`` (the target
+# enforces the requesting user's RBAC end to end), is realized by SPEC-070 and is
+# deliberately **not** produced here; the audit record names the mode so it never
+# implies target-side per-user RBAC the dev topology lacks.
+TARGET_IDENTITY_ACTING_SERVICE = "acting_service"
+
+# SPEC-069 R-5: error codes meaning the target could not be reached or did not
+# answer. Audit attributes these ``target_unavailable`` — distinct from a policy
+# denial (a separate ``policy_decision``/``deny`` event) and from a server-reported
+# tool error (``MCP_TOOL_ERROR``: the target *was* available and answered).
+TARGET_UNAVAILABLE_CODES = frozenset({"MCP_SDK_UNAVAILABLE", "MCP_TRANSPORT_ERROR"})
+
 
 @dataclass(frozen=True)
 class McpTransport:
@@ -231,6 +247,7 @@ class McpIngestionConnector:
         transport: McpTransport,
         admitted: tuple[AdmittedTool, ...],
         source_system: str = "mcp",
+        target_identity_mode: str = TARGET_IDENTITY_ACTING_SERVICE,
         credential_set: str = "",
         credential_sets_path: str = "",
         token_client: OAuth2TokenClient | None = None,
@@ -239,6 +256,7 @@ class McpIngestionConnector:
         self._transport = transport
         self._admitted = tuple(admitted)
         self._source_system = source_system
+        self._target_identity_mode = target_identity_mode
         self._credential_set = credential_set
         self._credentials = CredentialSetStore(credential_sets_path)
         # SPEC-068 R-2/R-3: one token client so its cache persists across calls.
@@ -248,6 +266,11 @@ class McpIngestionConnector:
     @property
     def admitted(self) -> tuple[AdmittedTool, ...]:
         return self._admitted
+
+    @property
+    def target_identity_mode(self) -> str:
+        """SPEC-069 R-4: how the target sees the caller (see module constant)."""
+        return self._target_identity_mode
 
     def register_tools(self, registry: ToolRegistry) -> None:
         """Register one typed tool per admitted spec.
@@ -428,3 +451,21 @@ class McpTool(BaseTool):
             data=data,
             evidence=build_evidence(spec.risk_level, source, duration_ms),
         )
+
+    def audit_attribution(self, result: ToolResult) -> dict:
+        """SPEC-069 R-4/R-5 audit attribution for one admitted-tool call.
+
+        Read by ``gateway_service.invoke_tool`` (duck-typed, opt-in) and merged
+        into the ``tool_invoked`` audit details; a tool that does not declare it
+        audits byte-identically to before. It folds in (a) the target-identity
+        mode — this pilot addresses the target as the acting service, never the
+        requesting user's delegated identity (SPEC-070's production path) — and
+        (b) on a transport/timeout/SDK failure, the ``target_unavailable`` class
+        that separates an unreachable target from a policy denial or a
+        server-reported tool error.
+        """
+        attribution = {"target_identity_mode": self._connector.target_identity_mode}
+        code = (result.error or {}).get("code") if result.status == "error" else None
+        if code in TARGET_UNAVAILABLE_CODES:
+            attribution["failure_class"] = "target_unavailable"
+        return attribution

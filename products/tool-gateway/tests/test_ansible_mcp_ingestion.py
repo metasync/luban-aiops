@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from unittest.mock import patch
 
 from tool_gateway.ingestion.ansible_binding import (
     ANSIBLE_ADMITTED_TOOLS,
@@ -29,6 +30,9 @@ from tool_gateway.ingestion.mcp_adapter import (
     McpTransport,
 )
 from tool_gateway.core.config import GatewaySettings
+from tool_gateway.schemas.api import IdentityContext
+from tool_gateway.services.gateway_service import invoke_tool
+from tool_gateway.services.policy_engine import reset_policy_state
 from tool_gateway.tools.registry import ToolRegistry
 
 
@@ -116,6 +120,12 @@ async def _connection_error_opener(transport, bearer):
     yield  # pragma: no cover
 
 
+@asynccontextmanager
+async def _timeout_opener(transport, bearer):
+    raise TimeoutError("read timed out")
+    yield  # pragma: no cover
+
+
 def _connector(admitted, server=None, opener=None, **kwargs) -> McpIngestionConnector:
     return McpIngestionConnector(
         transport=McpTransport(url="http://awx-mcp.local/mcp"),
@@ -128,6 +138,49 @@ def _connector(admitted, server=None, opener=None, **kwargs) -> McpIngestionConn
 
 def _ansible_names() -> set[str]:
     return {spec.name for spec in ANSIBLE_ADMITTED_TOOLS}
+
+
+def _write_cred_file(payload: dict) -> str:
+    handle = tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8")
+    json.dump(payload, handle)
+    handle.close()
+    return handle.name
+
+
+class _FakeRequest:
+    """Minimal stand-in for a FastAPI Request (invoke_tool reads .json()/.headers)."""
+
+    def __init__(self, body: dict, headers: dict | None = None) -> None:
+        self._body = body
+        self.headers = headers or {}
+
+    async def json(self) -> dict:
+        return self._body
+
+
+# A delegated-style identity: the requesting user (sub) acting via a service (act).
+_IDENTITY = IdentityContext(
+    subject="user-carol", username="carol.ops", roles=["operator"], actor="agent-platform",
+)
+
+
+def _invoke_captured(connector, tool_name, parameters, identity=_IDENTITY):
+    """Drive the real audit choke point (``gateway_service.invoke_tool``).
+
+    Returns ``(response, audit_event, log_calls_str)`` with the durable-audit
+    emitter and the structured logger captured, so R-4/R-5 assert on exactly what
+    would be recorded. No live server: the connector carries a fake opener.
+    """
+    registry = ToolRegistry()
+    connector.register_tools(registry)
+    request = _FakeRequest({"tool_name": tool_name, "parameters": parameters})
+    reset_policy_state()
+    with patch("tool_gateway.services.gateway_service.emit_audit_event") as emit, \
+            patch("tool_gateway.services.gateway_service.log_event") as log:
+        response = _run(invoke_tool(GatewaySettings(), registry, request, identity, "req-1"))
+    event = emit.call_args.args[1] if emit.call_args else None
+    return response, event, str(log.call_args_list)
 
 
 class RegistrationTests(unittest.TestCase):
@@ -439,6 +492,131 @@ class BindingFactoryTests(unittest.TestCase):
         registry = ToolRegistry()
         connector.register_tools(registry)
         self.assertEqual({d.name for d in registry.list_definitions()}, _ansible_names())
+
+
+class AuditFidelityTests(unittest.TestCase):
+    """SPEC-069 R-4: the ``tool_invoked`` audit record for an Ansible read carries
+    requester + acting-service + target + tool + outcome, keeps requester and
+    acting-service separate (ADR-0004 ``sub``/``act``), names the dev target-identity
+    mode, and never a secret."""
+
+    def test_success_audit_carries_all_five_fields_and_delegation_mode(self) -> None:
+        server = FakeServer(responses={
+            "list_inventories": FakeCallToolResult(structured_content={"inventories": ["demo"]}),
+        })
+        response, event, _log = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, server=server),
+            "ansible.list_inventories", {},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(event["event_type"], "tool_invoked")
+        # (1) requester identity and (2) acting-service identity, kept separate.
+        self.assertEqual(event["subject"], "user-carol")
+        self.assertEqual(event["username"], "carol.ops")
+        self.assertEqual(event["actor"], "agent-platform")
+        self.assertNotEqual(event["subject"], event["actor"])
+        self.assertEqual(event["roles"], ["operator"])
+        details = event["details"]
+        # (3) target system, (4) tool name, (5) outcome.
+        self.assertEqual(details["target_system"], "ansible")
+        self.assertEqual(details["tool_name"], "ansible.list_inventories")
+        self.assertEqual(event["outcome"], "success")
+        self.assertEqual(details["status"], "success")
+        # OQ-4 delegation distinction: dev addresses the target as the acting
+        # service, NOT the requesting user's delegated identity (SPEC-070).
+        self.assertEqual(details["target_identity_mode"], "acting_service")
+        self.assertNotIn("failure_class", details)
+
+    def test_no_secret_or_token_reaches_audit_or_logs(self) -> None:
+        token = "SUPERSECRET-BEARER-9"
+        path = _write_cred_file({"awx-read": {"scheme": "bearer", "token": token}})
+        server = FakeServer()
+        response, event, log_str = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, server=server,
+                       credential_set="awx-read", credential_sets_path=path),
+            "ansible.list_inventories", {},
+        )
+        self.assertEqual(response.status_code, 200)
+        blob = json.dumps(event) + log_str
+        for secret in (token, "client_secret", "password"):
+            self.assertNotIn(secret, blob)
+        # The token still reached the transport (SPEC-068), so the call truly ran.
+        self.assertEqual(server.bearers, [token])
+
+
+class FailClosedAuditTests(unittest.TestCase):
+    """SPEC-069 R-5: an unreachable/timed-out target is a *failed* outcome attributed
+    ``target_unavailable`` — distinct from a policy denial and never a fabricated
+    success; a server-reported tool error is a fact, not an unavailability."""
+
+    def test_transport_outage_is_failed_and_attributed_target_unavailable(self) -> None:
+        response, event, _log = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, opener=_connection_error_opener),
+            "ansible.list_inventories", {},
+        )
+        self.assertEqual(response.status_code, 400)
+        # A failed outcome, never an empty/fabricated "success".
+        self.assertEqual(json.loads(response.body)["status"], "error")
+        self.assertEqual(event["event_type"], "tool_invoked")  # not a policy_decision
+        self.assertEqual(event["outcome"], "error")
+        self.assertEqual(event["details"]["status"], "error")
+        self.assertEqual(event["details"]["failure_class"], "target_unavailable")
+        self.assertEqual(event["details"]["target_system"], "ansible")
+
+    def test_timeout_is_attributed_target_unavailable(self) -> None:
+        _response, event, _log = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, opener=_timeout_opener),
+            "ansible.get_job", {"job_id": "1"},
+        )
+        self.assertEqual(event["outcome"], "error")
+        self.assertEqual(event["details"]["failure_class"], "target_unavailable")
+
+    def test_server_reported_error_is_not_target_unavailable(self) -> None:
+        # The target WAS available and answered with an error: a fact, not an
+        # unavailability (SPEC-058 "an upstream 4xx/5xx is a fact, not an error").
+        server = FakeServer(responses={
+            "get_job": FakeCallToolResult(content=[FakeTextContent("nope")], is_error=True),
+        })
+        _response, event, _log = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, server=server),
+            "ansible.get_job", {"job_id": "1"},
+        )
+        self.assertEqual(event["outcome"], "error")
+        self.assertNotIn("failure_class", event["details"])
+
+    def test_target_unavailable_is_distinct_from_policy_denial(self) -> None:
+        # No identity -> a policy_decision/deny event carrying no failure_class:
+        # a denial and a target outage never collapse into one another.
+        response, event, _log = _invoke_captured(
+            _connector(ANSIBLE_ADMITTED_TOOLS, server=FakeServer()),
+            "ansible.list_inventories", {}, identity=None,
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(event["event_type"], "policy_decision")
+        self.assertEqual(event["outcome"], "deny")
+        self.assertNotIn("failure_class", event["details"])
+
+
+class DryRunExclusionTests(unittest.TestCase):
+    """SPEC-069 R-5 / OQ-3: ``--check``/dry-run is never read tier. The admitted set
+    holds no operation whose safety depends on check mode; a dry-run preview is a
+    Layer-2 action-tier concern (a fact about a *plan*), never a read guarantee."""
+
+    def test_no_admitted_operation_depends_on_check_mode(self) -> None:
+        forbidden = ("check", "dry", "diff", "plan", "preview",
+                     "launch", "cancel", "update", "run", "playbook",
+                     "runbook", "mutate", "apply", "execute")
+        for spec in ANSIBLE_ADMITTED_TOOLS:
+            self.assertEqual(spec.risk_level, "read")
+            haystack = f"{spec.name} {spec.server_name}".lower()
+            for token in forbidden:
+                self.assertNotIn(
+                    token, haystack,
+                    f"{spec.name} admits a check-mode/mutating '{token}' operation",
+                )
+        # The three mutating server tools stay structurally absent from the allowlist.
+        server_names = {spec.server_name for spec in ANSIBLE_ADMITTED_TOOLS}
+        self.assertFalse(DENIED_SERVER_TOOLS & server_names)
 
 
 if __name__ == "__main__":

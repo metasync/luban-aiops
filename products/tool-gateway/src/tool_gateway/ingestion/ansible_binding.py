@@ -171,6 +171,12 @@ def build_ansible_mcp_connector(settings: "GatewaySettings") -> McpIngestionConn
         args=tuple(settings.ansible_mcp_args),
         timeout_ms=settings.ansible_mcp_timeout_ms,
     )
+    # ``target_identity_mode`` stays at its default (``acting_service``): the
+    # self-hosted dev server is addressed with the acting service's own credential
+    # or a loopback session, never the requesting user's delegated identity. The
+    # production ``user_delegated`` mode is SPEC-070's seam and is deliberately not
+    # wired here (R-4); the audit record still names the mode so it never implies
+    # target-side per-user RBAC the dev topology does not provide.
     return McpIngestionConnector(
         transport=transport,
         admitted=ANSIBLE_ADMITTED_TOOLS,

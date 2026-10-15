@@ -51,6 +51,22 @@ CATEGORY = "ansible"
 # a vault-encrypted blob, so only a short tail is surfaced and never the vars.
 _MAX_STDERR = 400
 
+# SPEC-069 R-4: the fallback runs ``ansible-inventory`` with the gateway's own
+# execution identity — never the requesting user's delegated identity (SPEC-070's
+# production path). Audit states this explicitly so the record does not imply
+# target-side per-user RBAC the fallback cannot provide.
+TARGET_IDENTITY_ACTING_SERVICE = "acting_service"
+
+# SPEC-069 R-5: codes meaning the inventory target could not be reached or did
+# not return a usable answer; audit attributes these ``target_unavailable``.
+# ``ANSIBLE_NOT_CONFIGURED`` is deliberately excluded — that is a gateway config
+# gap, not an unreachable target.
+TARGET_UNAVAILABLE_CODES = frozenset({
+    "ANSIBLE_EXECUTABLE_NOT_FOUND",
+    "ANSIBLE_INVENTORY_TIMEOUT",
+    "ANSIBLE_INVENTORY_ERROR",
+})
+
 
 class AnsibleInventoryError(RuntimeError):
     """A non-zero ``ansible-inventory`` exit (stderr bounded)."""
@@ -183,3 +199,18 @@ class ListInventoryHostsTool(BaseTool):
                 name, "ANSIBLE_INVENTORY_ERROR", str(exc),
                 source_system=SOURCE_SYSTEM, duration_ms=duration_ms,
             )
+
+    def audit_attribution(self, result: ToolResult) -> dict:
+        """SPEC-069 R-4/R-5: target-identity mode + target-unavailable class.
+
+        Read by ``gateway_service.invoke_tool`` (duck-typed, opt-in). The
+        fallback addresses the inventory with the gateway's own execution
+        identity, never the requesting user's; a timeout / missing executable /
+        failed inventory load is attributed ``target_unavailable`` (distinct from
+        a policy denial), while ``ANSIBLE_NOT_CONFIGURED`` is not.
+        """
+        attribution = {"target_identity_mode": TARGET_IDENTITY_ACTING_SERVICE}
+        code = (result.error or {}).get("code") if result.status == "error" else None
+        if code in TARGET_UNAVAILABLE_CODES:
+            attribution["failure_class"] = "target_unavailable"
+        return attribution

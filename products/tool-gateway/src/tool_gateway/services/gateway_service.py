@@ -390,6 +390,19 @@ async def invoke_tool(
         else:
             result = redacted
 
+    # SPEC-069 R-4/R-5: name the target system and fold in any tool-declared
+    # attribution. ``target_system`` mirrors the ``source_system`` every result
+    # already carries in evidence (universal). The attribution hook is opt-in and
+    # duck-typed — the Ansible connectors declare a ``target_identity_mode`` (dev
+    # acting-service vs SPEC-070 user-delegated) and, on an unreachable target, a
+    # ``target_unavailable`` failure class distinct from a policy denial — so a
+    # tool that does not declare it audits byte-identically to before.
+    target_system = result.evidence.get("source_system")
+    attribution: dict = {}
+    attributor = getattr(target, "audit_attribution", None)
+    if callable(attributor):
+        attribution = attributor(result) or {}
+
     # Audit log.
     log_event(
         LOGGER,
@@ -399,10 +412,12 @@ async def invoke_tool(
         status=result.status,
         duration_ms=result.evidence.get("duration_ms", 0),
         risk_level=result.evidence.get("risk_level", "read"),
+        target_system=target_system,
         user_id=identity.username,
         sub=identity.subject,
         act=identity.actor,
         redacted_spans=redacted_spans,
+        **attribution,
         **correlation,
     )
 
@@ -422,7 +437,9 @@ async def invoke_tool(
                 "status": result.status,
                 "duration_ms": result.evidence.get("duration_ms", 0),
                 "risk_level": result.evidence.get("risk_level", "read"),
+                "target_system": target_system,
                 "redacted_spans": redacted_spans,
+                **attribution,
                 **correlation,
             },
         ),
