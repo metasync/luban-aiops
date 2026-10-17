@@ -11,6 +11,81 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.48.0 — 2026-10-17
+
+Feature release: Ansible read-tier MCP-ingestion pilot. The first concrete
+MCP-ingestion pilot, delivered under
+[SPEC-069](docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md):
+a **generic, server-agnostic MCP-ingestion connector** beneath `tool-gateway`
+(the gateway is the MCP client; the kernel never is) that reuses the existing
+`BaseTool` / `ToolRegistry` seam and preserves Luban policy, approval,
+redaction, evidence, and audit end to end. It binds an **Ansible read-only**
+surface — six read-tier `ansible.*` tools projected from the production
+`ansible/aap-mcp-server`'s published `controller.*` operationIds
+(`list_inventories`, `get_inventory`, `list_job_templates`, `get_job`,
+`get_job_stdout`, `get_environment_health`) — and is **deny-by-default**
+(`GATEWAY_ANSIBLE_MCP_ENABLED=false` in the base overlay) with **no mutating
+verb admitted** (an allowlist, never a model-selected tool set). Adds one new
+direct dependency, the MIT `mcp` Python SDK (`mcp>=2.3,<3.0`, locked `2.3.0`);
+the endpoint, admitted-tool list, transport, and credential set are all
+gateway-owned **operator configuration**, never model arguments. Only
+`products/tool-gateway` carries code; the dev target ships as a
+`shared/platform-ops` GitOps runtime profile. The generic adapter is the one
+[SPEC-067](docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md)
+(ServiceNow) later configures — SPEC-069 is re-sequenced **first** on
+self-provisioning difficulty, not a supersession.
+
+### Added
+
+- **SPEC-069 R-2: server-agnostic MCP-ingestion connector + Ansible read
+  binding.** New `ingestion/mcp_adapter.py` opens an MCP session over
+  `streamable_http` (default) or `stdio`, presents the connector's bearer via
+  the SPEC-068 auth-resolution seam, and projects server tools into gateway
+  `ToolResult`s; `ingestion/ansible_binding.py` maps the six read-tier
+  `controller.*` operations to canonical `ansible.*` tool names with
+  gateway-owned JSON-Schemas (validated **before** any session opens). A native
+  `ansible-inventory` shell-out (`ingestion/ansible_native.py`) is the OQ-1
+  fallback for when no MCP server is wired, and stays **disabled** by default.
+- **SPEC-069 R-4/R-5: audit attribution + fail-closed / no-fabrication
+  guardrail.** `invoke_tool` names the `target_system` and folds in an opt-in,
+  duck-typed `audit_attribution` hook (the Ansible connectors declare a
+  `target_identity_mode` and, on an unreachable target, a `target_unavailable`
+  failure class distinct from a policy denial). Both are read from the
+  connector's **own** result *before* redaction can replace it, so a
+  `REDACTION_OVERFLOW` envelope still attributes a withheld `ansible.*` call
+  correctly; a `resolve_audit_attribution()` helper drops keys colliding with
+  the reserved audit set rather than raising on the splat.
+- **SPEC-069 R-6: dev target provisioning + overlay wiring.** A new
+  resource-bearing `runtime-profiles/ansible-dev` overlay ships a **thin
+  in-cluster mock MCP server** (`ansible-mock-mcp`, reusing the `tool-gateway`
+  image with `mock_ansible_mcp_server.py` mounted from a ConfigMap) that mirrors
+  the `controller.*` read surface + a mock managed host, so CI makes **no live
+  external call** (OQ-5). `sync-ansible-credentials.sh` generates one bearer
+  into **two sinks** (the gateway credential set + the mock's bearer gate) so
+  they cannot drift; `e2e/ansible-mcp-check.sh` is a gated live-check
+  (unauth 401, enabled/disabled branch, fail-closed negatives, six live reads,
+  bearer-redaction) with an opt-in `STRICT_LIVE=true`; and
+  `tests/test_ansible_mcp_streamable_http.py` runs a **real** `mcp` SDK server
+  over streamable-HTTP in-process to exercise the connector's live wire path.
+
+### Changed
+
+- **Supply-chain landscape corrected at the R-6 review.** Production target is
+  Red Hat's Apache-2.0 `ansible/aap-mcp-server`; CI validates against the
+  in-cluster thin mock; `lycorp-jp/awx-mcp` (Apache-2.0, native
+  `AWX_MCP_READ_ONLY`) is the recorded open-source alternative. The Stage-0 pick
+  `SurgeX-Labs/awx-mcp-server` was **dropped** (stdio-only MCP, no declared
+  license, `mcp>=1.0.0` vs this gateway's `mcp==2.3.0`); the dated Stage-0
+  record is preserved under a superseding correction in the spec Changelog.
+- Living docs updated for the landed pilot: `products/tool-gateway/README.md`,
+  `docs/guides/tool-configuration.md` (Ansible activation checklist +
+  `STRICT_LIVE` + the operator AAP read-only validation runbook),
+  `docs/guides/architecture-overview.md`, the delivery-roadmap R6 status, and
+  `identity-and-authorization-design.md` (the production user-delegated target
+  recorded as a dependency on
+  [SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md), which
+  does not block this read-only dev slice). SPEC-067 remains `draft`/PDI-gated.
+
 ## 0.47.0 — 2026-10-08
 
 Feature release: outbound execution-credential schemes. The `tool-gateway`'s

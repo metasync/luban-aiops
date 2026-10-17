@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-10-11
 - release slice: **R6 — External System Integration via MCP Ingestion** (second target
@@ -456,6 +456,17 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-17 (release): **delivered** (status `approved` → `delivered`). The generic,
+  server-agnostic MCP-ingestion connector beneath tool-gateway (the gateway is the MCP
+  client; the kernel never is) shipped in `products/tool-gateway` with the six read-tier
+  tools projected from AAP's published `controller.*` operationIds, deny-by-default
+  (`GATEWAY_ANSIBLE_MCP_ENABLED=false` in base), the new MIT `mcp` direct dependency
+  (`mcp>=2.3,<3.0`, locked `2.3.0`), and the R-4/R-5 opt-in audit-attribution hook. R-6
+  (the `ansible-dev` overlay + thin in-cluster mock + two-sink `sync-ansible-credentials.sh`
+  + gated live-check + Layer-2 wire test) is live-validated in-cluster, and the post-delivery
+  code & doc review remediation is folded in. Full `make verify` green. Released as
+  **v0.48.0** (`VERSION` bump + CHANGELOG). Commit/push, deployment, and the tag remain
+  separate authorization boundaries.
 - 2026-10-17 (later): **R-6 delivered, live-validated in-cluster, and hardened by a
   post-delivery code & doc review** (no status change — still `approved`; `VERSION` untouched at
   0.47.0). R-6 shipped as `291e6d5` (feat) + `863400e` (docs) alongside R-4/R-5 (`b8a8eba`,

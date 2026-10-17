@@ -50,8 +50,12 @@ This project covers:
 - read-only and bounded-action connector pathways
 - connector execution metadata and health reporting
 
-MCP-backed connectors and selective standalone toolset extraction remain under
-assessment, not shipped or approved implementation scope. The 2026-09-23
+The first MCP-ingestion connector has **shipped**: [SPEC-069](../../docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md)
+delivered a **generic, server-agnostic** Ansible read-tier connector in **v0.48.0**
+(the gateway is the MCP *client* of an external Ansible AAP/AWX MCP server; the kernel
+never becomes one), admitting **only** read-tier discovery tools, deny-by-default
+(`GATEWAY_ANSIBLE_MCP_ENABLED=false` in base). Selective standalone toolset extraction
+and the further targets remain under assessment. The 2026-09-23
 [use-case assessment](../../docs/workspace/mcp-exposure-spike.md) recommended
 retaining native connectors until a concrete need justified a pilot; that reopen
 trigger is now **met** — operations has named three concrete external targets
@@ -64,8 +68,9 @@ retains policy, approval, redaction, evidence, and audit; the kernel never becom
 an independent MCP client. This is inbound consumption, **not** external exposure
 of tool-gateway or Luban workflows (that separate concern stays parked and
 de-numbered — the `SPEC-066` slot it was once earmarked for was taken by
-skill-retrieval-ranking-fidelity). The memo authorizes no implementation,
-pilot, ADR, or spec — each target pilot is separately approved.
+skill-retrieval-ranking-fidelity). Each target pilot is separately approved; SPEC-069
+(Ansible read-tier) is delivered, while ServiceNow (SPEC-067) and Windows remain
+separately-gated follow-ups that reuse this generic adapter.
 
 Current implementation artifacts:
 
@@ -90,6 +95,7 @@ Current implementation status:
 - ships a skills connector (`skills.search`, `skills.get`, `skills.list`) against the `skills-hub` service with Basic-auth httpx transport, 10s timeout, and structured error mapping (404 → `SKILL_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_SKILLS_SERVICE_URL` is set (SPEC-014)
 - ships an incidents connector (`incidents.list`, `incidents.get`) against the `incident-service` service with the same Basic-auth httpx transport and error-mapping pattern (404 → `INCIDENT_NOT_FOUND`, unreachable → `TOOL_EXECUTION_ERROR`); registered only when `GATEWAY_INCIDENTS_SERVICE_URL` is set; read-only by design — no mutating incident tool exists (SPEC-015)
 - ships a browser connector (nine read-tier tools — `web.navigate`, `web.snapshot`, `web.screenshot`, `web.fill_credential`, `web.extract`, `web.wait_for`, `web.hover`, `web.scroll`, `web.switch_frame`; six write-tier tools — `web.click`, `web.type`, `web.select`, `web.press_key`, `web.upload_file`, `web.evaluate`) for bounded web-application checks against a sidecar browser over CDP (Playwright `connect_over_cdp`; the gateway image ships the Playwright library only — no browser binary); off-by-default via `GATEWAY_BROWSER_ENABLED`, navigation deny-by-default via `GATEWAY_BROWSER_ALLOW_ORIGINS`, per-chat-session browser contexts (keyed by a trusted chat-session correlation handle, subject fallback) with idle TTL and cap eviction, skill-bound flows (`web_target`/`risk_class`) with a deviation guard and one HITL gate per write-class flow, and platform-managed credential sets that never surface in results (SPEC-049/SPEC-050)
+- ships a **generic, server-agnostic MCP-ingestion connector** for Ansible read-tier discovery (`ansible.list_inventories`, `ansible.get_inventory`, `ansible.list_job_templates`, `ansible.get_job`, `ansible.get_job_stdout`, `ansible.get_environment_health`) over the official `mcp` SDK (streamable-HTTP transport), with the gateway as the MCP *client* of an external Ansible AAP/AWX MCP server (the kernel never becomes one); tools are projected from AAP's published `controller.*` operationIds, **read-tier only** (no mutating verb admitted), off-by-default via `GATEWAY_ANSIBLE_MCP_ENABLED`, with outbound credentials resolved through SPEC-068's named credential-set seam and an opt-in audit-attribution hook (target system + acting/requesting identity) read before redaction (SPEC-069)
 - exposes `GET /api/v2/tools` (tool discovery, gated by `tools:list`) and `POST /api/v2/tools/invoke` (tool execution gated by `tools:invoke` for read tools and additionally by `tools:mutate` for write/admin tools); both derive identity and authorization solely from the verified token — any identity in a request body is never trusted (the one body field the gateway reads is the optional `session_id` chat-session correlation handle, injected only by trusted internal callers and carrying no authority, SPEC-049)
 - redacts credential-shaped spans (JWTs, `Bearer`/`Basic` values, PEM private keys, key-list fields such as `token`/`password`/`api_key`) from every tool result at the single invoke choke point before both the response and the audit log; when the redacted fraction exceeds `GATEWAY_REDACTION_OVERFLOW_FRACTION` the output is withheld with a `REDACTION_OVERFLOW` error (fail-closed, SPEC-009)
 - forwards `tool_invoked` audit events (including policy-denied invocations, post-redaction) to `audit-service` via a fire-and-forget emitter when `GATEWAY_AUDIT_SERVICE_URL` is set; unreachability degrades to log-only auditing and never blocks the invoke path (SPEC-013)

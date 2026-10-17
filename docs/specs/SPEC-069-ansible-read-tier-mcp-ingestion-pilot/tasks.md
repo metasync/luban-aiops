@@ -344,24 +344,29 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       dropped (stdio-only MCP, no license, `mcp>=1.0.0` vs `mcp==2.3.0`); production
       `ansible/aap-mcp-server` (`controller.*`), CI in-cluster thin mock, OSS alternative
       `lycorp-jp/awx-mcp` — see `spec.md` Changelog.
-- [ ] SPEC-068 (the dev outbound credential substrate, delivered v0.47.0) confirmed present;
+- [x] SPEC-068 (the dev outbound credential substrate, delivered v0.47.0) confirmed present;
       the connector resolves any dev credential through its resolver seam. The production
       user-delegated path's dependency on
       [SPEC-070](../SPEC-070-outbound-user-delegated-identity/spec.md) is recorded (and does
       not block this read-only slice).
-- [ ] All acceptance criteria in `spec.md` verified; `make verify` green (incl.
+- [x] All acceptance criteria in `spec.md` verified; `make verify` green (incl.
       `portal-test`, `validate-policy-scenarios`, `validate-secret-vocabulary`,
-      `overlays`).
-- [ ] `products/tool-gateway/uv.lock` regenerated with the direct `mcp` dependency (kernel
+      `overlays`). **Re-run at the v0.48.0 bump (2026-10-17): all product suites +
+      `validate-version` OK at VERSION=0.48.0, portal 494+43 passed & built, SPEC-063
+      campaign 792 passed (exit 0).**
+- [x] `products/tool-gateway/uv.lock` regenerated with the direct `mcp` dependency (kernel
       lockfile untouched); dependency + MCP-server-artifact license/provenance review
       recorded.
-- [ ] Living state docs updated (see spec `Impact`): `products/tool-gateway/README.md`,
-      `docs/agentic-aiops-platform/architecture.md`, delivery-roadmap R6 status,
-      `identity-and-authorization-design.md` §Service Identity Model (record the outbound
-      user-delegated-identity target).
-- [ ] `CHANGELOG.md` entry added referencing SPEC-069; `VERSION` bumped in lockstep
-      (separate authorization).
-- [ ] Spec index in `docs/specs/README.md` updated; spec status set to `delivered`. Note in
+- [x] Living state docs updated (see spec `Impact`): `products/tool-gateway/README.md`
+      (MCP-ingestion connector now shipped + a status bullet), delivery-roadmap R6 status
+      (SPEC-069 delivered as v0.48.0), and `identity-and-authorization-design.md`
+      §Service Identity Model (the outbound MCP-ingestion consumer + the SPEC-070
+      user-delegated-identity target). `docs/guides/tool-configuration.md` carried the
+      connector config from R-6. The conceptual `part-2-reference-architecture.md` keeps no
+      per-connector status, so it is unchanged (as at SPEC-068).
+- [x] `CHANGELOG.md` entry added referencing SPEC-069; `VERSION` bumped in lockstep
+      to **0.48.0** (separate authorization, now crossed).
+- [x] Spec index in `docs/specs/README.md` updated; spec status set to `delivered`. Note in
       the delivery record that SPEC-067 (ServiceNow) remains `draft`/PDI-gated and reuses
       this pilot's generic adapter — re-sequenced, not superseded — and that the **Layer-2
       runbook-typed-tool fast-follow** (number assigned at its own drafting) and the

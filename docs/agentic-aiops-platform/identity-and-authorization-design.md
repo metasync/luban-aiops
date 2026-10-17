@@ -375,6 +375,20 @@ Represents:
 > call. Kubernetes workload-identity-bound short-lived tokens remain the
 > documented upgrade path.
 
+> Landed (SPEC-069, v0.48.0): the first consumer of that outbound plane is the
+> tool-gateway's **generic, server-agnostic MCP-ingestion connector** — the gateway
+> is the MCP *client* of an external Ansible (AAP/AWX) MCP server while the kernel
+> never becomes one, admitting **only** read-tier discovery tools and resolving any
+> dev credential through SPEC-068's named-set resolver seam (deny-by-default;
+> `GATEWAY_ANSIBLE_MCP_ENABLED=false` in base). Attribution records the requester,
+> the acting service, and the target system on every read. The **production**
+> user-delegated path — carrying a *user* subject all the way to the managed target
+> so the agent never acts on its own service identity — is the separate
+> [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md) outbound
+> user-delegated-identity substrate (per-user OAuth 2.x authorization-code resolved
+> connector-locally, **no identity-broker mint**, ADR-0015); it is a dependency of
+> the production path and does **not** block this read-only dev slice.
+
 These identities should be logged separately so audit records can answer:
 
 - who requested the action
