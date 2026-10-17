@@ -8,56 +8,47 @@ source_files:
     - shared/shared-contracts/observability-conventions.md
     - products/agent-platform/src/agent_service/core/observability.py
     - products/agent-platform/src/agent_service/core/telemetry.py
-    - products/agent-platform/src/agent_service/services/audit_emitter.py
+    - products/agent-platform/src/agent_service/app.py
     - products/audit-service/src/audit_service/core/observability.py
     - products/audit-service/src/audit_service/core/telemetry.py
     - products/execution-runtime/src/execution_runtime/core/observability.py
     - products/execution-runtime/src/execution_runtime/core/telemetry.py
-    - products/identity-broker/src/identity_service/core/observability.py
-    - products/identity-broker/src/identity_service/core/telemetry.py
-    - products/incident-service/src/incident_service/core/observability.py
-    - products/incident-service/src/incident_service/core/telemetry.py
-    - products/platform-gateway/src/platform_gateway/core/telemetry.py
 ---
 
 ## Approach
 
-The platform uses Python's stdlib `logging` module for all application logging, with a uniform structured-JSON convention documented in `shared/shared-contracts/observability-conventions.md`. There is no third-party logger framework (no structlog, loguru, or similar). An opt-in OpenTelemetry push pipeline mirrors every INFO-level JSON record to an OTLP backend (OpenObserve) via `opentelemetry.exporter.otlp.proto.http._log_exporter`, but stdout remains the source of truth.
+The platform uses Python's stdlib `logging` module for all application logging, with a thin per-service wrapper that emits single-line JSON records. Structured logs are the audit trail; an opt-in OpenTelemetry OTLP log bridge mirrors them to the backend (OpenObserve) so they can be correlated with traces.
 
-## Key Files
+There is no third-party logging framework (no structlog, no loguru). The only cross-cutting observability dependency is OpenTelemetry, which is pulled in lazily and gated by `OTEL_ENABLED`.
 
-- `shared/shared-contracts/observability-conventions.md` — authoritative cross-service contract describing the two observability surfaces (`/metrics` pull + OTLP push), the `LOG_LEVEL` / `OTEL_ENABLED` switches, request-correlation rules, and the structured-logging level policy.
-- Per-service `core/observability.py` — defines `configure_logging()` and `log_event(logger, event, **fields)`:
-  - `products/agent-platform/src/agent_service/core/observability.py`
-  - `products/audit-service/src/audit_service/core/observability.py`
-  - `products/execution-runtime/src/execution_runtime/core/observability.py`
-  - `products/identity-broker/src/identity_service/core/observability.py`
-  - `products/incident-service/src/incident_service/core/observability.py`
-  - `products/platform-gateway/src/platform_gateway/core/telemetry.py` (gateway has no separate `observability.py`; its `setup_telemetry` also attaches the OTLP bridge).
-- Per-service `core/telemetry.py` — initializes traces/metrics/logs OTLP exporters gated by `OTEL_ENABLED`.
-- `products/agent-platform/src/agent_service/services/audit_emitter.py` — fire-and-forget HTTP emitter that ships structured audit events to the dedicated audit service; failures are swallowed and logged at WARNING.
+## Key files
 
-## Architecture and Conventions
+- `shared/shared-contracts/observability-conventions.md` — the authoritative convention document (SPEC-005 / SPEC-065) describing the two surfaces (`/metrics` pull + OTel push), structured-log level policy, OTLP log bridge semantics, and request-correlation rules.
+- `products/*/src/<service>/core/observability.py` — per-service copy of `configure_logging()` and `log_event()`. Each service ships its own tiny implementation:
+  - `configure_logging()` reads `LOG_LEVEL` (default `INFO`, upper-cased via `getattr(logging, ...)`), calls `logging.basicConfig(level=level, force=True)` to override uvicorn's WARNING default.
+  - `log_event(logger, event, **fields)` serializes `{"event": event, **fields}` as sorted JSON at INFO level.
+- `products/*/src/<service>/core/telemetry.py` — per-service copy of the OTel setup. It installs `opentelemetry.instrumentation.logging.handler.LoggingHandler` on the root logger when `OTEL_ENABLED=true`, detaches `logging.getLogger("opentelemetry")` from propagation to prevent recursion, and sets `resource={"service.name": OTEL_SERVICE_NAME or metadata.service_name}`.
+- `products/*/src/<service>/app.py` — each service's FastAPI entrypoint calls `configure_logging()` early and then `setup_telemetry(app, service_name)`; business routes call `log_event(LOGGER, "<event>", ...)`.
 
-1. **Root logger configuration.** Each service calls `configure_logging()` at startup. It reads `LOG_LEVEL` (default `INFO`, upper-cased, falling back to `logging.INFO` if unknown) and applies it via `logging.basicConfig(level=level, force=True)`. This overrides uvicorn's default WARNING root level so INFO audit records are not silently discarded.
-2. **Structured event emission.** Business/request events go through `log_event(LOGGER, "event_name", key=value, ...)`, which serializes `{"event": name, ...}` as a single-line JSON string at INFO level using `json.dumps(..., default=str, sort_keys=True)`. Call sites across services use this helper rather than calling `logger.info(json.dumps(...))` directly.
-3. **Logger instance pattern.** Modules define `LOGGER = logging.getLogger(__name__)` at module top level and pass it to `log_event`.
-4. **OTLP log bridge.** When `OTEL_ENABLED` is truthy (`1|true|yes|on`), each service installs an OTel `LoggingHandler` on the root logger. The bridge:
-   - Is attached once per process (`_log_bridge_attached` guard).
-   - Detaches `logging.getLogger("opentelemetry")` from propagation so exporter errors cannot recurse into the bridge.
-   - Emits at INFO level only.
-   - Is wrapped in try/except around the whole provider setup; exceptions are logged and the service continues without push.
-5. **Two decoupled surfaces.** `/metrics` (Prometheus, always on) and OTLP push (opt-in, fails open). Disabling OTel leaves `/metrics` fully functional.
-6. **Request correlation.** `x-request-id` is the portal-facing correlation key; when tracing is active it is set to the W3C `trace_id` (32 hex chars), otherwise generated as `req-<uuid4>`. Outbound calls forward both `x-request-id` and `traceparent`.
-7. **Audit trail separation.** Structured logs are the human/CLI audit trail; a separate fire-and-forget HTTP emitter (`audit_emitter.emit_audit_event`) ships normalized audit events to the audit service over `/api/v1/audit/events` on a daemon thread with a 2s timeout. Audit emit failures are counted via metrics and logged at WARNING but never raised.
+## Architecture and conventions
 
-## Conventions and Constraints
+1. **Two decoupled surfaces** (per `observability-conventions.md`):
+   - `/metrics` (Prometheus pull, always on).
+   - OpenTelemetry push (opt-in via `OTEL_ENABLED`; off by default, fail-open).
+2. **Structured log format**: every business/request event is one line of JSON produced by `log_event`, emitted at INFO. Fields include at least `event`; additional fields are passed through `json.dumps(..., default=str, sort_keys=True)`.
+3. **Log levels**: INFO is the audit-trail level. Uvicorn starts at WARNING, so `configure_logging()` raises the root logger explicitly. `LOG_LEVEL` overrides it per deployment.
+4. **OTLP log bridge**: When tracing is enabled, `LoggingHandler` attaches to the root logger so every `logger.info(...)` record is also exported as an OTLP log. Trace/span association is automatic via the active span. Exporter failures cannot recurse because the `opentelemetry` logger is detached.
+5. **Fail-open**: All OTel initialization is wrapped in try/except and logged rather than raised. Missing/misconfigured backends produce export-time drops but never break requests.
+6. **Request correlation**: `x-request-id` is the log/portal-facing key; `traceparent` (W3C) is machine-facing. When tracing is active, `x-request-id` is set to the active span's W3C `trace_id`; otherwise it falls back to `req-<uuid4>`.
+7. **Service identity**: `service.name` resource attribute comes from `OTEL_SERVICE_NAME` or the service's metadata name.
+8. **Per-service duplication**: Each product service (`agent-platform`, `audit-service`, `execution-runtime`, `identity-broker`, `incident-service`, `platform-gateway`, `skills-hub`, `tool-gateway`) ships its own `core/observability.py` and `core/telemetry.py` with identical logic. There is no shared SDK yet — the convention doc is the contract.
 
-- **Level policy:** All business and request events are emitted at INFO level via `log_event`. The root logger is explicitly raised from uvicorn's WARNING default to INFO at startup; `LOG_LEVEL` may override per deployment. (Enforced by `configure_logging` in every service's `core/observability.py`.)
-- **Structured format:** Events are single-line JSON with a required `event` field plus arbitrary additional fields serialized with `sort_keys=True` and `default=str`. (Defined in `log_event` and observed across all call sites.)
-- **OTel switch semantics:** `OTEL_ENABLED` is the master gate; when false, no OTel providers or instrumentation are initialized (zero overhead) and `/metrics` is unaffected. One switch gates traces + metrics + log mirror; there are no per-signal toggles. (Documented in `observability-conventions.md` and enforced by `is_enabled()` / early-return in `setup_telemetry`.)
-- **Fail-open guarantee:** Missing/invalid OTel credentials produce 401s at export time; batch processors drop telemetry on failure; service setup additionally guards initialization and logs rather than raising. (Documented in `observability-conventions.md`; implemented in each service's `setup_telemetry` try/except.)
-- **No unbounded label cardinality:** Metrics labels must be bounded enums; raw URLs, user ids, session ids, and request ids are never used as labels. (Constraint stated in `observability-conventions.md`.)
-- **Audit emit non-blocking:** `emit_audit_event` runs on a daemon thread with a 2-second timeout; failures are swallowed and recorded via metrics, never propagated to the caller. (Enforced by the implementation in `audit_emitter.py`.)
-- **Correlation header rule:** No service may silently drop an inbound correlation id; `x-request-id` is preserved or regenerated, and `traceparent` is forwarded on outbound calls. (Stated in `observability-conventions.md`.)
-- **Source-of-truth rule:** JSON stdout is the source of truth for the audit trail; the OTLP mirror exists only for backend correlation and never replaces container logs. (Stated in `observability-conventions.md` and enforced by attaching the bridge to the root logger rather than replacing handlers.)
+## Conventions and constraints
+
+- Business events use `log_event(LOGGER, "<event_name>", **fields)` at INFO level; ad-hoc `LOGGER.info(json.dumps(...))` calls exist in some modules but the documented path is `log_event`.
+- Audit-trail records must survive at INFO level; `LOG_LEVEL` defaults to `INFO` and tests assert that lowering it would discard http_request/tool_invoked/policy-decision records.
+- OTel push is controlled exclusively by `OTEL_ENABLED` — there are no per-signal toggles for traces/metrics/logs.
+- OTLP endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT` (HTTP/protobuf); auth via `OTEL_EXPORTER_OTLP_HEADERS`; service name via `OTEL_SERVICE_NAME`.
+- High-cardinality values (raw URL, user id, session id, request id) are forbidden as metric labels; this rule is enforced by review per the conventions doc.
+- Domain metrics follow `<service>_<noun>_<unit>` naming with bounded enum labels; counters carry `_total`.
+- The OTLP log bridge is additive: stdout JSON remains the source of truth for audit tooling; the bridge exists only for trace/log correlation.

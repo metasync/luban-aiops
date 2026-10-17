@@ -23,21 +23,24 @@
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
 - [ansible_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py)
 - [mcp_adapter.py](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py)
+- [ansible_binding.py](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py)
 - [test_tool_registry.py](file://products/tool-gateway/tests/test_tool_registry.py)
 - [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
 - [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
 - [test_redaction.py](file://products/tool-gateway/tests/test_redaction.py)
 - [test_ansible_native.py](file://products/tool-gateway/tests/test_ansible_native.py)
+- [test_ansible_mcp_ingestion.py](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py)
+- [ansible-mcp-check.sh](file://shared/platform-ops/e2e/ansible-mcp-check.sh)
 - [README.md](file://products/tool-gateway/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated audit attribution system with critical bug fix for reserved key collision handling
-- Added comprehensive documentation for the new `resolve_audit_attribution()` helper function
-- Enhanced audit trail documentation with connector-specific attribution mechanisms
-- Updated architecture diagrams to reflect the opt-in audit attribution pattern
-- Expanded error handling documentation to cover reserved key collision scenarios
+- Added comprehensive documentation for MCP-ingestion capabilities with server-agnostic adapter architecture
+- Documented deny-by-default Ansible integration with operator guidance for enabling the feature
+- Updated configuration reference with new Ansible MCP settings and environment variables
+- Enhanced connector ecosystem documentation to include MCP-based tool ingestion patterns
+- Added operator guidance for production deployment and security considerations
 
 ## Table of Contents
 1. Introduction
@@ -51,19 +54,20 @@
 9. Conclusion
 
 ## Introduction
-The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. The platform now provides comprehensive connectivity through seven built-in connectors: Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, skills repositories, and secure secret delivery mechanisms. Each connector implements standardized security controls including origin allowlisting, credential set management, parameter validation, and structured error responses. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
+The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. The platform now provides comprehensive connectivity through eight built-in connectors: Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, skills repositories, secure secret delivery mechanisms, and MCP-ingestion for Ansible/AAP systems. Each connector implements standardized security controls including origin allowlisting, credential set management, parameter validation, and structured error responses. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
 
-**Updated** The audit attribution system has been enhanced with a critical bug fix that prevents reserved key collisions from causing HTTP 500 errors after tool execution. The new `resolve_audit_attribution()` helper function provides safe, opt-in audit enrichment while maintaining backward compatibility.
+**Updated** The platform now includes MCP-ingestion capabilities that provide secure, server-agnostic access to external Model Context Protocol servers, with deny-by-default Ansible integration that requires explicit operator enablement.
 
 ## Project Structure
 The Tool Gateway service is organized into:
 - Application entrypoint and lifecycle management
 - API routing and request orchestration
 - Tool registry and base abstractions
-- Seven connector implementations per system
+- Eight connector implementations per system
 - Policy engine and token verification
 - Audit emission and observability
 - Configuration and runtime settings
+- MCP-ingestion adapter and bindings
 
 ```mermaid
 graph TB
@@ -72,7 +76,6 @@ A --> C["GatewayService<br/>invoke_tool()"]
 C --> D["PolicyEngine<br/>evaluate()"]
 C --> E["AuditEmitter<br/>emit_audit_event()"]
 C --> F["Redaction<br/>redact_result()"]
-C --> G["resolve_audit_attribution()<br/>safe attribution merging"]
 B --> H["KubernetesConnector"]
 B --> I["ElasticConnector"]
 B --> J["BrowserConnector"]
@@ -80,31 +83,30 @@ B --> K["IncidentsConnector"]
 B --> L["SkillsConnector"]
 B --> M["HttpConnector"]
 B --> N["SecretsConnector"]
-M --> O["URL Redaction<br/>secret masking"]
-N --> P["SecretDeliveryBuffer<br/>stash/redeem/discard"]
-P --> Q["InMemory/Redis Backend"]
-H --> R["audit_attribution()<br/>opt-in hook"]
-I --> R
-J --> R
-K --> R
-L --> R
-M --> R
-N --> R
+B --> O["MCP Ingestion<br/>(Ansible Binding)"]
+O --> P["McpIngestionConnector<br/>(server-agnostic)"]
+P --> Q["McpTransport<br/>(streamable_http/stdio)"]
+M --> R["URL Redaction<br/>secret masking"]
+N --> S["SecretDeliveryBuffer<br/>stash/redeem/discard"]
+S --> T["InMemory/Redis Backend"]
+H --> U["audit_attribution()<br/>opt-in hook"]
+I --> U
+J --> U
+K --> U
+L --> U
+M --> U
+N --> U
+O --> U
 ```
 
 **Diagram sources**
-- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
+- [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
-- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
-- [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
-- [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
-- [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
-- [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
-- [secrets_connector.py:379-387](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L379-L387)
-- [secret_delivery.py:50-91](file://products/tool-gateway/tools/secret_delivery.py#L50-L91)
+- [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
+- [ansible_binding.py:179-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L179-L207)
 
 **Section sources**
-- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
+- [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 - [main.py:1-9](file://products/tool-gateway/src/tool_gateway/main.py#L1-L9)
 
 ## Core Components
@@ -116,8 +118,10 @@ N --> R
 - URL Redaction: Specialized URL secret masking for query parameters and userinfo components.
 - AuditEmitter: Fire-and-forget durable audit events to the audit service; non-blocking and failure-tolerant.
 - Config: Centralized environment-driven configuration for connectors, policy, auth, and feature flags.
+- **New** McpIngestionConnector: Server-agnostic adapter for MCP protocol connections with typed tool registration.
+- **New** AnsibleBinding: Configuration-driven binding for Ansible/AAP read-only tools with deny-by-default policy.
 
-**Updated** The audit attribution system now includes a safe helper function that prevents reserved key collisions and provides opt-in connector-specific audit enrichment.
+**Updated** The connector ecosystem now includes MCP-ingestion capabilities that provide secure, server-agnostic access to external systems while maintaining strict security boundaries and deny-by-default policies.
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
@@ -127,7 +131,9 @@ N --> R
 - [redaction.py:1-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L1-L151)
 - [url_redaction.py:1-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L1-L91)
 - [audit_emitter.py:1-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L1-L98)
-- [config.py:32-190](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L190)
+- [config.py:32-494](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L494)
+- [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
+- [ansible_binding.py:1-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L1-L207)
 
 ## Architecture Overview
 The invocation path enforces security and safety at every stage:
@@ -138,6 +144,7 @@ The invocation path enforces security and safety at every stage:
 - Safe audit attribution resolution with reserved key collision protection.
 - Output redaction before response and audit emission.
 - Durable audit trail via fire-and-forget emission.
+- **New** MCP-ingestion provides server-agnostic access with deny-by-default policies and typed tool registration.
 
 ```mermaid
 sequenceDiagram
@@ -147,6 +154,7 @@ participant Service as "GatewayService.invoke_tool"
 participant Policy as "PolicyEngine.evaluate"
 participant Registry as "ToolRegistry.invoke"
 participant HttpConn as "HttpConnector"
+participant McpAdapter as "McpIngestionConnector"
 participant UrlRedact as "URL Redaction"
 participant Redact as "Redaction"
 participant Attrib as "resolve_audit_attribution"
@@ -164,6 +172,11 @@ Registry->>HttpConn : execute(parameters, identity)
 HttpConn->>UrlRedact : redact_secret_query(url)
 UrlRedact-->>HttpConn : masked URL
 HttpConn-->>Registry : ToolResult
+else ansible.* tools
+Registry->>McpAdapter : execute(server_name, arguments)
+McpAdapter->>McpAdapter : validate_parameters + map_arguments
+McpAdapter->>McpAdapter : _call(server_name, arguments)
+McpAdapter-->>Registry : ToolResult
 else secrets.generate_password/secrets.deliver
 Registry->>SecretsConn : execute(parameters, identity)
 SecretsConn-->>Registry : ToolResult
@@ -184,6 +197,7 @@ end
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [registry.py:65-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L65-L89)
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
+- [mcp_adapter.py:407-453](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L407-L453)
 - [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
@@ -235,6 +249,7 @@ BaseTool <|-- HttpGetTool
 BaseTool <|-- HttpPostTool
 BaseTool <|-- GeneratePasswordTool
 BaseTool <|-- DeliverSecretTool
+BaseTool <|-- McpTool
 ToolRegistry --> BaseTool : "dispatches"
 ```
 
@@ -243,73 +258,108 @@ ToolRegistry --> BaseTool : "dispatches"
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [http_connector.py:497-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L497-L699)
 - [secrets_connector.py:403-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L403-L620)
+- [mcp_adapter.py:382-453](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L382-L453)
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [test_tool_registry.py:56-172](file://products/tool-gateway/tests/test_tool_registry.py#L56-L172)
 
-### Audit Attribution System
-**New** The audit attribution system provides safe, opt-in connector-specific audit enrichment through duck-typed hooks. The system prevents reserved key collisions that could cause HTTP 500 errors after tool execution.
+### MCP-Ingestion Adapter Architecture
+**New** The MCP-ingestion adapter provides a server-agnostic interface for connecting to external Model Context Protocol servers while maintaining strict security boundaries and deny-by-default policies.
 
 **Key Features:**
-- **Opt-in Pattern**: Connectors implement optional `audit_attribution()` method; absence yields empty attribution
-- **Reserved Key Protection**: Prevents connector-provided keys from overwriting gateway-managed fields like `request_id`, `tool_name`, `status`, etc.
-- **Safe Collision Handling**: Reserved key conflicts are logged as warnings and dropped rather than causing failures
-- **Duck-typed Interface**: No formal inheritance required; any callable attribute named `audit_attribution` is recognized
-- **Backward Compatibility**: Tools without attribution hooks audit identically to pre-hook behavior
+- **Server-Agnostic Design**: One reusable adapter class that works with any MCP server implementation
+- **Config-Driven Registration**: Tools are registered purely from gateway-owned configuration, never from server metadata
+- **Fail-Closed Security**: Missing SDK, unreachable servers, credential failures, and transport errors all become structured errors
+- **Typed Tool Mapping**: Each admitted server tool becomes a typed gateway tool with validated parameters
+- **Credential Set Integration**: Uses the existing SPEC-068 credential resolution seam for bearer tokens
+- **Identity Threading**: Supports both acting-service and user-delegated identity modes
 
 ```mermaid
 flowchart TD
-Start(["resolve_audit_attribution"]) --> CheckHook{"Has audit_attribution?"}
-CheckHook --> |No| ReturnEmpty["Return {}"]
-CheckHook --> |Yes| CallHook["Call attributor(result)"]
-CallHook --> ValidateDict{"Valid non-empty dict?"}
-ValidateDict --> |No| ReturnEmpty
-ValidateDict --> |Yes| CheckCollision{"Any reserved keys?"}
-CheckCollision --> |No| ReturnAttrib["Return attribution"]
-CheckCollision --> |Yes| LogWarning["Log warning with reserved_keys"]
-LogWarning --> FilterKeys["Filter out reserved keys"]
-FilterKeys --> ReturnFiltered["Return filtered attribution"]
+Start(["AdmittedTool Config"]) --> Register["register_tools(registry)"]
+Register --> CreateTool["Create McpTool(spec)"]
+CreateTool --> ValidateParams["validate_parameters(schema, params)"]
+ValidateParams --> MapArgs["map_arguments(spec, params)"]
+MapArgs --> CallServer["_call(server_name, arguments)"]
+CallServer --> ResolveAuth["resolve_bearer()"]
+ResolveAuth --> OpenSession["_open_mcp_session(transport, token)"]
+OpenSession --> ExecuteTool["session.call_tool()"]
+ExecuteTool --> Normalize["normalize(result, duration_ms)"]
+Normalize --> ToolResult["ToolResult"]
 ```
 
 **Diagram sources**
-- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
+- [mcp_adapter.py:275-284](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L275-L284)
+- [mcp_adapter.py:407-453](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L407-L453)
+- [mcp_adapter.py:285-351](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L285-L351)
 
 **Section sources**
-- [gateway_service.py:32-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L69)
-- [test_redaction.py:329-348](file://products/tool-gateway/tests/test_redaction.py#L329-L348)
+- [mcp_adapter.py:1-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L1-L472)
+- [test_ansible_mcp_ingestion.py:1-200](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py#L1-L200)
 
-### Connector-Specific Audit Attribution
-Connectors can implement the optional `audit_attribution()` method to provide additional context for audit records. This enables rich audit trails with connector-specific information while maintaining safety guarantees.
+### Ansible Binding and Deny-by-Default Policy
+**New** The Ansible binding provides a secure, configuration-driven interface to Ansible Automation Platform (AAP) read-only tools with deny-by-default policy enforcement.
 
-**Ansible Native Connector:**
-- Provides `target_identity_mode` indicating acting-service vs user-delegated identity
-- Adds `failure_class: target_unavailable` for transport/timeout/configuration failures
-- Distinguishes between policy denials and infrastructure failures
+**Security Model:**
+- **Deny-by-Default**: No Ansible tools are exposed unless `GATEWAY_ANSIBLE_MCP_ENABLED=true`
+- **Read-Only Access**: Only six specific read-tier tools are admitted; all mutating operations are blocked
+- **Allowlist Enforcement**: Server-advertised tools are never trusted; only gateway-configured tools are exposed
+- **Structured Error Handling**: All failures return structured error codes without exposing internal details
 
-**MCP Adapter Connector:**
-- Mirrors Ansible connector attribution pattern
-- Supports configurable target identity modes
-- Provides consistent failure classification across MCP transports
+**Admitted Tools:**
+- `ansible.list_inventories`: List inventories with optional name filtering
+- `ansible.get_inventory`: Get inventory details including hosts and groups  
+- `ansible.list_job_templates`: List job templates with optional name filtering
+- `ansible.get_job`: Get job details and current status by ID
+- `ansible.get_job_stdout`: Retrieve job stdout/log output with tail-bounding
+- `ansible.get_environment_health`: Report control-plane health/readiness
 
 ```mermaid
 flowchart TD
-Connector["Connector.execute()"] --> Result["ToolResult"]
-Result --> AttribHook["connector.audit_attribution(result)"]
-AttribHook --> Attribution["Optional attribution dict"]
-Attribution --> Merge["Merge with gateway-managed fields"]
-Merge --> AuditRecord["Final audit record"]
+Config["ANSIBLE_ADMITTED_TOOLS config"] --> Bind["build_ansible_mcp_connector()"]
+Bind --> Transport["McpTransport(streamable_http)"]
+Bind --> Connector["McpIngestionConnector"]
+Connector --> Registry["register_tools(registry)"]
+Registry --> TypedTools["Six typed read-only tools"]
+TypedTools --> PolicyCheck{"Risk level = 'read'?"}
+PolicyCheck --> |Yes| Admit["Admit to registry"]
+PolicyCheck --> |No| Deny["Refuse registration"]
 ```
 
 **Diagram sources**
-- [ansible_native.py:203-217](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py#L203-L217)
-- [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
+- [ansible_binding.py:91-176](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L91-L176)
+- [ansible_binding.py:179-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L179-L207)
+- [app.py:167-194](file://products/tool-gateway/src/tool_gateway/app.py#L167-L194)
 
 **Section sources**
-- [ansible_native.py:203-217](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py#L203-L217)
-- [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
-- [test_ansible_native.py:141-167](file://products/tool-gateway/tests/test_ansible_native.py#L141-L167)
+- [ansible_binding.py:1-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L1-L207)
+- [app.py:167-194](file://products/tool-gateway/src/tool_gateway/app.py#L167-L194)
+- [ansible-mcp-check.sh:1-395](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L1-L395)
+
+### Operator Guidance for Enabling Ansible MCP-Ingestion
+**New** Operators must explicitly enable Ansible MCP-ingestion through configuration. The feature is disabled by default and requires careful setup for production use.
+
+**Configuration Requirements:**
+- `GATEWAY_ANSIBLE_MCP_ENABLED=true`: Enable the connector
+- `GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http`: Use HTTP transport for AAP
+- `GATEWAY_ANSIBLE_MCP_URL=https://your-aap-server/mcp`: Point to AAP MCP endpoint
+- `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET=aap-read-only`: Configure credential set for bearer token
+- `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS_PATH=/path/to/credential-sets.json`: Path to credential store
+
+**Production Deployment Steps:**
+1. Deploy the Ansible MCP server (AAP read-only mode or compatible implementation)
+2. Configure credential sets with appropriate permissions
+3. Set network policies to restrict access to the MCP server
+4. Enable the connector with minimal required configuration
+5. Verify tool discovery shows exactly six read-only tools
+6. Test deny-by-default behavior with unauthenticated requests
+
+**Section sources**
+- [config.py:170-191](file://products/tool-gateway/src/tool_gateway/core/config.py#L170-L191)
+- [config.py:455-487](file://products/tool-gateway/src/tool_gateway/core/config.py#L455-L487)
+- [ansible-mcp-check.sh:188-230](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L188-L230)
 
 ### HTTP Connector
 The HTTP connector provides bounded HTTP service check capabilities with two tools: `http.get` (read tier) and `http.post` (write tier). It implements strict security controls including origin allowlisting, redirect following with allowlist validation, body size limits, and credential set-based authentication.
@@ -569,6 +619,7 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 - Registry.invoke catches exceptions and returns TOOL_EXECUTION_ERROR with evidence.
 - Safe audit attribution resolution prevents reserved key collisions from causing failures.
 - Redaction applies deterministic masking and fails closed on overflow; audit events emitted for all outcomes.
+- **New** MCP-ingestion provides structured error handling for transport failures, SDK availability issues, and credential resolution problems.
 
 ```mermaid
 flowchart TD
@@ -608,6 +659,7 @@ Emit --> Resp["JSONResponse"]
 - Screenshots mask password-tier values to avoid leaking secrets.
 - All connector credentials are passed via configuration and never exposed in results or audit payloads.
 - HTTP connector uses the same credential set mechanism as browser connector, supporting rotation without restart.
+- **New** MCP-ingestion uses bearer tokens from credential sets, never exposing them in tool results or logs.
 
 **Section sources**
 - [browser_connector.py:123-148](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L123-L148)
@@ -615,6 +667,7 @@ Emit --> Resp["JSONResponse"]
 - [http_connector.py:361-387](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L361-L387)
 - [url_redaction.py:27-41](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L27-L41)
 - [config.py:63-73](file://products/tool-gateway/src/tool_gateway/core/config.py#L63-L73)
+- [mcp_adapter.py:285-323](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L285-L323)
 
 ### Integration with Audit and Policy Systems
 - PolicyEngine loads bundled rules, computes content fingerprint, and evaluates actions with deny-by-default semantics.
@@ -622,12 +675,14 @@ Emit --> Resp["JSONResponse"]
 - GatewayService records metrics for policy decisions, redaction spans, and token verification outcomes.
 - The SecretsConnector integrates with the existing audit and policy systems, introducing a new `secret_delivered` audit event type and `secrets:deliver` policy action for email delivery operations.
 - **Updated** The audit attribution system provides safe, opt-in connector-specific enrichment with reserved key collision protection, preventing HTTP 500 errors from malformed attribution data.
+- **New** MCP-ingestion provides detailed audit attribution including target identity mode and failure classification for transport vs. policy denials.
 
 **Section sources**
 - [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
 - [audit_emitter.py:29-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L29-L98)
 - [gateway_service.py:32-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L69)
 - [gateway_service.py:32-59](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L59)
+- [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
 
 ## Dependency Analysis
 - Application wiring: app creates registry and optional browser connector; lifespan starts/stops browser pool.
@@ -636,6 +691,7 @@ Emit --> Resp["JSONResponse"]
 - HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector.
 - SecretsConnector depends on password policy validation and secure delivery buffer backends.
 - **Updated** Audit attribution system integrates with all connectors through duck-typed hooks, providing safe enrichment without breaking existing functionality.
+- **New** MCP-ingestion adapter is independent of specific server implementations and uses the existing credential set infrastructure.
 
 ```mermaid
 graph LR
@@ -648,6 +704,9 @@ Reg --> Inc["IncidentsConnector"]
 Reg --> Sk["SkillsConnector"]
 Reg --> Http["HttpConnector"]
 Reg --> Secrets["SecretsConnector"]
+Reg --> Mcp["MCP Ingestion (Ansible)"]
+Mcp --> McpAdapter["McpIngestionConnector"]
+McpAdapter --> Transport["McpTransport"]
 Http --> UrlRedact["URL Redaction"]
 Secrets --> Buffer["SecretDeliveryBuffer"]
 Buffer --> Memory["InMemory Backend"]
@@ -663,17 +722,19 @@ AA --> Inc
 AA --> Sk
 AA --> Http
 AA --> Secrets
+AA --> Mcp
 ```
 
 **Diagram sources**
-- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
+- [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 - [secret_delivery.py:277-327](file://products/tool-gateway/tools/secret_delivery.py#L277-L327)
+- [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
 
 **Section sources**
-- [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
+- [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 
 ## Performance Considerations
 - Async execution: Connectors run blocking calls in executors to avoid blocking the event loop.
@@ -684,6 +745,7 @@ AA --> Secrets
 - HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion.
 - SecretsConnector uses efficient CSPRNG generation and minimal memory footprint for ephemeral delivery handles.
 - **Updated** Audit attribution resolution is lightweight duck-typed inspection with no performance impact for connectors without attribution hooks.
+- **New** MCP-ingestion opens sessions per call with timeout limits and lazy SDK imports to minimize startup overhead.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -696,6 +758,7 @@ Common issues and diagnostics:
 - HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems.
 - SecretsConnector issues: Password policy violations, delivery handle expiration, email delivery configuration problems, and active destruction failures.
 - **Updated** Audit attribution issues: Reserved key collisions are now safely handled with warning logs instead of HTTP 500 errors; check logs for "dropped reserved keys" messages if connector attribution is interfering with gateway-managed fields.
+- **New** MCP-ingestion issues: Verify `GATEWAY_ANSIBLE_MCP_ENABLED=true`, check credential set configuration, validate MCP server connectivity, and confirm exactly six read-only tools are registered.
 
 **Section sources**
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
@@ -706,12 +769,15 @@ Common issues and diagnostics:
 - [http_connector.py:100-180](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L180)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [test_tool_invoke.py:184-549](file://products/tool-gateway/tests/test_tool_invoke.py#L184-L549)
+- [ansible-mcp-check.sh:188-230](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L188-L230)
 
 ## Conclusion
-The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. The platform now includes seven comprehensive built-in connectors covering Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, skills repositories, and secure secret delivery, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
+The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. The platform now includes eight comprehensive built-in connectors covering Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, skills repositories, secure secret delivery, and MCP-ingestion for Ansible/AAP systems, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
 
 **Updated** The critical audit attribution bug fix ensures that connector-provided audit enrichment cannot interfere with gateway-managed fields, preventing HTTP 500 errors that would occur after successful tool execution. The new `resolve_audit_attribution()` helper function provides safe, opt-in connector-specific audit enrichment while maintaining full backward compatibility.
 
 The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking. The complete implementation of SPEC-062 secure password generation and delivery system provides cryptographically strong password generation, secure one-time delivery mechanisms, and active destruction capabilities through the new DELETE endpoint. 
 
-This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements. The enhanced audit attribution system further strengthens this boundary by enabling rich, connector-specific audit enrichment without compromising system stability or security.
+**New** The MCP-ingestion capabilities provide a secure, server-agnostic interface for connecting to external Model Context Protocol servers, with deny-by-default Ansible integration that requires explicit operator enablement. The architecture ensures that server metadata is never trusted, tools are registered purely from gateway-owned configuration, and all failures return structured error codes without exposing internal details.
+
+This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements. The enhanced audit attribution system further strengthens this boundary by enabling rich, connector-specific audit enrichment without compromising system stability or security. The MCP-ingestion adapter extends these capabilities to support modern protocol-based integrations while maintaining the same security and governance standards.
