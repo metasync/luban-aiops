@@ -45,10 +45,13 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
       **not** proven on this target.
       **Resolved (2026-10-13, operator pick): real AWX + the MIT `SurgeX-Labs/awx-mcp-server`,
       self-hosted in-cluster** (details + supply-chain/license/provenance review in the Stage-0
-      closure findings below). A suitable MIT MCP server exists, so the native
-      `ansible-inventory` fallback is **not** taken — the MCP substrate **is** proven on this
-      target. R-2/R-6 cautions: the server's 3 mutating tools stay denied, and R-6 budgets for
-      AWX's weight.
+      closure findings below). **[Superseded 2026-10-17: this exact artifact was DROPPED at the
+      R-6 supply-chain review — stdio-only MCP, no declared license, `mcp>=1.0.0` — see the
+      file-level correction above and `spec.md`'s Changelog. The remainder of this item is kept
+      verbatim as the dated historical record, not as current guidance.]** A suitable MIT MCP
+      server exists, so the native `ansible-inventory` fallback is **not** taken — the MCP
+      substrate **is** proven on this target. R-2/R-6 cautions: the server's 3 mutating tools stay
+      denied, and R-6 budgets for AWX's weight.
 - [x] Fix the **read-only discovery** operation set + each tool's argument-validation shape
       (OQ-2 residual) — record against R-2/R-3: inventory host/group listing, `gather_facts`/
       setup reads, job-template listing, job log/status monitoring, environment health.
@@ -274,9 +277,12 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       into `dev-k8s` (resources + `ansible.env` + the tool-gateway credential patch), the root
       `OVERLAYS`, `select-runtime-profile.sh`/`verify-runtime-profile.sh`, and `deploy-overlay.sh`
       (guarded `set image`). `make overlays` green (5 overlays) and the dev-k8s render verified.
-      *The live in-cluster `make deploy` + gated live-check run is deferred to the next
-      cluster-available window (the dev API went unresponsive mid-session); not a code gap —
-      OQ-5 means CI makes no live external call.*
+      *Live in-cluster validation completed later the same day (an earlier deferral for an
+      unresponsive dev API is superseded): `make build` + `make deploy` — tag
+      `0.47.0-dev-k8s-863400e-dirty-20261017122937`, with `SKIP_BROWSER_CREDENTIALS=true` and
+      `RECONCILE_OIDC_PORTAL_CLIENT=false` to preserve the existing browser credentials and the
+      shared Keycloak configuration — brought every deployment Ready, including
+      `ansible-mock-mcp`.*
 - [x] Deliver any credential fields the topology needs through the `sync-*.sh` model — never
       hand-edited in a consumer copy; keep `make validate-secret-vocabulary` green
       (`shared/platform-ops/`).
@@ -300,12 +306,34 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
       fail-closed negative control (denied `ansible.launch_job_template` + `INVALID_PARAMETERS`),
       gated live reads (skip with a note when the target is unreachable), and a bearer-redaction
       assertion. The **AAP read-only validation runbook** (operator step outside CI) is documented
-      in `docs/guides/tool-configuration.md`. *Live cluster run deferred with box 1.*
+      in `docs/guides/tool-configuration.md`. *Live cluster run completed 2026-10-17 (superseding
+      the earlier deferral): the **enabled** branch passed against the in-cluster mock with every
+      live read exercised — health, inventories, the demo inventory's mock hosts, job templates,
+      job 1, and its tail-bounded stdout — unauthenticated callers rejected (401), the denied verb
+      and the missing parameter failing closed, and no bearer in any tool result. Real licensed
+      AAP validation remains the separate operator runbook step.*
 
 > **R-6 Layer-2 strengthening.** `products/tool-gateway/tests/test_ansible_mcp_streamable_http.py`
 > runs a **real** `mcp` SDK server over streamable-HTTP in-process, so CI exercises the connector's
 > live `_open_mcp_session` wire path (not a stub). Part of the 550-test green tool-gateway suite
 > (2026-10-17).
+
+> **R-6 post-delivery review hardening (2026-10-17).** A code & doc review of the four R-4/R-5 +
+> R-6 commits found no Critical/High issue and nothing warranting a revert, and the follow-up pass
+> closed every finding: audit attribution (`target_system` + the connector's `target_identity_mode`
+> /`failure_class`) is now read from the connector's **own** result *before* redaction can replace
+> it, so a withheld `REDACTION_OVERFLOW` call no longer re-attributes to `platform` (regression
+> test added); the overflow envelope keeps the connector's risk tier and source system; a
+> connector attribution key colliding with a reserved audit key is dropped with a warning instead
+> of raising `TypeError` → HTTP 500 after the tool ran; the live-check's bearer-redaction assertion
+> no longer collapses a renamed key / RBAC failure / base64 failure into a vacuous NOTE (and now
+> fails when a successful live read coincides with an unreadable bearer), its accepted fail-closed
+> code set covers every code the connector can return without a server answer, and an opt-in
+> `STRICT_LIVE=true` turns the gated live leg into a hard failure for operator runs;
+> `ansible-mcp-check.sh` is executable (755) like its `make e2e` siblings;
+> `sync-ansible-credentials.sh` removes the raw-bearer temp files via an `EXIT`/`INT`/`TERM` trap
+> rather than only on the happy path; the Layer-2 test's `transport_security` now mirrors the
+> deployed mock exactly; and both test suites remove their temp credential files.
 
 ## Delivery Gate
 

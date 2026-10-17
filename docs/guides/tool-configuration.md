@@ -596,6 +596,11 @@ committed enabled/disabled state, so it passes deny-by-default or live):
 # Prerequisite: identity port-forward for the delegated operator token
 kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000
 shared/platform-ops/e2e/ansible-mcp-check.sh
+
+# Operator run against a deployed ansible-dev profile: turn the gated live leg
+# from a skip-with-a-note into a hard failure, so a green run always proves the
+# live reads rather than merely the registration and fail-closed behaviour.
+STRICT_LIVE=true shared/platform-ops/e2e/ansible-mcp-check.sh
 ```
 
 It proves: unauthenticated callers rejected (401); when disabled, no `ansible.*`
@@ -603,7 +608,12 @@ tool and `TOOL_NOT_FOUND` on invoke; when enabled, the six read tools present at
 `risk_level=read` with **no mutating verb admitted**, a non-admitted verb and a
 missing parameter fail closed with no server contact, the live reads project the
 target's inventory/hosts/templates/job/stdout (gated on reachability, else a
-clean fail-closed code), and the bearer never appears in any tool result. To list
+clean fail-closed code — and under `STRICT_LIVE=true` a skip *is* a failure), and
+the bearer never appears in any tool result. `make e2e` deliberately runs it
+**without** `STRICT_LIVE`: OQ-5 requires CI to pass with no live external call,
+so projection against a real MCP server is covered in CI by the in-process
+Layer-2 wire test
+(`products/tool-gateway/tests/test_ansible_mcp_streamable_http.py`). To list
 the tools directly:
 
 ```bash

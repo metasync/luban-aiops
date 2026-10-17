@@ -456,6 +456,27 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-17 (later): **R-6 delivered, live-validated in-cluster, and hardened by a
+  post-delivery code & doc review** (no status change — still `approved`; `VERSION` untouched at
+  0.47.0). R-6 shipped as `291e6d5` (feat) + `863400e` (docs) alongside R-4/R-5 (`b8a8eba`,
+  `52505b8`); all four were pushed to `origin/main` after a clean L3 deep review and a green full
+  `make verify` (including the 792-test crash-safety campaign). The enabled branch was then
+  exercised for real: `make build` + `make deploy` (tag
+  `0.47.0-dev-k8s-863400e-dirty-20261017122937`, browser credentials and the shared Keycloak
+  configuration preserved) brought every deployment Ready including `ansible-mock-mcp`, and
+  `shared/platform-ops/e2e/ansible-mcp-check.sh` passed with all six live reads, the fail-closed
+  negatives and the bearer-redaction assertion. A review of the four commits found **no
+  Critical/High issue and nothing warranting a revert**; every finding it did raise is closed in a
+  follow-up pass — audit attribution is now read from the connector's own result *before* redaction
+  can replace it (regression test added), the `REDACTION_OVERFLOW` envelope keeps the connector's
+  risk tier and source system, a reserved-key collision in the attribution splat is dropped rather
+  than becoming an HTTP 500, the live-check's bearer-redaction assertion can no longer pass
+  vacuously (widened fail-closed code set + an opt-in `STRICT_LIVE=true` for operator runs),
+  `ansible-mcp-check.sh` carries the executable bit, `sync-ansible-credentials.sh` traps
+  `EXIT`/`INT`/`TERM` so the raw-bearer temp files never outlive a failure, the Layer-2 test's
+  `transport_security` mirrors the deployed mock, and both suites remove their temp credential
+  files. Real licensed-AAP read-only validation remains the separate operator runbook step outside
+  CI (OQ-5).
 - 2026-10-17: **R-6 supply-chain review corrected the Stage-0 dev-artifact pick** (no status
   change — still `approved`). The 2026-10-13 Stage-0 pick `SurgeX-Labs/awx-mcp-server` was
   **dropped** on review: it is stdio-only MCP (its "network" mode is a non-MCP REST API),
