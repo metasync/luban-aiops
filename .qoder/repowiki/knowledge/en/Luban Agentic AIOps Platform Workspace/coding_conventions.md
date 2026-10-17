@@ -1,4 +1,5 @@
-- Each Python product ships its own `pyproject.toml`, `Dockerfile`, `Makefile`, and `.python-version`, and is invoked through the root Makefile rather than directly.
-- Cross-product contracts (API schemas, events, policies, approval payloads) live in `shared/shared-contracts/` and are consumed as read-only references — products do not duplicate them.
-- Policy bundles are authored once under `shared/shared-contracts/policies/` and synchronized into consumers via `make sync-policy` instead of being edited per product.
-- Version pinning is centralized in the root `VERSION` file and enforced across all products and the portal via `make validate-version`.
+- Each product directory is self-contained with its own `pyproject.toml`, `Dockerfile`, `Makefile`, `src/<service_name>/`, and `tests/`, and is invoked through the root Makefile's `PRODUCTS` loops rather than ad-hoc commands.
+- Cross-service boundaries are expressed as explicit contracts under `shared/shared-contracts/` (schemas, policies, SQL) that consumers import or validate against, instead of sharing Python packages across products.
+- New features follow the spec-driven workflow: a `docs/specs/SPEC-NNN-<title>/` folder containing `plan.md`, `spec.md`, and `tasks.md`, with status tracked as draft/approved/delivered.
+- Container images use a coordinated tag derived from `VERSION` plus git SHA and profile, written to `shared/platform-ops/gitops/dev-k8s/.images.env` so all deployed workloads share one release version.
+- Policy bundles are authored once at `shared/shared-contracts/policies/` and copied to every consumer location via `make sync-policy`, with JSON-schema validation and scenario evaluation driven by scripts under `shared/shared-contracts/scripts/`.

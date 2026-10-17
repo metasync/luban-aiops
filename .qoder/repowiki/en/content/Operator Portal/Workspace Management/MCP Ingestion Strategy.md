@@ -6,6 +6,8 @@
 - [mcp-exposure-spike.md](file://docs/workspace/mcp-exposure-spike.md)
 - [SPEC-067-servicenow-mcp-ingestion-pilot/spec.md](file://docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md)
 - [SPEC-068-outbound-execution-credential-schemes/spec.md](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md)
+- [SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md)
+- [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [registry.py](file://products/tool-gateway/src/tool_gateway/tools/registry.py)
 - [tools.py](file://products/tool-gateway/src/tool_gateway/api/routes/tools.py)
@@ -17,9 +19,9 @@
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect that SPEC-067 ServiceNow pilot now consumes credential substrate from SPEC-068 rather than defining it
-- Clarified the reduced blocking Open Questions (from 6 to 3, with OQ-2 resolved by extraction)
-- Emphasized the positioning of ServiceNow pilot as consumer of external system authentication capability
+- Updated delivery roadmap sequencing from ServiceNow → Ansible → Windows to **Ansible → Windows → ServiceNow** based on self-provisioning difficulty
+- Updated to reference SPEC-069 (Ansible) as the first pilot instead of SPEC-067 (ServiceNow)
+- Clarified that the re-sequencing prioritizes self-hosted Ansible MCP server over external provider waitlists
 - Maintained all existing architectural and implementation details unchanged
 
 ## Table of Contents
@@ -34,20 +36,22 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document describes the **MCP ingestion strategy** for consuming external Model Context Protocol (MCP) servers beneath `tool-gateway`. The strategy has been refined through two design assessments and now includes a concrete pilot specification with a critical architectural evolution:
+This document describes the **MCP ingestion strategy** for consuming external Model Context Protocol (MCP) servers beneath `tool-gateway`. The strategy has been refined through two design assessments and now includes concrete pilot specifications with a critical architectural evolution and re-sequenced delivery roadmap:
 
 - The original assessment (`mcp-exposure-spike.md`) established that no MCP client exists today, identified the existing extension seam, and recommended retaining native connectors until a concrete trigger justifies a separately approved pilot.
 - The follow-up assessment (`mcp-ingestion-spike.md`) accepts three named operational targets — ServiceNow, Ansible, Windows — and recommends building one generic MCP-ingestion connector under `tool-gateway`, then admitting targets one at a time in risk order.
-- **SPEC-067** formalizes the first pilot: ServiceNow ITSM read-tier operations, establishing the outbound execution-credential scheme extension as R6's first slice.
-- **Critical Evolution**: The outbound execution-credential extension originally drafted as SPEC-067's R-1 was extracted to **SPEC-068** (2026-10-08), making SPEC-067 a consumer of this substrate rather than its definer. This reduces blocking Open Questions from 6 to 3 and positions the ServiceNow pilot as a consumer of external system authentication capability.
+- **SPEC-069** formalizes the first pilot: Ansible read-tier operations, establishing the generic MCP-ingestion adapter as R6's first slice.
+- **SPEC-067** remains as the second pilot: ServiceNow ITSM read-tier operations, establishing the outbound execution-credential scheme extension as R6's first slice.
+- **Critical Evolution**: The outbound execution-credential extension originally drafted as SPEC-067's R-1 was extracted to **SPEC-068** (2026-10-08), making both SPEC-067 and SPEC-069 consumers of this substrate rather than its definer. This reduces blocking Open Questions and positions both pilots as consumers of external system authentication capability.
 
-The strategy is an **assessment with a concrete pilot specification**, not merely a concept. No MCP server has been installed, tested, or deployed as part of this codebase.
+The strategy is an **assessment with concrete pilot specifications**, not merely a concept. No MCP server has been installed, tested, or deployed as part of this codebase.
 
 ## Project Structure
 At present, the repository contains:
 
 - Two workspace assessments describing MCP exposure and ingestion.
-- A formal pilot specification (SPEC-067) for ServiceNow ITSM MCP-ingestion.
+- A formal pilot specification (SPEC-069) for Ansible read-tier MCP-ingestion as the first pilot.
+- A formal pilot specification (SPEC-067) for ServiceNow ITSM MCP-ingestion as the second pilot.
 - A standalone substrate specification (SPEC-068) for outbound execution-credential schemes.
 - A tool execution framework in `tool-gateway` with base abstractions, a registry, HTTP routes, policy enforcement, redaction, and audit emission.
 - Kernel middleware in `agent-platform` that gates headless AgentScope tool calls.
@@ -76,8 +80,8 @@ subgraph "Planned MCP Connector"
 MCPConn["MCP-Ingestion Connector<br/>(not implemented yet)")
 end
 subgraph "External Systems"
-SNOW["ServiceNow (SPEC-067 Pilot)"]
-ANSIBLE["Ansible (Future Pilot)"]
+ANSIBLE["Ansible (SPEC-069 First Pilot)"]
+SNOW["ServiceNow (SPEC-067 Second Pilot)"]
 WIN["Windows UI (Future Pilot)"]
 end
 Kernel --> Routes
@@ -89,8 +93,8 @@ Registry --> MCPConn
 MCPConn --> CredStore
 MCPConn --> OAuthClient
 MCPConn --> AuthResolver
-MCPConn --> SNOW
 MCPConn --> ANSIBLE
+MCPConn --> SNOW
 MCPConn --> WIN
 ```
 
@@ -207,7 +211,7 @@ end
 The ingestion spike defines the capability-substrate direction:
 
 - One generic MCP-ingestion connector beneath `tool-gateway`.
-- Targets admitted one at a time: ServiceNow → Ansible → Windows.
+- Targets admitted one at a time: **Ansible → Windows → ServiceNow** (re-sequenced).
 - Each pilot admits only the operations its use case needs.
 - Luban retains local risk classification, approval, evidence, and audit.
 - Remote discovery does not silently add capabilities or replace canonical implementations.
@@ -257,20 +261,21 @@ Audit --> Return(["Return ToolResult"])
 - [mcp-ingestion-spike.md:82-120](file://docs/workspace/mcp-ingestion-spike.md#L82-L120)
 
 ### Confirmed Pilot Strategy
-The strategy now commits to a specific pilot sequence with clear governance:
+The strategy now commits to a specific pilot sequence with clear governance, **re-sequenced based on self-provisioning difficulty**:
 
-**Pilot Order:** ServiceNow → Ansible → Windows
+**Pilot Order:** **Ansible → Windows → ServiceNow** (re-sequenced from original ServiceNow → Ansible → Windows)
 
-**ServiceNow (SPEC-067):** First pilot focusing on read-tier ITSM operations, establishing the outbound execution-credential scheme extension as R6's first slice. This pilot proves the substrate on the lowest-risk target while addressing the critical credential gap. **Critical Update**: The pilot now consumes the credential substrate from SPEC-068 rather than defining it, reducing blocking Open Questions from 6 to 3 (OQ-2 resolved by extraction).
+**Ansible (SPEC-069):** **First pilot** focusing on read-tier inventory/facts/job-template operations, establishing the generic MCP-ingestion adapter as R6's first slice. This pilot proves the substrate on a self-hosted, open-source target with no external provider dependencies. **Critical Update**: The pilot self-provisions a self-hosted Ansible MCP server in-cluster, avoiding external provider waitlists that blocked ServiceNow.
 
-**Ansible:** Second pilot with higher blast radius due to live infrastructure access and broad credentials. Requires careful blast-radius scoping for bundled playbooks and uncertain-outcome reconciliation.
+**Windows:** **Second pilot** with strongest pattern precedent but hardest topology challenges. Requires a separate boundary study for verification/evidence quality and cross-network trust models.
 
-**Windows UI:** Third pilot with strongest pattern precedent but hardest topology challenges. Requires a separate boundary study for verification/evidence quality and cross-network trust models.
+**ServiceNow (SPEC-067):** **Third pilot** focusing on read-tier ITSM operations, establishing the outbound execution-credential scheme extension as R6's first slice. This pilot proves the substrate on the lowest-risk target while addressing the critical credential gap. **Critical Update**: The pilot now consumes the credential substrate from SPEC-068 rather than defining it, reducing blocking Open Questions from 6 to 3 (OQ-2 resolved by extraction).
 
 **Updated** Each pilot admits only the required operations rather than building large catalogs upfront, maintaining the principle that "a large catalog is not itself a use case."
 
 **Section sources**
 - [mcp-ingestion-spike.md:126-179](file://docs/workspace/mcp-ingestion-spike.md#L126-L179)
+- [SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md:44-73](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md#L44-L73)
 - [SPEC-067-servicenow-mcp-ingestion-pilot/spec.md:44-73](file://docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md#L44-L73)
 
 ### Tool Execution Framework
@@ -393,7 +398,7 @@ This is critical for MCP ingestion: uncertainty after dispatch does not mean the
 - [executor.py:1-71](file://products/execution-runtime/src/execution_runtime/services/executor.py#L1-L71)
 
 ### Credential Substrate Integration (SPEC-068)
-**New Section** The ServiceNow pilot now consumes the credential substrate from SPEC-068 rather than defining it. This represents a significant architectural improvement:
+**New Section** Both the Ansible and ServiceNow pilots consume the credential substrate from SPEC-068 rather than defining it. This represents a significant architectural improvement:
 
 **SPEC-068 provides:**
 - Per-set `scheme` field supporting `basic` | `bearer` | `oauth2_client_credentials`
@@ -402,15 +407,16 @@ This is critical for MCP ingestion: uncertainty after dispatch does not mean the
 - Secret-handling invariants with redaction and fail-closed behavior
 - Provisioning and config wiring reuse of existing models
 
-**Impact on ServiceNow Pilot:**
+**Impact on Pilots:**
 - Reduces blocking Open Questions from 6 to 3 (OQ-2 resolved by extraction)
-- Positions ServiceNow as consumer of external system authentication capability
+- Positions both Ansible and ServiceNow as consumers of external system authentication capability
 - Enables modern SaaS integrations like ServiceNow OAuth2 client credentials
 - Maintains backward compatibility with existing Basic authentication
-- Provides target-agnostic substrate reusable by future pilots (Ansible, Windows)
+- Provides target-agnostic substrate reusable by future pilots (Windows)
 
 **Section sources**
 - [SPEC-068-outbound-execution-credential-schemes/spec.md:48-58](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L48-L58)
+- [SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md:98-106](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md#L98-L106)
 - [SPEC-067-servicenow-mcp-ingestion-pilot/spec.md:98-106](file://docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md#L98-L106)
 
 ## Dependency Analysis
@@ -426,7 +432,7 @@ Registry --> Base["tool_gateway.tools.base"]
 Registry --> NativeConnectors["Native Connectors<br/>k8s, elastic, skills, incidents, secrets, http, browser"]
 Registry --> MCPConnector["MCP Ingestion Connector<br/>(planned)"]
 MCPConnector --> CredSubstrate["SPEC-068 Credential Substrate<br/>basic/bearer/oauth2_client_credentials"]
-MCPConnector --> ExternalServers["External MCP Servers<br/>ServiceNow, Ansible, Windows"]
+MCPConnector --> ExternalServers["External MCP Servers<br/>Ansible (SPEC-069), ServiceNow (SPEC-067), Windows"]
 ```
 
 **Diagram sources**
@@ -515,24 +521,26 @@ The MCP ingestion strategy proposes one generic connector beneath `tool-gateway`
 The current codebase does not implement MCP ingestion. The authoritative design is captured in:
 
 - `docs/workspace/mcp-exposure-spike.md`, which establishes the extension seam and retention-of-native-connectors posture.
-- `docs/workspace/mcp-ingestion-spike.md`, which records the staged ServiceNow → Ansible → Windows sequencing and the non-negotiable architecture.
-- `docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md`, which formalizes the first pilot and establishes R6 as the release theme.
-- **Updated**: `docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md`, which provides the target-agnostic credential substrate that SPEC-067 consumes.
+- `docs/workspace/mcp-ingestion-spike.md`, which records the staged **Ansible → Windows → ServiceNow** sequencing and the non-negotiable architecture.
+- `docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md`, which formalizes the first pilot and establishes R6 as the release theme.
+- `docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md`, which formalizes the second pilot and establishes the outbound execution-credential scheme extension.
+- **Updated**: `docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md`, which provides the target-agnostic credential substrate that both SPEC-069 and SPEC-067 consume.
 
 Before implementation, the assessments require:
 
 1. Approval of the capability-substrate direction.
-2. Selection of ServiceNow as the first pilot.
+2. Selection of **Ansible (SPEC-069) as the first pilot** and ServiceNow (SPEC-067) as the second.
 3. A per-target pilot spec with pinned artifacts, explicit allowlists, contract tests, and proven operator workflow/evidence/replay behavior.
 4. **Updated**: Integration with SPEC-068's credential substrate rather than defining custom credential logic.
 5. Framing of R6 as a release theme if approved.
 
 Until those gates are met, the correct state is: assess, retain native connectors, and do not promote an implementation, pilot, ADR, or spec from these memos.
 
-**Updated** The strategy now confirms the direction to build one generic ingestion connector beneath tool-gateway, with SPEC-067 establishing ServiceNow as the first pilot in the confirmed risk-ordered sequence (ServiceNow → Ansible → Windows). The critical architectural evolution is that SPEC-067 now **consumes** the credential substrate from SPEC-068 rather than defining it, reducing blocking Open Questions from 6 to 3 and positioning the ServiceNow pilot as a consumer of external system authentication capability. Each pilot admits only required operations rather than building large catalogs upfront, maintaining the principle that "a large catalog is not itself a use case." The stable API productization backlog row referenced in the ingestion strategy remains de-numbered, as the previously earmarked SPEC-066 number was taken by the skill retrieval ranking fidelity spec (SPEC-066). The stable API productization row will receive its number at drafting time, maintaining consistency with the project's spec numbering discipline.
+**Updated** The strategy now confirms the direction to build one generic ingestion connector beneath tool-gateway, with **SPEC-069 establishing Ansible as the first pilot** in the re-sequenced risk-ordered sequence (**Ansible → Windows → ServiceNow**) based on self-provisioning difficulty. The critical architectural evolution is that both SPEC-069 and SPEC-067 **consume** the credential substrate from SPEC-068 rather than defining it, reducing blocking Open Questions from 6 to 3 and positioning both pilots as consumers of external system authentication capability. Each pilot admits only required operations rather than building large catalogs upfront, maintaining the principle that "a large catalog is not itself a use case." The stable API productization backlog row referenced in the ingestion strategy remains de-numbered, as the previously earmarked SPEC-066 number was taken by the skill retrieval ranking fidelity spec (SPEC-066). The stable API productization row will receive its number at drafting time, maintaining consistency with the project's spec numbering discipline.
 
 **Section sources**
 - [mcp-ingestion-spike.md:176-204](file://docs/workspace/mcp-ingestion-spike.md#L176-L204)
 - [mcp-exposure-spike.md:267-311](file://docs/workspace/mcp-exposure-spike.md#L267-L311)
+- [SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md:44-73](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md#L44-L73)
 - [SPEC-067-servicenow-mcp-ingestion-pilot/spec.md:44-73](file://docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md#L44-L73)
 - [SPEC-068-outbound-execution-credential-schemes/spec.md:48-58](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L48-L58)

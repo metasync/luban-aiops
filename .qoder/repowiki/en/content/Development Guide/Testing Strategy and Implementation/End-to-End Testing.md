@@ -3,6 +3,8 @@
 <cite>
 **Referenced Files in This Document**
 - [Makefile](file://Makefile)
+- [ansible-mcp-check.sh](file://shared/platform-ops/e2e/ansible-mcp-check.sh)
+- [sync-ansible-credentials.sh](file://shared/platform-ops/gitops/sync-ansible-credentials.sh)
 - [browser-check-demo.sh](file://shared/platform-ops/e2e/browser-check-demo.sh)
 - [documents-demo.sh](file://shared/platform-ops/e2e/documents-demo.sh)
 - [incident-demo.sh](file://shared/platform-ops/e2e/incident-demo.sh)
@@ -16,6 +18,14 @@
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive coverage of STRICT_LIVE operator knob for controlled live testing
+- Enhanced bearer-redaction validation documentation with improved security guarantees
+- Expanded fail-closed error codes documentation covering MCP transport and credential failures
+- Added proper signal trapping for temporary credential cleanup in credential provisioning
+- Updated Ansible MCP integration testing with enhanced security and reliability measures
+
 ## Table of Contents
 1. Introduction
 2. Project Structure
@@ -28,13 +38,14 @@
 9. Conclusion
 
 ## Introduction
-This document explains the end-to-end testing strategy for the platform, covering full workflow validation across browser automation, document workflows, incident triage, mutating operations, and skills management. It also documents the React component test suite used to validate portal behavior, including navigation, workspace scoping, approval flows, and session APIs. Guidance is provided for environment setup (Kubernetes cluster preparation, service deployment, and test data seeding), authenticated user flows, file uploads, real-time updates, error scenarios, reporting, debugging failed tests, and maintaining reliable suites. Where applicable, performance benchmarking and load testing approaches are outlined to validate scalability under realistic usage patterns.
+This document explains the end-to-end testing strategy for the platform, covering full workflow validation across browser automation, document workflows, incident triage, mutating operations, skills management, and Ansible MCP integration. It also documents the React component test suite used to validate portal behavior, including navigation, workspace scoping, approval flows, and session APIs. The framework includes comprehensive security controls with STRICT_LIVE operator knobs, enhanced bearer-redaction validation, expanded fail-closed error codes, and proper signal trapping for temporary credential cleanup. Guidance is provided for environment setup (Kubernetes cluster preparation, service deployment, and test data seeding), authenticated user flows, file uploads, real-time updates, error scenarios, reporting, debugging failed tests, and maintaining reliable suites. Where applicable, performance benchmarking and load testing approaches are outlined to validate scalability under realistic usage patterns.
 
 ## Project Structure
 The repository provides:
-- Shell-based E2E demo scripts under shared/platform-ops/e2e that exercise live services via HTTP and kubectl against a deployed dev cluster.
+- Shell-based E2E demo scripts under shared/platform-ops/e2e that exercise live services via HTTP and kubectl against a deployed dev cluster, including Ansible MCP integration testing with STRICT_LIVE operator control.
 - A React unit/integration test suite under products/operator-portal/web-ui/app/src/__tests__ and related subdirectories that validates UI wiring, state handling, and API client behavior using Vitest and Testing Library.
 - A root Makefile that orchestrates builds, deploys, and runs the E2E demos as a single gate.
+- Credential provisioning utilities with proper signal trapping for secure temporary file cleanup.
 
 ```mermaid
 graph TB
@@ -46,6 +57,7 @@ Audit["Audit Service"]
 SkillsHub["Skills Hub"]
 IncidentSvc["Incident Service"]
 WebUI["Operator Portal Web UI"]
+AnsibleMCP["Ansible MCP Integration"]
 WebUI --> Gateway
 Gateway --> ToolGW
 Gateway --> IncidentSvc
@@ -53,11 +65,13 @@ Gateway --> SkillsHub
 Gateway --> Audit
 ToolGW --> Identity
 ToolGW --> Audit
+ToolGW --> AnsibleMCP
 IncidentSvc --> Audit
 ```
 
 **Diagram sources**
 - [Makefile:171-183](file://Makefile#L171-L183)
+- [ansible-mcp-check.sh:1-395](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L1-L395)
 - [browser-check-demo.sh:70-133](file://shared/platform-ops/e2e/browser-check-demo.sh#L70-L133)
 - [documents-demo.sh:70-124](file://shared/platform-ops/e2e/documents-demo.sh#L70-L124)
 - [incident-demo.sh:43-132](file://shared/platform-ops/e2e/incident-demo.sh#L43-L132)
@@ -75,6 +89,7 @@ IncidentSvc --> Audit
   - Incident demo validates webhook intake, deduplication, resolution, visibility, operator triage, and audit dispatch.
   - Mutating tools demo validates deny-by-default posture, policy gating, RBAC checks, and an optional HITL flow with signed execution receipts.
   - Skills demo validates source sync status, deterministic search ranking, and agent invocation of skills.search during chat.
+  - **NEW**: Ansible MCP integration test validates read-tier tool registration, fail-closed error handling, bearer token redaction, and controlled live testing via STRICT_LIVE operator knob.
 - React test suite:
   - App navigation and workspace wiring tests ensure Studio gating, mode-scoped workspaces, and view routing correctness.
   - Session API client tests assert request shapes, error propagation, and session_type scoping.
@@ -86,6 +101,7 @@ IncidentSvc --> Audit
 - [incident-demo.sh:1-29](file://shared/platform-ops/e2e/incident-demo.sh#L1-L29)
 - [mutating-demo.sh:1-63](file://shared/platform-ops/e2e/mutating-demo.sh#L1-L63)
 - [skills-demo.sh:1-26](file://shared/platform-ops/e2e/skills-demo.sh#L1-L26)
+- [ansible-mcp-check.sh:1-395](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L1-L395)
 - [App.studio.test.tsx:1-16](file://products/operator-portal/web-ui/app/src/__tests__/App.studio.test.tsx#L1-L16)
 - [sessions.test.ts:1-13](file://products/operator-portal/web-ui/app/src/api/__tests__/sessions.test.ts#L1-L13)
 - [ConfirmationCard.test.tsx:1-12](file://products/operator-portal/web-ui/app/src/chat/__tests__/ConfirmationCard.test.tsx#L1-L12)
@@ -96,6 +112,7 @@ The E2E scripts drive a realistic user journey by:
 - Interacting with platform-gateway endpoints for sessions, chat streaming, approvals, documents, incidents, and audits.
 - Executing cluster-side calls via kubectl exec to reach tool-gateway or service pods directly for control-plane assertions.
 - Validating sidecar connectivity (CDP) and feature flags through runtime configuration.
+- **NEW**: Managing Ansible MCP integration with controlled live testing and enhanced security controls.
 
 ```mermaid
 sequenceDiagram
@@ -103,12 +120,14 @@ participant Test as "E2E Script"
 participant Id as "Identity Broker"
 participant GW as "Platform Gateway"
 participant TG as "Tool Gateway"
+participant AM as "Ansible MCP"
 participant Svc as "Service Pod"
 participant Aud as "Audit Service"
 Test->>Id : Obtain platform token
 Id-->>Test : access_token
 Test->>GW : Create session / chat stream
 GW->>TG : Delegate token / invoke tools
+TG->>AM : Ansible MCP integration (if enabled)
 TG->>Svc : Execute tool (read/write)
 TG-->>GW : Tool result / confirmation_request
 GW-->>Test : SSE frames (tool_call/tool_result/confirmation)
@@ -118,6 +137,7 @@ Aud-->>Test : Query durable trail
 ```
 
 **Diagram sources**
+- [ansible-mcp-check.sh:96-133](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L96-L133)
 - [browser-check-demo.sh:96-133](file://shared/platform-ops/e2e/browser-check-demo.sh#L96-L133)
 - [mutating-demo.sh:111-152](file://shared/platform-ops/e2e/mutating-demo.sh#L111-L152)
 - [incident-demo.sh:141-168](file://shared/platform-ops/e2e/incident-demo.sh#L141-L168)
@@ -130,11 +150,13 @@ Aud-->>Test : Query durable trail
   - A running Kubernetes cluster with the dev-k8s overlay deployed.
   - Port forwards for identity-service and platform-gateway when running chat legs.
   - Runtime secrets and config maps provisioned (browser credentials, webhook tokens, query clients).
+  - **NEW**: Ansible MCP credentials provisioned via sync-ansible-credentials.sh with proper signal trapping.
 - Build and deploy:
   - Use the root Makefile targets to build images, render overlays, and deploy the platform.
   - Run samples separately so base overlays remain unmodified.
 - Running E2E:
   - The e2e target executes the demo scripts sequentially and reports pass/fail.
+  - **NEW**: Includes ansible-mcp-check.sh in the standard E2E suite with controlled live testing.
 
 ```mermaid
 flowchart TD
@@ -149,31 +171,143 @@ Scripts --> |Incidents| IncDemo["incident-demo.sh"]
 Scripts --> |Mutating| MutDemo["mutating-demo.sh"]
 Scripts --> |Browser| BrDemo["browser-check-demo.sh"]
 Scripts --> |Docs| DocDemo["documents-demo.sh"]
+Scripts --> |Ansible MCP| AnsDemo["ansible-mcp-check.sh"]
 SkillsDemo --> Report["Report results"]
 IncDemo --> Report
 MutDemo --> Report
 BrDemo --> Report
 DocDemo --> Report
+AnsDemo --> Report
 ```
 
 **Diagram sources**
 - [Makefile:96-124](file://Makefile#L96-L124)
 - [Makefile:181-204](file://Makefile#L181-L204)
+- [Makefile:262-276](file://Makefile#L262-L276)
 
 **Section sources**
 - [Makefile:178-204](file://Makefile#L178-L204)
+- [Makefile:262-276](file://Makefile#L262-L276)
 - [browser-check-demo.sh:43-58](file://shared/platform-ops/e2e/browser-check-demo.sh#L43-L58)
 - [documents-demo.sh:26-38](file://shared/platform-ops/e2e/documents-demo.sh#L26-L38)
 - [incident-demo.sh:16-28](file://shared/platform-ops/e2e/incident-demo.sh#L16-L28)
 - [mutating-demo.sh:48-62](file://shared/platform-ops/e2e/mutating-demo.sh#L48-L62)
 - [skills-demo.sh:13-25](file://shared/platform-ops/e2e/skills-demo.sh#L13-L25)
 
+### STRICT_LIVE Operator Knob for Controlled Live Testing
+- **NEW**: The STRICT_LIVE operator knob provides controlled activation of live external calls in E2E testing.
+- Default behavior (STRICT_LIVE=false): CI passes without live external calls, proving registration, fail-closed behavior, and redaction only.
+- Operator mode (STRICT_LIVE=true): Turns gated live legs into hard failures when mock targets are not reachable/credentialed.
+- Used primarily in Ansible MCP integration testing to distinguish between development and production validation modes.
+
+```mermaid
+flowchart TD
+A["E2E Test Execution"] --> B{"STRICT_LIVE?"}
+B --> |false| C["CI Mode: Skip live legs"]
+B --> |true| D["Operator Mode: Fail if live unavailable"]
+C --> E["Prove registration + fail-closed + redaction"]
+D --> F["Validate live functionality"]
+E --> G["Green exit if all offline checks pass"]
+F --> H["Fail if mock target unreachable"]
+```
+
+**Diagram sources**
+- [ansible-mcp-check.sh:55-63](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L55-L63)
+- [ansible-mcp-check.sh:219-222](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L219-L222)
+- [ansible-mcp-check.sh:284-285](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L284-L285)
+
+**Section sources**
+- [ansible-mcp-check.sh:55-63](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L55-L63)
+- [ansible-mcp-check.sh:219-222](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L219-L222)
+- [ansible-mcp-check.sh:284-285](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L284-L285)
+
+### Enhanced Bearer-Redaction Validation
+- **NEW**: Comprehensive bearer token redaction validation ensures sensitive credentials never leak into tool results.
+- The Ansible MCP check validates that mock bearer tokens (read from ansible-mock-credentials secret) never appear in any tool-result body.
+- Credentials ride in httpx headers only, never in response bodies.
+- Enhanced validation catches both direct token leakage and indirect exposure through structured data fields.
+
+```mermaid
+sequenceDiagram
+participant Test as "E2E Test"
+participant Secret as "Secret Store"
+participant TG as "Tool Gateway"
+participant Mock as "Ansible Mock"
+Test->>Secret : Read bearer token
+Secret-->>Test : Encoded bearer
+Test->>TG : Invoke tool with bearer header
+TG->>Mock : HTTP request with bearer header
+Mock-->>TG : Tool result (no bearer)
+TG-->>Test : Tool result (redacted)
+Test->>Test : Assert no bearer in response
+```
+
+**Diagram sources**
+- [ansible-mcp-check.sh:343-381](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L343-L381)
+- [sync-ansible-credentials.sh:15-30](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L15-L30)
+
+**Section sources**
+- [ansible-mcp-check.sh:343-381](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L343-L381)
+- [sync-ansible-credentials.sh:15-30](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L15-L30)
+
+### Expanded Fail-Closed Error Codes
+- **NEW**: Comprehensive fail-closed error handling for MCP connector failures without server responses.
+- Accepted fail-closed codes: MCP_TRANSPORT_ERROR, MCP_SDK_UNAVAILABLE, CREDENTIAL_SET_NOT_FOUND, CREDENTIAL_SCHEME_UNSUPPORTED.
+- Any other error indicates unexpected failure that must not be waved through as "unreachable".
+- Ensures clean structured error handling rather than hangs or fabricated successes.
+
+```mermaid
+flowchart TD
+A["MCP Connection Attempt"] --> B{"Connection Status"}
+B --> |Success| C["Proceed with live reads"]
+B --> |Failure| D{"Error Code Check"}
+D --> |Fail-closed code| E["Skip live leg with note"]
+D --> |Unexpected code| F["Fail test immediately"]
+E --> G["Continue with offline validations"]
+F --> H["Report specific error details"]
+```
+
+**Diagram sources**
+- [ansible-mcp-check.sh:78-82](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L78-L82)
+- [ansible-mcp-check.sh:279-282](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L279-L282)
+
+**Section sources**
+- [ansible-mcp-check.sh:78-82](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L78-L82)
+- [ansible-mcp-check.sh:279-282](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L279-L282)
+
+### Proper Signal Trapping for Temporary Credential Cleanup
+- **NEW**: Robust signal trapping ensures temporary credential files are cleaned up on success, failure, and signals.
+- Uses trap cleanup EXIT INT TERM to handle all termination scenarios.
+- Prevents sensitive bearer tokens from lingering on disk after script completion.
+- Implements idempotent cleanup that can be called multiple times safely.
+
+```mermaid
+flowchart TD
+A["Script Start"] --> B["Generate Token File"]
+B --> C["Register Cleanup Trap"]
+C --> D{"Script Execution"}
+D --> |Success| E["Cleanup temp files"]
+D --> |Failure| F["Cleanup temp files"]
+D --> |Signal| G["Cleanup temp files"]
+E --> H["Exit cleanly"]
+F --> H
+G --> H
+```
+
+**Diagram sources**
+- [sync-ansible-credentials.sh:69-91](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L69-L91)
+- [sync-ansible-credentials.sh:93-108](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L93-L108)
+
+**Section sources**
+- [sync-ansible-credentials.sh:69-91](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L69-L91)
+- [sync-ansible-credentials.sh:93-108](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L93-L108)
+
 ### Browser Automation Testing (Web Tools and CDP)
 - Discovery and risk tiers:
   - When disabled, no web.* tools appear; invoke fails closed with TOOL_NOT_FOUND.
   - When enabled, baseline tools are registered with correct risk levels; off-allowlist origins are denied server-side.
 - CDP connectivity:
-  - The gateway pod must reach the Chromium sidecar’s CDP endpoint to navigate, snapshot, screenshot, and interact.
+  - The gateway pod must reach the Chromium sidecar's CDP endpoint to navigate, snapshot, screenshot, and interact.
 - Optional chat leg:
   - Creates a session, streams a message that triggers web.* tools, parks a confirmation_request for write-tier actions, approves via confirm, and asserts the resumed turn completes with operational outcomes and durable receipts.
 
@@ -340,6 +474,39 @@ GW-->>Script : SSE frames with skills.search tool_call + tool_result
 - [skills-demo.sh:40-83](file://shared/platform-ops/e2e/skills-demo.sh#L40-L83)
 - [skills-demo.sh:91-124](file://shared/platform-ops/e2e/skills-demo.sh#L91-L124)
 
+### Ansible MCP Integration Testing
+- **NEW**: Comprehensive Ansible MCP integration testing validates read-tier tool registration, fail-closed error handling, and bearer token redaction.
+- Control plane checks verify unauthenticated callers are rejected (401).
+- Tool discovery validates exactly six read-tier ansible.* tools are registered with risk_level=read.
+- Fail-closed negatives tested without server contact: non-admitted mutating verbs return TOOL_NOT_FOUND, missing parameters return INVALID_PARAMETERS.
+- Live reads are gated on mock target reachability via health probe, with proper skip logic when unavailable.
+- Redaction validation ensures mock bearer tokens never appear in tool result bodies.
+
+```mermaid
+sequenceDiagram
+participant Script as "ansible-mcp-check.sh"
+participant GW as "Platform Gateway"
+participant TG as "Tool Gateway"
+participant AM as "Ansible MCP Mock"
+Script->>GW : Unauthenticated discovery/invoke
+GW-->>Script : 401 Unauthorized
+Script->>GW : Authenticated discovery
+GW-->>Script : Six ansible.* tools (read tier)
+Script->>TG : Invoke ansible.get_environment_health
+TG->>AM : Health probe
+AM-->>TG : healthy/unhealthy
+TG-->>Script : Tool result (bearer redacted)
+```
+
+**Diagram sources**
+- [ansible-mcp-check.sh:138-147](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L138-L147)
+- [ansible-mcp-check.sh:232-250](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L232-L250)
+- [ansible-mcp-check.sh:269-292](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L269-L292)
+- [ansible-mcp-check.sh:343-381](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L343-L381)
+
+**Section sources**
+- [ansible-mcp-check.sh:1-395](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L1-L395)
+
 ### React Component Testing Approach
 - Navigation and workspace wiring:
   - Tests assert Studio entry gating, operation vs development workspace scoping, and view routing correctness.
@@ -444,6 +611,7 @@ F --> G
   - Platform gateway for sessions, chat streaming, approvals, documents, incidents, and audit queries.
   - Tool gateway for tool discovery and invocation; may connect to CDP sidecar for browser tools.
   - Services (skills-hub, incident-service) for domain-specific capabilities.
+  - **NEW**: Ansible MCP integration for read-tier automation tooling.
 - React tests depend on:
   - Mocked auth context and session workspace to isolate UI logic.
   - Stubbed fetch to assert API client behavior and error propagation.
@@ -454,6 +622,7 @@ E2E["E2E Scripts"] --> ID["Identity Broker"]
 E2E --> GW["Platform Gateway"]
 E2E --> TG["Tool Gateway"]
 E2E --> SVC["Domain Services"]
+E2E --> AM["Ansible MCP"]
 TG --> CDP["CDP Sidecar"]
 GW --> AUD["Audit Service"]
 ReactTests["React Tests"] --> Mocks["Mocks/Stubs"]
@@ -461,6 +630,7 @@ ReactTests --> API["API Client"]
 ```
 
 **Diagram sources**
+- [ansible-mcp-check.sh:96-133](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L96-L133)
 - [browser-check-demo.sh:96-133](file://shared/platform-ops/e2e/browser-check-demo.sh#L96-L133)
 - [mutating-demo.sh:111-152](file://shared/platform-ops/e2e/mutating-demo.sh#L111-L152)
 - [incident-demo.sh:141-168](file://shared/platform-ops/e2e/incident-demo.sh#L141-L168)
@@ -469,6 +639,7 @@ ReactTests --> API["API Client"]
 - [sessions.test.ts:20-44](file://products/operator-portal/web-ui/app/src/api/__tests__/sessions.test.ts#L20-L44)
 
 **Section sources**
+- [ansible-mcp-check.sh:96-133](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L96-L133)
 - [browser-check-demo.sh:96-133](file://shared/platform-ops/e2e/browser-check-demo.sh#L96-L133)
 - [mutating-demo.sh:111-152](file://shared/platform-ops/e2e/mutating-demo.sh#L111-L152)
 - [incident-demo.sh:141-168](file://shared/platform-ops/e2e/incident-demo.sh#L141-L168)
@@ -481,6 +652,8 @@ ReactTests --> API["API Client"]
   - Streams and long-running operations use timeouts; tune max-time values for stability under load.
 - Browser automation:
   - CDP connection and page interactions can be latency-sensitive; ensure sidecar readiness and resource limits are appropriate.
+- **NEW**: Ansible MCP integration:
+  - Health probes and live reads should be monitored for latency; consider timeout adjustments for network-bound operations.
 - Load testing approach:
   - Reproduce realistic usage by scripting concurrent sessions and tool invocations against the gateway while monitoring audit events and service metrics.
   - Validate throughput and error rates under sustained load; adjust timeouts and concurrency to reflect production patterns.
@@ -495,15 +668,21 @@ ReactTests --> API["API Client"]
   - Feature flags:
     - Browser tools disabled: expect no web.* tools and TOOL_NOT_FOUND on invoke.
     - Mutating tools disabled: expect absence of k8s.delete_pod and TOOL_NOT_FOUND on invoke.
+    - **NEW**: Ansible MCP disabled: expect no ansible.* tools and TOOL_NOT_FOUND on invoke.
   - Origin allowlist:
     - Off-allowlist navigation denied server-side; verify target URL is permitted.
   - HITL bridging:
     - If AGENT_HITL_CONFIRM_TIMEOUT is zero, chat legs requiring HITL cannot run.
+  - **NEW**: STRICT_LIVE mode:
+    - STRICT_LIVE=true requires mock target to be reachable; otherwise tests fail hard instead of skipping.
+  - **NEW**: Credential provisioning:
+    - Ensure sync-ansible-credentials.sh has completed successfully before running Ansible MCP tests.
 - Debugging steps:
   - Inspect port forwards and service reachability.
   - Check runtime config and secrets for required entries.
   - Query audit events to trace confirmation_decided and tool_invoked events.
   - For browser tools, verify CDP endpoint accessibility from the gateway pod.
+  - **NEW**: For Ansible MCP issues, verify ansible-mock-credentials secret exists and contains valid bearer-token.
 
 **Section sources**
 - [browser-check-demo.sh:70-94](file://shared/platform-ops/e2e/browser-check-demo.sh#L70-L94)
@@ -512,8 +691,12 @@ ReactTests --> API["API Client"]
 - [mutating-demo.sh:100-186](file://shared/platform-ops/e2e/mutating-demo.sh#L100-L186)
 - [incident-demo.sh:63-78](file://shared/platform-ops/e2e/incident-demo.sh#L63-L78)
 - [documents-demo.sh:99-105](file://shared/platform-ops/e2e/documents-demo.sh#L99-L105)
+- [ansible-mcp-check.sh:219-222](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L219-L222)
+- [ansible-mcp-check.sh:284-285](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L284-L285)
 
 ## Conclusion
-The platform’s E2E framework combines shell-driven scripts against a live Kubernetes cluster with targeted React tests to validate both system-wide workflows and UI behavior. The scripts enforce security postures (deny-by-default, origin allowlists, policy gates), validate real-time collaboration (HITL approvals, SSE streams), and ensure durability (audit trails, signed receipts). The React suite ensures consistent navigation, workspace scoping, and robust error handling in the portal. Together, these layers provide confidence in full-platform functionality, reliability, and safety under realistic usage patterns.
+The platform's E2E framework combines shell-driven scripts against a live Kubernetes cluster with targeted React tests to validate both system-wide workflows and UI behavior. The scripts enforce security postures (deny-by-default, origin allowlists, policy gates), validate real-time collaboration (HITL approvals, SSE streams), and ensure durability (audit trails, signed receipts). The React suite ensures consistent navigation, workspace scoping, and robust error handling in the portal. 
+
+**Updated**: The comprehensive E2E testing infrastructure improvements include STRICT_LIVE operator knobs for controlled live testing, enhanced bearer-redaction validation ensuring credential safety, expanded fail-closed error codes for robust error handling, and proper signal trapping for secure temporary credential cleanup. These enhancements provide stronger security guarantees and more reliable testing across all platform components, including the new Ansible MCP integration. Together, these layers provide confidence in full-platform functionality, reliability, and safety under realistic usage patterns.
 
 [No sources needed since this section summarizes without analyzing specific files]

@@ -1,1 +1,0 @@
-Kustomize v3 (`kustomize.config.k8s.io/v1beta1`) with `configMapGenerator` env-file merging; Kubernetes manifests targeting a dev cluster with Prometheus scrape annotations on every service deployment.

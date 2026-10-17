@@ -19,21 +19,25 @@
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
 - [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
 - [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
-- [secret_delivery.py](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py)
+- [secret_delivery.py](file://products/tool-gateway/tools/secret_delivery.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
+- [ansible_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py)
+- [mcp_adapter.py](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py)
 - [test_tool_registry.py](file://products/tool-gateway/tests/test_tool_registry.py)
 - [test_tool_invoke.py](file://products/tool-gateway/tests/test_tool_invoke.py)
 - [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
+- [test_redaction.py](file://products/tool-gateway/tests/test_redaction.py)
+- [test_ansible_native.py](file://products/tool-gateway/tests/test_ansible_native.py)
 - [README.md](file://products/tool-gateway/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated connector inventory to include HTTP, secrets, and browser web-checks alongside existing Kubernetes, Elastic, skills-hub, and incidents connectors
-- Added comprehensive documentation for the new HTTP connector with bounded service check capabilities
-- Enhanced SecretsConnector documentation covering secure password generation and delivery mechanisms
-- Updated architecture diagrams to reflect the complete connector ecosystem
-- Expanded credential management section to cover shared credential set infrastructure across connectors
+- Updated audit attribution system with critical bug fix for reserved key collision handling
+- Added comprehensive documentation for the new `resolve_audit_attribution()` helper function
+- Enhanced audit trail documentation with connector-specific attribution mechanisms
+- Updated architecture diagrams to reflect the opt-in audit attribution pattern
+- Expanded error handling documentation to cover reserved key collision scenarios
 
 ## Table of Contents
 1. Introduction
@@ -48,6 +52,8 @@
 
 ## Introduction
 The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. The platform now provides comprehensive connectivity through seven built-in connectors: Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, skills repositories, and secure secret delivery mechanisms. Each connector implements standardized security controls including origin allowlisting, credential set management, parameter validation, and structured error responses. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
+
+**Updated** The audit attribution system has been enhanced with a critical bug fix that prevents reserved key collisions from causing HTTP 500 errors after tool execution. The new `resolve_audit_attribution()` helper function provides safe, opt-in audit enrichment while maintaining backward compatibility.
 
 ## Project Structure
 The Tool Gateway service is organized into:
@@ -66,27 +72,36 @@ A --> C["GatewayService<br/>invoke_tool()"]
 C --> D["PolicyEngine<br/>evaluate()"]
 C --> E["AuditEmitter<br/>emit_audit_event()"]
 C --> F["Redaction<br/>redact_result()"]
-B --> G["KubernetesConnector"]
-B --> H["ElasticConnector"]
-B --> I["BrowserConnector"]
-B --> J["IncidentsConnector"]
-B --> K["SkillsConnector"]
-B --> L["HttpConnector"]
-B --> M["SecretsConnector"]
-L --> N["URL Redaction<br/>secret masking"]
-M --> O["SecretDeliveryBuffer<br/>stash/redeem/discard"]
-O --> P["InMemory/Redis Backend"]
+C --> G["resolve_audit_attribution()<br/>safe attribution merging"]
+B --> H["KubernetesConnector"]
+B --> I["ElasticConnector"]
+B --> J["BrowserConnector"]
+B --> K["IncidentsConnector"]
+B --> L["SkillsConnector"]
+B --> M["HttpConnector"]
+B --> N["SecretsConnector"]
+M --> O["URL Redaction<br/>secret masking"]
+N --> P["SecretDeliveryBuffer<br/>stash/redeem/discard"]
+P --> Q["InMemory/Redis Backend"]
+H --> R["audit_attribution()<br/>opt-in hook"]
+I --> R
+J --> R
+K --> R
+L --> R
+M --> R
+N --> R
 ```
 
 **Diagram sources**
 - [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 - [secrets_connector.py:379-387](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L379-L387)
-- [secret_delivery.py:50-91](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L91)
+- [secret_delivery.py:50-91](file://products/tool-gateway/tools/secret_delivery.py#L50-L91)
 
 **Section sources**
 - [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
@@ -102,11 +117,13 @@ O --> P["InMemory/Redis Backend"]
 - AuditEmitter: Fire-and-forget durable audit events to the audit service; non-blocking and failure-tolerant.
 - Config: Centralized environment-driven configuration for connectors, policy, auth, and feature flags.
 
+**Updated** The audit attribution system now includes a safe helper function that prevents reserved key collisions and provides opt-in connector-specific audit enrichment.
+
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
-- [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
+- [policy_engine.py:254-355](file://products/tool-gateway/services/policy_engine.py#L254-L355)
 - [redaction.py:1-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L1-L151)
 - [url_redaction.py:1-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L1-L91)
 - [audit_emitter.py:1-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L1-L98)
@@ -118,6 +135,7 @@ The invocation path enforces security and safety at every stage:
 - Policy evaluation for tools:invoke and tools:mutate based on roles and loaded bundle.
 - Risk-tier gating prevents mutating tools from executing unless explicitly admitted.
 - Tool dispatch through the registry with structured error envelopes.
+- Safe audit attribution resolution with reserved key collision protection.
 - Output redaction before response and audit emission.
 - Durable audit trail via fire-and-forget emission.
 
@@ -131,6 +149,7 @@ participant Registry as "ToolRegistry.invoke"
 participant HttpConn as "HttpConnector"
 participant UrlRedact as "URL Redaction"
 participant Redact as "Redaction"
+participant Attrib as "resolve_audit_attribution"
 participant Audit as "AuditEmitter"
 Client->>Gateway : POST /api/v2/tools/invoke
 Gateway->>Service : resolve_request_identity + enforce_policy
@@ -150,6 +169,8 @@ Registry->>SecretsConn : execute(parameters, identity)
 SecretsConn-->>Registry : ToolResult
 end
 Registry-->>Service : ToolResult
+Service->>Attrib : resolve_audit_attribution(target, result, tool_name, request_id)
+Attrib-->>Service : safe attribution dict
 Service->>Redact : redact_result(result)
 Redact-->>Service : redacted result + stats
 Service->>Audit : emit_audit_event(...)
@@ -159,6 +180,7 @@ end
 
 **Diagram sources**
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
 - [registry.py:65-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L65-L89)
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
@@ -178,6 +200,7 @@ classDiagram
 class BaseTool {
 +definition : ToolDefinition
 +execute(parameters, identity) ToolResult
++audit_attribution(result) dict
 }
 class ToolDefinition {
 +name : string
@@ -225,6 +248,68 @@ ToolRegistry --> BaseTool : "dispatches"
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
 - [test_tool_registry.py:56-172](file://products/tool-gateway/tests/test_tool_registry.py#L56-L172)
+
+### Audit Attribution System
+**New** The audit attribution system provides safe, opt-in connector-specific audit enrichment through duck-typed hooks. The system prevents reserved key collisions that could cause HTTP 500 errors after tool execution.
+
+**Key Features:**
+- **Opt-in Pattern**: Connectors implement optional `audit_attribution()` method; absence yields empty attribution
+- **Reserved Key Protection**: Prevents connector-provided keys from overwriting gateway-managed fields like `request_id`, `tool_name`, `status`, etc.
+- **Safe Collision Handling**: Reserved key conflicts are logged as warnings and dropped rather than causing failures
+- **Duck-typed Interface**: No formal inheritance required; any callable attribute named `audit_attribution` is recognized
+- **Backward Compatibility**: Tools without attribution hooks audit identically to pre-hook behavior
+
+```mermaid
+flowchart TD
+Start(["resolve_audit_attribution"]) --> CheckHook{"Has audit_attribution?"}
+CheckHook --> |No| ReturnEmpty["Return {}"]
+CheckHook --> |Yes| CallHook["Call attributor(result)"]
+CallHook --> ValidateDict{"Valid non-empty dict?"}
+ValidateDict --> |No| ReturnEmpty
+ValidateDict --> |Yes| CheckCollision{"Any reserved keys?"}
+CheckCollision --> |No| ReturnAttrib["Return attribution"]
+CheckCollision --> |Yes| LogWarning["Log warning with reserved_keys"]
+LogWarning --> FilterKeys["Filter out reserved keys"]
+FilterKeys --> ReturnFiltered["Return filtered attribution"]
+```
+
+**Diagram sources**
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
+
+**Section sources**
+- [gateway_service.py:32-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L69)
+- [test_redaction.py:329-348](file://products/tool-gateway/tests/test_redaction.py#L329-L348)
+
+### Connector-Specific Audit Attribution
+Connectors can implement the optional `audit_attribution()` method to provide additional context for audit records. This enables rich audit trails with connector-specific information while maintaining safety guarantees.
+
+**Ansible Native Connector:**
+- Provides `target_identity_mode` indicating acting-service vs user-delegated identity
+- Adds `failure_class: target_unavailable` for transport/timeout/configuration failures
+- Distinguishes between policy denials and infrastructure failures
+
+**MCP Adapter Connector:**
+- Mirrors Ansible connector attribution pattern
+- Supports configurable target identity modes
+- Provides consistent failure classification across MCP transports
+
+```mermaid
+flowchart TD
+Connector["Connector.execute()"] --> Result["ToolResult"]
+Result --> AttribHook["connector.audit_attribution(result)"]
+AttribHook --> Attribution["Optional attribution dict"]
+Attribution --> Merge["Merge with gateway-managed fields"]
+Merge --> AuditRecord["Final audit record"]
+```
+
+**Diagram sources**
+- [ansible_native.py:203-217](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py#L203-L217)
+- [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
+
+**Section sources**
+- [ansible_native.py:203-217](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py#L203-L217)
+- [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
+- [test_ansible_native.py:141-167](file://products/tool-gateway/tests/test_ansible_native.py#L141-L167)
 
 ### HTTP Connector
 The HTTP connector provides bounded HTTP service check capabilities with two tools: `http.get` (read tier) and `http.post` (write tier). It implements strict security controls including origin allowlisting, redirect following with allowlist validation, body size limits, and credential set-based authentication.
@@ -299,11 +384,11 @@ ValidateOwner --> |Invalid| Return204
 
 **Diagram sources**
 - [secrets_connector.py:403-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L403-L620)
-- [secret_delivery.py:50-91](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L91)
+- [secret_delivery.py:50-91](file://products/tool-gateway/tools/secret_delivery.py#L50-L91)
 
 **Section sources**
 - [secrets_connector.py:1-664](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L1-L664)
-- [secret_delivery.py:1-369](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L1-L369)
+- [secret_delivery.py:1-369](file://products/tool-gateway/tools/secret_delivery.py#L1-L369)
 
 ### Secret Delivery Buffer
 The SecretDeliveryBuffer provides single-use, owner-scoped, TTL-bounded secret storage with both redemption and active destruction capabilities. It supports both in-memory and Redis backends for different deployment scenarios.
@@ -334,11 +419,11 @@ DeleteOnly --> SuccessTrue
 ```
 
 **Diagram sources**
-- [secret_delivery.py:158-186](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L158-L186)
-- [secret_delivery.py:232-263](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L232-L263)
+- [secret_delivery.py:158-186](file://products/tool-gateway/tools/secret_delivery.py#L158-L186)
+- [secret_delivery.py:232-263](file://products/tool-gateway/tools/secret_delivery.py#L232-L263)
 
 **Section sources**
-- [secret_delivery.py:50-369](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L50-L369)
+- [secret_delivery.py:50-369](file://products/tool-gateway/tools/secret_delivery.py#L50-L369)
 
 ### URL Redaction Module
 The URL redaction module provides coordinated secret masking for URLs across HTTP and browser connectors. It masks secret-bearing query parameters and userinfo components while preserving URL structure and non-secret values.
@@ -482,6 +567,7 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 - Identity resolution supports bearer tokens and synthetic dev identity when configured.
 - Policy enforcement denies without identity or matching allow rules; mutating tools additionally require tools:mutate.
 - Registry.invoke catches exceptions and returns TOOL_EXECUTION_ERROR with evidence.
+- Safe audit attribution resolution prevents reserved key collisions from causing failures.
 - Redaction applies deterministic masking and fails closed on overflow; audit events emitted for all outcomes.
 
 ```mermaid
@@ -495,7 +581,9 @@ MutatePolicy --> |No| MutDeny["403 denied"]
 MutatePolicy --> |Yes| Dispatch["Registry.invoke"]
 MutateCheck --> |No| Dispatch
 Dispatch --> Result["ToolResult"]
-Result --> Redact["Redaction check"]
+Result --> Attrib["resolve_audit_attribution()"]
+Attrib --> SafeAttrib["Safe attribution with collision protection"]
+SafeAttrib --> Redact["Redaction check"]
 Redact --> Overflow{"Overflow?"}
 Overflow --> |Yes| Withhold["REDACTION_OVERFLOW"]
 Overflow --> |No| Emit["Emit audit event"]
@@ -505,6 +593,7 @@ Emit --> Resp["JSONResponse"]
 **Diagram sources**
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [registry.py:65-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L65-L89)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 
@@ -532,10 +621,12 @@ Emit --> Resp["JSONResponse"]
 - AuditEmitter emits durable events asynchronously; failures do not degrade the tool path.
 - GatewayService records metrics for policy decisions, redaction spans, and token verification outcomes.
 - The SecretsConnector integrates with the existing audit and policy systems, introducing a new `secret_delivered` audit event type and `secrets:deliver` policy action for email delivery operations.
+- **Updated** The audit attribution system provides safe, opt-in connector-specific enrichment with reserved key collision protection, preventing HTTP 500 errors from malformed attribution data.
 
 **Section sources**
 - [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
 - [audit_emitter.py:29-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L29-L98)
+- [gateway_service.py:32-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L69)
 - [gateway_service.py:32-59](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L59)
 
 ## Dependency Analysis
@@ -544,6 +635,7 @@ Emit --> Resp["JSONResponse"]
 - GatewayService depends on policy engine, token verifier, redaction, and audit emitter.
 - HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector.
 - SecretsConnector depends on password policy validation and secure delivery buffer backends.
+- **Updated** Audit attribution system integrates with all connectors through duck-typed hooks, providing safe enrichment without breaking existing functionality.
 
 ```mermaid
 graph LR
@@ -563,13 +655,22 @@ Buffer --> Redis["Redis Backend"]
 GS["GatewayService"] --> PE["PolicyEngine"]
 GS --> AE["AuditEmitter"]
 GS --> RD["Redaction"]
+GS --> AA["resolve_audit_attribution"]
+AA --> K8s
+AA --> ES
+AA --> Br
+AA --> Inc
+AA --> Sk
+AA --> Http
+AA --> Secrets
 ```
 
 **Diagram sources**
 - [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
-- [secret_delivery.py:277-327](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py#L277-L327)
+- [secret_delivery.py:277-327](file://products/tool-gateway/tools/secret_delivery.py#L277-L327)
 
 **Section sources**
 - [app.py:19-237](file://products/tool-gateway/src/tool_gateway/app.py#L19-L237)
@@ -582,6 +683,7 @@ GS --> RD["Redaction"]
 - Observability: Metrics recorded for policy decisions, redaction spans, token verification, and audit emissions.
 - HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion.
 - SecretsConnector uses efficient CSPRNG generation and minimal memory footprint for ephemeral delivery handles.
+- **Updated** Audit attribution resolution is lightweight duck-typed inspection with no performance impact for connectors without attribution hooks.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -593,9 +695,11 @@ Common issues and diagnostics:
 - Redaction overflow: If too much of the result appears sensitive, outputs are withheld; tighten parameters or reduce payload size.
 - HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems.
 - SecretsConnector issues: Password policy violations, delivery handle expiration, email delivery configuration problems, and active destruction failures.
+- **Updated** Audit attribution issues: Reserved key collisions are now safely handled with warning logs instead of HTTP 500 errors; check logs for "dropped reserved keys" messages if connector attribution is interfering with gateway-managed fields.
 
 **Section sources**
 - [gateway_service.py:61-156](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L61-L156)
+- [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
 - [k8s_connector.py:41-92](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L41-L92)
 - [elastic_connector.py:40-103](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py#L40-L103)
 - [browser_connector.py:533-698](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L533-L698)
@@ -606,6 +710,8 @@ Common issues and diagnostics:
 ## Conclusion
 The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. The platform now includes seven comprehensive built-in connectors covering Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, skills repositories, and secure secret delivery, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
 
+**Updated** The critical audit attribution bug fix ensures that connector-provided audit enrichment cannot interfere with gateway-managed fields, preventing HTTP 500 errors that would occur after successful tool execution. The new `resolve_audit_attribution()` helper function provides safe, opt-in connector-specific audit enrichment while maintaining full backward compatibility.
+
 The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking. The complete implementation of SPEC-062 secure password generation and delivery system provides cryptographically strong password generation, secure one-time delivery mechanisms, and active destruction capabilities through the new DELETE endpoint. 
 
-This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements.
+This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements. The enhanced audit attribution system further strengthens this boundary by enabling rich, connector-specific audit enrichment without compromising system stability or security.

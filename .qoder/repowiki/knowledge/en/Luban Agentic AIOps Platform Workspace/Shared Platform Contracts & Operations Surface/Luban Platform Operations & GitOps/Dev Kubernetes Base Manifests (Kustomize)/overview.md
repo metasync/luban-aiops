@@ -1,1 +1,0 @@
-Kustomize base layer that assembles the Luban AIOps platform's dev-cluster resources — services, gateways, operator portal, and shared infra like Postgres and Redis.

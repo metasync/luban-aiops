@@ -16,6 +16,9 @@
 - [request_context.py](file://products/tool-gateway/src/tool_gateway/core/request_context.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
+- [test_credential_sets.py](file://products/tool-gateway/tests/test_credential_sets.py)
+- [test_credential_redaction.py](file://products/tool-gateway/tests/test_credential_redaction.py)
+- [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [SPEC-062 spec.md](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md)
 - [SPEC-068 spec.md](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md)
 - [ADR-0012](file://docs/adr/0012-one-time-secret-delivery-handoff.md)
@@ -24,16 +27,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced credential masking throughout the entire request/response lifecycle with ephemeral masking knowledge
-- Added comprehensive redaction capabilities with improved pattern detection and overflow protection
-- Integrated one-time secure delivery mechanisms with portal-based copy functionality and gated email delivery
-- Expanded password generation with centralized policy enforcement and CSPRNG security
-- Improved URL secret masking for query parameters and userinfo components across all connectors
-- Enhanced audit logging with new secret delivery tracking events
-- Updated troubleshooting guide with secrets connector-specific issues and policy enforcement scenarios
-- **Updated** Enhanced credential model now supports scheme-aware parsing system with optional per-set scheme field, extending beyond fixed username/password requirements while maintaining backward compatibility
-- **New** Complete OAuth2 client credentials implementation with token caching, refresh management, and fail-closed security semantics
-- **New** Reusable outbound authentication resolution seam supporting basic, bearer, and oauth2_client_credentials schemes
+- Enhanced credential file management with automatic cleanup handlers for test resource lifecycle management
+- Improved bearer-redaction assertions in E2E testing to strengthen security validation across all output surfaces
+- Strengthened security around credential handling throughout the pipeline with better error handling and fail-closed semantics
+- Updated credential set parsing to support scheme-aware validation with proper cleanup on errors
+- Enhanced test infrastructure with automatic resource cleanup using addCleanup patterns
+- Improved bearer token redaction coverage with comprehensive assertion tests for all secret-bearing parameter names
 
 ## Table of Contents
 1. Introduction
@@ -56,6 +55,7 @@ This document explains how the Tool Gateway manages credentials and prevents sen
 - Rotation strategies, access controls, audit logging, and best practices for secure credential management.
 - HTTP connector capabilities including origin allowlisting, redirect protection, and URL secret masking.
 - Ephemeral masking knowledge that tracks generated credentials throughout the execution pipeline to prevent any leakage in transcripts, evidence, or audit trails.
+- **Updated** Enhanced credential file management with automatic cleanup handlers ensuring proper resource lifecycle management and improved error handling throughout the credential processing pipeline.
 
 ## Project Structure
 The Tool Gateway implements comprehensive credential handling and output sanitization across a focused set of modules:
@@ -95,6 +95,7 @@ N --> O["Redact tool output<br/>redaction.py"]
 N --> P["Audit events<br/>audit_emitter (external)"]
 H --> Q["Portal Copy Channel<br/>ephemeral storage"]
 H --> R["Email Channel<br/>gated delivery"]
+S["Test Cleanup Handlers<br/>automatic resource management"] --> T["Resource Lifecycle<br/>proper cleanup on errors"]
 ```
 
 **Diagram sources**
@@ -216,7 +217,7 @@ end
 
 ### Enhanced Credential Set Architecture with Scheme-Aware Parsing
 
-**Updated** Enhanced credential model now supports scheme-aware parsing system with optional per-set scheme field, extending beyond fixed username/password requirements while maintaining backward compatibility.
+**Updated** Enhanced credential model now supports scheme-aware parsing system with optional per-set scheme field, extending beyond fixed username/password requirements while maintaining backward compatibility. Automatic cleanup handlers ensure proper resource lifecycle management during credential file operations.
 
 #### Scheme Vocabulary and Field Requirements
 - **Supported schemes**: `basic`, `bearer`, and `oauth2_client_credentials` with distinct field requirements for each.
@@ -230,6 +231,7 @@ end
 - **Scheme-aware validation**: Instead of checking only `username` and `password`, the system now validates fields based on the declared scheme.
 - **Field retention**: Unlike previous implementation that projected sets down to only `username`/`password`, the enhanced version retains all scheme-specific fields.
 - **Error handling**: Malformed entries or unknown schemes are logged with warnings and skipped, maintaining system stability.
+- **Automatic cleanup**: Test resources and temporary files are properly cleaned up using Python's `addCleanup` mechanism to prevent resource leaks.
 
 ```mermaid
 flowchart TD
@@ -248,14 +250,17 @@ ValidateFields --> |Valid| RetainFields["Retain all scheme fields"]
 RetainFields --> UpdateCache["Update cache and mtime"]
 UpdateCache --> ReturnSets["Return sets"]
 IgnoreSet --> UpdateCache
+Cleanup["Automatic cleanup handlers<br/>ensure proper resource management"] --> ReturnSets
 ```
 
 **Diagram sources**
 - [credential_sets.py:30-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L30-L103)
+- [test_credential_sets.py:174-248](file://products/tool-gateway/tests/test_credential_sets.py#L174-L248)
 - [SPEC-068 spec.md:96-114](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L96-L114)
 
 **Section sources**
 - [credential_sets.py:30-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L30-L103)
+- [test_credential_sets.py:174-248](file://products/tool-gateway/tests/test_credential_sets.py#L174-L248)
 - [SPEC-068 spec.md:96-114](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L96-L114)
 
 ### Reusable Outbound Authentication Resolution
@@ -360,7 +365,7 @@ end
 
 ### Reference-Based Credential Injection into Tool Invocations
 
-**Updated** Enhanced support for scheme-aware credential sets with proper secret handling across all authentication types.
+**Updated** Enhanced support for scheme-aware credential sets with proper secret handling across all authentication types and improved error handling throughout the pipeline.
 
 #### HTTP Connector Credential Resolution
 - **Reference-only approach**: HTTP tools accept `credential_set` parameter (name only), never literal secrets.
@@ -510,6 +515,7 @@ Note over BUF : Handle invalidated after redemption
 - **Single choke point**: Redaction runs once after tool execution and before any response or audit log serialization.
 - **Generated value masking**: Generated passwords are added to the secret vocabulary and masked in all projections including evidence, transcripts, titles, and cards.
 - **Ephemeral masking knowledge**: Tracks generated credentials throughout the execution pipeline to ensure complete masking in all output surfaces.
+- **Improved bearer-redaction assertions**: Enhanced test coverage ensures bearer tokens are properly redacted across all output surfaces with comprehensive assertion tests.
 
 ```mermaid
 flowchart TD
@@ -709,6 +715,7 @@ BC --> SKILLS["Skills Service"]
 - Ephemeral masking overhead: Tracking generated credentials adds minimal overhead during tool execution but provides comprehensive protection across all output surfaces.
 - OAuth2 token caching: Memory-only token cache eliminates repeated network calls; near-expiry refresh prevents mid-flight expiration.
 - Concurrent token acquisition: Per-set locks prevent thundering herd effects during token refresh cycles.
+- **Updated** Automatic cleanup handlers provide minimal overhead while ensuring proper resource lifecycle management and preventing resource leaks in test environments.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -781,6 +788,12 @@ Common issues and diagnostics:
 - **OAuth2 token cache issues**:
   - Symptom: Frequent token refreshes or stale token errors.
   - Action: Check `expires_in` values in token responses; verify clock synchronization; review refresh margin configuration.
+- **Test resource cleanup issues**:
+  - Symptom: Temporary files or resources not properly cleaned up in test environments.
+  - Action: Verify that `addCleanup` handlers are properly registered; check for proper exception handling in test setup; ensure resources are released even when tests fail.
+- **Bearer redaction assertion failures**:
+  - Symptom: Tests failing due to bearer tokens not being properly redacted in assertions.
+  - Action: Review bearer-redaction test coverage; ensure all secret-bearing parameter names are covered; verify redaction patterns include bearer token detection.
 
 **Section sources**
 - [credential_sets.py:52-103](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L52-L103)
@@ -790,6 +803,7 @@ Common issues and diagnostics:
 - [gateway_service.py:307-335](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L335)
 - [http_connector.py:100-181](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L100-L181)
 - [browser_connector.py:174-257](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L174-L257)
+- [test_credential_redaction.py:1-146](file://products/tool-gateway/tests/test_credential_redaction.py#L1-146)
 
 ## Conclusion
 The Tool Gateway centralizes credential management and output sanitization to minimize risk through enhanced credential masking throughout the entire request/response lifecycle:
@@ -805,6 +819,8 @@ The Tool Gateway centralizes credential management and output sanitization to mi
 - Ephemeral masking knowledge tracks generated credentials throughout the execution pipeline to prevent any leakage in transcripts, evidence, or audit trails.
 - HTTP connector adds robust origin validation, redirect protection, and response projection with header filtering.
 - Policy enforcement, risk-tier gating, and audit logging provide strong access controls and traceability without leaking secrets.
+- **Updated** Enhanced credential file management with automatic cleanup handlers ensures proper resource lifecycle management and improved error handling throughout the credential processing pipeline.
+- **Updated** Improved bearer-redaction assertions in E2E testing strengthen security validation across all output surfaces with comprehensive test coverage.
 
 ## Appendices
 
@@ -936,3 +952,6 @@ result = await registry.invoke("secrets.deliver", {
 - Implement proper error handling for token acquisition failures.
 - Test OAuth2 flows end-to-end with mock token endpoints during development.
 - Review token endpoint security configurations and access controls regularly.
+- **Updated** Implement automatic cleanup handlers for test resources to prevent resource leaks and ensure proper lifecycle management.
+- **Updated** Strengthen bearer-redaction assertions in E2E testing to ensure comprehensive coverage of all secret-bearing parameter names and output surfaces.
+- **Updated** Enhance error handling throughout the credential processing pipeline to provide better diagnostics and fail-closed security semantics.

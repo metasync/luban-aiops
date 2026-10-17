@@ -1,1 +1,0 @@
-Houses the cross-product JSON Schema contracts plus the Kustomize-based Kubernetes deployment surface and e2e demos that consume those contracts to run Luban on a cluster.

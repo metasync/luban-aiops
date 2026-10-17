@@ -10,47 +10,69 @@ source_files:
     - mk/defaults.mk
     - .python-version
     - products/agent-platform/pyproject.toml
-    - products/agent-platform/uv.lock
+    - products/audit-service/pyproject.toml
+    - products/execution-runtime/pyproject.toml
+    - products/identity-broker/pyproject.toml
+    - products/incident-service/pyproject.toml
+    - products/platform-gateway/pyproject.toml
+    - products/skills-hub/pyproject.toml
     - products/tool-gateway/pyproject.toml
     - products/operator-portal/web-ui/app/package.json
     - shared/base-images/base-uv/Dockerfile
+    - docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md
+    - docs/agentic-aiops-platform/release-notes/2026-09-27-dependency-refresh-agentscope-2-0-8.md
 ---
 
 ## Approach
 
-Luban is a multi-product Python workspace (nine services under `products/`) that uses **uv** as its package manager, with one `pyproject.toml` + `uv.lock` per product. The frontend (`operator-portal/web-ui/app/package.json`) uses npm/Vite for Node dependencies. There is no vendoring of third-party code — all packages are resolved from PyPI at build time.
+The Luban workspace is a Python-first monorepo (nine product services plus an operator-portal SPA) that manages dependencies through:
+
+- **uv** as the sole Python package manager, invoked from `mk/python.mk` (`uv sync --frozen`, `uv run pytest`) and from each product's `Makefile`.
+- One `pyproject.toml` per Python product under `products/<name>/`, declaring runtime dependencies with caret ranges and a corresponding `uv.lock` lockfile committed in-tree.
+- A single Node.js project for the operator portal SPA under `products/operator-portal/web-ui/app/package.json`, using npm/yarn/pnpm (the lockfile is not present in the tree; `node_modules/` is committed).
+- Shared base image `shared/base-images/base-uv/Dockerfile` built from `mk/defaults.mk` with pinned `BASE_UV_UV_VERSION=0.12.1` and `BASE_UV_PYTHON_VERSION=3.12`, consumed by every product Dockerfile.
+
+No private PyPI registry, no `UV_DEFAULT_INDEX`, no `index-url` / `extra-index-url`, and no vendored Python packages were found — all third-party packages resolve from the public index.
 
 ## Key Files
 
-- Root orchestrator: `Makefile` (aggregates per-product `sync`, `test`, `build`, `verify`), `mk/python.mk` (shared `uv sync --frozen` / `uv run pytest` targets), `mk/defaults.mk` (pins `BASE_UV_UV_VERSION=0.12.1`, `BASE_UV_PYTHON_VERSION=3.12`).
-- Per-product manifests: `products/*/pyproject.toml` declare runtime deps; each has a matching `products/*/uv.lock` pinning exact transitive versions and hashes.
-- Python version pins: root `.python-version` and per-product `.python-version` both set `3.12`; `pyproject.toml` `requires-python = ">=3.11"`.
-- Frontend manifest: `products/operator-portal/web-ui/app/package.json` (npm, pinned via `node_modules/` in-tree).
-- Shared base image: `shared/base-images/base-uv/Dockerfile` builds a reproducible base image with the pinned uv/python versions referenced by `mk/defaults.mk`.
+- Root orchestration: `Makefile` (aggregates `sync`, `test`, `build`, `verify` across products), `mk/python.mk` (shared `sync`/`test` targets), `mk/defaults.mk` (pinned `BASE_UV_UV_VERSION`, `BASE_UV_PYTHON_VERSION`).
+- Per-product manifests: `products/*/pyproject.toml` + `products/*/uv.lock` (agent-platform, audit-service, execution-runtime, identity-broker, incident-service, platform-gateway, skills-hub, tool-gateway).
+- Runtime pin: `.python-version` declares `3.12` at the repo root.
+- Portal frontend: `products/operator-portal/web-ui/app/package.json` (React 19, antd 6, Vite 8, Vitest 4, TypeScript ~5.9).
+- Policy documents: `docs/agentic-aiops-platform/release-notes/2026-08-28-dependency-hygiene.md` (SPEC-042 adoption posture), `docs/agentic-aiops-platform/release-notes/2026-09-27-dependency-refresh-agentscope-2-0-8.md` (routine re-lock example).
 
 ## Architecture and Conventions
 
-1. **Per-product isolation.** Each service owns its own `pyproject.toml` and `uv.lock`. The root `Makefile` iterates over `PYTHON_PRODUCTS := agent-platform audit-service execution-runtime identity-broker incident-service platform-gateway skills-hub tool-gateway` and delegates `sync`/`test`/`build` into each product directory so `uv` resolves the local `pyproject.toml`.
+### Python dependency ranges
+Each `pyproject.toml` uses caret-ranged constraints on major versions, e.g. `agentscope>=2.0.4,<3.0`, `fastapi>=0.115,<1.0`, `pydantic>=2.8,<3.0`, `redis>=6.2,<7.0`. The `<major` caps are deliberate compatibility boundaries documented in release notes (e.g. Redis client `<7.0` because deployed server is 7.2 and client majors 7/8 removed APIs; Elasticsearch client `<9.0` following the deployed server major; Kubernetes client `<33.0` in tool-gateway).
 
-2. **Frozen installs.** `mk/python.mk` runs `uv sync --frozen` — lockfiles are mandatory; dependency resolution cannot drift between developer machines and CI.
+### Locked resolution
+`mk/python.mk` runs `uv sync --frozen`, which refuses to install anything not already recorded in `uv.lock`. The root `Makefile` delegates `sync`/`test` to each product Makefile, so CI and local dev both use frozen locks.
 
-3. **Version specifiers use bounded ranges.** Dependencies are declared with lower and upper bounds (e.g. `agentscope>=2.0.4,<3.0`, `fastapi>=0.115,<1.0`, `pydantic>=2.8,<3.0`, `redis>=6.2,<7.0`). This constrains major upgrades while allowing minor/patch bumps.
+### Build backend
+Every Python product declares `[build-system] requires = ["uv_build>=0.8.14,<0.9.0"]` with `build-backend = "uv_build"` (observed in agent-platform; consistent across products).
 
-4. **Dev vs runtime separation.** Runtime dependencies live under `[project].dependencies`; test-only packages (`pytest`, `fakeredis`, `jsonschema`) go under `[dependency-groups] dev` and are excluded from the built artifact.
+### Frontend dependencies
+The portal SPA pins React 19, antd 6, Vite 8, Vitest 4, jsdom 30, and TypeScript ~5.9.3 in `package.json`; `engines.node` is set to `>=22.22.2` (jsdom 30 floor). The SPA is not a uv product — it has its own `Makefile` targets `test` and `web-build` invoked from the root `make portal-test`.
 
-5. **Build backend pinned.** Every Python product declares `[build-system] requires = ["uv_build>=0.8.14,<0.9.0"]` with `build-backend = "uv_build"`, pinning the packaging tool itself.
+### Base image strategy
+`mk/defaults.mk` pins `BASE_UV_UV_VERSION=0.12.1` and `BASE_UV_PYTHON_VERSION=3.12`; `base-images` target builds `luban-aiops/base-uv:<tag>` from `shared/base-images/base-uv/Dockerfile`, and product images layer on top of this shared base.
 
-6. **Base image reproducibility.** `mk/defaults.mk` pins `BASE_UV_UV_VERSION=0.12.1` and `BASE_UV_PYTHON_VERSION=3.12`; the root `make base-images` target passes these as `--build-arg UV_VERSION` / `--build-arg PYTHON_VERSION` to `shared/base-images/base-uv/Dockerfile`, ensuring container images are built against a known uv/python combination.
+### Adoption policy
+Per SPEC-042 and the release notes: **latest stable only** — no alpha, beta, RC, or dev builds. The OpenTelemetry instrumentation packages are the single recorded exception, staying on their permanent `0.xb` channel paired with the locked SDK. New AgentScope capabilities are adopted only after passing the four-point adoption gate documented in `docs/workspace/agentscope-utilization-audit.md`.
 
-7. **No private registry configured.** A grep across the repo finds no `UV_INDEX_URL`, `index-url`, `extra-index-url`, or `UV_PIP_INDEX_URL` configuration — all packages resolve from `https://pypi.org/simple` (visible in every `[[package]] source = { registry = "https://pypi.org/simple" }` entry in the lockfiles).
-
-8. **Frontend dependencies managed separately.** The operator portal SPA lives under `products/operator-portal/web-ui/app/` and uses standard npm (`package.json` + `node_modules/`); it is not part of the uv ecosystem and is exercised through `make portal-test` which runs `vitest` and `vite build`.
+### Version coordination
+The root `VERSION` file is the single source of truth for the platform release version; `make validate-version` enforces lockstep between `VERSION`, every product's `pyproject.toml` version, and the portal version via `shared/shared-contracts/scripts/validate_version.py`.
 
 ## Conventions and Constraints
 
-- **Lockfiles are committed and enforced.** `uv sync --frozen` in `mk/python.mk` refuses to install anything not present in `uv.lock`; this is the hard enforcement mechanism for reproducible builds.
-- **Python version is pinned at two levels.** `.python-version` files (root and per-product) state `3.12`; `pyproject.toml` sets `requires-python = ">=3.11"`.
-- **All products share the same dependency categories.** Runtime deps under `[project].dependencies`, dev/test deps under `[dependency-groups] dev`, and `uv_build` under `[build-system]` — observed consistently across all eight Python products.
-- **Major-version caps on third-party libraries.** Every dependency uses an upper bound `<X.0` (e.g. `<3.0`, `<1.0`, `<4.0`, `<7.0`), preventing accidental major upgrades.
-- **The root `make verify` gate includes `test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test execution-failure-test`**, making dependency-related checks (version lockstep, policy contracts, dashboard schemas) part of the pre-commit/pre-push verification surface defined in the root Makefile.
-- **No vendored third-party code.** All third-party packages are pulled from PyPI at build/install time; there is no `vendor/`, `third_party/`, or similar directory.
+- **Frozen installs**: `uv sync --frozen` is used in both `sync` and `test` targets in `mk/python.mk`; any drift between `pyproject.toml` and `uv.lock` fails the build.
+- **Major-version caps**: Python dependencies declare upper bounds on the next major (`<3.0`, `<1.0`, `<4.0`, etc.) to prevent automatic major upgrades; specific caps (Redis `<7.0`, Elasticsearch `<9.0`, Kubernetes `<33.0`) are justified in release notes.
+- **Latest-stable-only adoption**: Stated explicitly in SPEC-042 release notes — pre-release channels (alpha/beta/RC/dev) are excluded except for OTel instrumentation's permanent `0.xb` channel.
+- **Python version pinning**: `.python-version` = `3.12`; `mk/defaults.mk` pins `BASE_UV_PYTHON_VERSION=3.12`; product `pyproject.toml`s declare `requires-python = ">=3.11"`.
+- **Node engine pinning**: `package.json` `engines.node` = `>=22.22.2`.
+- **Build tool pinning**: `mk/defaults.mk` pins `BASE_UV_UV_VERSION=0.12.1`; product `pyproject.toml`s pin `uv_build>=0.8.14,<0.9.0`.
+- **No private registries**: No `uv.toml`, no `PYPI_*` environment variables, no `index-url`/`extra-index-url` configuration was found — all packages resolve from the public index.
+- **Lockstep validation**: `make validate-version` enforces that the root `VERSION`, all product versions, and the portal version stay synchronized.
+- **Portal deprecation guard**: The vitest setup intercepts `console.error`/`console.warn` and fails the suite on any `[antd: …] deprecated` warning (SPEC-042 R-2), preventing future antd API drift.

@@ -1,1 +1,0 @@
-Plain Markdown + YAML frontmatter skills consumed by the `skills_hub` package; no runtime code in this module.

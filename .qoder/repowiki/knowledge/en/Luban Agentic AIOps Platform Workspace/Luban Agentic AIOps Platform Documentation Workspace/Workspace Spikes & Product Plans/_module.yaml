@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: docs/workspace_spikes_and_product_plans
-title: Workspace Spikes & Product Plans
-scope:
-    - docs/workspace/
-source_files: []
-depends_on: []
-related_to: []

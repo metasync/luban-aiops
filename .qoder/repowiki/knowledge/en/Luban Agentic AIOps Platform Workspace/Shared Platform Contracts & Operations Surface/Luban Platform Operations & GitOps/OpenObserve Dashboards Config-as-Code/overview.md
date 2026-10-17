@@ -1,1 +1,0 @@
-Versioned OpenObserve dashboard definitions and their offline validator / live importer, implementing SPEC-065 R-3 for the Luban AIOps observability surface.

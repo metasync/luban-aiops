@@ -373,7 +373,7 @@ Following the initial delivery of SPEC-068 in v0.47.0, post-delivery review iden
 
 **Section sources**
 - [oauth_client.py:152-157](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L152-L157)
-- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-L312)
+- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-312)
 
 ### Improved Redaction Documentation Precision
 
@@ -469,7 +469,7 @@ These characteristics make the substrate suitable for repeated use by multiple c
 - [spec.md:136-141](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/spec.md#L136-L141)
 - [plan.md:74-77](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/plan.md#L74-L77)
 - [tasks.md:40-44](file://docs/specs/SPEC-068-outbound-execution-credential-schemes/tasks.md#L40-L44)
-- [oauth_client.py:182-245](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L182-L245)
+- [oauth_client.py:182-245](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L182-L245)
 
 ### Symptom: A credential value appears in logs, results, or evidence
 **Likely cause:** A new secret-bearing name was introduced but not covered by the existing redaction vocabulary, or a response header was projected.  
@@ -498,7 +498,7 @@ These characteristics make the substrate suitable for repeated use by multiple c
 
 **Section sources**
 - [oauth_client.py:152-157](file://products/tool-gateway/src/tool-gateway/tools/oauth_client.py#L152-L157)
-- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-L312)
+- [test_oauth_client.py:300-312](file://products/tool-gateway/tests/test_oauth_client.py#L300-312)
 
 ## Conclusion
 SPEC-068 delivers a small, self-contained substrate that makes the tool-gateway capable of authenticating outbound calls with more than HTTP Basic. It does so without centralizing authority, adding dependencies, or changing the policy, audit, or execution-safety contracts. The substrate is additive, fail-closed, and secret-safe, and it prepares the platform for every MCP-ingestion pilot that needs an external target's outbound execution identity.

@@ -1,1 +1,0 @@
-Markdown-based spec templates; the only mechanical gate referenced is the root `make verify` command plus contract tests against `shared/shared-contracts` schemas.

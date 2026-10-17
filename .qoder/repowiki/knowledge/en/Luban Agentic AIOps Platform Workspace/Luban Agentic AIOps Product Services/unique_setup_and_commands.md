@@ -1,1 +1,0 @@
-Each service is bootstrapped via its own `Makefile` (typically `make dev`, `make test`, `make docker-build`) and pinned Python versions via `.python-version`. Integration tests in `execution-runtime/tests/failure/` spin up Postgres and other backends through `failure/support/compose.yaml` and are driven by `failure/run.py`.
