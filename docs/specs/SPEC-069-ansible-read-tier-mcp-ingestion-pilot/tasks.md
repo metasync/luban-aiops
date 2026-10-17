@@ -25,6 +25,16 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 > choice resolved to the **MCP-adapter path** (real AWX + the MIT `SurgeX-Labs/awx-mcp-server`),
 > **not** the native `ansible-inventory` fallback, so R-2 target-specific implementation is
 > now unblocked.
+>
+> **R-6 supply-chain correction (2026-10-17).** The Stage-0 dev-artifact pick
+> `SurgeX-Labs/awx-mcp-server` was **dropped** at the R-6 review (stdio-only MCP, no declared
+> license, `mcp>=1.0.0` vs the gateway's `mcp==2.3.0`). Corrected landscape: **production** =
+> Red Hat's Apache-2.0 `ansible/aap-mcp-server` (`controller.*` read operationIds); **CI** = an
+> in-cluster **thin mock** mirroring that surface + a mock managed host (SPEC-068 ephemeral-mock
+> pattern; no live external call, OQ-5); **OSS alternative** = `lycorp-jp/awx-mcp` (Apache-2.0,
+> native `AWX_MCP_READ_ONLY`). Real-AAP read-only validation is a documented operator step
+> outside CI. See `spec.md` Changelog 2026-10-17; the dated Stage-0 findings below are kept as
+> the historical record.
 
 ## Stage 0 — Verify (read-only; pins the residual OQ facts; confirms the SPEC-068 dependency and the topology)
 
@@ -72,6 +82,14 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 
 ### Stage-0 findings (2026-10-12; items 1/2/6 closed 2026-10-13)
 
+> **Superseded in part at the R-6 supply-chain review (2026-10-17).** The **item-1 dev-artifact
+> pick below (`SurgeX-Labs/awx-mcp-server`) was dropped** — stdio-only MCP, no declared license,
+> `mcp>=1.0.0` vs the gateway's `mcp==2.3.0`. The corrected landscape (production
+> `ansible/aap-mcp-server` `controller.*`; CI in-cluster thin mock; OSS alternative
+> `lycorp-jp/awx-mcp`) is recorded in `spec.md` Changelog 2026-10-17 and implemented in the R-2
+> binding + Ansible dev overlay. The dated findings are preserved unchanged as the historical
+> record; the item-2 read-operation set + argument shapes and items 3/4/5/6 remain valid.
+
 Desk research plus the SPEC-070 approval closed the pure-fact Stage-0 items (3/4/5) on
 2026-10-12. The two items that needed a hands-on artifact pin + supply-chain review (1/6),
 and the read-operation set whose per-tool argument shapes follow the item-1 choice (2), were
@@ -102,7 +120,9 @@ the record.
   `.python-version` 3.12 — compatible). The **exact pin lands at R-2** in **tool-gateway's**
   `pyproject.toml` + `uv.lock` only; the kernel lockfile is untouched (`mcp` stays
   transitive-only there via AgentScope).
-- **Dev server artifact (item 1 — RESOLVED 2026-10-13, operator pick).** The server-agnostic
+- **Dev server artifact (item 1 — RESOLVED 2026-10-13, operator pick; SUPERSEDED at the R-6
+  supply-chain review 2026-10-17 — `SurgeX-Labs/awx-mcp-server` dropped; see the note above and
+  `spec.md` Changelog).** The server-agnostic
   connector dev-validates against a **self-hosted** stand-in. Supply-chain/license/provenance
   review of the candidate landscape:
   - **`SurgeX-Labs/awx-mcp-server`** (PyPI `awx-mcp-server`) — **MIT** ✓; third-party/community
@@ -244,26 +264,58 @@ in SPEC-068's `tasks.md`. The **production** outbound user-delegated credential 
 
 ## R-6: Target provisioning and overlay wiring
 
-- [ ] Deploy the **self-hosted** Ansible MCP server (or native fallback) + a mock managed
+- [x] Deploy the **self-hosted** Ansible MCP server (or native fallback) + a mock managed
       host to the dev-k8s namespace through the overlay (reusing the SPEC-068 live-check
       ephemeral-mock pattern); keep `make overlays` green
       (`shared/platform-ops/gitops/dev-k8s/`).
-- [ ] Deliver any credential fields the topology needs through the `sync-*.sh` model — never
+      **Delivered (2026-10-17):** the `runtime-profiles/ansible-dev` overlay ships the thin mock
+      MCP server (`ansible-mock-mcp` Deployment/Service/NetworkPolicy on the tool-gateway image,
+      script mounted from the `ansible-mock-mcp-server` ConfigMap) = the mock managed host, wired
+      into `dev-k8s` (resources + `ansible.env` + the tool-gateway credential patch), the root
+      `OVERLAYS`, `select-runtime-profile.sh`/`verify-runtime-profile.sh`, and `deploy-overlay.sh`
+      (guarded `set image`). `make overlays` green (5 overlays) and the dev-k8s render verified.
+      *The live in-cluster `make deploy` + gated live-check run is deferred to the next
+      cluster-available window (the dev API went unresponsive mid-session); not a code gap —
+      OQ-5 means CI makes no live external call.*
+- [x] Deliver any credential fields the topology needs through the `sync-*.sh` model — never
       hand-edited in a consumer copy; keep `make validate-secret-vocabulary` green
       (`shared/platform-ops/`).
-- [ ] Ensure inventory source, endpoint, admitted-tool list, and executable path are operator
+      **Delivered (2026-10-17):** `sync-ansible-credentials.sh` generates one mock bearer and
+      writes it to **both** sinks (the gateway `tool-gateway-ansible-credentials` credential-set
+      file and the mock's `ansible-mock-credentials` secret) so they cannot drift; called from
+      `dev-k8s/deploy.sh`. `make validate-secret-vocabulary` green; the two-sink logic + operator
+      override (`ANSIBLE_MCP_BEARER_TOKEN`/`ANSIBLE_MCP_CREDENTIAL_SET`) proven via a kubectl shim.
+- [x] Ensure inventory source, endpoint, admitted-tool list, and executable path are operator
       configuration in the overlay (never model-selected); CI makes no live external call.
-- [ ] Add a gated live-check script (mirroring `shared/platform-ops/e2e/http-check-demo.sh`)
+      **Delivered (2026-10-17):** endpoint/transport/credential-set are `GATEWAY_ANSIBLE_MCP_*`
+      in `ansible.env` (platform-runtime-config); the admitted-tool list + argument shapes are
+      gateway config in `ansible_binding.py`; the target is the in-cluster `ansible-mock-mcp`
+      Service, so no live external call is made (OQ-5).
+- [x] Add a gated live-check script (mirroring `shared/platform-ops/e2e/http-check-demo.sh`)
       proving the end-to-end inventory/facts read against the deployed gateway, with the
       fail-closed negative control and redaction assertions. Document **AAP read-only-mode
       validation** as an operator step run outside CI (no licensed instance in CI).
+      **Delivered (2026-10-17):** `shared/platform-ops/e2e/ansible-mcp-check.sh` (wired into
+      `make e2e`) — unauth→401, delegated operator token, the enabled/disabled ConfigMap branch, a
+      fail-closed negative control (denied `ansible.launch_job_template` + `INVALID_PARAMETERS`),
+      gated live reads (skip with a note when the target is unreachable), and a bearer-redaction
+      assertion. The **AAP read-only validation runbook** (operator step outside CI) is documented
+      in `docs/guides/tool-configuration.md`. *Live cluster run deferred with box 1.*
+
+> **R-6 Layer-2 strengthening.** `products/tool-gateway/tests/test_ansible_mcp_streamable_http.py`
+> runs a **real** `mcp` SDK server over streamable-HTTP in-process, so CI exercises the connector's
+> live `_open_mcp_session` wire path (not a stub). Part of the 550-test green tool-gateway suite
+> (2026-10-17).
 
 ## Delivery Gate
 
 - [x] Stage 0 residual facts recorded; all five Open Questions show their 2026-10-11 operator
       resolutions in `spec.md`. **Stage 0 closed 2026-10-13** — all six verify items resolved
-      (dev artifact = real AWX + MIT `SurgeX-Labs/awx-mcp-server`; read-op set + argument
-      shapes pinned; `mcp==2.3.0` MIT confirmed).
+      (read-op set + argument shapes pinned; `mcp==2.3.0` MIT confirmed). The dev-artifact pick
+      was **corrected at the R-6 supply-chain review (2026-10-17)**: `SurgeX-Labs/awx-mcp-server`
+      dropped (stdio-only MCP, no license, `mcp>=1.0.0` vs `mcp==2.3.0`); production
+      `ansible/aap-mcp-server` (`controller.*`), CI in-cluster thin mock, OSS alternative
+      `lycorp-jp/awx-mcp` — see `spec.md` Changelog.
 - [ ] SPEC-068 (the dev outbound credential substrate, delivered v0.47.0) confirmed present;
       the connector resolves any dev credential through its resolver seam. The production
       user-delegated path's dependency on

@@ -213,9 +213,13 @@ adapter binds to a self-hosted AWX/mock server in dev and to AAP's read-only-mod
 production without adapter-code changes. The `mcp` dependency is added to **tool-gateway
 only**; the agent-platform kernel never becomes an MCP client. *(Transport direction
 inherited from SPEC-067 OQ-3; server artifact + read-operation set **pinned by Stage-0
-2026-10-13** — real AWX + the MIT `SurgeX-Labs/awx-mcp-server`, the read-only op set +
-argument shapes recorded in `tasks.md` — with each tool's exact `parameters_schema`
-finalizing at R-2.)*
+2026-10-13 and corrected at the R-6 supply-chain review** — production target Red Hat's
+Apache-2.0 `ansible/aap-mcp-server` (read tools generated from AAP's published `controller.*`
+operationIds), CI-validated against an in-cluster **thin mock** mirroring that surface, with
+`lycorp-jp/awx-mcp` (Apache-2.0, native `AWX_MCP_READ_ONLY`) the recorded open-source
+alternative — the Stage-0 pick `SurgeX-Labs/awx-mcp-server` was **dropped** (stdio-only MCP, no
+declared license, `mcp>=1.0.0` vs this gateway's `mcp==2.3.0`). The read-only op set + argument
+shapes are recorded in `tasks.md`, with each tool's exact `parameters_schema` finalizing at R-2.)*
 
 Acceptance criteria:
 
@@ -452,6 +456,21 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-17: **R-6 supply-chain review corrected the Stage-0 dev-artifact pick** (no status
+  change — still `approved`). The 2026-10-13 Stage-0 pick `SurgeX-Labs/awx-mcp-server` was
+  **dropped** on review: it is stdio-only MCP (its "network" mode is a non-MCP REST API),
+  declares **no license**, and pins `mcp>=1.0.0` against this gateway's `mcp==2.3.0`. The
+  corrected landscape is pinned: **production** target Red Hat's Apache-2.0
+  `ansible/aap-mcp-server` (streamable-HTTP at `/mcp` + bearer; read tools generated from AAP's
+  published `controller.*` OpenAPI operationIds), **CI** validated against an in-cluster **thin
+  mock** MCP server mirroring the `controller.*` read surface + a mock managed host (the
+  SPEC-068 ephemeral-mock live-check pattern, so CI still makes no live external call — OQ-5),
+  and `lycorp-jp/awx-mcp` (Apache-2.0; STDIO/SSE/streamable-HTTP; native `AWX_MCP_READ_ONLY=true`)
+  recorded as the **open-source AWX alternative** for validating against a real control plane
+  without an AAP license. Real AAP read-only validation remains a documented **operator step
+  outside CI**. The dated 2026-10-13 Stage-0 findings in `tasks.md` are preserved as the
+  historical record and marked superseded; the R-2 binding, the Ansible dev overlay, and
+  `docs/guides/tool-configuration.md` carry the corrected pick.
 - 2026-10-13: **Stage 0 closed** (verification complete; **no status change** — still
   `approved`). All six Stage-0 verify items are resolved and recorded in `tasks.md`: the
   dev-server artifact (OQ-1 residual) is **real AWX + the MIT `SurgeX-Labs/awx-mcp-server`**,

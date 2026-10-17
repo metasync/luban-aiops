@@ -25,6 +25,15 @@
 > server-artifact choice resolved to the **MCP-adapter path** (real AWX + the MIT
 > `SurgeX-Labs/awx-mcp-server`), **not** the native `ansible-inventory` fallback, so R-2
 > target-specific implementation is now unblocked.
+>
+> **R-6 supply-chain correction (2026-10-17).** The Stage-0 dev-artifact pick
+> `SurgeX-Labs/awx-mcp-server` was **dropped** at the R-6 review (stdio-only MCP, no declared
+> license, `mcp>=1.0.0` vs the gateway's `mcp==2.3.0`). Corrected landscape: **production** =
+> Red Hat's Apache-2.0 `ansible/aap-mcp-server` (`controller.*` read operationIds); **CI** = an
+> in-cluster **thin mock** mirroring that surface + a mock managed host (SPEC-068 ephemeral-mock
+> pattern; no live external call, OQ-5); **OSS alternative** = `lycorp-jp/awx-mcp` (Apache-2.0,
+> native `AWX_MCP_READ_ONLY`). Real-AAP read-only validation is a documented operator step
+> outside CI. See `spec.md` Changelog 2026-10-17.
 
 ## Approach
 
@@ -39,8 +48,10 @@ adapter +
 typed-tool model that [SPEC-067](../SPEC-067-servicenow-mcp-ingestion-pilot/spec.md) will
 later configure for ServiceNow and that the **Layer-2 runbook-typed-tool fast-follow** will
 extend — rather than either building blind. **Stage 0 closed 2026-10-13**, pinning the server
-artifact (OQ-1 → real AWX + the MIT `SurgeX-Labs/awx-mcp-server`), the read-operation set +
-argument shapes (OQ-2), and AAP's MCP-server auth (OQ-4 residual), so R-2–R-6 are no longer
+artifact (OQ-1 → a real Ansible control plane behind a community MCP server, **corrected at the
+R-6 supply-chain review 2026-10-17** to production `ansible/aap-mcp-server` + an in-cluster thin
+mock for CI; `SurgeX-Labs/awx-mcp-server` dropped — see `spec.md` Changelog), the read-operation
+set + argument shapes (OQ-2), and AAP's MCP-server auth (OQ-4 residual), so R-2–R-6 are no longer
 provisional (each tool's exact `parameters_schema` still finalizes at R-2). The stages are
 ordered so the connector is validated against an
 in-cluster mock target before any live infrastructure is touched.

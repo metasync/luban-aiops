@@ -163,6 +163,45 @@ The dispatcher emits `secret_delivered` after successful external delivery;
 `PortalCopyChannel` defers that event until actual redemption. New senders must
 never log values and must preserve write-tier authorization.
 
+### Ansible MCP Connector Tools (SPEC-069)
+
+Read-tier access to an Ansible automation control plane (Red Hat AAP or a
+self-hosted AWX) through the gateway's **server-agnostic MCP-ingestion
+connector**. The gateway is a thin MCP *client*: it admits a fixed, gateway-owned
+allowlist of the remote server's `controller.*` read operations and exposes each
+as a typed `ansible.*` tool. **Only read operations are admitted** — no job
+launch, workflow launch, or project update is exposed at any tier, and there is
+no `--check`/dry-run verb (SPEC-069 OQ-2/OQ-3). Admission, canonical names,
+argument schemas, and the read tier are gateway config
+(`ingestion/ansible_binding.py`); a server-advertised hint is never trusted and
+can never raise a tier or auto-approve.
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `ansible.list_inventories` | List Ansible inventories | `name_filter` (optional), `limit` (1-500) | read |
+| `ansible.get_inventory` | One inventory's hosts and groups | `inventory` (required) | read |
+| `ansible.list_job_templates` | List job templates | `name_filter` (optional), `limit` (1-500) | read |
+| `ansible.get_job` | One job's details and status | `job_id` (required) | read |
+| `ansible.get_job_stdout` | A job's stdout, optionally tail-bounded | `job_id` (required), `tail` (1-5000) | read |
+| `ansible.get_environment_health` | Control-plane health/readiness (launches nothing) | — | read |
+
+> **Read-tier only, deny-by-default.** The connector registers only under
+> `GATEWAY_ANSIBLE_MCP_ENABLED=true`; absent it every `ansible.*` call fails
+> closed with `TOOL_NOT_FOUND`. Mutating AAP operations
+> (`controller.job_templates_launch_create`,
+> `controller.workflow_job_templates_launch_create`,
+> `controller.projects_update`) are absent from the allowlist, so they are never
+> exposed no matter how the server describes them. One honest gap: no host
+> `gather_facts` tool is admitted, so live fact-gathering is deferred rather than
+> faked (OQ-5). An OQ-1 fallback — a single read-only
+> `ansible.list_inventory_hosts` shell-out (`ansible-inventory --list`, no
+> `--check`) — registers under `GATEWAY_ANSIBLE_NATIVE_ENABLED` only when no MCP
+> server is wired; it proves inventory topology, not the MCP substrate.
+
+The connector deep-dive, activation checklist, and the operator's real-AAP
+read-only validation runbook are below
+([Ansible MCP Connector](#ansible-mcp-connector-spec-069)).
+
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
 - [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — the base commits `false`
@@ -495,6 +534,141 @@ If an incident id does not exist, `incidents.get` returns a structured
 `INCIDENT_NOT_FOUND` error. If incident-service is unreachable, the incidents
 tools return `TOOL_EXECUTION_ERROR`. An empty list result is a success
 (`{"incidents": [], "total": 0}`), not an error.
+
+## Ansible MCP Connector (SPEC-069)
+
+The Ansible connector is the reference binding of the gateway's **generic,
+server-agnostic MCP-ingestion adapter** (`ingestion/mcp_adapter.py`). Luban acts
+as a thin MCP *client* over the official `mcp` SDK (pinned `mcp==2.3.0` in the
+tool-gateway only): what to admit, the canonical tool name, the argument schema,
+and the risk tier are all **gateway-owned binding config**
+(`ingestion/ansible_binding.py`), never adapter code and never anything the
+server advertises. Swapping the target server — the in-cluster mock (dev/CI),
+`ansible/aap-mcp-server` (production AAP), or `lycorp-jp/awx-mcp` (open-source
+AWX) — is an **overlay-config** change (a new `GATEWAY_ANSIBLE_MCP_URL` and,
+where tool names differ, a new `server_name`/`argument_map` binding), never an
+adapter-code change.
+
+### Activation Checklist
+
+- [ ] **`GATEWAY_ANSIBLE_MCP_ENABLED=true`** — registers the six read tools
+      (base keeps it `false`; the `ansible-dev` runtime profile flips it in dev)
+- [ ] **`GATEWAY_ANSIBLE_MCP_TRANSPORT`** — `streamable_http` (default; a URL
+      endpoint) or `stdio` (a local server process)
+- [ ] **`GATEWAY_ANSIBLE_MCP_URL`** — the MCP endpoint for `streamable_http`
+      (dev commits `http://ansible-mock-mcp:8000/mcp`; production AAP is
+      `https://<aap-mcp-host>/mcp`)
+- [ ] **`GATEWAY_ANSIBLE_MCP_COMMAND` / `_ARGS`** — for `stdio` only
+- [ ] **`GATEWAY_ANSIBLE_MCP_TIMEOUT_MS`** — bounds the session read and HTTP
+      client timeout (default 10000)
+- [ ] **`GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET`** — the named `bearer` set the
+      connector presents (dev: `ansible-mock`), resolved through the SPEC-068
+      credential-set seam, never an inline value
+- [ ] **`GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS`** — path to the mounted
+      credential-set JSON (dev:
+      `/etc/luban/ansible-credentials/credential-sets.json`); falls back to
+      `GATEWAY_HTTP_CREDENTIAL_SETS` then `GATEWAY_BROWSER_CREDENTIAL_SETS`
+- [ ] **Network reachability** — the tool-gateway pod must reach the MCP endpoint
+
+The endpoint, inventory source, admitted-tool list, and executable path are
+**operator configuration, never model-selected**. The credential set must be a
+`bearer` (or `oauth2_client_credentials`) scheme; a `basic` set has no bearer for
+the MCP transport and fails closed with `CREDENTIAL_SCHEME_UNSUPPORTED` rather
+than downgrading to no auth.
+
+**Provisioning shortcut (dev-k8s):** `make deploy` applies the `ansible-dev`
+runtime profile (a thin in-cluster mock MCP server + Service + NetworkPolicy) and
+runs `sync-ansible-credentials.sh`, which generates one bearer and writes it to
+**both** the gateway's credential-set secret
+(`tool-gateway-ansible-credentials`) and the mock's bearer gate
+(`ansible-mock-credentials`) so the two cannot drift. Use
+`SKIP_ANSIBLE_CREDENTIALS=true make deploy` when CI injects them; absent the
+secret the connector fails closed (`CREDENTIAL_SET_NOT_FOUND`) and the mock 401s
+every call. Point the dev gateway at a real server with
+`ANSIBLE_MCP_BEARER_TOKEN=<token>` (and a new `_URL`).
+
+### Verification
+
+The gated live-check asserts the whole surface end to end (it branches on the
+committed enabled/disabled state, so it passes deny-by-default or live):
+
+```bash
+# Prerequisite: identity port-forward for the delegated operator token
+kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000
+shared/platform-ops/e2e/ansible-mcp-check.sh
+```
+
+It proves: unauthenticated callers rejected (401); when disabled, no `ansible.*`
+tool and `TOOL_NOT_FOUND` on invoke; when enabled, the six read tools present at
+`risk_level=read` with **no mutating verb admitted**, a non-admitted verb and a
+missing parameter fail closed with no server contact, the live reads project the
+target's inventory/hosts/templates/job/stdout (gated on reachability, else a
+clean fail-closed code), and the bearer never appears in any tool result. To list
+the tools directly:
+
+```bash
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
+  curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v2/tools
+# Should include the six ansible.* read tools when enabled
+```
+
+**Fail-closed error codes:** `TOOL_NOT_FOUND` (connector off, or a verb outside
+the allowlist), `INVALID_PARAMETERS` (gateway-owned schema rejection, before any
+session opens), `CREDENTIAL_SET_NOT_FOUND` / `CREDENTIAL_SCHEME_UNSUPPORTED`
+(credential resolution), `MCP_SDK_UNAVAILABLE` (the `mcp` SDK is absent),
+`MCP_TRANSPORT_ERROR` (unreachable/timeout/401), and `MCP_TOOL_ERROR` (the server
+reported a tool error). `MCP_SDK_UNAVAILABLE` and `MCP_TRANSPORT_ERROR` are
+audited with `failure_class=target_unavailable` (SPEC-069 R-5), distinct from a
+policy denial; every call is audited with `target_identity_mode=acting_service`
+(R-4) — the target is addressed with the acting service's credential, not the
+requesting user's delegated identity (per-user target RBAC is SPEC-070's seam).
+
+### Operator Validation Against Real AAP (read-only, outside CI)
+
+CI makes **no live external call** (OQ-5) and never contacts a licensed AAP; the
+in-cluster thin mock stands in for it, and the deployed wire path is proven by
+the in-process Layer-2 test
+(`products/tool-gateway/tests/test_ansible_mcp_streamable_http.py`). Validating
+against a **real** AAP is an operator step, run out-of-band:
+
+1. **Provenance.** Deploy Red Hat's `ansible/aap-mcp-server` (Apache-2.0;
+   Node.js 22; streamable-HTTP at `/mcp` + `Authorization: Bearer`) against the
+   licensed AAP controller, per its upstream README. Record the pinned version
+   and license in the SPEC-069 supply-chain note before relying on it.
+2. **Read-only mode.** Configure the server and the AAP service account so only
+   read operations are reachable. Defense-in-depth: even if a mutating operation
+   were reachable, the gateway's allowlist never admits one, so the `ansible.*`
+   surface stays read-only regardless.
+3. **Confirm operationIds and argument names.** The binding's `server_name`
+   values follow AAP's published `controller.*` OpenAPI operationIds. Against the
+   live server, confirm each admitted tool's `inputSchema` matches the binding's
+   argument names; where one differs, carry it as an `argument_map` entry
+   (config) — never an adapter-code change.
+4. **Point the gateway at it.** Set `GATEWAY_ANSIBLE_MCP_URL` to the AAP MCP
+   endpoint and provision a `bearer` credential set for the read-only service
+   account (`ANSIBLE_MCP_BEARER_TOKEN=<token> sync-ansible-credentials.sh`, or an
+   operator-managed credential-set secret). The token rides an httpx header only
+   — never a URL, result, evidence field, or log line.
+5. **Run the live-check.** `ansible-mcp-check.sh` exercises the same six reads
+   against the real server. Its live-leg canned-topology assertions are
+   mock-specific; against real AAP, confirm the structural reads (inventory list,
+   one inventory's hosts, job templates, one job, its stdout) return real data and
+   that no mutating verb is admitted.
+6. **Audit.** Confirm each read audits `target_system=ansible`,
+   `target_identity_mode=acting_service`, and — on any unreachable-target fault —
+   `failure_class=target_unavailable`.
+
+**Open-source AWX alternative.** `lycorp-jp/awx-mcp` (Apache-2.0; Python
+3.10+/`uvx`; STDIO, SSE, or streamable-HTTP) exposes a real AWX with a native
+`AWX_MCP_READ_ONLY=true`. Bind it the same way — a new `_URL` (or `_COMMAND` for
+stdio) and, where its tool names differ from the `controller.*` convention, a new
+`server_name`/`argument_map`. This is the recorded path for validating against a
+real open-source control plane without an AAP license.
+
+**Dropped at the R-6 supply-chain review.** The Stage-0 pick
+`SurgeX-Labs/awx-mcp-server` was **not** used: it is stdio-only MCP (its network
+mode is a non-MCP REST API), declares no license, and pins `mcp>=1.0.0` against
+this gateway's `mcp==2.3.0`.
 
 ## Output Redaction
 
