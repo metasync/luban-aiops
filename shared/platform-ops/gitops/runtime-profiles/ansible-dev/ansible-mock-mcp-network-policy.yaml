@@ -1,0 +1,34 @@
+# Defense-in-depth NetworkPolicy for the thin mock Ansible MCP server
+# (SPEC-069 R-6).
+#
+# The mock is already bearer-gated (it 401s any request without the
+# shared token from the ansible-mock-credentials secret). This policy is
+# the network-layer second control: selecting the pod with an Ingress
+# policyType makes it deny-by-default, and the single rule admits port
+# 8000 only from the tool-gateway pod — the sole legitimate MCP client.
+# No other workload in the namespace can reach the mock, so a compromised
+# neighbour cannot probe it or replay the bearer.
+#
+# Egress is left unrestricted on purpose: the mock is a pure server and
+# initiates no outbound connections, so an egress rule would add noise
+# without tightening anything.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ansible-mock-mcp-allow-tool-gateway
+  labels:
+    app: ansible-mock-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app: ansible-mock-mcp
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tool-gateway
+      ports:
+        - protocol: TCP
+          port: 8000

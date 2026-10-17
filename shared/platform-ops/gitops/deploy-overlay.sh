@@ -104,4 +104,14 @@ kubectl -n "$NAMESPACE" rollout status deployment/audit-service --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/skills-hub --timeout=120s
 kubectl -n "$NAMESPACE" rollout status deployment/incident-service --timeout=120s
 
+# The thin mock Ansible MCP server (SPEC-069 R-6) reuses the tool-gateway
+# image but is not one of the nine platform services, so retag it to the
+# coordinated tag as well. Guarded: only overlays shipping the ansible-dev
+# profile (dev-k8s) create it, and deploy-overlay.sh serves every overlay.
+if kubectl -n "$NAMESPACE" get deployment ansible-mock-mcp >/dev/null 2>&1; then
+  kubectl -n "$NAMESPACE" set image deployment/ansible-mock-mcp \
+    "ansible-mock-mcp=$TOOL_GATEWAY_IMAGE"
+  kubectl -n "$NAMESPACE" rollout status deployment/ansible-mock-mcp --timeout=120s
+fi
+
 echo "Applied overlay $OVERLAY_DIR with IMAGE_TAG=$IMAGE_TAG in namespace $NAMESPACE"

@@ -1,28 +1,41 @@
-"""Ansible read-only MCP binding (SPEC-069 R-2, Stage-0 items 1/2).
+"""Ansible read-only MCP binding (SPEC-069 R-2/R-6).
 
 This is the **configuration** the generic adapter consumes for the Ansible
 target — the admitted read-only tool allowlist, each tool's canonical name, its
-gateway-owned JSON-Schema argument shape, and its tier. None of this comes from
-the server: the chosen ``SurgeX-Labs/awx-mcp-server`` exposes a 16-tool
-read-*write* surface, and the adapter admits only the six read-only capabilities
-named here.
+gateway-owned JSON-Schema argument shape, and its tier. None of it comes from
+the server: the gateway owns admission and tier, and a server-advertised hint is
+never trusted.
 
-Stage-0 (2026-10-13) pinned this set. The server's **three mutating tools**
-(``job_launch``, ``job_cancel``, ``project_update``) are **never** admitted at any
-tier — they are simply absent from :data:`ANSIBLE_ADMITTED_TOOLS`, so the
-allowlist denies them (R-2/R-3). No playbook-run/runbook-execution name and no
-``--check``/dry-run operation is admitted (OQ-2/OQ-3). Four server *read* tools
-(``get_job_template``, ``list_jobs``, ``job_events``, ``list_projects``) are
-deliberately not admitted — no use case yet; admit later only on a named need.
+**Server target (R-6, corrected at the supply-chain review).** The production
+target is Red Hat's ``ansible/aap-mcp-server`` (Apache-2.0; streamable-HTTP at
+``/mcp`` + bearer), whose read tools are generated from AAP's published
+``controller.*`` OpenAPI operationIds. The ``server_name`` values below follow
+that convention so the *same* binding runs against production AAP and against
+the in-cluster **thin mock** (R-6) that mirrors this surface for CI. The Stage-0
+pick ``SurgeX-Labs/awx-mcp-server`` was **dropped** at the R-6 review: it is
+stdio-only MCP (its network mode is a non-MCP REST API), declares no license,
+and pins ``mcp>=1.0.0`` against this gateway's ``mcp==2.3.0``.
+``lycorp-jp/awx-mcp`` (Apache-2.0; streamable-HTTP; native ``AWX_MCP_READ_ONLY``)
+is the recorded open-source AWX alternative — bound by swapping these
+``server_name``/``argument_map`` values as config, never an adapter-code change.
 
-One honest Stage-0 gap: the server exposes **no host ``gather_facts``/facts
-tool**, so live fact gathering is deferred (a native fallback or a later server
-tool) rather than faked (OQ-5 "defer, don't fake").
+AAP's **mutating** operations (``controller.job_templates_launch_create``,
+``controller.workflow_job_templates_launch_create``, ``controller.projects_update``)
+are **never** admitted at any tier — they are absent from
+:data:`ANSIBLE_ADMITTED_TOOLS`, so the allowlist denies them (R-2/R-3). No
+playbook-run/runbook-execution name and no ``--check``/dry-run operation is
+admitted (OQ-2/OQ-3). Several server *read* tools are deliberately not admitted
+— no use case yet; admit later only on a named need.
 
-The exact server argument *names* are confirmed against the deployed server's
-``inputSchema`` at the R-6 gated live-check (CI makes no live external call);
-where a canonical parameter must be renamed, ``argument_map`` carries it as
-config — never an adapter-code change.
+One honest gap: no host ``gather_facts``/facts tool is admitted, so live fact
+gathering is deferred (the native ``ansible-inventory`` fallback or a later
+server tool) rather than faked (OQ-5 "defer, don't fake").
+
+The exact AAP operationIds and argument *names* are confirmed against the real
+server's ``inputSchema`` at the documented operator validation step (real AAP is
+licensed, so CI makes no live external call — OQ-5); where a canonical parameter
+must be renamed, ``argument_map`` carries it as config — never an adapter-code
+change.
 """
 
 from __future__ import annotations
@@ -43,11 +56,18 @@ SOURCE_SYSTEM = "ansible"
 
 # Server tools that MUTATE — never admitted at any tier (absent from the
 # allowlist below). Tests assert no canonical tool maps to one of these.
-DENIED_SERVER_TOOLS = frozenset({"job_launch", "job_cancel", "project_update"})
+DENIED_SERVER_TOOLS = frozenset({
+    "controller.job_templates_launch_create",
+    "controller.workflow_job_templates_launch_create",
+    "controller.projects_update",
+})
 # Server read tools deliberately not admitted (no use case yet).
-NOT_ADMITTED_SERVER_TOOLS = frozenset(
-    {"get_job_template", "list_jobs", "job_events", "list_projects"}
-)
+NOT_ADMITTED_SERVER_TOOLS = frozenset({
+    "controller.job_templates_read",
+    "controller.jobs_list",
+    "controller.job_events_list",
+    "controller.projects_list",
+})
 
 _NAME_FILTER_SCHEMA: dict = {
     "type": "object",
@@ -70,7 +90,7 @@ _NAME_FILTER_SCHEMA: dict = {
 # tier; a server-advertised hint can never change it.
 ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
     AdmittedTool(
-        server_name="list_inventories",
+        server_name="controller.inventories_list",
         name="ansible.list_inventories",
         description="List Ansible inventories with optional name filtering.",
         risk_level="read",
@@ -78,7 +98,7 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
         parameters_schema=_NAME_FILTER_SCHEMA,
     ),
     AdmittedTool(
-        server_name="get_inventory",
+        server_name="controller.inventories_read",
         name="ansible.get_inventory",
         description="Get one inventory's details, including its hosts and groups.",
         risk_level="read",
@@ -95,7 +115,7 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
         },
     ),
     AdmittedTool(
-        server_name="list_job_templates",
+        server_name="controller.job_templates_list",
         name="ansible.list_job_templates",
         description="List Ansible job templates with optional name filtering.",
         risk_level="read",
@@ -103,7 +123,7 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
         parameters_schema=_NAME_FILTER_SCHEMA,
     ),
     AdmittedTool(
-        server_name="get_job",
+        server_name="controller.jobs_read",
         name="ansible.get_job",
         description="Get one job's details and current status by ID.",
         risk_level="read",
@@ -120,7 +140,7 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
         },
     ),
     AdmittedTool(
-        server_name="job_stdout",
+        server_name="controller.jobs_stdout_retrieve",
         name="ansible.get_job_stdout",
         description="Retrieve a job's stdout/log output, optionally tail-bounded.",
         risk_level="read",
@@ -143,11 +163,11 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
         },
     ),
     AdmittedTool(
-        server_name="env_get_active",
+        server_name="controller.ping_list",
         name="ansible.get_environment_health",
         description=(
-            "Report the active Ansible environment's health/readiness. A pure "
-            "read of environment state; it launches nothing."
+            "Report the Ansible control-plane's health/readiness. A pure read "
+            "of platform state; it launches nothing."
         ),
         risk_level="read",
         category=CATEGORY,

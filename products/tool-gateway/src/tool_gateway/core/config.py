@@ -50,9 +50,10 @@ DEFAULT_EMAIL_PORT = 587
 
 # Ansible MCP-ingestion defaults (SPEC-069 R-2). Off by default; the generic,
 # server-agnostic adapter is inert until a flag is enabled and an endpoint is
-# wired. The streamable-HTTP transport matches the self-hosted awx-mcp-server
-# (and AAP's read-only-mode MCP server); ``stdio`` covers a local server
-# process. The timeout mirrors the HTTP connector default.
+# wired. The streamable-HTTP transport matches AAP's read-only-mode MCP server
+# (ansible/aap-mcp-server, the production target) and the in-cluster thin mock
+# used for CI; ``stdio`` covers a local server process. The timeout mirrors the
+# HTTP connector default.
 DEFAULT_ANSIBLE_MCP_TRANSPORT = "streamable_http"
 DEFAULT_ANSIBLE_MCP_TIMEOUT_MS = 10000
 DEFAULT_ANSIBLE_NATIVE_EXECUTABLE = "ansible-inventory"

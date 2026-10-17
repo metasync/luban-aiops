@@ -6,17 +6,25 @@ resources:
   - ../runtime-profiles/default
   - ../runtime-profiles/mutating-dev
   - ../runtime-profiles/browser-dev
+  - ../runtime-profiles/ansible-dev
 configMapGenerator:
   - name: platform-runtime-config
     behavior: merge
     envs:
       - ../runtime-profiles/mutating-dev/mutating.env
       - ../runtime-profiles/browser-dev/browser.env
+      - ../runtime-profiles/ansible-dev/ansible.env
       - ../runtime-profiles/secrets-dev/secrets.env
 patches:
   # SPEC-049: chromium-headless-shell sidecar + credential-set mount on
   # the tool-gateway pod (browser-dev posture).
   - path: ../runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml
+    target:
+      kind: Deployment
+      name: tool-gateway
+  # SPEC-069 R-6: Ansible MCP credential-set mount on the tool-gateway pod
+  # (ansible-dev posture); the mock server itself ships as a profile resource.
+  - path: ../runtime-profiles/ansible-dev/tool-gateway-ansible-credentials.yaml
     target:
       kind: Deployment
       name: tool-gateway

@@ -1,0 +1,92 @@
+# Thin mock Ansible MCP server (SPEC-069 R-6) — the in-cluster dev/CI target the
+# tool-gateway's server-agnostic MCP-ingestion connector reads from. It stands in
+# for the production `ansible/aap-mcp-server` (streamable-HTTP at /mcp + bearer)
+# so the overlay can be validated end to end with no licensed AAP instance and no
+# live external call (OQ-5).
+#
+# It reuses the tool-gateway image (already FROM base-uv and already shipping
+# mcp==2.3.0 + starlette + uvicorn as runtime deps), so no new image is built;
+# deploy-overlay.sh retags it to the coordinated tool-gateway tag alongside the
+# platform services. The server script is mounted read-only from the
+# ansible-mock-mcp-server ConfigMap (generated from mock_ansible_mcp_server.py)
+# and run as a separate Deployment, so the gateway reaches it over the Service
+# network exactly as it would a real external MCP server.
+#
+# The required bearer comes from the ansible-mock-credentials secret
+# (sync-ansible-credentials.sh, one generator / two sinks). Absent it, the server
+# adopts an unguessable token and fails every call closed (401) rather than
+# running open. Resource caps keep the footprint negligible on the shared dev
+# node.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ansible-mock-mcp
+  labels:
+    app: ansible-mock-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ansible-mock-mcp
+  template:
+    metadata:
+      labels:
+        app: ansible-mock-mcp
+    spec:
+      # Service-link env vars collide with *_PORT/_HOST settings; the mock reads
+      # its own ANSIBLE_MOCK_* env and needs no service discovery.
+      enableServiceLinks: false
+      containers:
+        - name: ansible-mock-mcp
+          image: luban-aiops/tool-gateway:dev-local
+          imagePullPolicy: IfNotPresent
+          command: ["uv", "run", "python", "/mock/mock_ansible_mcp_server.py"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: ANSIBLE_MOCK_HOST
+              value: "0.0.0.0"
+            - name: ANSIBLE_MOCK_PORT
+              value: "8000"
+            - name: ANSIBLE_MOCK_BEARER_FILE
+              value: /etc/luban/ansible-mock/bearer-token
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          # A TCP probe, not HTTP: the server 401s any request without the
+          # bearer, so an HTTP probe would read "unhealthy" on a perfectly
+          # healthy fail-closed server. The port being open is the readiness
+          # signal; the live-check proves the authenticated path.
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: server
+              mountPath: /mock
+              readOnly: true
+            # Optional so the pod still starts before sync-ansible-credentials.sh
+            # runs; the server then fails closed (unguessable token) until the
+            # secret exists and the pod restarts.
+            - name: bearer
+              mountPath: /etc/luban/ansible-mock
+              readOnly: true
+      volumes:
+        - name: server
+          configMap:
+            name: ansible-mock-mcp-server
+        - name: bearer
+          secret:
+            secretName: ansible-mock-credentials
+            optional: true

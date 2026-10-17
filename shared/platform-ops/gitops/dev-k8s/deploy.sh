@@ -42,6 +42,13 @@ NAMESPACE=${NAMESPACE:-dev-luban-aiops}
 # time; read-class browser checks still work.
 "$SCRIPT_DIR/../sync-browser-credentials.sh" "$NAMESPACE"
 
+# Provision the Ansible MCP credentials (SPEC-069 R-6) unless skipped.
+# Set SKIP_ANSIBLE_CREDENTIALS=true when secrets are injected externally
+# (e.g. CI). One generator / two sinks: the gateway's credential set and the
+# mock server's bearer gate. Without it both fail closed (CREDENTIAL_SET_NOT_FOUND
+# on the connector, 401 at the mock) rather than running open.
+"$SCRIPT_DIR/../sync-ansible-credentials.sh" "$NAMESPACE"
+
 # Provision the sessions database for the agent-platform session store
 # (SPEC-016). Idempotent; no secrets involved.
 "$SCRIPT_DIR/../sync-sessions-db.sh" "$NAMESPACE"

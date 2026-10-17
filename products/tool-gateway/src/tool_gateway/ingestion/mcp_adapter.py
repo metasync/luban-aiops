@@ -74,10 +74,10 @@ TARGET_UNAVAILABLE_CODES = frozenset({"MCP_SDK_UNAVAILABLE", "MCP_TRANSPORT_ERRO
 class McpTransport:
     """How to reach one MCP server (operator configuration, never a model arg).
 
-    ``kind`` is ``"streamable_http"`` (a URL endpoint — the self-hosted
-    awx-mcp-server and AAP's read-only-mode server) or ``"stdio"`` (a local
-    server process). ``timeout_ms`` bounds both the session read timeout and the
-    HTTP client timeout.
+    ``kind`` is ``"streamable_http"`` (a URL endpoint — AAP's read-only-mode
+    MCP server, the production target, and the in-cluster thin mock used for
+    CI) or ``"stdio"`` (a local server process). ``timeout_ms`` bounds both the
+    session read timeout and the HTTP client timeout.
     """
 
     kind: str = "streamable_http"

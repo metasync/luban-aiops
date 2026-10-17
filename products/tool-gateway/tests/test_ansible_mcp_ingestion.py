@@ -315,7 +315,7 @@ class ExecutionTests(unittest.TestCase):
 
     def test_success_passes_through_structured_content(self) -> None:
         server = FakeServer(responses={
-            "list_inventories": FakeCallToolResult(structured_content={"inventories": ["demo"]}),
+            "controller.inventories_list": FakeCallToolResult(structured_content={"inventories": ["demo"]}),
         })
         result = _run(self._registry(server).invoke("ansible.list_inventories", {}, {}))
         self.assertEqual(result.status, "success")
@@ -324,10 +324,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(result.evidence["source_system"], "ansible")
 
     def test_success_extracts_text_content(self) -> None:
-        # Keyed by the SERVER tool name (env_get_active), which is what the
-        # binding dispatches to — not the canonical ansible.* name.
+        # Keyed by the SERVER tool name (controller.ping_list), which is what
+        # the binding dispatches to — not the canonical ansible.* name.
         server = FakeServer(responses={
-            "env_get_active": FakeCallToolResult(
+            "controller.ping_list": FakeCallToolResult(
                 content=[FakeTextContent("healthy")]),
         })
         result = _run(self._registry(server).invoke("ansible.get_environment_health", {}, {}))
@@ -359,7 +359,7 @@ class ExecutionTests(unittest.TestCase):
         server = FakeServer()
         _run(self._registry(server).invoke(
             "ansible.list_inventories", {"limit": 5, "bogus": "x", "--check": True}, {}))
-        self.assertEqual(server.calls[-1], ("list_inventories", {"limit": 5}))
+        self.assertEqual(server.calls[-1], ("controller.inventories_list", {"limit": 5}))
 
     def test_identity_threads_through_execute(self) -> None:
         # R-2: the identity context is carried into the tool (full five-field
@@ -403,7 +403,7 @@ class FailClosedTests(unittest.TestCase):
 
     def test_server_reported_tool_error_is_not_a_success(self) -> None:
         server = FakeServer(responses={
-            "get_job": FakeCallToolResult(
+            "controller.jobs_read": FakeCallToolResult(
                 content=[FakeTextContent("job 1 not found")], is_error=True),
         })
         registry = ToolRegistry()
@@ -502,7 +502,7 @@ class AuditFidelityTests(unittest.TestCase):
 
     def test_success_audit_carries_all_five_fields_and_delegation_mode(self) -> None:
         server = FakeServer(responses={
-            "list_inventories": FakeCallToolResult(structured_content={"inventories": ["demo"]}),
+            "controller.inventories_list": FakeCallToolResult(structured_content={"inventories": ["demo"]}),
         })
         response, event, _log = _invoke_captured(
             _connector(ANSIBLE_ADMITTED_TOOLS, server=server),
@@ -575,7 +575,7 @@ class FailClosedAuditTests(unittest.TestCase):
         # The target WAS available and answered with an error: a fact, not an
         # unavailability (SPEC-058 "an upstream 4xx/5xx is a fact, not an error").
         server = FakeServer(responses={
-            "get_job": FakeCallToolResult(content=[FakeTextContent("nope")], is_error=True),
+            "controller.jobs_read": FakeCallToolResult(content=[FakeTextContent("nope")], is_error=True),
         })
         _response, event, _log = _invoke_captured(
             _connector(ANSIBLE_ADMITTED_TOOLS, server=server),

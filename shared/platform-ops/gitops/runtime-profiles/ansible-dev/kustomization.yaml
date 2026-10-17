@@ -1,0 +1,42 @@
+# Ansible read-tier MCP-ingestion dev posture (SPEC-069 R-6).
+#
+# Like mutating-dev and browser-dev this is not an LLM provider profile: it
+# is the committed Ansible posture for dev environments. It ships the thin
+# mock Ansible MCP server the gateway's server-agnostic ingestion connector
+# reads from — the in-cluster stand-in for the production
+# `ansible/aap-mcp-server` (streamable-HTTP at /mcp + bearer), so the overlay
+# is validated end to end with no licensed AAP instance and no live external
+# call (OQ-5).
+#
+# It ships three standalone resources (the mock's Deployment, Service, and
+# NetworkPolicy) plus the ConfigMap the mock's server script is generated
+# from, and ansible.env, which provides the GATEWAY_ANSIBLE_MCP_* values
+# dev-k8s merges into the platform-runtime-config ConfigMap.
+#
+# tool-gateway-ansible-credentials.yaml is deliberately NOT listed under
+# resources here: it is a strategic merge patch applied by the dev-k8s
+# overlay (where the tool-gateway Deployment lives), not a standalone
+# resource — the same arrangement browser-dev uses for its sidecar patch.
+#
+# The mock reuses the tool-gateway image (already FROM base-uv, already
+# shipping mcp/starlette/uvicorn as runtime deps), so no new image is built;
+# deploy-overlay.sh retags it to the coordinated tool-gateway tag.
+#
+# The base stays deny-by-default: base/tool-gateway/runtime-config.env keeps
+# GATEWAY_ANSIBLE_MCP_ENABLED=false, so absent this profile the connector is
+# off and every ansible.* call fails closed.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  # Generated off the real .py (the house pattern, cf. platform-policy) so the
+  # mounted script and the committed source cannot drift; the Deployment runs
+  # it with `uv run python /mock/mock_ansible_mcp_server.py`.
+  - name: ansible-mock-mcp-server
+    files:
+      - mock_ansible_mcp_server.py
+resources:
+  - ansible-mock-mcp-deployment.yaml
+  - ansible-mock-mcp-service.yaml
+  - ansible-mock-mcp-network-policy.yaml

@@ -1,0 +1,21 @@
+# ClusterIP Service for the thin mock Ansible MCP server (SPEC-069 R-6).
+#
+# The tool-gateway reaches the mock over this Service DNS name
+# (http://ansible-mock-mcp:8000/mcp) exactly as it would a real external
+# Ansible MCP server, so GATEWAY_ANSIBLE_MCP_URL is the only thing that
+# changes when the mock is swapped for `aap-mcp-server` (production) or
+# `lycorp-jp/awx-mcp` (open-source AWX). Port 8000 mirrors the production
+# streamable-HTTP convention.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ansible-mock-mcp
+  labels:
+    app: ansible-mock-mcp
+spec:
+  selector:
+    app: ansible-mock-mcp
+  ports:
+    - name: mcp
+      port: 8000
+      targetPort: 8000
