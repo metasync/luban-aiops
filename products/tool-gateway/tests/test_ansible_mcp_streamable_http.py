@@ -28,14 +28,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import tempfile
 import threading
 import time
 import unittest
+from contextlib import suppress
 
 import uvicorn
 from mcp.server import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from tool_gateway.ingestion.ansible_binding import ANSIBLE_ADMITTED_TOOLS
 from tool_gateway.ingestion.mcp_adapter import McpIngestionConnector, McpTransport
@@ -129,6 +132,11 @@ def _cred_file(payload: dict) -> str:
     return handle.name
 
 
+def _unlink(path: str) -> None:
+    with suppress(FileNotFoundError):
+        os.unlink(path)
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -138,9 +146,21 @@ class StreamableHttpWireTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        # ``transport_security`` mirrors the DEPLOYED mock
+        # (runtime-profiles/ansible-dev/mock_ansible_mcp_server.py) exactly.
+        # Passing an explicit TransportSecuritySettings bypasses the SDK's
+        # localhost auto-configuration, so without this the test server would
+        # run *stricter* Host validation than the mock this test stands in for —
+        # a divergence in the fixture, not a security posture: DNS-rebinding
+        # protection is a browser-oriented Host/Origin control, and the deployed
+        # mock is cluster-internal behind a NetworkPolicy plus the bearer gate
+        # below. Keeping the two identical is what makes this a fidelity test of
+        # the deployed wire path.
         app = _BearerGate(
             _build_mock_server().streamable_http_app(
-                streamable_http_path="/mcp", host="127.0.0.1"),
+                streamable_http_path="/mcp", host="127.0.0.1",
+                transport_security=TransportSecuritySettings(
+                    enable_dns_rebinding_protection=False)),
             _TOKEN,
         )
         cls._port = _free_port()
@@ -157,6 +177,9 @@ class StreamableHttpWireTests(unittest.TestCase):
         cls._url = f"http://127.0.0.1:{cls._port}/mcp"
         cls._cred_path = _cred_file(
             {"ansible-mock": {"scheme": "bearer", "token": _TOKEN}})
+        # The credential file holds a fake bearer, but a delete=False temp file
+        # still litters the runner's tmpdir if the class never removes it.
+        cls.addClassCleanup(_unlink, cls._cred_path)
 
     @classmethod
     def tearDownClass(cls) -> None:

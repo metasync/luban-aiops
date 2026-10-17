@@ -25,10 +25,13 @@
 #        inventory's mock managed hosts, job templates, one job, and its
 #        tail-bounded stdout. When the probe does not answer 200 the leg is
 #        skipped with a note AND the failure is asserted to be a clean
-#        structured fail-closed code (MCP_TRANSPORT_ERROR /
-#        CREDENTIAL_SET_NOT_FOUND) — never a hang and never a fabricated
-#        success. This is the deployed counterpart to the in-process Layer-2
-#        wire test (products/tool-gateway/tests/test_ansible_mcp_streamable_http.py).
+#        structured fail-closed code — never a hang and never a fabricated
+#        success. The accepted codes are exactly the ones the connector can
+#        return WITHOUT a server answer: MCP_TRANSPORT_ERROR,
+#        MCP_SDK_UNAVAILABLE, CREDENTIAL_SET_NOT_FOUND and
+#        CREDENTIAL_SCHEME_UNSUPPORTED. This is the deployed counterpart to the
+#        in-process Layer-2 wire test
+#        (products/tool-gateway/tests/test_ansible_mcp_streamable_http.py).
 #     5. redaction: the mock bearer (read from the ansible-mock-credentials
 #        secret) never appears in ANY tool-result body — the connector rides it
 #        in an httpx header, so a leak here would be a regression.
@@ -49,12 +52,22 @@
 #   NAMESPACE     (default dev-luban-aiops)
 #   IDENTITY_URL  (default http://localhost:18081)
 #   TEST_USER     (default luban-operator)
+#   STRICT_LIVE   (default false) set true for an operator run to turn the
+#                 gated live leg from skip-with-a-note into a hard failure when
+#                 the mock target is not reachable/credentialed. `make e2e`
+#                 leaves it false: OQ-5 means CI must pass without a live
+#                 external call, so a green `make e2e` proves registration,
+#                 fail-closed behaviour and redaction — never the projection
+#                 logic against a real server (that coverage is the Layer-2
+#                 wire test). Run STRICT_LIVE=true after `make deploy` of the
+#                 ansible-dev profile to close the gap.
 
 set -eu
 
 NAMESPACE="${NAMESPACE:-dev-luban-aiops}"
 IDENTITY_URL="${IDENTITY_URL:-http://localhost:18081}"
 TEST_USER="${TEST_USER:-luban-operator}"
+STRICT_LIVE="${STRICT_LIVE:-false}"
 RUN_SUFFIX="$(date +%s)-$$"
 
 # A mutating verb the binding never admits (DENIED_SERVER_TOOLS has no canonical
@@ -62,6 +75,11 @@ RUN_SUFFIX="$(date +%s)-$$"
 DENIED_TOOL="ansible.launch_job_template"
 # The six admitted read-tier canonical names (ingestion/ansible_binding.py).
 READ_TOOLS="ansible.list_inventories ansible.get_inventory ansible.list_job_templates ansible.get_job ansible.get_job_stdout ansible.get_environment_health"
+# The structured codes the MCP connector can return WITHOUT the server answering
+# (ingestion/mcp_adapter.py: transport, SDK-import, credential-set and
+# credential-scheme failures). Anything else means the probe failed in a way this
+# check does not understand, which must never be waved through as "unreachable".
+FAIL_CLOSED_CODES='MCP_TRANSPORT_ERROR|MCP_SDK_UNAVAILABLE|CREDENTIAL_SET_NOT_FOUND|CREDENTIAL_SCHEME_UNSUPPORTED'
 
 # Collects every enabled-state tool-result body for the redaction assertion.
 RESPONSES=$(mktemp)
@@ -198,6 +216,11 @@ assert not leaked, 'ansible.* registered while disabled: %r' % leaked" \
     || fail "invoke did not fail with TOOL_NOT_FOUND: $GATEWAY_BODY"
   echo "operator invoke of ansible.list_inventories rejected with TOOL_NOT_FOUND"
 
+  # STRICT_LIVE means "prove the live read leg", which the deny-by-default
+  # overlay structurally cannot: fail rather than report a vacuous pass.
+  [ "$STRICT_LIVE" != "true" ] \
+    || fail "STRICT_LIVE=true but GATEWAY_ANSIBLE_MCP_ENABLED=$ANSIBLE_ENABLED; deploy the ansible-dev profile first"
+
   echo ""
   echo "Ansible MCP-ingestion live-check passed (deny-by-default):"
   echo "  - unauthenticated callers rejected (401)"
@@ -255,13 +278,17 @@ if [ "$HTTP_CODE" = "200" ]; then
 else
   # Not reachable / not credentialed: assert a CLEAN fail-closed structured
   # error (never a hang, never a fabricated success), then skip the live reads.
-  printf '%s' "$GATEWAY_BODY" | grep -qE 'MCP_TRANSPORT_ERROR|CREDENTIAL_SET_NOT_FOUND' \
+  printf '%s' "$GATEWAY_BODY" | grep -qE "$FAIL_CLOSED_CODES" \
     || fail "health probe failed with an unexpected (non-fail-closed) body: $GATEWAY_BODY"
   CODE=$(json_field "$GATEWAY_BODY" error.code)
+  if [ "$STRICT_LIVE" = "true" ]; then
+    fail "STRICT_LIVE=true but the mock target was not reachable/credentialed (fail-closed: ${CODE:-unknown}); the live read leg must not be skipped"
+  fi
   echo "NOTE: the mock target is not reachable/credentialed (fail-closed: ${CODE:-unknown})."
   echo "      Deploy the ansible-dev profile (make deploy) and run"
-  echo "      sync-ansible-credentials.sh to exercise the live read leg. The"
-  echo "      registration and fail-closed negatives above already hold."
+  echo "      sync-ansible-credentials.sh to exercise the live read leg, then"
+  echo "      re-run with STRICT_LIVE=true. The registration and fail-closed"
+  echo "      negatives above already hold."
 fi
 
 if [ "$LIVE_OK" = "true" ]; then
@@ -315,12 +342,37 @@ fi
 
 echo "==> [6/6] redaction: the mock bearer never appears in a tool result"
 
-BEARER=$(kubectl -n "$NAMESPACE" get secret ansible-mock-credentials \
-  -o jsonpath='{.data.bearer-token}' 2>/dev/null | base64 -d 2>/dev/null || true)
+# Read the mock's bearer WITHOUT swallowing errors. `|| true` plus `2>/dev/null`
+# on both stages used to collapse four distinct outcomes — key absent, key
+# renamed, kubectl/RBAC failure, base64 failure — into one reassuring NOTE and a
+# zero exit, silently turning the only assertion covering the two-sink
+# credential invariant into a no-op.
+BEARER=""
+if kubectl -n "$NAMESPACE" get secret ansible-mock-credentials >/dev/null 2>&1; then
+  ENCODED=$(kubectl -n "$NAMESPACE" get secret ansible-mock-credentials \
+    -o jsonpath='{.data.bearer-token}') \
+    || fail "ansible-mock-credentials exists but bearer-token could not be read (renamed? RBAC?)"
+  [ -n "$ENCODED" ] \
+    || fail "ansible-mock-credentials carries no bearer-token key (sync-ansible-credentials.sh sink 2)"
+  BEARER=$(printf '%s' "$ENCODED" | base64 -d) \
+    || fail "ansible-mock-credentials bearer-token is not valid base64"
+fi
+
 if [ -z "$BEARER" ]; then
+  # Legitimate only when the connector never reached a credentialed target:
+  # LIVE_OK=true requires a 200 health probe, which requires BOTH a resolved
+  # credential set and a bearer the mock accepted — so an empty bearer alongside
+  # a successful live read is provably a defect, not a trivially-satisfied check.
+  [ "$LIVE_OK" != "true" ] \
+    || fail "live reads succeeded but no mock bearer could be read; the two-sink credential invariant is unverifiable"
   echo "NOTE: ansible-mock-credentials secret absent; the connector had no bearer to"
   echo "      leak, so redaction is trivially satisfied (and reads fail closed above)."
 else
+  # A non-empty capture file is what makes the grep below meaningful: without it
+  # "the bearer appears in no response" would hold because there were no
+  # responses at all.
+  [ -s "$RESPONSES" ] \
+    || fail "no tool-result body was captured; the redaction assertion would pass vacuously"
   # -F fixed-string, -q quiet: the token is never echoed, only tested for.
   if grep -qF "$BEARER" "$RESPONSES"; then
     fail "the mock bearer leaked into a tool-result body"
@@ -335,5 +387,8 @@ echo "  - six ansible.* read tools registered read; no mutating verb admitted"
 echo "  - a non-admitted verb and a missing parameter fail closed (no server contact)"
 if [ "$LIVE_OK" = "true" ]; then
   echo "  - live reads projected the mock's inventory, hosts, templates, job, stdout"
+else
+  echo "  - live reads SKIPPED (target not reachable/credentialed, fail-closed above);"
+  echo "    re-run with STRICT_LIVE=true after deploying the ansible-dev profile"
 fi
 echo "  - the mock bearer never appears in a tool result"

@@ -29,6 +29,45 @@ from tool_gateway.tools.registry import ToolRegistry
 
 LOGGER = logging.getLogger(__name__)
 
+# SPEC-069 R-4/R-5: keys ``invoke_tool`` writes into the ``tool_invoked`` record
+# itself (plus ``execution_id`` from the correlation hint). A connector-declared
+# attribution colliding with one would raise ``TypeError`` on the ``**`` splat,
+# turning an audit enrichment into an HTTP 500 *after* the tool already ran, so
+# collisions are dropped with a warning rather than propagated.
+_RESERVED_AUDIT_KEYS = frozenset({
+    "request_id", "tool_name", "status", "duration_ms", "risk_level",
+    "target_system", "user_id", "sub", "act", "redacted_spans", "execution_id",
+})
+
+
+def resolve_audit_attribution(target: object, result: object, tool_name: str,
+                      request_id: str) -> dict:
+    """Read a connector's opt-in audit attribution, dropping reserved keys.
+
+    Duck-typed and opt-in (SPEC-069 R-4/R-5): a target that does not declare
+    ``audit_attribution`` yields ``{}``, so its audit record is byte-identical
+    to before the hook existed.
+    """
+    attributor = getattr(target, "audit_attribution", None)
+    if not callable(attributor):
+        return {}
+    attribution = attributor(result)
+    if not isinstance(attribution, dict) or not attribution:
+        return {}
+    clash = sorted(_RESERVED_AUDIT_KEYS.intersection(attribution))
+    if clash:
+        LOGGER.warning(
+            "audit attribution dropped reserved keys",
+            extra={
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "reserved_keys": clash,
+            },
+        )
+        return {k: v for k, v in attribution.items()
+                if k not in _RESERVED_AUDIT_KEYS}
+    return attribution
+
 
 def live_status(settings: GatewaySettings) -> dict[str, str]:
     return {
@@ -361,6 +400,21 @@ async def invoke_tool(
         identity_dict["approval_kind"] = approval_kind
     result = await registry.invoke(tool_name, parameters, identity_dict)
 
+    # SPEC-069 R-4/R-5: name the target system and fold in any tool-declared
+    # attribution. Both are read from the connector's OWN result, *before*
+    # redaction can replace it: the fail-closed REDACTION_OVERFLOW envelope
+    # below is synthesized by the gateway, so reading it afterwards would
+    # attribute a withheld call to the target it never reached and drop the
+    # connector's ``target_unavailable`` class. ``target_system`` mirrors the
+    # ``source_system`` every result already carries in evidence (universal).
+    # The attribution hook is opt-in and duck-typed — the Ansible connectors
+    # declare a ``target_identity_mode`` (dev acting-service vs SPEC-070
+    # user-delegated) and, on an unreachable target, a ``target_unavailable``
+    # failure class distinct from a policy denial — so a tool that does not
+    # declare it audits byte-identically to before.
+    target_system = result.evidence.get("source_system")
+    attribution = resolve_audit_attribution(target, result, tool_name, request_id)
+
     # Redaction (SPEC-009 R-1/R-2): applied at the single choke point before
     # both the response and the audit log. Fail-closed on overflow.
     redacted_spans = 0
@@ -380,28 +434,20 @@ async def invoke_tool(
                     ),
                 },
             )
+            # The withheld result keeps the connector's own risk tier and source
+            # system: the envelope must not silently re-attribute the call to
+            # the platform (SPEC-069 R-4).
             result = make_error_result(
                 tool_name,
                 "REDACTION_OVERFLOW",
                 "tool output withheld: too much of the result appears to "
                 "contain credentials; re-run with tighter parameters",
+                risk_level=result.evidence.get("risk_level", "read"),
+                source_system=result.evidence.get("source_system", "platform"),
                 duration_ms=result.evidence.get("duration_ms", 0),
             )
         else:
             result = redacted
-
-    # SPEC-069 R-4/R-5: name the target system and fold in any tool-declared
-    # attribution. ``target_system`` mirrors the ``source_system`` every result
-    # already carries in evidence (universal). The attribution hook is opt-in and
-    # duck-typed — the Ansible connectors declare a ``target_identity_mode`` (dev
-    # acting-service vs SPEC-070 user-delegated) and, on an unreachable target, a
-    # ``target_unavailable`` failure class distinct from a policy denial — so a
-    # tool that does not declare it audits byte-identically to before.
-    target_system = result.evidence.get("source_system")
-    attribution: dict = {}
-    attributor = getattr(target, "audit_attribution", None)
-    if callable(attributor):
-        attribution = attributor(result) or {}
 
     # Audit log.
     log_event(

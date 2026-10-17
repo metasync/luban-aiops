@@ -168,10 +168,66 @@ class _LeakyTool(BaseTool):
         )
 
 
+class _AttributedSecretTool(BaseTool):
+    """A leaky tool that also declares SPEC-069 R-4/R-5 audit attribution.
+
+    Stands in for an Ansible connector tool: non-platform ``source_system`` plus
+    an opt-in ``audit_attribution`` hook, so the overflow path can be proven to
+    keep both.
+    """
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="test.attributed", description="Leaks.", risk_level="read",
+            category="test",
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        return ToolResult(
+            tool_name="test.attributed",
+            status="success",
+            data={"logs": [_JWT * 4]},
+            evidence=build_evidence("read", "ansible", 1),
+        )
+
+    def audit_attribution(self, result: ToolResult) -> dict:
+        return {
+            "target_identity_mode": "acting_service",
+            "failure_class": "target_unavailable",
+        }
+
+
+class _ClashingAttributionTool(_AttributedSecretTool):
+    """Declares an attribution key the audit record already owns."""
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="test.clash", description="Leaks.", risk_level="read",
+            category="test",
+        )
+
+    async def execute(self, parameters: dict, identity: dict) -> ToolResult:
+        return ToolResult(
+            tool_name="test.clash",
+            status="success",
+            data={"logs": [_JWT * 4]},
+            evidence=build_evidence("read", "ansible", 1),
+        )
+
+    def audit_attribution(self, result: ToolResult) -> dict:
+        attribution = super().audit_attribution(result)
+        attribution["status"] = "forged-by-a-future-hook"
+        return attribution
+
+
 def _build_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(_SecretTool())
     registry.register(_LeakyTool())
+    registry.register(_AttributedSecretTool())
+    registry.register(_ClashingAttributionTool())
     return registry
 
 
@@ -245,6 +301,51 @@ class RedactionRouteTests(unittest.TestCase):
         self.assertEqual(body["status"], "error")
         self.assertEqual(body["error"]["code"], "REDACTION_OVERFLOW")
         self.assertNotIn(_JWT, str(body))
+
+    def test_overflow_keeps_target_system_and_attribution(self) -> None:
+        # SPEC-069 R-4/R-5 regression: the REDACTION_OVERFLOW envelope is
+        # synthesized by the gateway, so attribution must be read from the
+        # connector's own result. Reading it afterwards re-attributed a withheld
+        # ansible.* call to target_system="platform" and dropped its declared
+        # failure class — the exact opposite of what R-4/R-5 exist to prove.
+        client = self._client(GatewaySettings(require_auth=True))
+        with _patch_jwks(), self.assertLogs(
+            "tool_gateway.services.gateway_service", level="INFO"
+        ) as captured:
+            response = self._invoke(client, "test.attributed")
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["error"]["code"], "REDACTION_OVERFLOW")
+        self.assertNotIn(_JWT, str(body))
+        # The withheld envelope still names the connector's own source system.
+        self.assertEqual(body["evidence"]["source_system"], "ansible")
+        audit = [r for r in captured.records if "tool_invoked" in r.getMessage()]
+        self.assertTrue(audit)
+        message = audit[-1].getMessage()
+        self.assertIn('"target_system": "ansible"', message)
+        self.assertIn('"target_identity_mode": "acting_service"', message)
+        self.assertIn('"failure_class": "target_unavailable"', message)
+
+    def test_attribution_reserved_key_collision_is_dropped_not_a_500(self) -> None:
+        # A future hook returning a key the audit record already owns would
+        # raise TypeError on the ``**`` splat — after the tool had run. The
+        # collision is dropped with a warning instead, and the record keeps the
+        # gateway's own value.
+        client = self._client(GatewaySettings(require_auth=True))
+        with _patch_jwks(), self.assertLogs(
+            "tool_gateway.services.gateway_service", level="INFO"
+        ) as captured:
+            response = self._invoke(client, "test.clash")
+        self.assertEqual(response.status_code, 400)
+        audit = [r for r in captured.records if "tool_invoked" in r.getMessage()]
+        self.assertTrue(audit)
+        message = audit[-1].getMessage()
+        self.assertNotIn("forged-by-a-future-hook", message)
+        self.assertIn('"target_identity_mode": "acting_service"', message)
+        warnings = [r for r in captured.records
+                    if "dropped reserved keys" in r.getMessage()]
+        self.assertTrue(warnings)
+        self.assertEqual(getattr(warnings[-1], "reserved_keys", None), ["status"])
 
     def test_opt_out_switch_disables_redaction(self) -> None:
         client = self._client(GatewaySettings(require_auth=True, redaction_enabled=False))

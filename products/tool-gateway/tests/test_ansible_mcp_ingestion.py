@@ -13,9 +13,10 @@ transport, so CI makes no live external call (OQ-5).
 
 import asyncio
 import json
+import os
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from unittest.mock import patch
 
@@ -140,11 +141,23 @@ def _ansible_names() -> set[str]:
     return {spec.name for spec in ANSIBLE_ADMITTED_TOOLS}
 
 
-def _write_cred_file(payload: dict) -> str:
+def _unlink(path: str) -> None:
+    with suppress(FileNotFoundError):
+        os.unlink(path)
+
+
+def _write_cred_file(test: unittest.TestCase, payload: dict) -> str:
+    """Write a temp credential-set file whose removal is guaranteed.
+
+    The bearer inside is a fake, but a ``delete=False`` temp file per test still
+    litters the runner's tmpdir across the suite, so every write registers its
+    own cleanup.
+    """
     handle = tempfile.NamedTemporaryFile(
         "w", suffix=".json", delete=False, encoding="utf-8")
     json.dump(payload, handle)
     handle.close()
+    test.addCleanup(_unlink, handle.name)
     return handle.name
 
 
@@ -418,11 +431,7 @@ class CredentialResolutionTests(unittest.TestCase):
     """Credentials resolve through the SPEC-068 seam; the token never leaks."""
 
     def _cred_file(self, payload: dict) -> str:
-        handle = tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8")
-        json.dump(payload, handle)
-        handle.close()
-        return handle.name
+        return _write_cred_file(self, payload)
 
     def test_bearer_set_resolves_and_token_reaches_transport_only(self) -> None:
         token = "SUPERSECRET-BEARER-9"
@@ -529,7 +538,7 @@ class AuditFidelityTests(unittest.TestCase):
 
     def test_no_secret_or_token_reaches_audit_or_logs(self) -> None:
         token = "SUPERSECRET-BEARER-9"
-        path = _write_cred_file({"awx-read": {"scheme": "bearer", "token": token}})
+        path = _write_cred_file(self, {"awx-read": {"scheme": "bearer", "token": token}})
         server = FakeServer()
         response, event, log_str = _invoke_captured(
             _connector(ANSIBLE_ADMITTED_TOOLS, server=server,

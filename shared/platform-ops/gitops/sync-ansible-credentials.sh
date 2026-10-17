@@ -75,6 +75,21 @@ add_cleanup() {
   fi
 }
 
+# These temp files carry the RAW bearer and the rendered credential set, so they
+# must not outlive the script. A plain trailing loop only runs on the happy path:
+# under `set -eu` any failing kubectl/python3 step in between would leave both on
+# disk. The trap runs on success, failure and signal alike (same shape as
+# shared/platform-ops/e2e/ansible-mcp-check.sh).
+cleanup() {
+  for path in $CLEANUP; do
+    rm -f "$path"
+  done
+  # Idempotent: the explicit call below empties the list, so the EXIT trap that
+  # stays armed as the failure safety net becomes a no-op.
+  CLEANUP=""
+}
+trap cleanup EXIT INT TERM
+
 # The bearer is written to a temp file, never passed as --from-literal, so it
 # never appears in this process's argv (visible to `ps`).
 TOKEN_FILE=$(mktemp)
@@ -118,9 +133,9 @@ kubectl -n "$NAMESPACE" create secret generic ansible-mock-credentials \
   --from-file=bearer-token="$TOKEN_FILE" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-for path in $CLEANUP; do
-  rm -f "$path"
-done
+# Both sinks are written: drop the raw bearer and the rendered credential set
+# from disk now, rather than leaving them around until the exit trap fires.
+cleanup
 
 echo "Ansible MCP credential set synced (secret: tool-gateway-ansible-credentials, set: $CREDENTIAL_SET_NAME)."
 echo "Ansible mock bearer synced (secret: ansible-mock-credentials)."
