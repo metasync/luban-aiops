@@ -5,23 +5,22 @@
 - [spec.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md)
 - [plan.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md)
 - [tasks.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md)
+- [compatibility-report.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/compatibility-report.md)
+- [oq7-first-use-handoff-contract.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/oq7-first-use-handoff-contract.md)
+- [0016-just-in-time-outbound-oauth-authorization.md](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md)
 - [credential_sets.py](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py)
 - [auth_resolution.py](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py)
 - [oauth_client.py](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py)
-- [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
-- [metrics.py](file://products/platform-gateway/src/platform_gateway/core/metrics.py)
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)
-- [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 </cite>
 
 ## Update Summary
 **Changes Made**   
-- Updated status from draft to approved based on ADR-0015 acceptance
-- Enhanced OAuth flow implementation details with per-user authorization-code mechanism
-- Added comprehensive security considerations and trust boundary analysis
-- Expanded task breakdown with concrete implementation steps
-- Updated architecture diagrams to reflect connector-local OAuth flow
-- Added detailed component analysis for user-scoped credential store
+- Updated status to reflect ADR-0016 acceptance and OQ-7 ratification
+- Enhanced with comprehensive design package including detailed cross-product contract
+- Added first-use browser-based OAuth authorization flow with callback handling
+- Incorporated owner-scoped state management and encrypted Postgres custody
+- Updated architecture diagrams to reflect the ratified handoff contract
+- Added detailed component analysis for the complete cross-product implementation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,7 +28,7 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [OAuth Flow Implementation](#oauth-flow-implementation)
+6. [First-Use Authorization Handoff Contract](#first-use-authorization-handoff-contract)
 7. [Security Considerations](#security-considerations)
 8. [Dependency Analysis](#dependency-analysis)
 9. [Performance Considerations](#performance-considerations)
@@ -39,44 +38,47 @@
 ## Introduction
 SPEC-070 defines the substrate for **outbound user-delegated execution identity** in the tool-gateway. Its purpose is to let a connector act as the requesting operator at an external target, rather than only as a shared platform service account. The spec extends the outbound credential model established by SPEC-068 and threads the inbound human subject into outbound token acquisition so that the target enforces its own per-user RBAC.
 
-The spec is now **approved** (2026-10-12) following operator direction resolving all open questions:
+The spec is now **approved** (2026-10-18, amended) following operator direction resolving all open questions:
 - OQ-1 selects **(c) per-user OAuth 2.x authorization-code, connector-local** as the delegation mechanism
-- OQ-2 determines **no identity-broker mint** — the target issues user-bound tokens directly
-- OQ-3 confirmed Red Hat AAP's MCP server accepts per-user OAuth authorization-code/PATs and inherits user RBAC
+- OQ-2 determines **no identity-broker mint** — the target issues user-bound tokens directly  
+- OQ-7 detailed handoff contract was **ratified 2026-10-19**, closing the pre-runtime design gate
+- ADR-0016 is **accepted** (2026-10-18), superseding ADR-0015 while retaining its accepted body
 
-ADR-0015 records the decision: **per-user OAuth 2.x authorization-code, resolved connector-locally** against the target's own token endpoint (a **target-issued, user-bound** token), with **no identity-broker mint** (OQ-2) and a new **user-scoped credential store** as the principal new trust surface.
+ADR-0016 records the decision: **per-user OAuth 2.x authorization-code, resolved connector-locally** against the target's own token endpoint (a **target-issued, user-bound** token), with **no identity-broker mint** (OQ-2) and a new **user-scoped credential store** as the principal new trust surface. The design establishes first-use browser-based OAuth authorization flows with callback handling and owner-scoped state management.
 
 **Section sources**
 - [spec.md:3-35](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L3-L35)
 - [spec.md:54-67](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L54-L67)
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:60-89](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L60-L89)
+- [0016-just-in-time-outbound-oauth-authorization.md:24-47](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L24-L47)
 
 ## Project Structure
-SPEC-070 is centered on three existing tool-gateway modules plus the specification scaffold:
+SPEC-070 is centered on three existing tool-gateway modules plus the comprehensive specification scaffold:
 
 | Area | File | Responsibility |
 |---|---|---|
 | Specification | `docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md` | Requirements, non-goals, impact, open questions |
 | Plan | `docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md` | Stage-0-gated build shape and sequencing |
 | Tasks | `docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md` | Task list tied to requirements |
+| Compatibility Report | `docs/specs/SPEC-070-outbound-user-delegated-identity/compatibility-report.md` | Target profile assessment and redirect-based reassessment |
+| OQ-7 Contract | `docs/specs/SPEC-070-outbound-user-delegated-identity/oq7-first-use-handoff-contract.md` | Detailed cross-product handoff contract |
 | Credential vocabulary | `products/tool-gateway/src/tool_gateway/tools/credential_sets.py` | Additive user-delegated scheme alongside `basic`, `bearer`, `oauth2_client_credentials` |
 | Auth seam | `products/tool-gateway/src/tool_gateway/tools/auth_resolution.py` | Thread the request's user subject into outbound resolution |
-| Token client | `products/tool-gateway/src/tool_gateway/tools/oauth_client.py` | Existing machine-grant client; extended or replaced by a user-delegated grant |
-| Inbound delegation context | `products/platform-gateway/src/platform_gateway/services/delegation_client.py` | Per-user delegated-token cache backing the inbound subject used by SPEC-070 |
-| Delegation metrics | `products/platform-gateway/src/platform_gateway/core/metrics.py` | Metrics label covering per-user delegated-token cache lookups |
+| Token client | `products/tool-gateway/src/tool-gateway/tools/oauth_client.py` | Existing machine-grant client; extended or replaced by a user-delegated grant |
 
 ```mermaid
 graph TB
 Spec["SPEC-070 spec.md"] --> Plan["SPEC-070 plan.md"]
 Spec --> Tasks["SPEC-070 tasks.md"]
+Spec --> Compat["Compatibility Report"]
+Spec --> OQ7["OQ-7 First-Use Handoff Contract"]
 Plan --> CredSets["tool_gateway.tools.credential_sets"]
 Plan --> AuthRes["tool_gateway.tools.auth_resolution"]
 Plan --> OAuthClient["tool_gateway.tools.oauth_client"]
 CredSets --> AuthRes
 AuthRes --> OAuthClient
-Inbound["platform_gateway.services.delegation_client"] --> AuthRes
-Metrics["platform_gateway.core.metrics"] --> Inbound
-UserStore["User-scoped credential store<br/>(New capability)"] --> OAuthClient
+ADR16["ADR-0016<br/>Just-in-Time OAuth"] --> Spec
+Compat --> Spec
+OQ7 --> Spec
 ```
 
 **Diagram sources**
@@ -85,8 +87,6 @@ UserStore["User-scoped credential store<br/>(New capability)"] --> OAuthClient
 - [credential_sets.py:1-18](file://products/tool-gateway/src/tool_gateway/tools/credential_sets.py#L1-L18)
 - [auth_resolution.py:1-19](file://products/tool-gateway/src/tool_gateway/tools/auth_resolution.py#L1-L19)
 - [oauth_client.py:1-22](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py#L1-L22)
-- [delegation_client.py:45-45](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L45-L45)
-- [metrics.py:76-76](file://products/platform-gateway/src/platform_gateway/core/metrics.py#L76-L76)
 
 **Section sources**
 - [spec.md:284-317](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L284-L317)
@@ -130,7 +130,7 @@ participant Gateway as "Platform gateway"
 participant Broker as "Identity broker"
 participant Agent as "Agent platform"
 participant ToolGW as "Tool gateway"
-participant UserStore as "User-scoped credential store"
+participant Store as "User-scoped credential store"
 participant Target as "External target"
 Operator->>Gateway : "Authenticated request"
 Gateway->>Broker : "Exchange verified user token"
@@ -141,25 +141,23 @@ ToolGW->>ToolGW : "Resolve named credential set"
 alt "Existing SPEC-068 scheme"
 ToolGW->>Target : "Authenticate as service account"
 else "New user-delegated scheme"
-ToolGW->>UserStore : "Look up user's refresh token"
-UserStore-->>ToolGW : "Return encrypted refresh token"
+ToolGW->>Store : "Look up user's refresh token"
+Store-->>ToolGW : "Return encrypted refresh token"
 ToolGW->>Target : "Exchange refresh token for user-bound access token"
 ToolGW->>Target : "Call as the requesting operator"
 end
 ```
 
 **Diagram sources**
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:60-89](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L60-L89)
-- [identity-and-authorization-design.md:333-376](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L333-L376)
+- [0016-just-in-time-outbound-oauth-authorization.md:42-75](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L42-L75)
 - [spec.md:69-84](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L69-L84)
 - [spec.md:148-171](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L148-L171)
 
 The inbound flow is already implemented: the platform gateway exchanges the verified user token at the identity broker for a short-lived delegated token where `sub` is the real user, `act` names the calling service, and `aud` is the target audience. SPEC-070 reuses that inbound human subject when resolving a user-delegated credential set.
 
 **Section sources**
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:60-89](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L60-L89)
-- [identity-and-authorization-design.md:333-376](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L333-L376)
-- [delegation_client.py:45-45](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L45-L45)
+- [0016-just-in-time-outbound-oauth-authorization.md:42-75](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L42-L75)
+- [spec.md:69-84](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L69-L84)
 
 ## Detailed Component Analysis
 
@@ -319,27 +317,36 @@ Per-user storage is now **in scope** because OQ-1 forces it:
 - [plan.md:132-143](file://docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md#L132-L143)
 - [tasks.md:118-128](file://docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#L118-L128)
 
-## OAuth Flow Implementation
-The approved mechanism implements per-user OAuth 2.x authorization-code flow, connector-local against the target's own token endpoint.
+## First-Use Authorization Handoff Contract
+The ratified OQ-7 contract establishes the detailed cross-product implementation for first-use browser-based OAuth authorization flows with callback handling and owner-scoped state management.
 
 ### Authorization Code Flow
 ```mermaid
 sequenceDiagram
 participant User as "User"
 participant Browser as "User's Browser"
+participant Portal as "Portal"
+participant Platform as "Platform Gateway"
+participant ToolGW as "Tool Gateway"
 participant Target as "Target Authorization Server"
-participant Platform as "Platform"
 participant Store as "User-scoped Store"
-User->>Browser : "Initiate consent flow"
+User->>Browser : "Initiate authorization"
+Browser->>Portal : "Click authorize button"
+Portal->>Platform : "POST /api/v1/targets/authorizations/{challenge_id}/start"
+Platform->>ToolGW : "Internal handoff"
+ToolGW->>ToolGW : "Generate state + PKCE verifier"
+ToolGW-->>Platform : "Provider URL"
+Platform-->>Browser : "302 redirect to provider"
 Browser->>Target : "Authorization request"
 Target->>User : "Consent prompt"
 User->>Target : "Grant consent"
 Target->>Browser : "Authorization code"
-Browser->>Platform : "Code callback"
-Platform->>Target : "Exchange code for refresh token"
-Target->>Platform : "Refresh token"
-Platform->>Store : "Store encrypted refresh token"
-Note over Platform,Store : "One-time setup per user/target"
+Browser->>Platform : "GET /api/v1/targets/authorizations/callback"
+Platform->>ToolGW : "Forward code + state"
+ToolGW->>ToolGW : "Validate state, redeem code"
+ToolGW->>Store : "Commit encrypted custody"
+ToolGW-->>Platform : "Status : authorized"
+Platform-->>Browser : "302 back to conversation"
 ```
 
 ### Refresh Token Exchange Flow
@@ -357,7 +364,8 @@ Client->>Target : "Make API call with user-bound token"
 ```
 
 **Section sources**
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:67-72](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L67-L72)
+- [oq7-first-use-handoff-contract.md:15-37](file://docs/specs/SPEC-070-outbound-user-delegated-identity/oq7-first-use-handoff-contract.md#L15-L37)
+- [oq7-first-use-handoff-contract.md:150-210](file://docs/specs/SPEC-070-outbound-user-delegated-identity/oq7-first-use-handoff-contract.md#L150-L210)
 - [spec.md:120-123](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L120-L123)
 - [plan.md:62-92](file://docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md#L62-L92)
 
@@ -380,7 +388,7 @@ SPEC-070 introduces significant security implications that must be carefully man
 - **No fabrication**: The platform must never fabricate user assertions or elevate user authority.
 
 **Section sources**
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:78-89](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L78-L89)
+- [0016-just-in-time-outbound-oauth-authorization.md:77-101](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L77-L101)
 - [spec.md:210-233](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L210-L233)
 - [plan.md:118-130](file://docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md#L118-L130)
 
@@ -410,9 +418,7 @@ Spec070 --> UserStore["User-scoped store<br/>(In scope - OQ-1=c)"]
 ```
 
 **Diagram sources**
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:60-89](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L60-L89)
-- [identity-and-authorization-design.md:38-58](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L38-L58)
-- [identity-and-authorization-design.md:333-376](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L333-L376)
+- [0016-just-in-time-outbound-oauth-authorization.md:42-75](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L42-L75)
 - [spec.md:284-317](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L284-L317)
 
 **Section sources**
@@ -464,13 +470,13 @@ Operational checks:
 - [spec.md:210-233](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L210-L233)
 
 ## Conclusion
-SPEC-070 defines the shape of the platform's first outbound user-delegated identity and is now **approved** (2026-10-12). It establishes the platform's **first outbound user-delegated identity** — carrying a human subject's identity and authority across the platform boundary to an external system that enforces its own RBAC on that user.
+SPEC-070 defines the shape of the platform's first outbound user-delegated identity and is now **approved** (2026-10-18, amended). It establishes the platform's **first outbound user-delegated identity** — carrying a human subject's identity and authority across the platform boundary to an external system that enforces its own RBAC on that user.
 
 The mechanism is now decision-complete:
 - **OQ-1 resolved**: per-user OAuth 2.x authorization-code, connector-local
 - **OQ-2 resolved**: no identity-broker mint  
-- **OQ-3 answered**: Red Hat AAP's MCP server accepts per-user OAuth authorization-code/PATs
-- **ADR-0015 accepted**: records the trust-model decision and consequences
+- **OQ-7 ratified**: detailed cross-product handoff contract (2026-10-19)
+- **ADR-0016 accepted**: records the trust-model decision and consequences
 
 The spec extends the tool-gateway's additive credential vocabulary, threads the inbound human subject into outbound acquisition, and enforces strict safety invariants: fail-closed, no fabrication, no elevation, and no downgrade to a service account.
 
@@ -483,4 +489,4 @@ Once implementation begins, the same substrate will enable MCP-ingestion pilots 
 - [spec.md:373-395](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L373-L395)
 - [plan.md:1-11](file://docs/specs/SPEC-070-outbound-user-delegated-identity/plan.md#L1-L11)
 - [tasks.md:1-11](file://docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#L1-L11)
-- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:122-146](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L122-L146)
+- [0016-just-in-time-outbound-oauth-authorization.md:24-47](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L24-L47)

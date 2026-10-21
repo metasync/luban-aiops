@@ -1,6 +1,5 @@
-- Each product under `products/` is self-contained with its own `pyproject.toml`, `.python-version`, `Dockerfile`, `Makefile`, `src/<service_name>/`, and `tests/`, and is invoked through the root Makefile rather than directly.
-- Cross-product integration points are expressed as JSON Schema/API contracts under `shared/shared-contracts/` (schemas, policies, SQL, scripts) instead of shared Python packages, keeping consumers dependency-light.
-- Feature work follows a spec-driven workflow: each feature lives in `docs/specs/SPEC-NNN-<name>/` with a `plan.md`, `spec.md`, and `tasks.md` triplet, tracked through draft → approved → delivered status.
-- Policy bundles are authored once at `shared/shared-contracts/policies/` and synced into consumers (`tool-gateway`, `platform-gateway`, GitOps base) via `make sync-policy`, with validation enforced by `make validate-policy` and scenario runners.
-- Platform-wide configuration is kept in sync through the root `VERSION` file plus `make validate-version`, which enforces lockstep between the platform semver, product versions, and the portal build.
-- Observability and operational concerns are centralized in `shared/platform-ops/`: GitOps overlays under `gitops/`, OpenObserve dashboards under `dashboards/`, and e2e/demo scripts under `e2e/`, all orchestrated by top-level Make targets.
+- Every product follows the same layout: `src/<service_name>/` with `app.py`, `main.py`, `metadata.py`, plus `api/`, `core/`, `services/`, `schemas/` subpackages, and a sibling `tests/` directory mirroring source modules.
+- Cross-service data contracts are defined once in `shared/shared-contracts/schemas/` as Pydantic models and imported by all consuming products rather than redefined locally.
+- Feature work is governed by numbered artifacts under `docs/specs/SPEC-NNN-<slug>/` containing plan.md, spec.md, and tasks.md, with corresponding release notes dated under `docs/agentic-aiops-platform/release-notes/`.
+- Container images for each product are built from per-product `Dockerfile`s that layer on the shared `shared/base-images/base-uv/Dockerfile` base image.
+- Build and image recipes are centralized in `mk/defaults.mk`, `mk/python.mk`, and `mk/image.mk` and included by each product's `Makefile` instead of being duplicated.

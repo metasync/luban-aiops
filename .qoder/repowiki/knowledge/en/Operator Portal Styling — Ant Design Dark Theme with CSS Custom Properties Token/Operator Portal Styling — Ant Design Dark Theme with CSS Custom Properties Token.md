@@ -7,55 +7,104 @@ scope:
 source_files:
     - products/operator-portal/web-ui/app/package.json
     - products/operator-portal/web-ui/app/vite.config.ts
-    - products/operator-portal/web-ui/app/src/main.tsx
     - products/operator-portal/web-ui/app/src/theme/tokens.ts
     - products/operator-portal/web-ui/app/src/theme/global.css
 ---
 
-## System / Approach
+## What system/approach is used
 
-The only frontend in the repository is the **operator-portal** under `products/operator-portal/web-ui/app`. It is a React 19 + TypeScript application built with Vite, styled primarily through **Ant Design v6** (`antd`, `@ant-design/icons`, `@ant-design/x`) and a small set of bespoke global CSS rules. There is no Tailwind, Sass, CSS-in-JS library, or component library beyond Ant Design.
+The only frontend in the repository is the **operator-portal** (`products/operator-portal/web-ui/app/`), a React 19 + TypeScript SPA built with Vite. Visual styling is provided by:
 
-Theming is centralized around two files:
+- **Ant Design v6** (`antd`, `@ant-design/icons`, `@ant-design/x`) as the component library.
+- A **dark-only theme** configured via Ant Design's `ThemeConfig` using `antdTheme.darkAlgorithm`.
+- A single global stylesheet `app/src/theme/global.css` that defines CSS custom properties (design tokens) on `:root` and styles bespoke UI regions not covered by Ant Design components.
+- No CSS-in-JS, no Tailwind, no Sass/Less preprocessor — plain `.css` consumed directly by Vite.
 
-- `app/src/theme/tokens.ts` — defines the design-token palette and an Ant Design `ThemeConfig` using `antdTheme.darkAlgorithm`.
-- `app/src/theme/global.css` — declares the same tokens as CSS custom properties on `:root` for bespoke styles that bypass Ant Design.
+There is no second frontend; backend products are Python FastAPI services with no client-side assets.
 
-The theme is applied at the root via `<ConfigProvider theme={portalTheme}>` in `src/main.tsx`, making Ant Design components consume the dark palette automatically.
+## Key files and packages
 
-## Key Files
+- `products/operator-portal/web-ui/app/package.json` — declares `react`, `antd`, `@ant-design/x`, `@ant-design/icons`, `vite`, `vitest`, `typescript`; build script runs `tsc --noEmit && vite build`.
+- `products/operator-portal/web-ui/app/vite.config.ts` — Vite config with `@vitejs/plugin-react`, injects `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` at build time, serves output to `../dist` for nginx.
+- `products/operator-portal/web-ui/app/src/theme/tokens.ts` — JS/TS source of truth for the palette and Ant Design `ThemeConfig` (`portalTheme`).
+- `products/operator-portal/web-ui/app/src/theme/global.css` — 739-line global stylesheet defining `:root` design tokens and all bespoke layout/component styles.
+- `products/operator-portal/nginx.conf` — serves the built `web-ui/dist` at `/`.
 
-- `products/operator-portal/web-ui/app/package.json` — declares dependencies (`antd ^6.6.2`, `react ^19.2.8`, `@vitejs/plugin-react`, `vitest`).
-- `products/operator-portal/web-ui/app/vite.config.ts` — injects `__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__` at build time; outputs to `../dist` for nginx.
-- `products/operator-portal/web-ui/app/src/main.tsx` — bootstraps React StrictMode, wraps the app in `ConfigProvider` with `portalTheme` and `AuthProvider`, imports `global.css`.
-- `products/operator-portal/web-ui/app/src/theme/tokens.ts` — single source of truth for colors, radius, fonts; exports `palette` (as const) and `portalTheme`.
-- `products/operator-portal/web-ui/app/src/theme/global.css` — CSS custom properties mirroring `tokens.ts`, plus layout, chat transcript, evidence cards, HITL confirmation cards, markdown rendering, and responsive breakpoints.
+## Architecture and conventions
 
-## Architecture and Conventions
+### Dual token surface
 
-1. **Dual token surface.** The palette lives once in `tokens.ts` and is mirrored into CSS custom properties (`--bg`, `--surface`, `--accent`, `--border`, `--text-muted`, `--code-bg`, `--radius`, etc.) so Ant Design components get the theme programmatically while hand-written CSS reads the same values from `var(--*)`. The comment in `tokens.ts` explicitly states this mirrors the legacy portal's `:root` design tokens (SPEC-023 R-1).
+Design tokens live in two synchronized places, both ported from the legacy portal's `styles.css`:
 
-2. **Dark-only theme.** `color-scheme: dark` is set on `:root`; there is no light-mode toggle. All color variables are dark-slate tones with a sky-blue accent (`#38bdf8`).
+1. `src/theme/tokens.ts` exports a `palette` object and an Ant Design `ThemeConfig` (`portalTheme`) so components consume tokens through Ant Design's theme API.
+2. `src/theme/global.css` declares the same values as CSS custom properties (`--bg`, `--surface`, `--accent`, `--border`, `--text`, `--success`, `--error`, `--warning`, `--code-bg`, `--radius`, …) so bespoke CSS rules and third-party rendered content can reference them without importing TS.
 
-3. **Typography.** Font families are declared inside the Ant Design `ThemeConfig.token`: sans-serif stack `'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif'` and monospace stack `"JetBrains Mono", "Fira Code", monospace`. These are reused in `.md-content code`, `.tool-name`, and `.recovery-fact > dd` selectors in `global.css`.
+The comment in `tokens.ts` explicitly states this dual-surface pattern: "The CSS custom properties in global.css mirror these so bespoke styles and antd components stay on one vocabulary (SPEC-023 R-1 dark theme)."
 
-4. **BEM-like class naming for bespoke styles.** Global CSS uses flat BEM-style class names scoped by feature sections (e.g., `.session-panel`, `.chat-view`, `.confirm-card`, `.approvals-entry`, `.turn-group.turn-arrived`, `.digest-bounded`, `.prose-bounded`). Components themselves are TSX files under `src/views/`, `src/chat/`, `src/auth/`, `src/stream/`, `src/voice/`; they compose Ant Design primitives rather than defining their own CSS modules.
+### Ant Design theme configuration
 
-5. **Responsive strategy.** A single `@media (max-width: 860px)` breakpoint narrows the session panel width. Sidebar collapse behavior relies on Ant Design's `Sider` auto-collapse at its `lg` breakpoint (992px), with a pinned `.mobile-menu-button` that opens an off-canvas drawer below that breakpoint (documented in comments referencing SPEC-019).
+`portalTheme` maps the palette into Ant Design's token space: `colorPrimary`, `colorBgBase`, `colorBgContainer`, `colorBgElevated`, `colorBorder`, `colorText`, `colorTextSecondary`, semantic colors, `borderRadius`, and fonts (`Inter` family plus `JetBrains Mono` / `Fira Code` for code). The theme uses `algorithm: antdTheme.darkAlgorithm` — there is no light-mode toggle.
 
-6. **Accessibility conventions baked into CSS.** `:focus-visible` gets a 2px accent outline; `prefers-reduced-motion: reduce` disables the `.turn-arrived` flash animation; keyboard focus visibility is called out in a comment.
+### Global stylesheet structure
 
-7. **Spec-driven style gates.** Many CSS blocks carry inline references to spec requirements (e.g., `SPEC-023 R-1`, `SPEC-019 R-1`, `SPEC-020 R-4`, `SPEC-034 R-1`, `SPEC-035 R-4`, `SPEC-037 R-6`, `SPEC-039 R-8`, `SPEC-041 R-3`), tying visual decisions back to product specs.
+`global.css` is organized as:
 
-8. **Build-time asset hashing.** Vite output goes to `web-ui/dist` with content-hashed filenames so assets are immutable-cacheable while `index.html` stays no-store (per `vite.config.ts` comment citing SPEC-023 R-1). The parent `nginx.conf` serves this directory at `/`.
+- `:root` token declarations + `color-scheme: dark`.
+- Reset (`box-sizing: border-box`) and focus-visible outline using `var(--accent)`.
+- App shell layout: `.app-shell`, `.sidebar-footer`, `.mobile-menu-button`, collapsed rail overrides for `ant-layout-sider-collapsed`.
+- View chrome: `.view-container`, `.view-container-flush`, `.view-toolbar`, `.report-form`.
+- Chat workspace (`.chat-view`, `.session-panel`, `.chat-messages`, `.chat-composer`, `.turn-group`, `.composer-selection-bar`).
+- Markdown rendering rules under `.md-content` (headings, lists, code blocks, tables, blockquotes).
+- Tool evidence groups (`.evidence-turn`, `.evidence-card`, `.evidence-pre`).
+- Sticky request banner (`.turn-request-banner`).
+- HITL confirmation cards (`.confirm-card`, `.confirm-call`, `.confirm-execution`, recovery details).
+- Bounded panes for documents drawer (`.digest-bounded`, `.prose-bounded` driven by `--bounded-pane-max-height`).
 
-## Conventions and Constraints
+### Responsive strategy
 
-- **Design tokens are single-sourced in `tokens.ts`** and mirrored into `global.css` `:root` custom properties. Any new color must be added to both places (enforced by the comment in `tokens.ts` stating the CSS properties mirror the JS palette).
-- **All bespoke styling goes through `global.css`**; there are no per-component CSS modules, SCSS files, or inline style objects used for layout/theming.
-- **Ant Design is the sole UI component library.** Components import from `antd` and `@ant-design/icons`; custom overrides target Ant Design's generated class names (e.g., `.ant-layout-sider`, `.ant-layout-sider-collapsed`, `.ant-tabs-body-holder`, `.ant-collapse-body`).
-- **The theme is dark-only** — `color-scheme: dark` and `darkAlgorithm` are the only configuration paths present.
-- **Responsive breakpoints are minimal:** 860px (session panel shrink) and reliance on Ant Design's internal `lg` breakpoint at 992px for sidebar collapse.
-- **Motion is reduced when requested:** `@media (prefers-reduced-motion: reduce)` suppresses the turn-arrival flash animation.
-- **Spec references in comments act as traceability anchors** for visual changes (SPEC-023, SPEC-019, SPEC-020, SPEC-034, SPEC-035, SPEC-037, SPEC-039, SPEC-041).
-- **Build-time version injection** (`__PLATFORM_VERSION__`, `__REACT_VERSION__`, `__ANTD_VERSION__`) is enforced by `make validate-version` (referenced in `vite.config.ts`), ensuring the runtime tech-stack table matches the locked bundle.
+Responsive behavior is CSS-media-query based rather than component-driven:
+
+- Sidebar collapses automatically below Ant Design's `lg` breakpoint (992px); a pinned `.mobile-menu-button` opens an off-canvas drawer instead.
+- `.session-panel` narrows from 260px to 200px at `max-width: 860px`.
+- `prefers-reduced-motion: reduce` disables the `.turn-arrived` flash animation.
+
+No mobile-first breakpoints or utility classes — the stylesheet is desktop-first with targeted media queries.
+
+### Spec-driven style gates
+
+Many style decisions are tied to spec requirements embedded as comments:
+
+- SPEC-023 R-1: dark theme, platform version injection, immutable cache filenames.
+- SPEC-019 R-1: hairline dividers replace group titles in collapsed sidebar.
+- SPEC-023 R-3: chat workspace layout.
+- SPEC-024: extensible selection strip under the composer.
+- SPEC-034 R-1 / SPEC-035 R-4: arrival highlight animation for turn groups.
+- SPEC-037 R-6: signed-execution receipts on decided cards.
+- SPEC-039 R-8: session id display per panel entry.
+- SPEC-041 R-3: bounded pane heights.
+
+These are documented conventions, not lint-enforced rules.
+
+### Build-time asset handling
+
+Vite outputs hashed filenames to `../dist` so the runtime nginx serves content-hash assets as immutable-cacheable while `index.html` stays no-store (SPEC-023 R-1). The `make validate-version` target asserts the injected `__PLATFORM_VERSION__` constant against the root `VERSION` file.
+
+## Conventions and constraints
+
+Observed conventions (descriptive):
+
+- All visual tokens flow through the `palette` object in `tokens.ts`; hard-coded color literals are avoided outside `global.css`'s `:root` declaration.
+- Bespoke component styles use CSS custom properties (`var(--accent)`, `var(--surface)`, `var(--radius)`) rather than inline hex values.
+- Ant Design components receive styling via the `portalTheme` `ThemeConfig` rather than per-component overrides.
+- The app is dark-only; `color-scheme: dark` is set globally.
+- Fonts are declared once in the Ant Design theme (`Inter` family, `JetBrains Mono` / `Fira Code` for monospace) and reused in `.md-content` and evidence code blocks.
+- Layouts use Flexbox throughout; grid is used sparingly (e.g., `.recovery-facts` key/value grid).
+- Animations respect `prefers-reduced-motion`.
+- Style changes are cross-referenced to their originating spec number in comments (e.g., `/* SPEC-020 R-4 */`).
+
+Enforced rules (source cited):
+
+- Node engine requirement `>=22.22.2` is enforced by npm/yarn when installing dependencies (`package.json` `engines` field).
+- The build script requires TypeScript type-checking before bundling (`"build": "tsc --noEmit && vite build"`), so invalid TS in styled components fails the build.
+- Platform version injection is asserted by `make validate-version`, which follows the constant to its injection point in `vite.config.ts`.
+- Built assets are written to `../dist` and served by the product's `nginx.conf`; changing the output directory would break the deployment contract.

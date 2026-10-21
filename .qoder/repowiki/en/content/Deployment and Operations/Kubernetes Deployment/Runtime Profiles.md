@@ -16,6 +16,15 @@
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
 - [secrets.env (secrets-dev)](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env)
 - [kustomization.yaml (dev-k8s)](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml (servicenow-dev)](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml)
+- [servicenow.env (servicenow-dev)](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env)
+- [mock_servicenow_table_api.py](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py)
+- [servicenow-mock-deployment.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-deployment.yaml)
+- [servicenow-mock-service.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-service.yaml)
+- [servicenow-mock-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-network-policy.yaml)
+- [tool-gateway-servicenow-credentials.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/tool-gateway-servicenow-credentials.yaml)
+- [sync-servicenow-credentials.sh](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh)
+- [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [config.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [app.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/app.py)
 - [password-policy.yaml (contract)](file://shared/shared-contracts/policies/password-policy.yaml)
@@ -23,11 +32,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added secrets-dev runtime profile section documenting development-time password generation capabilities without email delivery
-- Updated dev-k8s overlay configuration to include the new secrets-dev posture overlay
-- Enhanced architecture diagrams to show the fourth posture layer for secret generation
-- Updated troubleshooting guidance to cover secrets-enabled scenarios and password policy validation
-- Added security considerations for the secrets-dev profile's read-tier-only posture
+- Added ServiceNow development runtime profile section documenting mock Table-API responder, OAuth2 client_credentials integration, and Kubernetes deployment manifests
+- Updated dev-k8s overlay configuration to include the new servicenow-dev posture overlay alongside existing profiles
+- Enhanced architecture diagrams to show the fifth posture layer for ServiceNow read-tier ingestion
+- Added operational script documentation for credential synchronization using sync-servicenow-credentials.sh
+- Updated troubleshooting guidance to cover ServiceNow connectivity issues and mock service validation
+- Added security considerations for the servicenow-dev profile's read-only posture with bearer token authentication
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,12 +56,13 @@ This document explains the runtime profiles system that customizes platform beha
 - The default profile for standard deployments, which sets a generic agent profile and provider configuration.
 - The browser-dev profile for web automation testing with a Playwright-compatible sidecar and posture configuration only (sample targets are deployed out-of-band).
 - The mutating-dev profile for testing write operations with elevated permissions scoped to bounded actions.
-- **New**: The secrets-dev profile for enabling development-time password generation capabilities without email delivery, providing secure credential generation through the portal-copy handoff mechanism.
+- The secrets-dev profile for enabling development-time password generation capabilities without email delivery, providing secure credential generation through the portal-copy handoff mechanism.
+- **New**: The servicenow-dev profile for ServiceNow read-tier Table-API ingestion with a mock OAuth2 client_credentials endpoint and bearer token authentication.
 
 It also documents how each profile configures security policies, network policies, resource allocations, and service integrations; how tool execution policies and approval workflows are affected; and how to use the select and verify scripts to switch and validate profiles. Finally, it provides guidance for creating custom profiles and understanding their security implications.
 
 ## Project Structure
-Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Three "posture" profiles (mutating-dev, browser-dev, and secrets-dev) are always wired into dev-k8s alongside the active LLM provider profile. A fourth profile (default) is the current LLM provider profile used by dev-k8s.
+Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Five "posture" profiles (mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev) are always wired into dev-k8s alongside the active LLM provider profile. A sixth profile (default) is the current LLM provider profile used by dev-k8s.
 
 ```mermaid
 graph TB
@@ -63,18 +74,23 @@ DEF["default/"]
 BR["browser-dev/"]
 MUT["mutating-dev/"]
 SEC["secrets-dev/"]
+ANS["ansible-dev/"]
+SN["servicenow-dev/"]
 end
 D --> DEF
 D --> BR
 D --> MUT
 D --> SEC
+D --> ANS
+D --> SN
 ```
 
 **Diagram sources**
-- [kustomization.yaml (dev-k8s):5-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L15)
+- [kustomization.yaml (dev-k8s):5-10](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L10)
 - [kustomization.yaml (browser-dev):22-28](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L22-L28)
 - [kustomization.yaml (mutating-dev):18-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L18-L21)
 - [kustomization.yaml (default):1-5](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml#L1-L5)
+- [kustomization.yaml (servicenow-dev):28-42](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml#L28-L42)
 
 **Section sources**
 - [README.md:1-18](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L18)
@@ -84,13 +100,14 @@ D --> SEC
 - Default profile: Provides a ConfigMap that labels the deployment with a generic profile and selects an LLM provider and model.
 - Browser-dev posture: Adds a headless browser sidecar to the tool-gateway Deployment, mounts credential sets, and restricts network access to the CDP port. Sample target applications are deployed out-of-band via `make deploy-sample-app`.
 - Mutating-dev posture: Grants a minimal RBAC Role/RoleBinding for deleting pods in the dev namespace and enables mutating tools via a ConfigMap flag.
-- **New**: Secrets-dev posture: Enables secure password generation through the `secrets.generate_password` tool with one-time portal-copy handoff, without email delivery capabilities.
+- Secrets-dev posture: Enables secure password generation through the `secrets.generate_password` tool with one-time portal-copy handoff, without email delivery capabilities.
+- **New**: ServiceNow-dev posture: Deploys a thin mock ServiceNow Table-API + OAuth2 client_credentials responder, provides GATEWAY_SERVICENOW_* configuration, and mounts credential sets for read-only ingestion of incident, change_request, sys_user, and cmdb_ci tables.
 
 These components affect:
 - Security policies: Deny-by-default posture unless explicitly enabled by a profile.
-- Network policies: Restrict cross-pod access to the browser's debugging port.
+- Network policies: Restrict cross-pod access to the browser's debugging port and ServiceNow mock endpoints.
 - Resource allocations: Sidecar CPU/memory requests and limits.
-- Service integrations: Tool-gateway integration with the browser sidecar, optional credentials, and secret delivery buffer.
+- Service integrations: Tool-gateway integration with the browser sidecar, optional credentials, secret delivery buffer, and ServiceNow mock server.
 
 **Section sources**
 - [configmap.yaml (default):1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
@@ -100,12 +117,13 @@ These components affect:
 - [mutating.env (mutating-dev):1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 - [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
+- [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
 
 ## Architecture Overview
-The dev-k8s overlay composes four layers at build time:
+The dev-k8s overlay composes five layers at build time:
 - Base platform manifests.
 - One active LLM provider profile (currently default).
-- Always-on posture overlays: mutating-dev, browser-dev, and secrets-dev.
+- Always-on posture overlays: mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev.
 
 The select script writes a new dev-k8s/kustomization.yaml that includes the chosen profile while preserving all posture overlays. The verify script reports the active profile and validates that kustomize can render the overlay without errors.
 
@@ -118,13 +136,17 @@ participant Prof as "runtime-profiles/<profile>"
 participant PostM as "runtime-profiles/mutating-dev"
 participant PostB as "runtime-profiles/browser-dev"
 participant PostS as "runtime-profiles/secrets-dev"
+participant PostA as "runtime-profiles/ansible-dev"
+participant PostN as "runtime-profiles/servicenow-dev"
 Dev->>Sel : Run with <profile>
 Sel->>Kum : Write resources list
-Note over Sel,Kum : Always include mutating-dev, browser-dev, and secrets-dev
+Note over Sel,Kum : Always include mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev
 Sel->>Prof : Include selected profile
 Sel->>PostM : Include posture overlay
 Sel->>PostB : Include posture overlay
 Sel->>PostS : Include posture overlay
+Sel->>PostA : Include posture overlay
+Sel->>PostN : Include posture overlay
 Dev->>Sel : Verify
 Sel->>Kum : Render with kubectl kustomize
 Kum-->>Dev : Success or error
@@ -133,7 +155,7 @@ Kum-->>Dev : Success or error
 **Diagram sources**
 - [select-runtime-profile.sh:30-52](file://shared/platform-ops/gitops/select-runtime-profile.sh#L30-L52)
 - [verify-runtime-profile.sh:8-23](file://shared/platform-ops/gitops/verify-runtime-profile.sh#L8-L23)
-- [kustomization.yaml (dev-k8s):5-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L15)
+- [kustomization.yaml (dev-k8s):5-10](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L10)
 
 **Section sources**
 - [select-runtime-profile.sh:14-55](file://shared/platform-ops/gitops/select-runtime-profile.sh#L14-L55)
@@ -264,7 +286,7 @@ Deny --> End
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 
 ### Secrets-Dev Profile (Secure Password Generation)
-**New** The secrets-dev profile enables development-time password generation capabilities without email delivery, providing secure credential generation through the portal-copy handoff mechanism.
+**Updated** The secrets-dev profile enables development-time password generation capabilities without email delivery, providing secure credential generation through the portal-copy handoff mechanism.
 
 Purpose:
 - Enables secure password generation in development environments through the `secrets.generate_password` tool, with values delivered via one-time portal-copy handoff rather than email.
@@ -316,12 +338,76 @@ Deny --> End
 - [app.py (tool-gateway):119-164](file://products/tool-gateway/src/tool_gateway/app.py#L119-L164)
 - [password-policy.yaml (contract):1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
 
+### ServiceNow-Dev Profile (Read-Tier Table-API Ingestion)
+**New** The servicenow-dev profile enables ServiceNow read-tier Table-API ingestion with a mock OAuth2 client_credentials endpoint and bearer token authentication.
+
+Purpose:
+- Provides a complete ServiceNow development environment with a thin mock Table-API + OAuth2 responder, enabling end-to-end testing of the servicenow.* tools without requiring a licensed ServiceNow instance.
+
+Key configurations:
+- Environment variables merged into platform-runtime-config:
+  - Enable ServiceNow connector (`GATEWAY_SERVICENOW_ENABLED=true`).
+  - Point to mock Table-API endpoint (`GATEWAY_SERVICENOW_BASE_URL=http://servicenow-mock-table-api:8000`).
+  - Configure timeout and credential set mounting.
+- Mock ServiceNow deployment:
+  - Thin Starlette/uvicorn server implementing `/api/now/table/{table}` and `/oauth_token.do` endpoints.
+  - OAuth2 client_credentials grant with Basic authentication.
+  - Bearer token gate for Table API requests.
+  - Canned data for incident, change_request, sys_user, and cmdb_ci tables.
+- Network policy:
+  - Restricts access to port 8000 only from tool-gateway pods.
+  - Defense-in-depth complementing the bearer token authentication.
+
+Tool execution and approvals:
+- Six read-tier tools: servicenow.incident.list, servicenow.incident.get, servicenow.change_request.list, servicenow.change_request.get, servicenow.user.get, servicenow.cmdb_ci.get.
+- All tools operate at read tier with no write capabilities.
+- Authentication handled automatically via OAuth2 client_credentials flow.
+- Field projection enforced by gateway to exclude sensitive columns.
+
+Security boundaries:
+- Read-only posture with no mutation capabilities.
+- OAuth2 client_credentials with Basic authentication for token acquisition.
+- Bearer token required for all Table API requests.
+- NetworkPolicy restricts access to tool-gateway pods only.
+- Mock credentials fail closed when not provisioned (unguessable random values).
+
+```mermaid
+flowchart TD
+Start(["ServiceNow tool invoked"]) --> CheckEnabled{"GATEWAY_SERVICENOW_ENABLED?"}
+CheckEnabled --> |False| Deny["Deny invocation"]
+CheckEnabled --> |True| GetToken["POST /oauth_token.do with client_credentials"]
+GetToken --> AuthSuccess{"Authentication successful?"}
+AuthSuccess --> |No| FailClosed["Fail closed (401 Unauthorized)"]
+AuthSuccess --> |Yes| CallAPI["Call Table API with Bearer token"]
+CallAPI --> ValidateTable{"Table in admitted set?"}
+ValidateTable --> |No| FailClosed
+ValidateTable --> |Yes| ProjectFields["Apply field projection"]
+ProjectFields --> ReturnData["Return sanitized data"]
+Deny --> End(["Result returned"])
+FailClosed --> End
+ReturnData --> End
+```
+
+**Diagram sources**
+- [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+- [mock_servicenow_table_api.py:180-256](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L180-L256)
+- [servicenow-mock-network-policy.yaml:1-36](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-network-policy.yaml#L1-L36)
+
+**Section sources**
+- [kustomization.yaml (servicenow-dev):1-43](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml#L1-L43)
+- [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+- [mock_servicenow_table_api.py:1-267](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L1-L267)
+- [servicenow-mock-deployment.yaml:1-95](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-deployment.yaml#L1-L95)
+- [servicenow-mock-service.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-service.yaml#L1-L22)
+- [servicenow-mock-network-policy.yaml:1-36](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-network-policy.yaml#L1-L36)
+- [tool-gateway-servicenow-credentials.yaml:1-36](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/tool-gateway-servicenow-credentials.yaml#L1-L36)
+
 ### Select and Verify Scripts
 - select-runtime-profile.sh:
-  - Validates input and rejects mutating-dev, browser-dev, and secrets-dev as switchable LLM profiles.
-  - Writes dev-k8s/kustomization.yaml to include the selected profile plus all three posture overlays.
+  - Validates input and rejects mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev as switchable LLM profiles.
+  - Writes dev-k8s/kustomization.yaml to include the selected profile plus all five posture overlays.
   - Merges environment files from all posture overlays into the runtime ConfigMap.
-  - Applies the browser sidecar strategic merge patch to the tool-gateway Deployment.
+  - Applies strategic merge patches for browser sidecar, Ansible credentials, and ServiceNow credentials.
 - verify-runtime-profile.sh:
   - Extracts the currently active LLM profile from dev-k8s/kustomization.yaml.
   - Renders the overlay with kustomize to validate integrity.
@@ -352,7 +438,7 @@ V-->>U : Report active profile and result
 
 ## Dependency Analysis
 Profiles compose through Kustomize:
-- dev-k8s includes the active LLM profile and all three posture overlays.
+- dev-k8s includes the active LLM profile and all five posture overlays.
 - browser-dev depends on:
   - tool-gateway Deployment (patched by dev-k8s).
   - NetworkPolicy restricting CDP ingress.
@@ -360,10 +446,15 @@ Profiles compose through Kustomize:
 - mutating-dev depends on:
   - tool-gateway ServiceAccount in the dev namespace.
   - RBAC Role/RoleBinding for bounded pod deletion.
-- **New**: secrets-dev depends on:
+- secrets-dev depends on:
   - tool-gateway ServiceAccount in the dev namespace.
   - Password policy contract mounted via base platform-policy ConfigMap.
   - Ephemeral secret delivery buffer (memory backend by default).
+- **New**: servicenow-dev depends on:
+  - tool-gateway ServiceAccount in the dev namespace.
+  - Mock ServiceNow Table-API Deployment/Service/NetworkPolicy.
+  - OAuth2 client_credentials setup via sync-servicenow-credentials.sh.
+  - Credential set mounted at GATEWAY_SERVICENOW_CREDENTIAL_SETS path.
 
 ```mermaid
 graph LR
@@ -372,38 +463,45 @@ Def["default/"]
 Br["browser-dev/"]
 Mut["mutating-dev/"]
 Sec["secrets-dev/"]
+Ans["ansible-dev/"]
+Sn["servicenow-dev/"]
 TG["tool-gateway Deployment"]
 NP["NetworkPolicy"]
 RB["Role/RoleBinding"]
 SA["ServiceAccount"]
 PP["Password Policy Contract"]
 DB["Secret Delivery Buffer"]
+Mock["ServiceNow Mock Server"]
+OAuth["OAuth2 Client Credentials"]
 DevK8s --> Def
 DevK8s --> Br
 DevK8s --> Mut
 DevK8s --> Sec
+DevK8s --> Ans
+DevK8s --> Sn
 Br --> TG
 Br --> NP
 Mut --> RB
 Mut --> SA
 Sec --> PP
 Sec --> DB
+Sn --> Mock
+Sn --> OAuth
 ```
 
 **Diagram sources**
-- [kustomization.yaml (dev-k8s):5-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L15)
+- [kustomization.yaml (dev-k8s):5-10](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L10)
 - [kustomization.yaml (browser-dev):22-28](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L22-L28)
 - [kustomization.yaml (mutating-dev):18-21](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L18-L21)
-- [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
-- [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
-- [browser-sidecar-network-policy.yaml:1-31](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser-sidecar-network-policy.yaml#L1-L31)
-- [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
+- [kustomization.yaml (servicenow-dev):28-42](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml#L28-L42)
+- [servicenow-mock-deployment.yaml:1-95](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-deployment.yaml#L1-L95)
+- [servicenow-mock-network-policy.yaml:1-36](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-network-policy.yaml#L1-L36)
 
 **Section sources**
-- [kustomization.yaml (dev-k8s):5-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L15)
+- [kustomization.yaml (dev-k8s):5-10](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L5-L10)
 - [kustomization.yaml (browser-dev):1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 - [kustomization.yaml (mutating-dev):1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
-- [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
+- [kustomization.yaml (servicenow-dev):1-43](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml#L1-L43)
 
 ## Performance Considerations
 - Browser sidecar resources:
@@ -413,10 +511,15 @@ Sec --> DB
   - Limits exposure of the CDP port to loopback and denies cross-pod access.
 - Mutating tools:
   - Keep scope minimal (delete pods only in dev namespace) to reduce blast radius.
-- **New**: Secret delivery buffer:
+- Secret delivery buffer:
   - Memory backend provides single-replica ephemeral storage with TTL expiration.
   - Redis backend available for multi-replica deployments with proper TTL support.
   - Password generation follows cryptographic standards with entropy floor validation.
+- **New**: ServiceNow mock server:
+  - Lightweight Starlette/uvicorn server with minimal resource footprint (50m CPU, 64Mi memory requests).
+  - Single replica deployment with TCP readiness probe.
+  - No external dependencies beyond tool-gateway image runtime.
+  - Mock data is static and in-memory, providing fast response times.
 
 [No sources needed since this section provides general guidance derived from the referenced files]
 
@@ -433,19 +536,28 @@ Common issues and resolutions:
   - Verify GATEWAY_MUTATING_TOOLS_ENABLED is true.
   - Confirm RBAC Role/RoleBinding exists and matches the tool-gateway ServiceAccount.
   - Ensure policy grants and HITL configuration are in place.
-- **New**: Secret generation failing:
+- Secret generation failing:
   - Verify GATEWAY_SECRETS_ENABLED is true in the secrets-dev profile.
   - Check that password policy contract is properly mounted and readable.
   - Ensure secret delivery buffer is initialized and accessible.
   - For email delivery failures, confirm SMTP configuration is provisioned via sync-email-secrets.sh.
   - Validate password policy compliance if generation requests are rejected.
+- **New**: ServiceNow tools failing:
+  - Verify GATEWAY_SERVICENOW_ENABLED is true in the servicenow-dev profile.
+  - Check that the servicenow-mock-table-api deployment is running and healthy.
+  - Ensure sync-servicenow-credentials.sh has been executed to provision both secrets.
+  - Verify the mock Service is reachable from tool-gateway pods.
+  - Check NetworkPolicy allows traffic from tool-gateway to the mock on port 8000.
+  - Validate OAuth2 client_credentials are correctly synchronized between tool-gateway and mock.
 
 Operational steps:
 - Re-run select-runtime-profile.sh with the desired profile.
 - Re-run verify-runtime-profile.sh to validate overlay rendering.
 - Deploy sample applications using `make deploy-sample-app` if browser tools cannot connect to targets.
 - Inspect logs of tool-gateway and browser sidecar if connectivity issues persist.
-- **New**: Check tool-gateway logs for secret delivery buffer initialization and password policy validation errors.
+- **New**: Run sync-servicenow-credentials.sh to provision ServiceNow mock credentials and restart deployments.
+- Check tool-gateway logs for secret delivery buffer initialization and password policy validation errors.
+- **New**: Verify ServiceNow mock health with `kubectl get pods -l app=servicenow-mock-table-api` and check readiness probe status.
 
 **Section sources**
 - [verify-runtime-profile.sh:8-23](file://shared/platform-ops/gitops/verify-runtime-profile.sh#L8-L23)
@@ -454,6 +566,8 @@ Operational steps:
 - [mutating.env (mutating-dev):1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 - [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
+- [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+- [sync-servicenow-credentials.sh:1-192](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh#L1-L192)
 - [config.py (tool-gateway):118-136](file://products/tool-gateway/src/tool_gateway/core/config.py#L118-L136)
 
 ## Conclusion
@@ -461,9 +575,10 @@ Runtime profiles provide a layered, deny-by-default approach to configuring plat
 - The default profile sets a generic agent profile and provider selection.
 - The browser-dev posture enables safe, scoped browser automation with strict network and credential controls, relying on out-of-band sample applications.
 - The mutating-dev posture enables bounded write operations with minimal RBAC and enforced approvals.
-- **New**: The secrets-dev posture enables secure password generation with one-time portal-copy handoff, maintaining strong security boundaries while providing development-time credential generation capabilities.
+- The secrets-dev posture enables secure password generation with one-time portal-copy handoff, maintaining strong security boundaries while providing development-time credential generation capabilities.
+- **New**: The servicenow-dev posture enables read-only ServiceNow Table-API ingestion with a complete mock OAuth2 client_credentials endpoint, allowing end-to-end testing without requiring a licensed ServiceNow instance.
 
-Use the select script to switch the active LLM profile while keeping all posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments. Remember that sample applications must be deployed separately using `make deploy-sample-app` when testing browser functionality, and email delivery requires additional SMTP configuration beyond the secrets-dev profile scope.
+Use the select script to switch the active LLM profile while keeping all posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments. Remember that sample applications must be deployed separately using `make deploy-sample-app` when testing browser functionality, email delivery requires additional SMTP configuration beyond the secrets-dev profile scope, and ServiceNow mock credentials must be provisioned using sync-servicenow-credentials.sh before testing ServiceNow functionality.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -473,7 +588,7 @@ Use the select script to switch the active LLM profile while keeping all posture
 Guidance:
 - Create a new directory under runtime-profiles with a kustomization.yaml listing resources to include.
 - If you need environment variables, add an env file and merge it via the dev-k8s overlay's configMapGenerator.
-- For posture-like features (sidecars, network policies, RBAC), follow the patterns in browser-dev, mutating-dev, and secrets-dev.
+- For posture-like features (sidecars, network policies, RBAC), follow the patterns in browser-dev, mutating-dev, secrets-dev, and servicenow-dev.
 - Keep defaults deny-by-default; only enable capabilities explicitly through your profile.
 - Update dev-k8s to include your profile if it replaces the active LLM profile, or keep it as an additional posture overlay if appropriate.
 
@@ -483,6 +598,28 @@ Security considerations:
 - Use allowlists for external access (origins, endpoints).
 - Ensure secrets are provisioned out-of-band and mounted as optional where possible to avoid blocking startup.
 - For browser-related profiles, remember that sample applications should be deployed out-of-band rather than included in the profile resources.
-- **New**: For secret-related profiles, ensure password policy compliance and consider whether email delivery capabilities should be enabled based on security requirements.
+- For secret-related profiles, ensure password policy compliance and consider whether email delivery capabilities should be enabled based on security requirements.
+- **New**: For ServiceNow-like profiles, implement proper OAuth2 authentication flows, bearer token validation, and network isolation for mock services.
 
 [No sources needed since this section provides general guidance]
+
+### ServiceNow Development Workflow
+**New** Complete workflow for ServiceNow development profile:
+
+1. Select the servicenow-dev profile (it's always included as a posture overlay).
+2. Provision credentials: `./shared/platform-ops/gitops/sync-servicenow-credentials.sh`
+3. Verify overlay rendering: `./shared/platform-ops/gitops/verify-runtime-profile.sh`
+4. Deploy the overlay: `make deploy`
+5. Test ServiceNow tools through the platform interface.
+
+The mock ServiceNow instance provides:
+- OAuth2 client_credentials endpoint at `/oauth_token.do`
+- Table API endpoints at `/api/now/table/{table}` and `/api/now/table/{table}/{sys_id}`
+- Canned data for incident, change_request, sys_user, and cmdb_ci tables
+- Bearer token authentication for all Table API requests
+- NetworkPolicy restricting access to tool-gateway pods only
+
+**Section sources**
+- [sync-servicenow-credentials.sh:1-192](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh#L1-L192)
+- [servicenow-mock-deployment.yaml:1-95](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-deployment.yaml#L1-L95)
+- [mock_servicenow_table_api.py:180-256](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L180-L256)

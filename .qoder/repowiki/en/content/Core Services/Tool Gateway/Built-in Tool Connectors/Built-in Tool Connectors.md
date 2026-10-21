@@ -11,22 +11,25 @@
 - [incidents_connector.py](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py)
 - [skills_connector.py](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py)
 - [http_connector.py](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py)
+- [servicenow_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py)
+- [servicenow_binding.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [test_http_connector.py](file://products/tool-gateway/tests/test_http_connector.py)
 - [test_browser_connector.py](file://products/tool-gateway/tests/test_browser_connector.py)
 - [test_k8s_connector.py](file://products/tool-gateway/tests/test_k8s_connector.py)
 - [test_elastic_connector.py](file://products/tool-gateway/tests/test_elastic_connector.py)
+- [test_servicenow_native.py](file://products/tool-gateway/tests/test_servicenow_native.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new HTTP connector with `http.get` and `http.post` tools
-- Updated project structure section to include HTTP connector
-- Enhanced architecture overview with HTTP connector integration
-- Added detailed HTTP connector component analysis covering security controls, configuration options, and approval system integration
-- Updated dependency analysis to include HTTP connector dependencies
-- Enhanced troubleshooting guide with HTTP-specific error codes and issues
+- Added comprehensive documentation for the new ServiceNow ITSM connector with six read-tier tools
+- Updated project structure section to include ServiceNow connector
+- Enhanced architecture overview with ServiceNow connector integration
+- Added detailed ServiceNow connector component analysis covering OAuth2 authentication, field projection security, and REST/Table-API integration
+- Updated dependency analysis to include ServiceNow connector dependencies
+- Enhanced troubleshooting guide with ServiceNow-specific error codes and issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,7 +49,8 @@ This document describes all built-in tool connectors provided by the Tool Gatewa
 - Elasticsearch observability queries
 - Incidents service queries
 - Skills hub queries
-- **HTTP service health checking** (http.get, http.post)
+- HTTP service health checking (http.get, http.post)
+- **ServiceNow ITSM operations** (servicenow.incident.list/.get, servicenow.change_request.list/.get, servicenow.user.get, servicenow.cmdb_ci.get)
 
 Each connector registers tools with a registry, validates parameters, enforces risk tiers, and returns consistent results that include an evidence envelope.
 
@@ -69,6 +73,7 @@ ES["ElasticConnector"]
 INC["IncidentsConnector"]
 SK["SkillsConnector"]
 HTTP["HttpConnector"]
+SN["ServiceNowNativeConnector"]
 end
 BR --> REG
 K8S --> REG
@@ -76,6 +81,7 @@ ES --> REG
 INC --> REG
 SK --> REG
 HTTP --> REG
+SN --> REG
 REG --> BASE
 ```
 
@@ -85,9 +91,10 @@ REG --> BASE
 - [browser_connector.py:315-399](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L315-L399)
 - [k8s_connector.py:41-92](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L41-L92)
 - [elastic_connector.py:40-103](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py#L40-L103)
-- [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-84)
+- [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-L84)
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L88)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
+- [servicenow_native.py:135-174](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L135-L174)
 
 **Section sources**
 - [README.md:1-64](file://products/tool-gateway/README.md#L1-L64)
@@ -327,7 +334,7 @@ Common responses:
 - [skills_connector.py:1-12](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L1-L12)
 - [skills_connector.py:71-149](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L149)
 - [skills_connector.py:154-419](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L154-L419)
-- [README.md:113-118](file://products/tool-gateway/README.md#L113-L118)
+- [README.md:113-118](file://products/tool-gateway/README.md#L113-118)
 
 ### HTTP Connector
 **New** - Service health checking and API interaction capabilities:
@@ -383,6 +390,64 @@ Common responses:
 - [config.py:25-90](file://products/tool-gateway/src/tool_gateway/core/config.py#L25-L90)
 - [app.py:97-112](file://products/tool-gateway/src/tool_gateway/app.py#L97-L112)
 
+### ServiceNow ITSM Connector
+**New** - ServiceNow ITSM operations with native REST/Table-API integration:
+
+Capabilities:
+- **servicenow.incident.list**: List ServiceNow incidents with bounded pagination and triage field projection
+- **servicenow.incident.get**: Get one ServiceNow incident by sys_id with triage field projection
+- **servicenow.change_request.list**: List ServiceNow change requests with bounded pagination and change-review field projection
+- **servicenow.change_request.get**: Get one ServiceNow change request by sys_id with change-review field projection
+- **servicenow.user.get**: Get one ServiceNow user by sys_id with identity/contact profile field projection (never credentials)
+- **servicenow.cmdb_ci.get**: Get one ServiceNow CMDB configuration item by sys_id with asset/operational field projection
+
+Key security features:
+- **Fixed table bindings**: Each tool operates on a gateway-owned table constant, never model-selected
+- **Field projection allowlists**: Every record is projected down to declared fields after response arrival, preventing credential leakage
+- **OAuth2 client credentials authentication**: Secure token acquisition through SPEC-068 seam with no token exposure in results
+- **sys_id validation**: 32-character hex GUID validation prevents path injection attacks
+- **Bounded pagination**: List operations capped at MAX_LIMIT (100) records with DEFAULT_LIMIT (20)
+- **Fail-closed behavior**: Transport timeouts, non-2xx responses, and malformed data return structured errors, never fabricated successes
+
+Configuration highlights:
+- Enable connector: `GATEWAY_SERVICENOW_ENABLED`
+- Base URL: `GATEWAY_SERVICENOW_BASE_URL` (must be http/https with no userinfo)
+- Credential set: `GATEWAY_SERVICENOW_CREDENTIAL_SET` (name of OAuth2 client credentials)
+- Credential sets path: `GATEWAY_SERVICENOW_CREDENTIAL_SETS` (path to credential file)
+- Timeout: `GATEWAY_SERVICENOW_TIMEOUT_MS` (default 10000ms, max 30000ms)
+
+Usage patterns:
+- Incident triage: Use `servicenow.incident.list` to browse recent incidents with bounded pagination
+- Incident details: Use `servicenow.incident.get` to fetch complete incident information by sys_id
+- Change management: Use `servicenow.change_request.list/.get` for change review workflows
+- User lookup: Use `servicenow.user.get` to retrieve user identity and contact information
+- CMDB exploration: Use `servicenow.cmdb_ci.get` to explore configuration items and their operational status
+
+Security considerations:
+- All table names are gateway-owned constants, never model-supplied
+- Field projections explicitly exclude credential columns (password, user_password, etc.)
+- OAuth2 tokens are used for authentication but never exposed in results, evidence, or logs
+- Base URL validation prevents scheme injection and userinfo leakage
+- Audit attribution marks target identity mode as "acting_service" (gateway's own identity)
+
+Practical example outline:
+- Call `servicenow.incident.list` with optional limit parameter for incident triage
+- Call `servicenow.incident.get` with valid 32-char hex sys_id for incident details
+- Call `servicenow.change_request.list` with limit for change review workflows
+- Call `servicenow.user.get` with sys_id for user lookup (returns identity fields only)
+- Call `servicenow.cmdb_ci.get` with sys_id for CMDB exploration
+
+Common responses:
+- success with data containing table name, count/record, and projected fields
+- error with codes: `SERVICENOW_NOT_CONFIGURED`, `SERVICENOW_INVALID_BASE_URL`, `INVALID_PARAMETERS`, `SERVICENOW_TIMEOUT`, `SERVICENOW_UNREACHABLE`, `SERVICENOW_UPSTREAM_ERROR`, `SERVICENOW_RESPONSE_INVALID`, `CREDENTIAL_SET_NOT_FOUND`
+
+**Section sources**
+- [servicenow_native.py:1-472](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L1-L472)
+- [servicenow_binding.py:1-197](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py#L1-L197)
+- [test_servicenow_native.py:1-702](file://products/tool-gateway/tests/test_servicenow_native.py#L1-L702)
+- [config.py:61-70](file://products/tool-gateway/src/tool_gateway/core/config.py#L61-L70)
+- [app.py:195-210](file://products/tool-gateway/src/tool_gateway/app.py#L195-L210)
+
 ## Dependency Analysis
 Connectors depend on:
 - Base abstractions for tool definitions, results, and evidence.
@@ -390,8 +455,9 @@ Connectors depend on:
 - External clients:
   - Kubernetes client for cluster operations
   - Elasticsearch client for observability queries
-  - HTTPX for skills, incidents, and HTTP services
+  - HTTPX for skills, incidents, HTTP services, and ServiceNow REST/Table-API calls
   - Playwright via CDP for browser automation
+  - OAuth2TokenClient for ServiceNow authentication
 
 ```mermaid
 graph LR
@@ -403,12 +469,16 @@ ES["ElasticConnector"]
 INC["IncidentsConnector"]
 SK["SkillsConnector"]
 HTTP["HttpConnector"]
+SN["ServiceNowNativeConnector"]
+OAUTH["OAuth2TokenClient"]
 BR --> BASE
 K8S --> BASE
 ES --> BASE
 INC --> BASE
 SK --> BASE
 HTTP --> BASE
+SN --> BASE
+OAUTH --> SN
 REG --> BASE
 BR --> REG
 K8S --> REG
@@ -416,6 +486,7 @@ ES --> REG
 INC --> REG
 SK --> REG
 HTTP --> REG
+SN --> REG
 ```
 
 **Diagram sources**
@@ -427,6 +498,7 @@ HTTP --> REG
 - [incidents_connector.py:68-84](file://products/tool-gateway/src/tool_gateway/tools/incidents_connector.py#L68-L84)
 - [skills_connector.py:71-88](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L71-L88)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
+- [servicenow_native.py:135-174](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L135-L174)
 
 **Section sources**
 - [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
@@ -437,6 +509,7 @@ HTTP --> REG
 - Kubernetes logs: tail_lines clamped to a maximum to avoid large payloads.
 - Elastic queries: time ranges and result counts are bounded to protect performance.
 - HTTP requests: timeouts enforced, response sizes capped, redirect chains limited to 3 hops.
+- ServiceNow reads: sysparm_limit capped at MAX_LIMIT (100), default LIMIT (20), field projections reduce payload size.
 - Asynchronous execution: connector sync calls run in executors to avoid blocking the event loop.
 
 ## Troubleshooting Guide
@@ -445,7 +518,8 @@ Common issues and resolutions:
   - Kubernetes: ensure in-cluster config or kubeconfig is available; otherwise tools return K8S_NOT_CONFIGURED.
   - Elastic: ensure URL and authentication are set; otherwise tools return ELASTIC_NOT_CONFIGURED.
   - Incidents/Skills: ensure service URLs and client credentials are configured; otherwise tools return TOOL_EXECUTION_ERROR on transport failure.
-  - **HTTP connector**: ensure `GATEWAY_HTTP_ENABLED=true` and `GATEWAY_HTTP_ALLOW_ORIGINS` contains target origins.
+  - HTTP connector: ensure `GATEWAY_HTTP_ENABLED=true` and `GATEWAY_HTTP_ALLOW_ORIGINS` contains target origins.
+  - **ServiceNow connector**: ensure `GATEWAY_SERVICENOW_ENABLED=true` and `GATEWAY_SERVICENOW_BASE_URL` is configured.
 - Permission denied:
   - Kubernetes delete: missing RBAC yields K8S_PERMISSION_DENIED; grant pod-delete permissions to the service account.
   - **HTTP post**: requires `GATEWAY_MUTATING_TOOLS_ENABLED=true` and `tools:mutate` permission.
@@ -455,6 +529,7 @@ Common issues and resolutions:
 - Invalid parameters:
   - Validate required fields and enums; connectors return INVALID_PARAMETERS with descriptive messages.
   - **HTTP connector**: check URL format, body size limits, and timeout values.
+  - **ServiceNow connector**: validate sys_id format (32-char hex) and limit ranges.
 - Redaction overflow:
   - If too much output would be redacted, the gateway withholds output with REDACTION_OVERFLOW; reduce sensitive content or adjust thresholds.
 - **HTTP-specific issues**:
@@ -463,6 +538,14 @@ Common issues and resolutions:
   - `HTTP_REDIRECT_NOT_ALLOWED`: Too many redirects or redirect to unauthorized origin
   - `HTTP_BODY_TOO_LARGE`: POST body exceeds configured limits
   - `CREDENTIAL_SET_NOT_FOUND`: Named credential set not found in configuration
+- **ServiceNow-specific issues**:
+  - `SERVICENOW_NOT_CONFIGURED`: Base URL not configured
+  - `SERVICENOW_INVALID_BASE_URL`: Invalid URL scheme or userinfo present
+  - `SERVICENOW_TIMEOUT`: Connection timed out (check timeout_ms setting)
+  - `SERVICENOW_UNREACHABLE`: Network connectivity issues to ServiceNow instance
+  - `SERVICENOW_UPSTREAM_ERROR`: ServiceNow returned non-2xx HTTP status
+  - `SERVICENOW_RESPONSE_INVALID`: Malformed JSON response or unexpected data structure
+  - `CREDENTIAL_SET_NOT_FOUND`: OAuth2 credential set not found in configuration
 
 **Section sources**
 - [k8s_connector.py:474-518](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py#L474-L518)
@@ -471,7 +554,8 @@ Common issues and resolutions:
 - [skills_connector.py:198-245](file://products/tool-gateway/src/tool_gateway/tools/skills_connector.py#L198-L245)
 - [browser_connector.py:765-800](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py#L765-L800)
 - [http_connector.py:471-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L471-L491)
+- [servicenow_native.py:313-408](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L313-L408)
 - [README.md:89-92](file://products/tool-gateway/README.md#L89-L92)
 
 ## Conclusion
-The Tool Gateway provides a secure, standardized interface to multiple backends through typed tools with consistent metadata, evidence, and error handling. Use the connectors to automate web checks, observe clusters, query observability data, perform HTTP service health checks, and collaborate via incidents and skills. Always configure connectors explicitly, respect risk tiers, and handle structured errors returned by each tool. The new HTTP connector enables direct API health checking and bounded mutations with robust security controls, making it ideal for service monitoring and controlled administrative operations.
+The Tool Gateway provides a secure, standardized interface to multiple backends through typed tools with consistent metadata, evidence, and error handling. Use the connectors to automate web checks, observe clusters, query observability data, perform HTTP service health checks, collaborate via incidents and skills, and integrate with ServiceNow ITSM operations. Always configure connectors explicitly, respect risk tiers, and handle structured errors returned by each tool. The new HTTP connector enables direct API health checking and bounded mutations with robust security controls, while the ServiceNow connector provides secure read-only access to ITSM data with comprehensive field projection and OAuth2 authentication, making both ideal for service monitoring and IT operations workflows.

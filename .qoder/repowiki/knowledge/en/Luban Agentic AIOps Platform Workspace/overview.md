@@ -1,1 +1,1 @@
-Monorepo workspace for the Luban agentic AIOps platform, coordinating nine product services, shared contracts, GitOps overlays, and spec-driven delivery documentation.
+Monorepo workspace for the Luban agentic AIOps platform, orchestrating Python services (agent-platform, execution-runtime, identity-broker, audit-service, incident-service, platform-gateway, skills-hub, tool-gateway), shared contracts, operator portal, samples, specs, and Kubernetes deployment assets.

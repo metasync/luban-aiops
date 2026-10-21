@@ -1,0 +1,6 @@
+- Each product under `products/` is self-contained with its own `pyproject.toml`, `.python-version`, `Dockerfile`, `Makefile`, `src/<service_name>/`, and `tests/`, and is invoked through the root Makefile rather than directly.
+- Cross-product integration points are expressed as JSON Schema/API contracts under `shared/shared-contracts/` (schemas, policies, SQL, scripts) instead of shared Python packages, keeping consumers dependency-light.
+- Feature work follows a spec-driven workflow: each feature lives in `docs/specs/SPEC-NNN-<name>/` with a `plan.md`, `spec.md`, and `tasks.md` triplet, tracked through draft → approved → delivered status.
+- Policy bundles are authored once at `shared/shared-contracts/policies/` and synced into consumers (`tool-gateway`, `platform-gateway`, GitOps base) via `make sync-policy`, with validation enforced by `make validate-policy` and scenario runners.
+- Platform-wide configuration is kept in sync through the root `VERSION` file plus `make validate-version`, which enforces lockstep between the platform semver, product versions, and the portal build.
+- Observability and operational concerns are centralized in `shared/platform-ops/`: GitOps overlays under `gitops/`, OpenObserve dashboards under `dashboards/`, and e2e/demo scripts under `e2e/`, all orchestrated by top-level Make targets.
