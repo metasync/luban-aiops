@@ -1,0 +1,42 @@
+# ServiceNow read-tier Table-API ingestion dev posture (SPEC-067 R-6).
+#
+# Like mutating-dev, browser-dev and ansible-dev this is not an LLM provider
+# profile: it is the committed ServiceNow posture for dev environments. It ships
+# the thin mock ServiceNow Table-API + OAuth responder the gateway's native
+# `servicenow_native` connector reads from — the in-cluster stand-in for a real
+# ServiceNow tenant's REST surface (`/api/now/table/...` + `/oauth_token.do`
+# OAuth2 client_credentials), so the overlay is validated end to end with no
+# licensed PDI and no live external call (OQ-5).
+#
+# It ships three standalone resources (the mock's Deployment, Service, and
+# NetworkPolicy) plus the ConfigMap the mock's server script is generated from,
+# and servicenow.env, which provides the GATEWAY_SERVICENOW_* values dev-k8s
+# merges into the platform-runtime-config ConfigMap.
+#
+# tool-gateway-servicenow-credentials.yaml is deliberately NOT listed under
+# resources here: it is a strategic merge patch applied by the dev-k8s overlay
+# (where the tool-gateway Deployment lives), not a standalone resource — the same
+# arrangement ansible-dev and browser-dev use for their credential/sidecar patch.
+#
+# The mock reuses the tool-gateway image (already FROM base-uv, already shipping
+# starlette/uvicorn as runtime deps), so no new image is built; deploy-overlay.sh
+# retags it to the coordinated tool-gateway tag.
+#
+# The base stays deny-by-default: servicenow_enabled defaults to false in
+# core/config.py's from_env, so absent this profile the connector is off and every
+# servicenow.* call fails closed with TOOL_NOT_FOUND.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  # Generated off the real .py (the house pattern, cf. platform-policy and the
+  # ansible-dev mock) so the mounted script and the committed source cannot drift;
+  # the Deployment runs it with `uv run python /mock/mock_servicenow_table_api.py`.
+  - name: servicenow-mock-table-api
+    files:
+      - mock_servicenow_table_api.py
+resources:
+  - servicenow-mock-deployment.yaml
+  - servicenow-mock-service.yaml
+  - servicenow-mock-network-policy.yaml

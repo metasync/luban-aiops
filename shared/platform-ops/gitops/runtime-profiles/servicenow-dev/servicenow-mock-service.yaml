@@ -1,0 +1,22 @@
+# ClusterIP Service for the thin mock ServiceNow Table-API responder (SPEC-067 R-6).
+#
+# The tool-gateway reaches the mock over this Service DNS name
+# (http://servicenow-mock-table-api:8000) exactly as it would a real ServiceNow
+# tenant, so GATEWAY_SERVICENOW_BASE_URL (and the credential set's token_url) are
+# the only things that change when the mock is swapped for a live PDI. Port 8000
+# mirrors the ansible-dev mock convention; a real instance is HTTPS behind its own
+# origin, which is a config-only change (the connector's base-URL validator
+# accepts http and https alike).
+apiVersion: v1
+kind: Service
+metadata:
+  name: servicenow-mock-table-api
+  labels:
+    app: servicenow-mock-table-api
+spec:
+  selector:
+    app: servicenow-mock-table-api
+  ports:
+    - name: table-api
+      port: 8000
+      targetPort: 8000

@@ -202,6 +202,45 @@ The connector deep-dive, activation checklist, and the operator's real-AAP
 read-only validation runbook are below
 ([Ansible MCP Connector](#ansible-mcp-connector-spec-069)).
 
+### ServiceNow Connector Tools (SPEC-067)
+
+Read-tier access to a ServiceNow ITSM instance through a gateway-owned
+**REST/Table-API connector** (`ingestion/servicenow_native.py`). Stage-0
+verification (2026-10-19) found the operator PDI exposes no ServiceNow MCP
+server, so — per SPEC-067 OQ-3 — this is a hand-rolled REST binding mirroring
+`ansible_native.py`, **not** an MCP-adapter binding; the kernel still never
+becomes an MCP client. The gateway admits a fixed allowlist of six read
+operations and exposes each as a typed `servicenow.*` tool. **Only reads are
+admitted** — no table write, update, or attachment fetch is exposed at any tier.
+Admission, canonical names, fixed tables, field projections, argument schemas,
+and the read tier are gateway config (`ingestion/servicenow_binding.py`); nothing
+a ServiceNow instance returns can widen them.
+
+| Tool | Description | Parameters | Risk |
+|---|---|---|---|
+| `servicenow.incident.list` | List incidents (newest first), triage fields only | `limit` (1-100, default 20) | read |
+| `servicenow.incident.get` | One incident by sys_id, triage fields only | `sys_id` (required, 32-hex) | read |
+| `servicenow.change_request.list` | List change requests, change-review fields only | `limit` (1-100, default 20) | read |
+| `servicenow.change_request.get` | One change request by sys_id | `sys_id` (required, 32-hex) | read |
+| `servicenow.user.get` | One user by sys_id, identity/contact fields only | `sys_id` (required, 32-hex) | read |
+| `servicenow.cmdb_ci.get` | One CMDB configuration item by sys_id | `sys_id` (required, 32-hex) | read |
+
+> **Read-tier only, deny-by-default.** The connector registers only under
+> `GATEWAY_SERVICENOW_ENABLED=true`; absent it every `servicenow.*` call fails
+> closed with `TOOL_NOT_FOUND`. Deny-by-default lives at the connector admission
+> allowlist `SERVICENOW_ADMITTED_TOOLS` (the action-based policy bundle names zero
+> individual tools), so a write verb or a deferred capability — `problem` and
+> `attachment` (a binary/exfiltration surface) — is never registered and returns
+> `TOOL_NOT_FOUND` no matter what the instance holds. **Field projection is a
+> safety allowlist:** each tool names the exact columns it may return and the
+> connector projects every record down to that set post-response, so the
+> `sys_user` read never returns `password`/`user_password` or any other credential
+> column.
+
+The connector deep-dive, activation checklist, and the operator's real-PDI
+read-only validation runbook are below
+([ServiceNow Connector](#servicenow-connector-spec-067)).
+
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
 - [ ] **`GATEWAY_MUTATING_TOOLS_ENABLED=true`** — the base commits `false`
@@ -679,6 +718,140 @@ real open-source control plane without an AAP license.
 `SurgeX-Labs/awx-mcp-server` was **not** used: it is stdio-only MCP (its network
 mode is a non-MCP REST API), declares no license, and pins `mcp>=1.0.0` against
 this gateway's `mcp==2.3.0`.
+
+## ServiceNow Connector (SPEC-067)
+
+The ServiceNow connector is a **native REST/Table-API binding**
+(`ingestion/servicenow_native.py`), not an MCP-adapter binding: Stage-0
+verification (2026-10-19) on the operator's PDI (`dev417985`) found ServiceNow's
+own MCP server unprovisioned, tripping the OQ-3 REST fallback. It is a GET-only
+client over `{base}/api/now/table/{table}[/{sys_id}]` with a single transport call
+site. What to admit, the canonical tool name, the fixed table, the field
+projection, the argument schema, and the risk tier are all **gateway-owned binding
+config** (`ingestion/servicenow_binding.py`), never anything the target returns.
+Swapping the target instance — the in-cluster mock (dev/CI) or a real PDI — is an
+**overlay-config** change (a new `GATEWAY_SERVICENOW_BASE_URL` + credential set),
+never a connector-code change.
+
+### Activation Checklist
+
+- [ ] **`GATEWAY_SERVICENOW_ENABLED=true`** — registers the six read tools (the
+      code default is `false`; the `servicenow-dev` runtime profile flips it in dev)
+- [ ] **`GATEWAY_SERVICENOW_BASE_URL`** — the Table-API base (dev commits
+      `http://servicenow-mock-table-api:8000`; a real instance is
+      `https://<instance>.service-now.com`)
+- [ ] **`GATEWAY_SERVICENOW_TIMEOUT_MS`** — bounds the HTTP client timeout
+      (default 10000)
+- [ ] **`GATEWAY_SERVICENOW_CREDENTIAL_SET`** — the named
+      `oauth2_client_credentials` set the connector presents (dev:
+      `servicenow-mock`), resolved through the SPEC-068 credential-set seam, never
+      an inline value
+- [ ] **`GATEWAY_SERVICENOW_CREDENTIAL_SETS`** — path to the mounted
+      credential-set JSON (dev:
+      `/etc/luban/servicenow-credentials/credential-sets.json`)
+- [ ] **Network reachability** — the tool-gateway pod must reach the Table-API base
+
+The base URL, admitted-tool list, fixed tables, and field projections are
+**operator configuration, never model-selected**. The credential set must be an
+`oauth2_client_credentials` scheme (OQ-1); the acquired bearer rides an outbound
+`Authorization` header only — never a URL, result, evidence field, or log line.
+
+**Provisioning shortcut (dev-k8s):** `make deploy` applies the `servicenow-dev`
+runtime profile (a thin in-cluster mock Table-API + `/oauth_token.do` responder +
+Service + NetworkPolicy, reusing the tool-gateway image) and runs
+`sync-servicenow-credentials.sh`, which generates one credential and writes it to
+**both** the gateway's credential-set secret
+(`tool-gateway-servicenow-credentials`) and the mock's OAuth/bearer gate
+(`servicenow-mock-credentials`) so the two cannot drift. Use
+`SKIP_SERVICENOW_CREDENTIALS=true make deploy` when CI injects them; absent the
+secret the connector fails closed (`CREDENTIAL_SET_NOT_FOUND`) and the mock 401s
+every call. Point the dev gateway at a real instance with
+`SERVICENOW_CLIENT_ID` / `SERVICENOW_CLIENT_SECRET` / `SERVICENOW_TOKEN_URL`
+overrides (and a new `_BASE_URL`).
+
+### Verification
+
+The gated live-check asserts the whole surface end to end (it branches on the
+committed enabled/disabled state, so it passes deny-by-default or live):
+
+```bash
+# Prerequisite: identity port-forward for the delegated operator token
+kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000
+shared/platform-ops/e2e/servicenow-check.sh
+
+# Operator run against a deployed servicenow-dev profile: turn the gated live leg
+# from a skip-with-a-note into a hard failure, so a green run always proves the
+# live reads rather than merely the registration and fail-closed behaviour.
+STRICT_LIVE=true shared/platform-ops/e2e/servicenow-check.sh
+```
+
+It proves: when disabled, no `servicenow.*` tool and `TOOL_NOT_FOUND` on invoke;
+when enabled, the six read tools present at `risk_level=read` with **no write verb
+admitted**, a denied/deferred name (`servicenow.incident.update`,
+`servicenow.problem.get`) and a missing/malformed `sys_id` fail closed with no
+target contact, the live reads project the target's incident/change/user/CI
+records (gated on reachability, else a clean fail-closed code — and under
+`STRICT_LIVE=true` a skip *is* a failure), the `sys_user` read strips
+`password`/`user_password`, and the client-secret/access-token never appears in
+any tool result. `make e2e` deliberately runs it **without** `STRICT_LIVE`: OQ-5
+requires CI to pass with no live external call. To list the tools directly:
+
+```bash
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
+  curl -fsS -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/v2/tools
+# Should include the six servicenow.* read tools when enabled
+```
+
+**Fail-closed error codes:** `TOOL_NOT_FOUND` (connector off, or a name outside
+the allowlist), `INVALID_PARAMETERS` (gateway-owned schema rejection — a missing
+or non-32-hex `sys_id`, an out-of-range `limit` — before any request),
+`SERVICENOW_NOT_CONFIGURED` / `SERVICENOW_INVALID_BASE_URL` (config),
+`CREDENTIAL_SET_NOT_FOUND` / `CREDENTIAL_ACQUISITION_FAILED` /
+`CREDENTIAL_SCHEME_UNSUPPORTED` (credential resolution),
+`SERVICENOW_TIMEOUT` / `SERVICENOW_UNREACHABLE` (transport),
+`SERVICENOW_UPSTREAM_ERROR` (a 4xx/5xx fact), and `SERVICENOW_RESPONSE_INVALID`
+(a non-JSON body). `SERVICENOW_TIMEOUT` and `SERVICENOW_UNREACHABLE` are audited
+with `failure_class=target_unavailable` (SPEC-067 R-5), distinct from a policy
+denial and from an upstream error; every call is audited with
+`target_system=servicenow` and `target_identity_mode=acting_service` (R-4) — the
+target is addressed with the acting service's credential, not the requesting
+user's delegated identity (per-user target RBAC is SPEC-070's seam).
+
+### Operator Validation Against a Real PDI (read-only, outside CI)
+
+CI makes **no live external call** (OQ-5); the in-cluster thin mock stands in for
+a real instance. Validating against a **real** ServiceNow PDI is an operator step,
+run out-of-band:
+
+1. **Least-privilege service account.** Create a dedicated read-only integration
+   user and an OAuth2 `client_credentials` client scoped to the four tables
+   (`incident`, `change_request`, `sys_user`, `cmdb_ci`) with **read** ACLs only.
+2. **Point the gateway at it.** Set `GATEWAY_SERVICENOW_BASE_URL` to
+   `https://<instance>.service-now.com` and provision an
+   `oauth2_client_credentials` set (`token_url` =
+   `https://<instance>.service-now.com/oauth_token.do`, plus `client_id` /
+   `client_secret`) via `sync-servicenow-credentials.sh` overrides or an
+   operator-managed credential-set secret. The acquired token rides an httpx
+   header only — never a URL, result, evidence field, or log line.
+3. **Confirm the field allowlists.** The binding's per-table projections follow
+   the documented Table-API columns; against the live instance, confirm each
+   admitted tool's returned columns match the binding's allowlist and that no
+   secret-bearing column is present. Where a column must be renamed or added,
+   edit `servicenow_binding.py` as config — never a connector-code change.
+4. **Run the live-check.** `STRICT_LIVE=true servicenow-check.sh` exercises the
+   same six reads against the real instance. Its canned-record assertions are
+   mock-specific; against a real PDI, confirm the structural reads return real
+   data, the `sys_user` read strips credential columns, and no write verb is
+   admitted.
+5. **Audit.** Confirm each read audits `target_system=servicenow`,
+   `target_identity_mode=acting_service`, and — on any unreachable-target fault —
+   `failure_class=target_unavailable`.
+
+**No ServiceNow MCP server.** Stage-0 (2026-10-19) confirmed the PDI does not
+expose ServiceNow's own MCP server (AI Platform / AI Agent Studio / AI Control
+Tower unprovisioned). Should a future instance expose one, the generic
+server-agnostic MCP adapter (SPEC-069) is the reuse path — a new binding, not a
+connector rewrite.
 
 ## Output Redaction
 

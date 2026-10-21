@@ -58,6 +58,16 @@ DEFAULT_ANSIBLE_MCP_TRANSPORT = "streamable_http"
 DEFAULT_ANSIBLE_MCP_TIMEOUT_MS = 10000
 DEFAULT_ANSIBLE_NATIVE_EXECUTABLE = "ansible-inventory"
 
+# ServiceNow read-tier ingestion defaults (SPEC-067 R-2). Off by default; the
+# native REST/Table-API connector is inert until the flag is enabled and a base
+# URL is wired (the OQ-3 fallback taken at Stage-0 2026-10-19 — the PDI exposes
+# no ServiceNow MCP server). The timeout mirrors the HTTP/Ansible defaults. The
+# admitted read-tool allowlist, tables, field projections, and tiers are
+# gateway-owned binding config (``ingestion/servicenow_binding.py``), never
+# target-advertised metadata; the credential set resolves through the SPEC-068
+# seam (OQ-1 = ``oauth2_client_credentials``). No new dependency: ``httpx``.
+DEFAULT_SERVICENOW_TIMEOUT_MS = 10000
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -189,6 +199,21 @@ class GatewaySettings:
     ansible_native_enabled: bool = False
     ansible_inventory_path: str = ""
     ansible_native_executable: str = DEFAULT_ANSIBLE_NATIVE_EXECUTABLE
+    # ServiceNow read-tier ingestion connector (SPEC-067 R-2): off by default.
+    # The native REST/Table-API connector (the OQ-3 fallback taken at Stage-0
+    # 2026-10-19) admits only the six gateway-owned read tools declared in
+    # ``ingestion/servicenow_binding.py`` (incident/change_request list+get,
+    # user.get, cmdb_ci.get), each a fixed table with an allowlisted field
+    # projection, a validated ``sys_id``, and a capped ``sysparm_limit``. The
+    # bound credential set resolves through the SPEC-068 seam (OQ-1 =
+    # ``oauth2_client_credentials``); it is operator config, never a model
+    # argument, and no token reaches a result or log. Base URL, credential set,
+    # and timeout are operator configuration, never model args.
+    servicenow_enabled: bool = False
+    servicenow_base_url: str = ""
+    servicenow_credential_set: str = ""
+    servicenow_credential_sets_path: str = ""
+    servicenow_timeout_ms: int = DEFAULT_SERVICENOW_TIMEOUT_MS
 
     def __post_init__(self) -> None:
         """Fail fast on a password-policy override that would *weaken* the floor.
@@ -484,6 +509,26 @@ class GatewaySettings:
             ansible_native_executable=os.getenv(
                 "GATEWAY_ANSIBLE_NATIVE_EXECUTABLE",
                 DEFAULT_ANSIBLE_NATIVE_EXECUTABLE,
+            ),
+            # ServiceNow read-tier ingestion knobs (SPEC-067 R-2). Off by
+            # default; the credential-set path falls back to the http/browser
+            # mount so one synced secret can serve it, and no inline credential
+            # value is ever accepted (the set is a file path reference only).
+            servicenow_enabled=_env_bool("GATEWAY_SERVICENOW_ENABLED", "false"),
+            servicenow_base_url=os.getenv("GATEWAY_SERVICENOW_BASE_URL", ""),
+            servicenow_credential_set=os.getenv(
+                "GATEWAY_SERVICENOW_CREDENTIAL_SET", ""
+            ),
+            servicenow_credential_sets_path=(
+                os.getenv("GATEWAY_SERVICENOW_CREDENTIAL_SETS", "")
+                or os.getenv("GATEWAY_HTTP_CREDENTIAL_SETS", "")
+                or os.getenv("GATEWAY_BROWSER_CREDENTIAL_SETS", "")
+            ),
+            servicenow_timeout_ms=int(
+                os.getenv(
+                    "GATEWAY_SERVICENOW_TIMEOUT_MS",
+                    str(DEFAULT_SERVICENOW_TIMEOUT_MS),
+                )
             ),
         )
 

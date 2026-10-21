@@ -11,11 +11,11 @@ if [ -z "$PROFILE" ]; then
   exit 1
 fi
 
-if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ] || [ "$PROFILE" = "secrets-dev" ] || [ "$PROFILE" = "ansible-dev" ]; then
+if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ] || [ "$PROFILE" = "secrets-dev" ] || [ "$PROFILE" = "ansible-dev" ] || [ "$PROFILE" = "servicenow-dev" ]; then
   # mutating-dev (SPEC-022 R-3), browser-dev (SPEC-049 R-7), secrets-dev
-  # (SPEC-062 R-7) and ansible-dev (SPEC-069 R-6) are the committed dev
-  # postures, always wired in below — they are never switchable LLM
-  # provider profiles.
+  # (SPEC-062 R-7), ansible-dev (SPEC-069 R-6) and servicenow-dev (SPEC-067 R-6)
+  # are the committed dev postures, always wired in below — they are never
+  # switchable LLM provider profiles.
   echo "$PROFILE is not a switchable LLM runtime profile" >&2
   exit 1
 fi
@@ -26,9 +26,9 @@ if [ ! -d "$PROFILE_DIR" ]; then
 fi
 
 # The LLM provider profile is switchable; the mutating-dev (SPEC-022
-# R-3), browser-dev (SPEC-049 R-7), secrets-dev (SPEC-062 R-7) and
-# ansible-dev (SPEC-069 R-6) profiles are the committed dev postures and
-# always stay wired in.
+# R-3), browser-dev (SPEC-049 R-7), secrets-dev (SPEC-062 R-7),
+# ansible-dev (SPEC-069 R-6) and servicenow-dev (SPEC-067 R-6) profiles are
+# the committed dev postures and always stay wired in.
 cat <<EOF > "$SCRIPT_DIR/dev-k8s/kustomization.yaml"
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -39,6 +39,7 @@ resources:
   - ../runtime-profiles/mutating-dev
   - ../runtime-profiles/browser-dev
   - ../runtime-profiles/ansible-dev
+  - ../runtime-profiles/servicenow-dev
 configMapGenerator:
   - name: platform-runtime-config
     behavior: merge
@@ -46,6 +47,7 @@ configMapGenerator:
       - ../runtime-profiles/mutating-dev/mutating.env
       - ../runtime-profiles/browser-dev/browser.env
       - ../runtime-profiles/ansible-dev/ansible.env
+      - ../runtime-profiles/servicenow-dev/servicenow.env
       - ../runtime-profiles/secrets-dev/secrets.env
 patches:
   # SPEC-049: chromium-headless-shell sidecar + credential-set mount on
@@ -57,6 +59,13 @@ patches:
   # SPEC-069 R-6: Ansible MCP credential-set mount on the tool-gateway pod
   # (ansible-dev posture); the mock server itself ships as a profile resource.
   - path: ../runtime-profiles/ansible-dev/tool-gateway-ansible-credentials.yaml
+    target:
+      kind: Deployment
+      name: tool-gateway
+  # SPEC-067 R-6: ServiceNow credential-set mount on the tool-gateway pod
+  # (servicenow-dev posture); the mock Table-API server itself ships as a
+  # profile resource.
+  - path: ../runtime-profiles/servicenow-dev/tool-gateway-servicenow-credentials.yaml
     target:
       kind: Deployment
       name: tool-gateway

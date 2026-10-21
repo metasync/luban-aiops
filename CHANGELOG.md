@@ -11,6 +11,92 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.49.0 — 2026-10-20
+
+Feature release: ServiceNow ITSM read-tier MCP-ingestion pilot. The second
+concrete ingestion pilot, delivered under
+[SPEC-067](docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md): a
+**ServiceNow read-tier connector** beneath `tool-gateway` that reuses the
+shipped `BaseTool` / `ToolRegistry` seam (SPEC-007) and preserves Luban policy,
+approval, redaction, evidence, and audit end to end. **Stage-0 transport
+verification (2026-10-19) on the operator's PDI found ServiceNow's own MCP
+server unprovisioned**, tripping the OQ-3 fallback: R-2 is therefore a
+hand-rolled **REST/Table-API** connector (`servicenow_native.py`, pure `httpx`,
+mirroring SPEC-069's `ansible_native.py`) rather than a binding of the generic
+MCP adapter — the kernel still never becomes an MCP client. It binds **six
+read-tier `servicenow.*` tools** (`incident.list`/`.get`,
+`change_request.list`/`.get`, `user.get`, `cmdb_ci.get`), is **deny-by-default**
+(`GATEWAY_SERVICENOW_ENABLED` defaults to `false`) with **no mutating verb
+admitted** (an admission allowlist, never a model-selected tool set), and
+authenticates with OAuth2 `client_credentials` resolved through SPEC-068's
+named credential-set seam. Adds **no new dependency** (`httpx` already present;
+`mcp>=2.3` from SPEC-069 is unused by the REST path). Only
+`products/tool-gateway` carries code; the dev target ships as a
+`shared/platform-ops` GitOps runtime profile.
+
+### Added
+
+- **SPEC-067 R-2: ServiceNow REST/Table-API read-tier connector + binding.**
+  New `ingestion/servicenow_native.py` is a GET-only Table-API client
+  (`{base}/api/now/table/{table}[/{sys_id}]`) with a single transport call site,
+  a gateway-owned per-table field-projection allowlist (`_project`) that strips
+  secret columns (e.g. `sys_user.password`/`user_password`) post-response as
+  defense in depth, and `sys_id` (32-hex) + `sysparm_limit` (≤100, default 20)
+  validation **before** any network call; `ingestion/servicenow_binding.py`
+  statically declares the six OQ-4 read tools with gateway-owned JSON-Schemas
+  and the `build_servicenow_connector` factory. Tables, field projections, and
+  risk tiers are operator configuration, never target-derived. The credential
+  resolves through SPEC-068's `resolve_outbound_auth`
+  (`oauth2_client_credentials`); the bearer reaches the target but never a
+  result, evidence envelope, or log.
+- **SPEC-067 R-3: deny-by-default at the gateway admission allowlist.** Per the
+  SPEC-069 R-3 faithful reinterpretation, the canonical action-based policy
+  bundle names **zero** individual tools, so deny-by-default is enforced by
+  `SERVICENOW_ADMITTED_TOOLS` — the connector registers only the six declared
+  read tools; any unlisted name (a write verb, or the deferred `problem` /
+  `attachment` capabilities) is never registered → `TOOL_NOT_FOUND`. **No bundle
+  edit; `make sync-policy` not invoked; the policy gates stay green unchanged.**
+- **SPEC-067 R-4/R-5: audit attribution + fail-closed / no-fabrication
+  guardrail.** The connector sets `source_system="servicenow"` on every result's
+  evidence and declares the opt-in `audit_attribution` hook
+  (`target_identity_mode="acting_service"`), which the shipped SPEC-069 gateway
+  seam folds — with the requester `sub`/`act`/`username`/`roles`, target system,
+  tool name, and outcome — into both the `tool_invoked` log event and the durable
+  audit event *before* redaction can replace it. A timeout or connect error maps
+  to `SERVICENOW_TIMEOUT`/`SERVICENOW_UNREACHABLE` and adds
+  `failure_class="target_unavailable"`; an upstream 4xx/5xx stays a plain
+  `SERVICENOW_UPSTREAM_ERROR` fact (no `failure_class`), distinct from both a
+  target outage and a policy denial — never an empty fabricated success.
+- **SPEC-067 R-6: dev target provisioning + overlay wiring.** A new
+  resource-bearing `runtime-profiles/servicenow-dev` overlay ships a **thin
+  in-cluster mock** (`servicenow-mock-table-api`, reusing the `tool-gateway`
+  image with `mock_servicenow_table_api.py` mounted from a ConfigMap) that
+  answers `/oauth_token.do` (client_credentials grant) and bearer-protected
+  Table-API reads, so CI makes **no live external call** (OQ-5).
+  `sync-servicenow-credentials.sh` generates one credential into **two sinks**
+  (the gateway credential set + the mock's OAuth/bearer gate) so they cannot
+  drift; `e2e/servicenow-check.sh` is a gated live-check (disabled/enabled
+  branch, deny-by-default negatives, a fail-closed matrix, six gated live reads
+  with a `sys_user` secret-stripping assertion, and client-secret/access-token
+  redaction) with an opt-in `STRICT_LIVE=true`. `tests/test_servicenow_native.py`
+  (40 tests) covers registration/tier, the operator-declared set, projection,
+  pre-transport validation, the fail-closed matrix, the credential seam, and the
+  gateway-level R-3/R-4/R-5 audit paths.
+
+### Changed
+
+- Living docs updated for the landed pilot: `products/tool-gateway/README.md`,
+  the delivery-roadmap R6 status, `identity-and-authorization-design.md` (the
+  Service Identity Model records ServiceNow as the second outbound-plane
+  consumer, with the **production** user-delegated path still a dependency on
+  [SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md) that
+  does not block this read-only dev slice), and the spec index
+  (`docs/specs/README.md`).
+- No contract, policy-bundle, audit-event-type, or secret-vocabulary change;
+  `make validate-policy`, `validate-policy-scenarios`, and
+  `validate-secret-vocabulary` stay green with the bundle byte-identical, and
+  `uv.lock`/`pyproject.toml` gain no dependency (only the release version bump).
+
 ## 0.48.0 — 2026-10-17
 
 Feature release: Ansible read-tier MCP-ingestion pilot. The first concrete

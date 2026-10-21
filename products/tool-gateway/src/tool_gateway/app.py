@@ -192,6 +192,22 @@ def _build_tool_registry(
         ansible_connector.register_tools(registry)
         LOGGER.info("ansible native read-only connector registered")
 
+    if settings.servicenow_enabled:
+        # SPEC-067 R-2: the native ServiceNow REST/Table-API connector (the OQ-3
+        # fallback taken at Stage-0 2026-10-19 — the PDI exposes no ServiceNow
+        # MCP server). It admits only the six gateway-owned read tools in
+        # ``servicenow_binding.py`` (read tier), resolves its credential through
+        # the SPEC-068 seam, and fails closed on any transport/upstream fault.
+        # No app-lifecycle hooks — the session is per call — so it is registered
+        # here and not added to the returned tuple; the tuple shape is unchanged.
+        from tool_gateway.ingestion.servicenow_binding import (
+            build_servicenow_connector,
+        )
+
+        servicenow_connector = build_servicenow_connector(settings)
+        servicenow_connector.register_tools(registry)
+        LOGGER.info("servicenow native read-tier connector registered")
+
     return registry, browser_connector
 
 

@@ -2,17 +2,22 @@
 
 ## Status
 
-- status: `draft`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-10-06
 - release slice: **R6 — External System Integration via MCP Ingestion** (first slice;
   see the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md#r6-external-system-integration-via-mcp-ingestion))
-- target version: unversioned while `draft` — R6 has no approved slice yet, so the
-  version is pinned only at approval (the platform is at v0.46.0; R5 closed at
-  v0.45.0 and SPEC-066 shipped standalone at v0.46.0).
-- related ADRs: **none at draft.** Adopting the official MCP SDK as the ingestion
-  transport (OQ-3, resolved 2026-10-07) is recorded here; whether it also merits its
-  own ADR is an approval-time call. The outbound-credential acquisition-locus ADR
+- target version: **v0.49.0 — delivered 2026-10-20** (the next minor slot after
+  SPEC-069's v0.48.0). SPEC-070's planning target re-slots to v0.50.0 accordingly.
+  The `VERSION` file now reads `0.49.0`; the release/version bump crossed as its own
+  delivery gate after the full aggregate `make verify` passed green (exit 0).
+  (R5 closed at v0.45.0 and SPEC-066 shipped standalone at v0.46.0.)
+- related ADRs: **none.** The transport decision (OQ-3, resolved 2026-10-07:
+  official MCP SDK as conditional primary, REST/Table-API as fallback) is recorded
+  here; **Stage-0 (2026-10-19) selected the REST fallback** because the target PDI
+  does not expose ServiceNow's own MCP server. The transport merits **no** ADR — it is
+  a connector-local REST binding reusing SPEC-068 (mirroring SPEC-068's no-ADR Option
+  A). The outbound-credential acquisition-locus ADR
   trigger (Option A connector-local vs B/C centralized) now lives in
   [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md), where this
   spec's original R-1 was extracted; this pilot consumes that substrate and introduces
@@ -39,23 +44,35 @@
 
 > **Approval note (SDD discipline).** The full scaffold (`spec.md` + `plan.md` +
 > `tasks.md`) was authored together per the SPEC-064/SPEC-065/SPEC-066
-> same-session precedent. At drafting this spec is deliberately **not**
-> decision-complete: the source memos authorize **no implementation** and hand the
-> scope questions to "the first pilot spec" — i.e. to this document. Three Open
-> Questions therefore block `approved` — OQ-1, OQ-4, and OQ-5, all PDI-gated
-> live-target facts. OQ-2 (substrate-vs-pilot coupling) was resolved 2026-10-08 by
-> extracting the credential extension to SPEC-068; OQ-3 (transport) was resolved
-> 2026-10-07; OQ-6 (provisioning) moved to and was resolved in SPEC-068.
-> `plan.md`/`tasks.md` stay banner-marked provisional until the remaining three are
-> resolved and ratified. None of the three blocks SPEC-068 — which is exactly why the
-> substrate was extracted: OQ-1 now only *selects* among schemes SPEC-068 already
-> ships, and OQ-4/OQ-5 scope and validate this pilot's live target.
+> same-session precedent. At drafting the spec was deliberately **not**
+> decision-complete: the source memos authorized **no implementation** and handed the
+> scope questions to "the first pilot spec" — i.e. to this document. **All six Open
+> Questions are now resolved and the spec is `approved` (operator, 2026-10-20):**
+> OQ-1 (auth scheme), OQ-4 (read-operation set), and OQ-5 (validation model) were
+> resolved by operator direction on 2026-10-20; OQ-2 (substrate-vs-pilot coupling)
+> was resolved 2026-10-08 by extracting the credential extension to SPEC-068; OQ-3
+> (transport) was resolved 2026-10-07 and validated read-only against the operator's
+> PDI 2026-10-19 (the REST/Table-API fallback is taken); OQ-6 (provisioning) moved to
+> and was resolved in SPEC-068. The `plan.md`/`tasks.md` banners are lifted to
+> **binding**: approval authorizes implementation to *begin*. Commit/push,
+> deployment, and any `VERSION` bump remain separate authorization gates not granted
+> here. None of the resolved questions reopened SPEC-068 — OQ-1 only *selects* among
+> schemes SPEC-068 already ships, and OQ-4/OQ-5 scope and validate this pilot's
+> live target.
 
 ## Summary
 
 Give operators real read-only ServiceNow ITSM actions through the platform's
-existing governed tool path — consuming ServiceNow's **own** MCP server via the
-official `mcp` Python SDK behind a gateway-owned adapter. This pilot **depends on**
+existing governed tool path. **Transport (Stage-0 settled 2026-10-19):** the pilot
+builds a ServiceNow **REST/Table-API native connector** — OQ-3's documented
+fallback, taken because read-only verification on the operator's PDI (`dev417985`)
+found ServiceNow's **own** MCP server unavailable there (the AI Platform stack is
+not provisioned; no MCP plugin can be activated). The connector mirrors the shipped
+`ansible_native.py` fallback, registering `servicenow.*` read tools on the same
+SPEC-007 `BaseTool` seam and adding **no new dependency** (`httpx` is already
+present). The MCP-SDK path (via SPEC-069's generic adapter) stays the conditional
+alternative for a differently-entitled instance that does expose ServiceNow's own
+MCP server. This pilot **depends on**
 [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md) — the
 target-agnostic outbound execution-credential substrate (bearer / OAuth2
 `client_credentials`) extracted from this spec's original R-1 — which lands first and
@@ -120,15 +137,19 @@ Acceptance criteria:
 
 ### R-2: ServiceNow read-tier ingestion connector beneath the gateway
 
-Add a ServiceNow ingestion client owned by tool-gateway that registers read-tier
+Add a ServiceNow ingestion connector owned by tool-gateway that registers read-tier
 tools into the same registry as native tools, reusing the SPEC-007
-`BaseTool`/`ToolDefinition`/`ToolRegistry` seam. The transport consumes
-**ServiceNow's own MCP server** through the **official `mcp` Python SDK**, wrapped
-in a gateway-owned ingestion adapter that keeps every governance decision
-(classification, policy, redaction, audit) tool-gateway-side. The `mcp` dependency
-is added to **tool-gateway only**; the agent-platform kernel never becomes an MCP
-client. *(Transport direction resolved 2026-10-07 — OQ-3; scope still provisional
-on OQ-4.)*
+`BaseTool`/`ToolDefinition`/`ToolRegistry` seam. **Transport (Stage-0 settled
+2026-10-19 — OQ-3 fallback taken):** a hand-rolled **REST/Table-API native
+connector** (`servicenow_native.py`), mirroring the shipped `ansible_native.py`
+fallback — read-only verification on the operator's PDI (`dev417985`) found
+ServiceNow's **own** MCP server unavailable there, so the MCP-SDK path is not
+exercisable on this target. Every governance decision (classification, policy,
+redaction, audit) stays tool-gateway-side. The REST connector uses `httpx` (already
+a tool-gateway dependency) and adds **no new dependency**; the agent-platform kernel
+never becomes an MCP client. *(OQ-3 resolved 2026-10-07 with the MCP SDK as the
+conditional primary and REST as the fallback; Stage-0 selected the fallback on
+2026-10-19. Scope still provisional on OQ-4.)*
 
 Acceptance criteria:
 
@@ -137,32 +158,46 @@ Acceptance criteria:
 - Each call carries the requester identity and the acting service identity to the
   target, per the identity model's three-plane logging.
 - No write/mutating ServiceNow operation is exposed in this slice (read tier only).
-- The connector talks to ServiceNow's own MCP server via the official `mcp` SDK;
-  `mcp` is a direct dependency of tool-gateway only, and the MCP protocol is never
-  hand-rolled. A hand-rolled REST/Table-API connector is the documented **fallback**
-  if Stage-0 (OQ-1/OQ-4) finds the target instance's MCP server unavailable,
-  preview-only, or short of the needed read coverage.
-- The MCP session authenticates using the R-1 credential scheme (bearer/OAuth2); no
-  credential or token crosses the adapter into a tool result or log.
+- The connector talks to ServiceNow's REST **Table API** (`/api/now/table/...`) via
+  `httpx`, following the `ansible_native.py` / skills-incidents connector pattern;
+  the tool set is **statically declared** by the operator (as `ansible_binding.py`
+  declares its admitted tools), never auto-discovered from the target. The MCP-SDK
+  path (SPEC-069's generic adapter) remains the documented alternative for a
+  differently-entitled instance that exposes ServiceNow's own MCP server; if it is
+  ever taken, server-advertised metadata stays untrusted (R-3).
+- The REST session authenticates using the R-1/SPEC-068 credential scheme (the
+  scheme OQ-1 pins — bearer / OAuth2 `client_credentials` / basic); no credential or
+  token crosses the connector into a tool result or log.
 
 ### R-3: Deny-by-default policy coverage for ServiceNow tools
 
-ServiceNow tools are deny-by-default until the policy bundle names them, and each
-named read tool resolves to the correct tier.
+ServiceNow tools are deny-by-default at the **gateway admission allowlist**, and each
+admitted tool resolves to read tier. The policy bundle is **action-based** (role ×
+action), not a per-tool-name allowlist, so R-3 requires **no bundle change**: read-tier
+tools ride the existing `tools:invoke` grant exactly as the `k8s.*`/`http.*`/`ansible.*`
+read tools already do (the SPEC-069 R-3 faithful reinterpretation).
 
 Acceptance criteria:
 
-- An unlisted ServiceNow tool is denied (deny-by-default preserved).
-- **Tool metadata advertised by the MCP server is untrusted input.** The adapter
-  admits only tools explicitly named in the policy bundle and never auto-registers
-  whatever the server advertises; a server-declared annotation, `readOnlyHint`, or
-  description never sets a tool's tier or grants approval (the MCP-exposure spike's
-  "remote annotations never auto-approve" invariant, applied to ingestion).
-- Each named read tool resolves to read tier; the policy-bundle scenario suite
-  (`make validate-policy-scenarios`) gains coverage for the new tool names.
-- `make validate-policy` and `make policy-diff` stay green after the bundle change
-  is synced (authored canonically in `shared/shared-contracts/policies/`, never
-  edited in place).
+- An unlisted ServiceNow tool is denied: it is never registered (the allowlist is
+  connector config — `SERVICENOW_ADMITTED_TOOLS` — not a bundle entry), so invoking it
+  returns `TOOL_NOT_FOUND` — deny-by-default preserved without naming any tool in the
+  bundle. The deferred `problem`/`attachment` capabilities and any write/mutation name
+  are structurally absent from the allowlist.
+- **The admitted tool set is operator-declared, never target-derived.** Under the
+  REST path the connector registers only the six statically declared `servicenow.*`
+  tools (as `servicenow_binding.py` declares them); there is no auto-discovery from the
+  target. If the MCP-SDK alternative is ever taken, **server-advertised metadata is
+  untrusted input** — a server-declared annotation, `readOnlyHint`, or description never
+  sets a tool's tier or grants approval (the MCP-exposure spike's "remote annotations
+  never auto-approve" invariant, applied to ingestion).
+- Each admitted tool resolves to **read tier** (`risk_level="read"`), which the gateway
+  maps to `tools:invoke` alone, never `tools:mutate`; no admitted tool resolves to write
+  or admin tier. With no bundle edit, `make sync-policy` is not invoked and
+  `make validate-policy-scenarios`, `make validate-policy`, and `make policy-diff` stay
+  green **unchanged** (no drift, bundle byte-identical); the read-tier-only and
+  deny-by-default invariants are asserted by the gateway tool tests
+  (`test_servicenow_native.py`) instead of a per-tool-name scenario.
 
 ### R-4: Audit fidelity for external ingestion
 
@@ -234,23 +269,30 @@ Acceptance criteria:
   [SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md)'s Non-Goals
   (Option A connector-local is the default; B/C would require their own ADR).
 - **Hand-rolling the MCP protocol, or adopting a third-party ServiceNow MCP
-  *server*.** The official `mcp` Python SDK is the transport (OQ-3, resolved
-  2026-10-07); the protocol is never re-implemented here. We consume ServiceNow's
-  **own** MCP server — not a community/marketplace one (supply-chain + license
-  risk, an extra stateful deployment, and it would re-expose our credential to a
-  component we do not control).
+  *server*.** If the MCP-SDK path is ever taken (OQ-3's conditional primary), it uses
+  the official `mcp` Python SDK — the protocol is never re-implemented here — against
+  ServiceNow's **own** MCP server, not a community/marketplace one (supply-chain +
+  license risk, an extra stateful deployment, and it would re-expose our credential to
+  a component we do not control). Stage-0 (2026-10-19) took the REST/Table-API
+  fallback instead, so this pilot exercises no MCP protocol at all.
 
 ## Impact
 
-- products touched: `products/tool-gateway` (a new MCP ingestion adapter + ServiceNow
-  connector, tool registration, and a new **direct `mcp` dependency** in
-  tool-gateway's `pyproject.toml`/`uv.lock` — the kernel's separate lockfile is
-  untouched); `shared/shared-contracts/policies` (ServiceNow tool names/tiers);
-  `shared/platform-ops/gitops/dev-k8s` (overlay + the ServiceNow credential-set entry).
+- products touched: `products/tool-gateway` (a new ServiceNow **REST/Table-API native
+  connector** registering `servicenow.*` read tools on the SPEC-007 seam, mirroring
+  `ansible_native.py`). **No new dependency** — the connector uses `httpx` (already
+  present), and `mcp>=2.3` is already a direct tool-gateway dependency from SPEC-069
+  (unused by the REST path; the kernel's separate lockfile is untouched either way);
+  `shared/platform-ops/gitops` (the `servicenow-dev` runtime-profile overlay + the
+  dev-k8s ServiceNow credential-set entry). **No `shared/shared-contracts/policies`
+  change** — the bundle is action-based (role × action), so read-tier `servicenow.*`
+  tools ride the existing `tools:invoke` grant and deny-by-default lives at the
+  connector admission allowlist (`SERVICENOW_ADMITTED_TOOLS`), not the bundle (R-3).
   The outbound-credential code (`credential_sets.py`, `http_connector.py`,
   `oauth_client.py`) is delivered by **SPEC-068**, on which this pilot depends.
-- contracts touched: the policy bundle (new read-tier ServiceNow tool names). The
-  credential-file shape and any secret-vocabulary work belong to SPEC-068.
+- contracts touched: **none in the policy bundle** (it is action-based; it names no
+  per-tool entry — R-3). The credential-file shape and any secret-vocabulary work
+  belong to SPEC-068.
 - identity / policy / audit / execution safety impact: **consumes** SPEC-068's outbound
   execution credential (the External Execution Identity's first concrete form); audit
   gains external-target attribution; read-tier only, so no new HITL surface;
@@ -264,16 +306,19 @@ Acceptance criteria:
 
 ## Open Questions
 
-These block `approved` and must all be resolved before approval. **OQ-2 and OQ-3 are
-resolved and OQ-6 moved to SPEC-068; the remaining three — OQ-1, OQ-4, OQ-5 — are open,
-and all three are PDI-gated live-target facts** (Stage-0 verification, not design
-preferences). None of the three blocks SPEC-068.
+**All Open Questions are resolved; the spec is `approved` (2026-10-20).** OQ-2 and
+OQ-3 were resolved earlier and OQ-6 moved to SPEC-068; OQ-1, OQ-4, and OQ-5 — the
+three PDI-gated live-target facts — were resolved by operator direction 2026-10-20
+(each below). None of them ever blocked SPEC-068.
 
-- **OQ-1 (fact, PDI-gated):** What is ServiceNow's actual auth scheme for the target
-  surface (its MCP server and/or REST) — static bearer, OAuth2 `client_credentials`,
-  mTLS, or Basic? This now **selects among the schemes SPEC-068 already ships** (and
-  confirms whether the pilot needs the token client at all); it no longer defines the
-  substrate's shape, which is why SPEC-068 is approvable without it.
+- **OQ-1 (fact, PDI-gated) — RESOLVED 2026-10-20 (operator direction):** ServiceNow's
+  auth scheme for the **REST Table API** (Stage-0 2026-10-19 confirmed the target PDI
+  exposes REST only — no MCP server) is **OAuth2 `client_credentials`**, against a
+  **dedicated least-privilege read-only integration service account** (never `admin`).
+  **Basic** is an acceptable dev bootstrap but not the production posture; **mTLS is
+  out** (it would reopen SPEC-068's scope). All are schemes SPEC-068 already ships, so
+  this *selects among* them with **no substrate change**; `client_credentials`
+  exercises SPEC-068's token client (in-memory cache + near-expiry refresh + redaction).
 - **OQ-2 (architectural fork) — RESOLVED 2026-10-08 (operator decision).** Extract
   the credential-scheme extension into a standalone target-agnostic substrate spec —
   **[SPEC-068](../SPEC-068-outbound-execution-credential-schemes/spec.md)** — so the
@@ -292,13 +337,46 @@ preferences). None of the three blocks SPEC-068.
   taken. This reverses the drafting-time lean in the exposure spike's "don't take
   the dependency until it earns its keep" posture — overridden because ServiceNow now
   ships an official MCP server and an official maintained SDK exists.
-- **OQ-4 (scope):** Which ServiceNow read-tier operations are in scope (incident
-  query, CMDB read, user/assignment lookup, attachment read?) and what are their
-  policy tier and argument-validation shape?
-- **OQ-5 (fact, go/no-go):** Can the pilot be validated against the local dev-k8s
-  cluster, or does it require a real ServiceNow tenant / Personal Developer
-  Instance? The MCP-ingestion spike §2 named dev-cluster feasibility a go/no-go
-  gate for the theme.
+  - **Stage-0 update 2026-10-19 (fallback taken).** Read-only verification on the
+    operator's PDI (`dev417985`, an **Australia**-build instance) found ServiceNow's
+    **own MCP server UNAVAILABLE** — a provisioning/entitlement gap, not a release
+    gap: AI Agent Studio / AI Platform / AI Control Tower are absent (page-not-found
+    routes, 0 modules), **no `sys_plugins` entry named MCP/AI-Platform/GenAI is even
+    available to activate**, there is no MCP Server Console route or registration
+    table, and the Now Assist Admin console shows "Requires plugin install" on every
+    capability (`Now Assist Core` is active but `sys_gen_ai_skill` is empty). The
+    fallback condition this OQ specified is therefore **TRIPPED**: the
+    **REST/Table-API native connector** is the taken transport for this pilot, and
+    R-2 is re-scoped accordingly. The MCP-SDK path remains the conditional primary
+    for a differently-entitled instance that does expose ServiceNow's own MCP server.
+    Building **our own** MCP server around the REST API was considered and
+    **rejected** — for a single internal consumer it adds a stateful hop + a
+    credential boundary and re-wraps the same `BaseTool` seam a direct REST connector
+    already registers (the `mcp-exposure-spike.md` "retain native connectors; own a
+    server only on a documented adoption gap" posture; none of its triggers apply).
+- **OQ-4 (scope) — RESOLVED 2026-10-20 (operator direction):** six read-tier tools,
+  all at read tier (`risk_level="read"` → `tools:invoke`), deny-by-default, each name
+  explicitly allowlisted at the gateway admission connector (`SERVICENOW_ADMITTED_TOOLS`;
+  the action-based bundle names no tool — see R-3), each with a bounded argument schema
+  (fixed
+  table, allowlisted field projection, capped `sysparm_limit`, `sys_id` format
+  validation): `servicenow.incident.list`, `servicenow.incident.get`,
+  `servicenow.change_request.list`, `servicenow.change_request.get`,
+  `servicenow.user.get` (`sys_user`), and `servicenow.cmdb_ci.get` (`cmdb_ci`).
+  `change_request` is **in scope** (operator amendment 2026-10-20 — not deferred).
+  **Deferred** to a fast-follow: **attachments** (`/attachment/{sys_id}/file` returns
+  arbitrary binary — an exfil/payload/redaction surface) and **`problem`** (broader
+  ITSM); neither is needed for the incident/change-triage use case.
+- **OQ-5 (fact, go/no-go) — RESOLVED 2026-10-20 (operator direction):** validate
+  against a **local mock Table-API responder in dev-k8s** (the SPEC-069 `ansible-dev`
+  pattern, so CI makes no live external call), with **live-PDI validation as a gated,
+  separately-authorized operator check script** (a `servicenow-check.sh`-style leg),
+  never a CI dependency. This promotes the plan's Test-Strategy fallback to the
+  decision; the mock also lets the fail-closed / no-fabrication guardrail be tested
+  deterministically (simulated 4xx/5xx/timeout → a failed outcome, never a fabricated
+  success), which a live PDI cannot produce on demand. The MCP-ingestion spike §2
+  go/no-go is thereby satisfied without hard-wiring the entitlement-fragile PDI into
+  the test path.
 - **OQ-6 (provisioning) — MOVED to SPEC-068 (resolved there 2026-10-08).** The
   credential-field provisioning question travels with the extracted substrate: SPEC-068
   R-5 confirms the new fields ride the existing file-mounted `credential-sets.json` +
@@ -308,6 +386,54 @@ preferences). None of the three blocks SPEC-068.
 
 ## Changelog
 
+- 2026-10-20: **delivered as v0.49.0.** R-2–R-6 implemented on the OQ-3
+  REST/Table-API fallback (Stage-0 2026-10-19 found the PDI exposes no ServiceNow
+  MCP server). R-2: the `servicenow_native` connector + `servicenow_binding` (six
+  read-tier tools, gateway-owned field projection that strips secret columns,
+  `sys_id`/`limit` validation before transport, OAuth2 `client_credentials` via
+  SPEC-068's resolver seam). R-3: deny-by-default at the connector admission
+  allowlist `SERVICENOW_ADMITTED_TOOLS` — a documented faithful reinterpretation
+  (the action-based bundle names zero tools), **no bundle edit**. R-4/R-5: the
+  opt-in `audit_attribution` hook (`source_system="servicenow"`,
+  `target_identity_mode="acting_service"`) + fail-closed mapping
+  (`SERVICENOW_TIMEOUT`/`_UNREACHABLE` → `failure_class="target_unavailable"`; an
+  upstream 4xx/5xx stays a plain fact, distinct from a policy denial). R-6: the
+  `servicenow-dev` resource-bearing overlay + mock Table-API/`oauth_token.do`
+  responder + two-sink `sync-servicenow-credentials.sh` + gated
+  `e2e/servicenow-check.sh`. **No new dependency** (`httpx` present; `mcp>=2.3`
+  unused by the REST path). `tests/test_servicenow_native.py` (40 tests) and the
+  full tool-gateway suite (592) green; the full aggregate `make verify` passed
+  (exit 0). Status `approved` → `delivered`; `VERSION` bumped 0.48.0 → 0.49.0 in
+  lockstep; spec index + delivery-roadmap R6 flipped to delivered.
+- 2026-10-20: **approved** (operator). OQ-1, OQ-4, and OQ-5 resolved by operator
+  direction — OQ-1 = OAuth2 `client_credentials` against a dedicated least-privilege
+  read-only service account (Basic a dev bootstrap; mTLS out, it would reopen SPEC-068);
+  OQ-4 = six read-tier tools (`servicenow.incident.list/.get`,
+  `servicenow.change_request.list/.get`, `servicenow.user.get`,
+  `servicenow.cmdb_ci.get`) — `change_request` kept **in scope** by operator amendment,
+  attachments + `problem` deferred; OQ-5 = a local mock Table-API responder in dev-k8s +
+  a gated live-PDI operator check, never a CI dependency. Target version pinned
+  **v0.49.0** (SPEC-070's planning target re-slots to v0.50.0). The transport merits
+  **no** ADR (a connector-local REST binding reusing SPEC-068, mirroring its no-ADR
+  Option A). `plan.md`/`tasks.md` provisional banners lifted; status `draft` →
+  `approved`. Per the SPEC-066/069 precedent, approval **authorizes implementation to
+  begin**; commit/push, deployment, and any version bump remain separate boundaries
+  **not** granted here.
+- 2026-10-19: **Stage-0 transport verification — OQ-3 REST fallback taken; R-2
+  re-scoped to a `servicenow_native` REST connector.** Read-only verification on the
+  operator's PDI (`dev417985`, Australia build) found ServiceNow's **own MCP server
+  unavailable** (AI Platform / AI Agent Studio / AI Control Tower not provisioned; no
+  MCP-named plugin even available to activate; Now Assist Admin shows "Requires
+  plugin install"). This trips the fallback condition OQ-3 (resolved 2026-10-07)
+  specified, so the **REST/Table-API native connector** — mirroring the shipped
+  `ansible_native.py` — is the taken transport. Amended the Summary, R-2, R-3, the
+  Impact dependency note (`mcp` is already a direct dep from SPEC-069; the REST path
+  adds **no** new dependency), the target-version note (R6's first slice, SPEC-069,
+  shipped at v0.48.0), and OQ-1 (now REST-only) accordingly, and recorded "build our
+  own MCP server around the REST API" as **considered and rejected** (a stateful hop
+  + credential boundary that re-wraps the same `BaseTool` seam, for one internal
+  consumer). **OQ-1, OQ-4, OQ-5 remain open** (PDI-gated facts), so the spec stays
+  `draft`; no implementation, approval, commit/push, or version bump is authorized.
 - 2026-10-11: **Cross-reference — re-sequenced behind
   [SPEC-069](../SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md) for
   implementation.** Because this pilot's three remaining Open Questions (OQ-1, OQ-4,

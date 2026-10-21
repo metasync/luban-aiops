@@ -389,6 +389,22 @@ Represents:
 > connector-locally, **no identity-broker mint**, ADR-0015); it is a dependency of
 > the production path and does **not** block this read-only dev slice.
 
+> Landed (SPEC-067, v0.49.0): the second consumer of that outbound plane is a
+> **native ServiceNow REST/Table-API read-tier connector** — the gateway is a
+> plain `httpx` client of a ServiceNow instance's Table API (Stage-0 found the
+> target PDI exposes no ServiceNow MCP server, so this is a REST binding, not an
+> MCP-adapter binding), admitting **only** six read-tier `servicenow.*` tools,
+> deny-by-default (`GATEWAY_SERVICENOW_ENABLED` defaults `false`) at the connector
+> admission allowlist, and resolving its credential through SPEC-068's
+> `oauth2_client_credentials` named-set seam. Attribution records the requester,
+> the acting service, and `target_system=servicenow` on every read; a timeout or
+> unreachable target is attributed `failure_class=target_unavailable`, distinct
+> from a policy denial. As with the Ansible slice, the **production**
+> user-delegated path — carrying a *user* subject all the way to ServiceNow so the
+> agent never acts on its own service identity — remains
+> [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md); it is a
+> dependency of the production path and does **not** block this read-only dev slice.
+
 These identities should be logged separately so audit records can answer:
 
 - who requested the action

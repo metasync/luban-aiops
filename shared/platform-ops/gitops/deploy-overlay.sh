@@ -114,4 +114,14 @@ if kubectl -n "$NAMESPACE" get deployment ansible-mock-mcp >/dev/null 2>&1; then
   kubectl -n "$NAMESPACE" rollout status deployment/ansible-mock-mcp --timeout=120s
 fi
 
+# The thin mock ServiceNow Table-API responder (SPEC-067 R-6) likewise reuses the
+# tool-gateway image but is not one of the nine platform services, so retag it to
+# the coordinated tag as well. Guarded: only overlays shipping the servicenow-dev
+# profile (dev-k8s) create it, and deploy-overlay.sh serves every overlay.
+if kubectl -n "$NAMESPACE" get deployment servicenow-mock-table-api >/dev/null 2>&1; then
+  kubectl -n "$NAMESPACE" set image deployment/servicenow-mock-table-api \
+    "servicenow-mock-table-api=$TOOL_GATEWAY_IMAGE"
+  kubectl -n "$NAMESPACE" rollout status deployment/servicenow-mock-table-api --timeout=120s
+fi
+
 echo "Applied overlay $OVERLAY_DIR with IMAGE_TAG=$IMAGE_TAG in namespace $NAMESPACE"

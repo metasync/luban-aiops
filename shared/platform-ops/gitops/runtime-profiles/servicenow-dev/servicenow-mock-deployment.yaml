@@ -1,0 +1,94 @@
+# Thin mock ServiceNow Table-API + OAuth responder (SPEC-067 R-6) — the
+# in-cluster dev/CI target the tool-gateway's native `servicenow_native`
+# connector reads from. It stands in for a real ServiceNow instance's REST
+# surface (`/api/now/table/...` + `/oauth_token.do` OAuth2 client_credentials,
+# OQ-1's pinned scheme) so the overlay can be validated end to end with no
+# licensed PDI and no live external call (OQ-5).
+#
+# It reuses the tool-gateway image (already FROM base-uv and already shipping
+# starlette + uvicorn as runtime deps), so no new image is built;
+# deploy-overlay.sh retags it to the coordinated tool-gateway tag alongside the
+# platform services. The server script is mounted read-only from the
+# servicenow-mock-table-api ConfigMap (generated from
+# mock_servicenow_table_api.py) and run as a separate Deployment, so the gateway
+# reaches it over the Service network exactly as it would a real ServiceNow tenant.
+#
+# The client_id/client_secret/access_token come from the
+# servicenow-mock-credentials secret (sync-servicenow-credentials.sh, one
+# generator / two sinks). Absent it, the server adopts unguessable values and
+# fails every call closed (401) rather than running open. Resource caps keep the
+# footprint negligible on the shared dev node.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servicenow-mock-table-api
+  labels:
+    app: servicenow-mock-table-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: servicenow-mock-table-api
+  template:
+    metadata:
+      labels:
+        app: servicenow-mock-table-api
+    spec:
+      # Service-link env vars collide with *_PORT/_HOST settings; the mock reads
+      # its own SERVICENOW_MOCK_* env and needs no service discovery.
+      enableServiceLinks: false
+      containers:
+        - name: servicenow-mock-table-api
+          image: luban-aiops/tool-gateway:dev-local
+          imagePullPolicy: IfNotPresent
+          command: ["uv", "run", "python", "/mock/mock_servicenow_table_api.py"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: SERVICENOW_MOCK_HOST
+              value: "0.0.0.0"
+            - name: SERVICENOW_MOCK_PORT
+              value: "8000"
+            - name: SERVICENOW_MOCK_CRED_DIR
+              value: /etc/luban/servicenow-mock
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          # A TCP probe, not HTTP: the server 401s any Table-API request without
+          # the bearer and 405s a GET on /oauth_token.do, so an HTTP probe would
+          # read "unhealthy" on a perfectly healthy fail-closed server. The port
+          # being open is the readiness signal; the live-check proves the
+          # authenticated path.
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: server
+              mountPath: /mock
+              readOnly: true
+            # Optional so the pod still starts before sync-servicenow-credentials.sh
+            # runs; the server then fails closed (unguessable credentials) until the
+            # secret exists and the pod restarts.
+            - name: credentials
+              mountPath: /etc/luban/servicenow-mock
+              readOnly: true
+      volumes:
+        - name: server
+          configMap:
+            name: servicenow-mock-table-api
+        - name: credentials
+          secret:
+            secretName: servicenow-mock-credentials
+            optional: true
