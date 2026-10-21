@@ -2,10 +2,16 @@
 
 ## Status
 
-`accepted`
+`superseded by ADR-0016`
 
 - date: 2026-10-12
 - accepted: 2026-10-12
+- superseded: 2026-10-18 by [ADR-0016](0016-just-in-time-outbound-oauth-authorization.md),
+  which retains this record's target-issued authorization-code / no-broker-mint core and
+  per-user credential store, and revises its provisioning-only one-time enrollment, the PAT
+  interim variant for this slice, and the blanket no-kernel-change scope assumption to the
+  first-use/reauthorization workflow. This accepted body is immutable; only the status and
+  this supersession link changed.
 - deciders: workspace operator, through explicit SPEC-070 OQ-1 mechanism selection
 - related specs: [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md)
   (the outbound user-delegated substrate this decision unblocks);

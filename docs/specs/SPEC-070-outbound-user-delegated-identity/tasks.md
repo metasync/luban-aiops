@@ -2,144 +2,159 @@
 
 Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
 
-> **Approved — implementation authorized (2026-10-12).** SPEC-070 is `approved`: **OQ-1**
-> resolved to **(c) per-user OAuth 2.x authorization-code, connector-local**, **OQ-2** to
-> **no identity-broker mint**, and **OQ-3** answered by research (Red Hat AAP's MCP server
-> takes per-user OAuth auth-code / PATs and inherits user RBAC). ADR-0015 is **accepted**
-> and indexed. Stage 0 is therefore **complete**; the R-1..R-6 build tasks below are
-> concrete against the pinned mechanism. Commit/push, deployment, and any version bump
-> remain **separate** authorization boundaries **not** granted by approval.
+> **Approved (amended) — 2026-10-18; OQ-7 ratified 2026-10-19.** Redirect-based direction is
+> ratified; ADR-0016 is accepted and ADR-0015 superseded. OQ-7 (detailed first-use contract)
+> is **ratified** — the pre-runtime gate is closed; OQ-3 (target profile) is the sole open
+> (pre-live) gate. No R-1–R-6 runtime task is complete. The attached kickoff plan is not
+> edited. Commit/push, deployment, live tests, and release are separate.
 
-## Stage 0 — decide the mechanism, then write ADR-0015 (COMPLETE 2026-10-12)
+## Historical Stage 0 — 2026-10-12
 
-- [x] **OQ-3 (live fact) — RESOLVED:** Red Hat AAP's MCP server takes **per-user OAuth 2.x
-      authorization-code / PATs** against AAP Gateway's own authorization server and
-      **inherits the requesting user's RBAC**; 2.6 has **no OIDC discovery** and documents
-      authorization-code + password grants — **not** token-exchange or OBO. Evidence recorded
-      in ADR-0015 (researched 2026-10-12).
-- [x] **OQ-1 (decision) — RESOLVED to (c) per-user OAuth authorization-code** (operator,
-      2026-10-12), constrained by the OQ-3 fact. Scheme provisionally named
-      `oauth2_authorization_code`; R-1 fields and the R-2 grant shape are pinned in
-      `spec.md`/`plan.md`. (a)/(b) rejected, (d) deferred — see ADR-0015.
-- [x] **OQ-2 (decision) — RESOLVED to no identity-broker mint.** The mechanism stays
-      **connector-local**; the target issues the user-bound token. `identity-token.schema.json`
-      is **unchanged**; the broker's inbound `sub` is only read to look up the user's refresh
-      token. See ADR-0015.
-- [x] **Write ADR-0015** — done:
-      `docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md`, status
-      **`accepted`** (2026-10-12), recording the trust decision, mechanism, alternatives, and
-      the no-elevation / no-downgrade consequences; indexed in `docs/adr/README.md`.
-- [x] **OQ-4 (decision) — IN SCOPE (OQ-1 = c forces it):** a **new user-scoped credential
-      store** holds per-user refresh tokens — encrypted at rest, in-memory on use, rotatable,
-      revocable, redaction-covered (ADR-0015). The direction is decided; the concrete backend
-      + consent/rotation/revocation flow is an R-6 implementation task, its own reviewed
-      capability (not an ad-hoc file).
-- [x] **OQ-5 (decision) — RESOLVED in direction:** with authorization-code (not token
-      exchange), dev validation uses a mock OAuth authorization server — a **self-hosted
-      Keycloak** fronting **AWX** as the in-cluster stand-in (ties to SPEC-069 OQ-5); unit /
-      integration tests use `httpx.MockTransport`. The concrete harness is pinned in the R-2
-      test tasks.
-- [x] Flip `spec.md` status `draft` → **`approved`**, target version pinned to **v0.49.0**,
-      and the `Provisional` banners on `plan.md`/`tasks.md` lifted — done 2026-10-12 after
-      OQ-1/OQ-2/OQ-3 resolved and ADR-0015 was accepted (operator authorization).
+- [x] Selected target-issued authorization-code, no outbound broker mint, and per-user
+      credential custody; accepted/indexed ADR-0015 and approved the original scaffold.
+- [x] Recorded AAP documentation research. **Correction, 2026-10-18:** this was not a live
+      deployment fact. PKCE not enforced in 2.6 does not mean unsupported; no universal
+      token-exchange impossibility follows from absent discovery/documentation.
+- [x] Recorded Keycloak + AWX as an early dev suggestion. **Correction, 2026-10-18:** it
+      cannot stand in for actual AAP credential/RBAC compatibility proof without equivalence.
+- [x] Retained the original v0.49.0 planning target; no version bump or runtime delivery.
 
-## R-1: User-delegated outbound credential scheme (additive over SPEC-068)
+## Reopened Gate 0 — Redirect-Based Reconciliation
 
-- [ ] Add the user-delegated scheme (name + required fields per Stage 0) to
-      `_SCHEME_REQUIRED_FIELDS` in
-      `products/tool-gateway/src/tool_gateway/tools/credential_sets.py`, retaining its fields
-      in `_parse_set` exactly as SPEC-068 generalized the parser.
-- [ ] Fail closed on an unknown scheme or a set missing its required fields
-      (`LOGGER.warning`, never admitted half-formed); leave the mtime-refresh +
-      keep-last-good-on-unreadable logic unchanged.
-- [ ] Tests: a `basic`/`bearer`/`oauth2_client_credentials` set (and one with no `scheme`)
-      parses byte-identically to post-SPEC-068 (regression on the `acme-admin` sample set);
-      the user-delegated scheme requires its Stage-0 fields; unknown/incomplete sets are
-      ignored with a warning (`products/tool-gateway/tests/`).
+- [x] Record zero-redirect no-go and the later operator-approved change to first-use and
+      reauthorization redirects without credential settings, manual tokens, or CLI enrollment.
+- [x] Retain target authorization-code/server-side renewal and no new broker signing authority.
+- [x] Record selected encrypted Postgres custody and expanded portal/gateway/agent impact.
+- [x] Recheck official AAP 2.6/2.7 authorization-code, client, PKCE, and token-lifetime docs;
+      preserve evidence limits in the [report](compatibility-report.md#redirect-based-reassessment-2026-10-18).
+- [x] Draft revised requirements, plan/test gates, proposed ADR-0016, and index/roadmap state.
+- [ ] **OQ-3:** obtain intended AAP release/patch and MCP build plus Keycloak/SSO facts;
+      pin explicit endpoints, client auth, callback, PKCE S256, scopes, target account
+      linkage, refresh issuance/rotation/revocation, token lifetimes, and group/RBAC lifecycle.
+- [x] **OQ-7:** complete and ratify exact API/stream/owner-state/browser-binding contracts,
+      credential configuration fields, audit-query impact, and safe stop/continue semantics
+      against the existing signed-execution path. No callback may dispatch a tool. **Drafted
+      (proposed) 2026-10-18** in
+      [oq7-first-use-handoff-contract.md](oq7-first-use-handoff-contract.md): bounded-stop (not
+      park) signal via a reserved `TARGET_AUTHORIZATION_REQUIRED` code + additive
+      `authorization_required` tool-result object and stream v13 frame; owner-scoped
+      single-use `challenge_id`/`start_token`/`state`; portal + internal routes; replica-safe
+      transaction store; new-turn continue that re-passes policy/HITL/signed-execution/claim;
+      top-level `delegation_mode` audit field. **Ratified 2026-10-19** — the pre-runtime gate
+      is closed and R-1..R-6 may begin against it; the two flagged TTL/PKCE values stay
+      **[OQ-3]-gated** pins until the deployment facts arrive.
+- [x] Obtain revised spec/ADR approval before runtime work — **done 2026-10-18:** operator
+      approved the amended spec; ADR-0016 accepted and ADR-0015 marked `superseded by
+      ADR-0016` (status/link only, accepted body preserved). Approval authorized the OQ-7
+      design, which was **ratified 2026-10-19** — R-1..R-6 implementation may now begin
+      against the contract; runtime code that depends on the OQ-3 facts stays gated.
+- [ ] Obtain separate authorization and an actual target environment for live token/RBAC tests.
 
-## R-2: User-subject threading + the user-delegated grant
+**Build sequence after approval:** R-1 → R-6 store foundation → R-2/R-3 → R-4 → R-6
+provisioning/live proof, with R-5 failure-first tests at every step.
 
-- [ ] Extend `products/tool-gateway/src/tool_gateway/tools/auth_resolution.py` to thread the
-      requesting user's subject (from the inbound ADR-0004 delegated token) into outbound
-      resolution for a user-delegated set.
-- [ ] Implement the Stage-0 grant in `tools/oauth_client.py` (extended) or a new
-      `tools/user_delegated_client.py`: obtain a **target-issued, user-bound** token; cache in
-      memory keyed by (set name, user subject) with near-expiry refresh + single-flight,
-      mirroring `oauth_client`'s `_CachedToken`/lock discipline and **never** shared across
-      users.
-- [ ] Enforce no-elevation: the outbound token carries at most the user's target-side
-      authority; the platform does not translate or synthesize roles (mirror
-      `exchange_service.exchange_token`'s verbatim-roles invariant).
-- [ ] Fail closed with a structured gateway error when the user subject cannot be resolved —
-      never substitute a service/machine credential (see R-5).
-- [ ] Tests: cache miss → user-bound fetch → cache hit; per-(set,user) keying with no
-      cross-user reuse; near-expiry refresh; single-flight under concurrency; unresolved
-      subject fails closed; no token in logs/results/evidence (`products/tool-gateway/tests/`).
+## R-1: Credential Configuration
 
-## R-3: Trust-boundary / federation contract
+- [ ] Add `oauth2_authorization_code` validation/projection with the ratified fields; preserve
+      existing scheme/default parsing and browser credential behavior (R-1a–c).
+- [ ] Reject unsupported/incomplete/untrusted config with safe warnings and zero network calls;
+      enforce delegated generation invalidation on change/removal without changing machine sets.
 
-- [ ] Make the trust prerequisite (federated issuer the target trusts / per-user consent /
-      shared IdP, per Stage 0) **explicit per-set config**, never auto-negotiated.
-- [ ] Fail closed with a structured gateway error on a missing/broken federation; never assert
-      a user identity to a target not configured to trust it.
-- [ ] *(Only if OQ-2 = broker-minted)* add the new outbound exchange audience/path in
-      `products/identity-broker` and the matching `identity-token.schema.json` claim class.
-- [ ] Tests: a configured-trust path succeeds; a missing/broken federation fails closed; the
-      platform never emits a user assertion to an untrusted target
-      (`products/tool-gateway/tests/`, plus `products/identity-broker/tests/` iff OQ-2).
+## R-6 Foundation: Encrypted Postgres Custody
 
-## R-4: End-to-end attribution fidelity
+- [ ] Implement gateway-owned tables/role, versioned authenticated encryption, owner/target
+      binding, separately mounted keys, and product dependency/frozen lockfile (R-6a).
+- [ ] Implement single-use authorization transactions and cross-process credential generation,
+      refresh rotation, local revocation, and cache invalidation; fail closed on store/key failure.
+- [ ] Prove real-Postgres concurrency, ciphertext substitution denial, key rotation, crash/restart,
+      lost provider refresh response/commit, and no revoked-record resurrection (R-6b).
 
-- [ ] Record the human subject **and** the delegation mode (user-delegated vs SPEC-068
-      service-account) on the outbound tool-call audit trail, so a target-side action is
-      attributable end to end (identity Principles 2/3/5; ADR-0004 `sub`/`act`).
-- [ ] Confirm no token/secret/credential value surfaces in audit, evidence, a tool result, or
-      a log line (reuse SPEC-068 R-4 + SPEC-009 R-1 redaction); add no new HITL surface and
-      change no risk tier.
-- [ ] Tests: a user-delegated call's audit links the platform subject to the target identity
-      and is distinguishable from a service-account call; no secret in the trail
-      (`products/tool-gateway/tests/`).
+## R-2: Acquisition and First-Use Workflow
 
-## R-5: Secret-handling, fail-closed, no-fabrication, **no-downgrade**
+- [ ] Thread verified identity through HTTP and existing MCP calls into the resolver; add a
+      separate user-delegated client, not changes to the machine-grant client (R-2a–b).
+- [ ] Implement generation-bound cache, bounded expiry, single-flight, safe token-response
+      validation, and supported refresh behavior (R-2a/e).
+- [ ] Implement the ratified gateway/agent/portal authorization-required contract and minimal
+      workflow feedback; first-use redirect only for the needed target, no settings UI (R-2c).
+- [ ] Implement owner-only status/return, cancellation/expiry, and bounded stop/continue;
+      completion never dispatches/replays a write or bypasses approval/claims (R-2d).
+- [ ] Test first-use, later no-prompt renewal, HTTP/MCP isolation, absent user/grant, transient
+      failure versus reauthorization, cancellation, duplicate/expired state, and safe continuation.
 
-- [ ] Assert the existing redaction vocabulary covers a user-delegated token: drive it through
-      a URL projection, a tool result, an evidence field, and audit; confirm masking
-      (`url_redaction.SECRET_QUERY_PARAMS` + `redaction._VALUE_PATTERNS` already cover
-      `token`/`secret`/`authorization`).
-- [ ] Confirm `make validate-secret-vocabulary` stays green **without** a new canonical field
-      set (it pins redaction vocabularies, not credential field names).
-- [ ] Confirm `_PROJECTED_HEADERS` still omits `authorization`/`set-cookie`; hold the token in
-      memory only (never disk/result/evidence/audit/log).
-- [ ] **No-downgrade (governance crux):** assert there is **no** code path that retries a
-      failed user-delegated acquisition with `oauth2_client_credentials`/`bearer`/`basic` — a
-      silent service-account fallback would violate the OQ-4 directive, so its absence is a
-      first-class tested invariant (`products/tool-gateway/tests/`).
+## R-3: Trust and Callback Security
 
-## R-6: Provisioning + (OQ-dependent) per-user storage
+- [ ] Implement exact HTTPS callback/endpoint validation, state + PKCE S256, initiating
+      browser/user binding, single-use replay protection, and safe return locations (R-3a).
+- [ ] Verify target immutable account identity against trusted linkage; reject wrong-account
+      login, bad issuer/audience/nonce, and username/email-only linking (R-3b).
+- [ ] Enforce separate Luban policy/target RBAC and destination-bound HTTP/MCP credentials;
+      prove no leakage to another allowed origin or redirected token endpoint (R-3c/d).
+- [ ] Pin/test local cache delays, target revocation, account disable, and group removal;
+      separate SSO logout from target grant revocation (R-3e).
 
-- [ ] Document the extended `credential-sets.json` shape and confirm an operator supplies the
-      user-delegated target/client config through the existing `sync-browser-credentials.sh`
-      `BROWSER_CREDENTIAL_SETS_FILE` override — no new platform-config secret, never inline
-      env, never committed (`shared/platform-ops/gitops/sync-browser-credentials.sh`).
-- [ ] Render the dev-k8s overlay green (`make overlays`); leave the extension inert until a
-      user-delegated set is provisioned (`shared/platform-ops/gitops/dev-k8s/`).
-- [ ] *(Only if OQ-1 = per-user OAuth, per OQ-4)* implement the user-scoped credential store
-      with consent/rotation/revocation as its own reviewed capability — not an ad-hoc file.
+## R-4: Verified and Queryable Attribution
+
+- [ ] Record human, service actor, verified target identity, mode, signed correlation, and
+      safe authorization/acquisition failure classes; preserve redaction-overflow attribution.
+- [ ] Implement any ratified audit filter/schema change and asserting durable query test;
+      a configured mode label alone cannot mark successful delegation (R-4a–c).
+
+## R-5: Failure-First Security Invariants
+
+- [ ] Prove target access tokens memory-only and refresh tokens ciphertext-only; callback
+      code/state handled backend-only and omitted from JS/logs/referrers (R-5a).
+- [ ] Inject opaque test secrets into URLs, headers, responses, errors, logs, traces, results,
+      evidence, and audit; repair uncovered representations; pass secret-vocabulary gate (R-5b).
+- [ ] Spy on Basic/bearer/machine/unauthenticated/alternate-transport paths, including MCP
+      diagnostics/stdio; failed delegated acquisition invokes none (R-5c).
+- [ ] Assert failure-first callback/identity/key/store/token endpoint/malformed-response tests
+      open no target session and never grant execution authority (R-5d).
+
+## R-6 Completion: Provisioning and Operational Proof
+
+- [ ] Wire file-mounted target/client config plus least-privilege database/key mounts and
+      network access; keep delegation disabled until provisioned; pass `make overlays` (R-6c).
+- [ ] Update existing operator/configuration/troubleshooting guides for registration, first-use,
+      renewal, recovery, key rotation, revocation/offboarding, rollback, and SSO limits (R-6d).
+- [ ] With separate authorization, prove actual AAP two-user RBAC, first-use/reauthorization,
+      no-prompt renewal, account/group changes, restart, and configuration removal (R-6e).
+
+## Acceptance-to-Test Matrix
+
+All entries are **planned / not run**. Replace each planned obligation with concrete test
+paths/names and results before delivery; do not count this matrix as execution evidence.
+
+| Criteria | Planned asserting coverage | Primary boundary |
+| --- | --- | --- |
+| R-1a, R-1b, R-1c | Parser/projection regression; unsupported fields/trust/scopes; zero network calls | tool-gateway |
+| R-2a | Two users/two targets; cache expiry, scope/generation isolation, single-flight | HTTP + MCP + Postgres |
+| R-2b, R-2e | Missing grant/user; malformed response; refresh success/denial; transient-error distinction; zero target sessions | tool-gateway |
+| R-2c | First-use redirect only for needed target; no settings/manual tokens; no loop on cancellation | gateway + portal |
+| R-2d | Owner return/status; cancellation; current-policy continue; no callback dispatch, consumed-claim reuse, or unknown-write retry | agent + portal + signed execution |
+| R-3a | State/code replay, CSRF, PKCE, mix-up, browser/session substitution, open redirect | gateway callbacks |
+| R-3b, R-3c | Wrong target account; immutable linkage; ID-token validation when used; platform/target allow/deny | gateway + actual target |
+| R-3d | Allowed-but-unrelated origin, HTTP redirect, MCP destination, token-endpoint redirect | HTTP + MCP |
+| R-3e | Group removal, account disable, grant revoke, logout distinction, bounded cache delay | local + actual target |
+| R-4a, R-4b, R-4c | Verified mode/account; failed enrollment; durable audit filter round-trip; signed correlation; overflow | gateway + audit |
+| R-5a, R-5b | Ciphertext-only refresh; memory-only access; opaque-secret injection; callback/access-log/JS/referrer exclusions | gateway + portal + telemetry |
+| R-5c, R-5d | Every fallback spy remains zero; key/store/provider/callback failure opens no target session | HTTP + MCP + callback |
+| R-6a, R-6b | Real-Postgres owner/target substitution, concurrent rotation/revoke, lost response, restart/key rotation | independent processes + Postgres |
+| R-6c, R-6d | Overlay rendering; disabled-until-configured; exercised setup/revocation/recovery/rollback procedures | GitOps + operator guides |
+| R-6e | Authorized actual-target two-user first-use/renewal/RBAC/lifecycle campaign; mocks explicitly insufficient | live AAP/MCP |
 
 ## Delivery Gate
 
-- [ ] All acceptance criteria in `spec.md` verified; `make verify` green (incl.
-      `validate-secret-vocabulary` asserted unchanged, `overlays`, `portal-test`).
-- [ ] A SPEC-068-scheme regression proves `basic`/`bearer`/`oauth2_client_credentials`
-      resolution is byte-identical; the **no-downgrade** test passes.
-- [ ] ADR-0015 accepted and indexed in `docs/adr/README.md`.
-- [ ] Living state docs updated (see spec `Impact`):
-      `docs/agentic-aiops-platform/identity-and-authorization-design.md` §Service Identity
-      Model / §External Execution Identity, `products/tool-gateway/README.md`,
-      `docs/guides/architecture-overview.md`, and the delivery-roadmap (substrate delivered;
-      SPEC-069's production path now depends on it).
-- [ ] `CHANGELOG.md` entry referencing SPEC-070; `VERSION` bumped in lockstep (separate
-      authorization). Spec index in `docs/specs/README.md` updated; status set to `delivered`.
+- [ ] Gate 0 approval recorded; all criteria mapped to actual asserting tests and passed;
+      every changed contract tested in its consumers; live target evidence recorded.
+- [ ] Root `make verify` passes, including secret vocabulary, overlays, portal tests/build,
+      policy, dashboards, version checks, and disposable execution-failure campaign.
+- [ ] Existing-scheme regressions and every no-fallback/no-disclosure test pass.
+- [x] ADR-0016 accepted/indexed and ADR-0015 supersession recorded (2026-10-18).
+- [ ] Living state docs updated to implemented behavior, not planned capability; SPEC-069's
+      delivered dev record preserved and its production dependency status updated accurately.
+- [ ] Release bookkeeping and `VERSION` changes only with separate authorization; no
+      `delivered` status while acceptance or authorized live proof is pending.
 
 > **Forward path.** SPEC-070 is the production-identity dependency SPEC-069 R-1 names; the
 > Layer-2 runbook-typed-tools fast-follow (number assigned at its own drafting) also relies

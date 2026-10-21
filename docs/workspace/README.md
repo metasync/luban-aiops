@@ -44,6 +44,9 @@ This folder contains the documents that define how the platform should be organi
 - [mcp-ingestion-spike.md](mcp-ingestion-spike.md)
   - records that the MCP reopen trigger is now met, and the current MCP direction — tool-gateway as the MCP *client* of external servers via an ingestion connector beneath the gateway, staged ServiceNow → Ansible → Windows; assessment only, no implementation, ADR, or spec authorized
 
+- [ansible-write-tier-fastfollow-spike.md](ansible-write-tier-fastfollow-spike.md)
+  - boundary study for the SPEC-069 Layer-2 write-tier fast-follow (runbooks as typed tools): what it reuses from the delivered v0.48.0 adapter, what is inherited free at `risk_level="write"` (HITL park + `tools:mutate`), the four net-new contracts (launch→outcome, card payload, idempotency, blast radius), and the dev-`acting_service` vs production-`user_delegated` split that gates the production path on SPEC-070/OQ-3; assessment only, no implementation, spec, number, ADR, or approval authorized
+
 - [semantic-skill-retrieval-eval-set.md](semantic-skill-retrieval-eval-set.md)
   - the measurement artifact for gate 1 of the semantic-retrieval spike: an 18-document catalogue, the 63 real audit queries with their lexical candidate pools, and the labeling protocol, label sheet, metrics, and pre-registered decision rule that operations needs to produce a baseline; records three measured lexical defects that no vector store is required to fix; labeling and offline scoring only, no implementation authorized
 
