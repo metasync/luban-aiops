@@ -288,11 +288,14 @@ the bound user's ACLs do not cover it (§3.2).
 
 ### 3.5 Collect real sys_ids for validation
 
-The shipped live-check asserts canned mock records, so the real-data legs need
-real identifiers. Keep the `sys_id`s the smoke test printed for one `incident`,
-one `change_request`, and one `cmdb_ci`, plus the integration user's own
-`sys_id` — the last one is the best `sys_user` target because you know exactly
-which columns it holds.
+The shipped live-check takes its expected records from the environment (§5.1), so
+the real-data legs need real identifiers. Keep the `sys_id`s the smoke test
+printed for one `incident`, one `change_request`, and one `cmdb_ci`, plus the
+integration user's own `sys_id` — the last one is the best `sys_user` target
+because you know exactly which columns it holds. For each of the four, also note
+the projected value the gateway will return — `number` for the incident and the
+change, `user_name` for the user, `name` for the CI — since those are the four
+`EXPECT_*` values §5.1 requires alongside the `sys_id`s.
 
 ## 4. Wire Luban to the instance
 
@@ -435,7 +438,13 @@ CI makes **no live external call** (SPEC-067 OQ-5) — the in-cluster thin mock
 stands in for the tenant, and the wire path is additionally proven by the
 in-process Layer-2 tests. Everything below is an operator step run out-of-band.
 
-### 5.1 The shipped live-check is mock-bound — know what it can prove
+### 5.1 The shipped live-check has two modes — know which one you ran
+
+The script is parameterised, and the mode you run determines what a green run is
+evidence *of*. Report the mode alongside the result; a default-mode pass is not a
+live pass.
+
+**Default mode** — the in-cluster thin mock, and what `make e2e` runs:
 
 ```bash
 kubectl -n dev-luban-aiops port-forward svc/identity-service 18081:8000 &
@@ -444,48 +453,75 @@ STRICT_LIVE=true shared/platform-ops/e2e/servicenow-check.sh
 
 `STRICT_LIVE=true` turns the gated live leg from a skip-with-a-note into a hard
 failure, so that in dev a green run proves the live reads rather than merely
-registration and fail-closed behaviour. **Against a real tenant the script
-cannot go green**: its `[5/6]` live leg asserts the *mock's* canned records —
-incident `INC0010001`, change `CHG0020001`, user `mock.operator`, CI
-`Mock DB Cluster` — on both the `list` and the `get` legs, and a real instance
-holds none of them. The leg therefore fails on its first assertion, and under
-`STRICT_LIVE=true` a skip is a failure too.
+registration and fail-closed behaviour. Every expected record defaults to the
+mock's canned values — incident `INC0010001`, change `CHG0020001`, user
+`mock.operator`, CI `Mock DB Cluster` — so a green default run proves the wire
+path, the projection and the redaction **against the mock**. It says nothing about
+a real tenant, and it cannot: a real instance holds none of those records.
 
-What the script **does** prove against a live tenant is legs `[1/6]`–`[4/6]`,
-which are target-agnostic and worth running: unauthenticated discovery/invoke
-returns `401`; a delegated operator token is accepted; exactly six read tools are
-registered at `risk_level=read` with no write or deferred verb admitted; and the
-denied names (`servicenow.incident.update`, `servicenow.problem.get`) plus a
-missing/malformed `sys_id` fail closed with no target contact.
+**`LIVE_TARGET=true`** — a real tenant, read-only:
 
-Two legs prove nothing live and must be done by hand:
+```bash
+LIVE_TARGET=true \
+SERVICENOW_INCIDENT_SYS_ID=<32-hex> SERVICENOW_CHANGE_SYS_ID=<32-hex> \
+SERVICENOW_USER_SYS_ID=<32-hex> SERVICENOW_CI_SYS_ID=<32-hex> \
+EXPECT_INCIDENT_NUMBER=INC0001234 EXPECT_CHANGE_NUMBER=CHG0005678 \
+EXPECT_USER_NAME=<integration user> EXPECT_CI_NAME='<a real CI name>' \
+REDACTION_SECRETS_FILE=/tmp/snow-secrets.txt \
+  sh shared/platform-ops/e2e/servicenow-check.sh
+```
 
-- `[5/6]` is mock-bound (above) — **including** its `sys_user` credential-stripping
-  assertion, which rides the same canned `mock.operator` record. Re-assert the
-  stripping on a real user row yourself (§5.3).
-- `[6/6]` greps the captured tool-result bodies for the **mock's**
-  `client_secret`/`access_token`, not the live tenant's. Against a real instance it
-  passes without ever testing the credential you actually provisioned, so check the
-  live client secret and access token by hand (§5.6).
+All nine knobs are **required**, and the script refuses to start — naming the
+first one still on its default — if any is missing. That gate is the point of the
+design: the canned defaults cannot exist on a real tenant, so a knob left on its
+default means the run would be asserting mock data against a live instance and
+reporting it as a live pass, which is worse than no live pass at all because the
+two are indistinguishable in the transcript. `LIVE_TARGET=true` also implies
+`STRICT_LIVE=true` (a skipped live leg on a live run is a failed run, never a
+note), and it switches `[6/6]` from reading the mock's secret to reading
+`REDACTION_SECRETS_FILE` — a file of credential literals, one per line, blanks
+and `#` comments ignored. The file must be readable, non-empty and carry at least
+one real literal, or the script refuses; that is what stops the redaction leg
+passing vacuously once the mock's secret is out of scope.
 
-The script inspects **no** gateway logs either — log hygiene is likewise the
-manual step in §5.6.
+In this mode all six legs are live evidence, including the two that default mode
+cannot prove:
 
-So the operator workflow against a live tenant is: run the shipped script for the
-target-agnostic legs and *expect* `[5/6]` to fail on the canned records, then
-perform §5.2–§5.6 yourself. Most operators keep a private variant of the check
-with their own sys_ids substituted (the 2026-10-22 PDI run did exactly that); if
-you do, keep it out of `make e2e` — CI must never make a live external call
-(OQ-5), and a real-tenant script is not CI-testable.
+- `[5/6]` asserts your real records on both the `list` and the `get` legs. Its
+  `sys_user` credential-stripping half runs unconditionally, but treat the *mock*
+  as the target that can actually catch a projection regression: the mock
+  deliberately returns `password`/`user_password`, whereas a live row would not
+  carry them in the first place. Keep §5.3 as the real assertion of record.
+- `[6/6]` greps the captured tool-result bodies for the literals you supplied, so
+  it tests the credential you actually provisioned rather than the mock's.
 
-### 5.2 The live-data legs the script cannot run
+The script inspects **no** gateway logs in either mode, so log hygiene stays the
+manual step in §5.6 — and §5.2–§5.5 remain worth doing by hand even after a green
+`LIVE_TARGET=true` run, because they assert things the script does not (column
+subsetting against your binding, the absence of an *outbound* request on a denial,
+and durable audit attribution).
 
-For each of the four tables, drive the real reads yourself: `list` first, then
-`get` a `sys_id` **that list actually returned** (or the ones collected in
-§3.5). Confirm each returns a real record rather than a clean fail-closed code,
-and that the projection carries the fields you expect. This is the part an
-operator must own — do not report the shipped script's canned leg as a live
-pass, and do not report a canned-leg failure as a connector fault.
+Keep every live run out of `make e2e`: CI must never make a live external call
+(OQ-5), and a real-tenant run is not CI-testable. The knobs exist so that the
+live check is the *shipped* script with your values supplied, not a private fork
+of it — the 2026-10-22 PDI run predated them and needed exactly such a fork,
+which is how a mock-bound leg came to be reported as a live pass.
+
+### 5.2 The live-data legs: what the script covers, and what it does not
+
+A `LIVE_TARGET=true` run drives all four tables for you — `list` first, then `get`
+on the four `sys_id`s you supplied — and asserts the identifier column of each
+record it projected. What it does not assert is the *shape* of that projection:
+whether the returned columns are the ones your binding allows and no others. That
+is §5.3, and it is the part an operator must own.
+
+If you drive the reads by hand instead, `get` a `sys_id` **that `list` actually
+returned** (or one collected in §3.5) and confirm each returns a real record
+rather than a clean fail-closed code. Either way, keep the two failure classes
+apart: a *default-mode* run failing on `[5/6]` against a real tenant is the
+canned defaults doing their job, not a connector fault — while a
+`LIVE_TARGET=true` run failing there is a real finding about your records or your
+projection.
 
 ### 5.3 Field projection on live rows
 
@@ -536,8 +572,10 @@ not columns.
 Assert the client secret, the access token, and the `Authorization` header value
 appear in **no** tool result, evidence frame, audit payload, or gateway log line.
 Redaction is the backstop, not the design: the credential never enters those
-surfaces in the first place. The shipped script's redaction leg only tests the
-*mock's* values (§5.1), so test the live ones yourself:
+surfaces in the first place. A `LIVE_TARGET=true` run covers the tool-result half
+of this for whatever literals you put in `REDACTION_SECRETS_FILE` (§5.1) — put the
+live client secret and a live access token in it. Evidence frames, audit payloads
+and gateway log lines are covered by **no** mode, so check them yourself:
 
 ```bash
 # Read the live secret into a variable without echoing it, then count its
@@ -551,7 +589,19 @@ kubectl -n dev-luban-aiops logs deployment/tool-gateway -c tool-gateway \
   --tail=5000 | grep -cF "$LIVE_SECRET"
 ```
 
-Repeat for any captured tool result or evidence frame you recorded during §5.2.
+Build `REDACTION_SECRETS_FILE` the same way, reusing `$LIVE_SECRET` from above so
+the value never reaches your shell history or a transcript — the script only ever
+tests for these literals and never echoes them:
+
+```bash
+umask 077                                   # the file lands mode 600
+printf '%s\n' "$LIVE_SECRET" > /tmp/snow-secrets.txt
+# Append a live access token as a second line if you captured one in §3.4.
+# One literal per line; blanks and '#' comments are ignored.
+```
+
+Then repeat the log count for any captured tool result or evidence frame you
+recorded during §5.2, and delete the file when the run is over.
 
 ### 5.7 Record the result
 

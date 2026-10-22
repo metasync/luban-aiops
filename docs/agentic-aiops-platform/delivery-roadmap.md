@@ -553,6 +553,30 @@ committed `servicenow-dev` mock state and the PDI credential removed from
 in-cluster secrets. CI still makes no live external call; no code, bundle, or
 version change.
 
+**Post-validation hardening 2026-10-23 — both R-6 live-check instruments are
+parameterised, so a live run no longer needs a private fork.** The 2026-10-22 run
+had to substitute real `sys_id`s into a local variant of `servicenow-check.sh`,
+because every `[5/6]` assertion was hardcoded to the in-cluster mock's canned
+records — and a forked check script is precisely how a mock-bound leg comes to be
+reported as a live pass, the two transcripts being indistinguishable. Both
+instruments now take their expected values from the environment (SPEC-067: four
+`SERVICENOW_*_SYS_ID`s, four `EXPECT_*` values, `REDACTION_SECRETS_FILE`;
+SPEC-069: six `EXPECT_*` values, `REDACTION_SECRETS_FILE`), each defaulting to the
+mock's value so `make e2e` and OQ-5 are untouched; both default runs were
+re-verified green and outcome-identical. `LIVE_TARGET=true` **refuses to start**
+until every knob is set explicitly, implies `STRICT_LIVE=true`, and repoints the
+redaction leg at the operator's own literals — that file must be readable,
+non-empty and carry a real literal, so the leg cannot pass vacuously. Both
+redaction directions were verified against the deployed mocks (a literal present in
+a captured tool-result body fails `[6/6]`; one absent passes with the tested count
+reported). `servicenow-check.sh` also dropped `CREDENTIAL_SCHEME_UNSUPPORTED` from
+its fail-closed accept-list, that code being unreachable on the native REST path
+(only the MCP adapter emits it). Guides revised to match:
+[`servicenow-integration.md`](../guides/servicenow-integration.md) §3.5/§5.1/§5.2/
+§5.6 and [`tool-configuration.md`](../guides/tool-configuration.md). No
+product code, contract, policy, audit, or version change; CI still makes no live
+external call.
+
 The theme's central scoping finding (recorded in the
 [machine-consumer credential memo](../workspace/machine-consumer-credential-model-spike.md)):
 the long-standing "`client_credentials` gap" label conflates two planes — the

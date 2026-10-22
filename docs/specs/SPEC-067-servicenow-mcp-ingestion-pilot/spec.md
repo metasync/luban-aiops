@@ -386,6 +386,28 @@ three PDI-gated live-target facts — were resolved by operator direction 2026-1
 
 ## Changelog
 
+- 2026-10-23: **R-6's live-check instrument is parameterised, closing the
+  mock-bound hazard the 2026-10-22 run needed a private fork to work around.**
+  `shared/platform-ops/e2e/servicenow-check.sh` now takes its expected records from
+  the environment — four `SERVICENOW_*_SYS_ID`s, four `EXPECT_*` values and a
+  `REDACTION_SECRETS_FILE` — each defaulting to the in-cluster mock's canned value,
+  so `make e2e` and OQ-5 are unaffected (the default run was re-verified green and
+  outcome-identical). `LIVE_TARGET=true` **refuses to start** until all nine are set
+  explicitly, naming the first one still on its default: a canned value left in
+  place would assert mock data against a real tenant and report it as a live pass,
+  which is indistinguishable from a genuine one. That mode implies
+  `STRICT_LIVE=true` and switches `[6/6]` from the mock's secret to the supplied
+  literals, requiring the file to be readable, non-empty and to carry at least one
+  real literal so the redaction leg cannot pass vacuously. Both directions were
+  verified against the deployed mock: a literal known to appear in a captured
+  tool-result body fails `[6/6]`, and one known not to appear passes with the tested
+  count reported. Separately, `CREDENTIAL_SCHEME_UNSUPPORTED` was dropped from the
+  script's fail-closed accept-list — only the MCP adapter emits it, while this
+  connector resolves through `tools/auth_resolution.py`, whose unsupported-scheme
+  branch returns `CREDENTIAL_ACQUISITION_FAILED`; listing an unreachable code only
+  widened what the guard waved through as "target unreachable". No product code,
+  contract, policy or audit change; R-6's obligations are unchanged.
+
 - 2026-10-22: **gated live-PDI operator check (OQ-5's second leg) EXECUTED and
   PASSED against the real PDI (`dev417985`).** The connector ran live against the
   real instance through the governed path: the six read-tier tools exercised with

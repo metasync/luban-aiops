@@ -456,6 +456,29 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-23: **R-6's live-check instrument is parameterised, mirroring the same
+  change to SPEC-067's `servicenow-check.sh`.**
+  `shared/platform-ops/e2e/ansible-mcp-check.sh` now takes its expected topology
+  from the environment — `EXPECT_INVENTORY_NAME`, `EXPECT_INVENTORY_HOSTS`
+  (comma-separated), `EXPECT_JOB_TEMPLATE_NAME`, `EXPECT_JOB_ID`,
+  `EXPECT_JOB_STATUS`, `EXPECT_STDOUT_MARKER` and `REDACTION_SECRETS_FILE` — each
+  defaulting to `mock_ansible_mcp_server.py`'s canned values, so `make e2e` and
+  OQ-5 are unaffected (the default run was re-verified green and
+  outcome-identical). `LIVE_TARGET=true` **refuses to start** until all seven are
+  set explicitly, because a canned value left in place would assert the mock's
+  topology against a real AAP and report it as a live pass; it implies
+  `STRICT_LIVE=true` and switches `[6/6]` from the mock's bearer to the supplied
+  literals, requiring that file to be readable, non-empty and to carry at least one
+  real literal. Since a live inventory or host name is free text that can carry a
+  quote or a backslash, the request bodies are built through a new `json_str()`
+  helper rather than by shell interpolation, so such a value cannot change the shape
+  of the JSON sent. Both redaction directions were verified against the deployed
+  mock: a literal present in a captured tool-result body fails `[6/6]`, one absent
+  passes with the tested count reported. `CREDENTIAL_SCHEME_UNSUPPORTED` stays in
+  this script's fail-closed accept-list — unlike SPEC-067's native REST connector,
+  this path runs the generic MCP adapter, which does emit it. No product code,
+  contract, policy or audit change; R-6's obligations are unchanged.
+
 - 2026-10-17 (release): **delivered** (status `approved` → `delivered`). The generic,
   server-agnostic MCP-ingestion connector beneath tool-gateway (the gateway is the MCP
   client; the kernel never is) shipped in `products/tool-gateway` with the six read-tier

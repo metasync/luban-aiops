@@ -702,10 +702,18 @@ against a **real** AAP is an operator step, run out-of-band:
    operator-managed credential-set secret). The token rides an httpx header only
    — never a URL, result, evidence field, or log line.
 5. **Run the live-check.** `ansible-mcp-check.sh` exercises the same six reads
-   against the real server. Its live-leg canned-topology assertions are
-   mock-specific; against real AAP, confirm the structural reads (inventory list,
-   one inventory's hosts, job templates, one job, its stdout) return real data and
-   that no mutating verb is admitted.
+   against the real server. Its expected topology is parameterised: by default
+   every value is the in-cluster mock's (`demo`, `mock-host-01`/`mock-host-02`,
+   `Deploy App`, job `1` `successful`), which is what `make e2e` runs. Against real
+   AAP set `LIVE_TARGET=true` and supply all six `EXPECT_*` knobs —
+   `EXPECT_INVENTORY_NAME`, `EXPECT_INVENTORY_HOSTS` (comma-separated),
+   `EXPECT_JOB_TEMPLATE_NAME`, `EXPECT_JOB_ID`, `EXPECT_JOB_STATUS`,
+   `EXPECT_STDOUT_MARKER` — plus `REDACTION_SECRETS_FILE`. The script refuses to
+   start until every one is set explicitly, because a value left on its mock default
+   would make the run assert canned data against your server and report it as a live
+   pass. `LIVE_TARGET=true` implies `STRICT_LIVE=true` and switches the redaction
+   leg from the mock's bearer to your own literals. Keep any live run out of
+   `make e2e`: CI makes no live external call (OQ-5).
 6. **Audit.** Confirm each read audits `target_system=ansible`,
    `target_identity_mode=acting_service`, and — on any unreachable-target fault —
    `failure_class=target_unavailable`.
@@ -796,10 +804,16 @@ target contact, the live reads project the target's incident/change/user/CI
 records (gated on reachability, else a clean fail-closed code — and under
 `STRICT_LIVE=true` a skip *is* a failure), the `sys_user` read strips
 `password`/`user_password`, and the client-secret/access-token never appears in
-any tool result. All of that holds **against the in-cluster mock**: the record
-assertions are canned mock data, so the script is a wire-path and
-fail-closed-behaviour test, not a live-target test. `make e2e` deliberately runs
-it **without** `STRICT_LIVE`: OQ-5 requires CI to pass with no live external call.
+any tool result. Run bare, all of that holds **against the in-cluster mock**: every
+record assertion defaults to the mock's canned data, so a default run is a
+wire-path and fail-closed-behaviour test, not a live-target test. `make e2e`
+deliberately runs it **without** `STRICT_LIVE`: OQ-5 requires CI to pass with no
+live external call. Against a real tenant the same script takes `LIVE_TARGET=true`
+plus the four `SERVICENOW_*_SYS_ID`s, the four `EXPECT_*` values and a
+`REDACTION_SECRETS_FILE`, and refuses to start until all nine are set explicitly —
+see §5.1 of the
+[ServiceNow Live Integration Guide](servicenow-integration.md).
+
 To list the tools directly:
 
 ```bash
@@ -834,11 +848,12 @@ run out-of-band. The five steps below are the short form; the
 [ServiceNow Live Integration Guide](servicenow-integration.md) is the expanded
 runbook — it adds the tenant-side field values, both OAuth-administration
 generations, the credential-custody rules, a pre-flight credential smoke test,
-the live-data legs the shipped script cannot assert (**all** of its `[5/6]`
-record assertions are mock-canned, on the `list` legs as well as the `get` legs,
-so against a real tenant that leg fails and `STRICT_LIVE=true` cannot go green —
-only `[1/6]`–`[4/6]` are target-agnostic), the restore procedure, and day-2
-operations:
+the live-data legs and the two run modes of the shipped live-check (run bare,
+**all** of its `[5/6]` record assertions are mock-canned — on the `list` legs as
+well as the `get` legs — so against a real tenant that leg fails by design and
+`STRICT_LIVE=true` cannot go green; `LIVE_TARGET=true` with all nine knobs
+supplied explicitly is what turns all six legs into live evidence), the restore
+procedure, and day-2 operations:
 
 1. **Least-privilege service account.** Create a dedicated read-only integration
    user and an OAuth2 `client_credentials` client scoped to the four tables
@@ -855,12 +870,15 @@ operations:
    admitted tool's returned columns match the binding's allowlist and that no
    secret-bearing column is present. Where a column must be renamed or added,
    edit `servicenow_binding.py` as config — never a connector-code change.
-4. **Drive the six reads live.** `servicenow-check.sh` is mock-bound, so it is not
-   the instrument for this step: run it for the target-agnostic legs
-   (`[1/6]`–`[4/6]`) and drive the live reads yourself — `list` per table, then
-   `get` a `sys_id` that list actually returned — confirming real data comes back,
-   the `sys_user` read strips credential columns, and no write verb is admitted.
-   The expanded guide carries the exact legs and the audit query.
+4. **Drive the six reads live.** `servicenow-check.sh` is the instrument: run it
+   with `LIVE_TARGET=true` and all nine knobs supplied (the four
+   `SERVICENOW_*_SYS_ID`s, the four `EXPECT_*` values, `REDACTION_SECRETS_FILE`),
+   which drives `list` per table then `get` on your real `sys_id`s, confirming real
+   data comes back, the `sys_user` read strips credential columns, and no write verb
+   is admitted. Run bare it asserts the mock's canned records instead, so its
+   `[5/6]` leg fails against a real tenant by design — use it then only for the
+   target-agnostic legs (`[1/6]`–`[4/6]`). The expanded guide carries the exact
+   knobs, the projection and hygiene checks no mode covers, and the audit query.
 5. **Audit.** Confirm each read audits `target_system=servicenow`,
    `target_identity_mode=acting_service`, and — on any unreachable-target fault —
    `failure_class=target_unavailable`.
@@ -875,6 +893,11 @@ and every call was durably audited with `target_system=servicenow` +
 `target_identity_mode=acting_service`. Afterwards the cluster was restored to the
 committed mock state (re-run `sync-servicenow-credentials.sh` without overrides and
 repoint `GATEWAY_SERVICENOW_BASE_URL` back to the mock).
+
+That run predates the script's parameterisation, so the private variant it needed
+is now unnecessary: `LIVE_TARGET=true` supplies real `sys_id`s and expectations to
+the *committed* script directly (step 4), which is the point of the knobs — a
+forked check script is how a mock-bound leg came to be reported as a live pass.
 
 **Provisioning notes for the Australia-generation PDI (amend steps 1–2 above):**
 
