@@ -9,6 +9,7 @@
 - [getting-started.md](file://docs/guides/getting-started.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
+- [tool-configuration.md](file://docs/guides/tool-configuration.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -45,6 +46,7 @@
 - Updated deployment workflow to document eleven platform workloads and their coordinated rollout
 - Enhanced troubleshooting guidance for new secret provisioning failures and browser sidecar issues
 - Updated Makefile command documentation to reflect the complete build and deploy pipeline
+- **Added comprehensive Australia-generation PDI environment provisioning instructions replacing generic OAuth setup with concrete Machine Identity Console procedures**
 
 ## Table of Contents
 1. Introduction
@@ -66,7 +68,7 @@
 ## Introduction
 This guide helps you set up the Luban AIOps platform locally and deploy it to a Kubernetes cluster using the dev-k8s overlay. It covers prerequisites, environment setup, building images with coordinated tagging, deploying with Make targets, first-time configuration (OIDC identity provider, operator accounts), and verifying service health. The platform includes HTTP service-check tools (`http.get`, `http.post`) with enhanced security controls and an ACME Admin sample application for quick platform exploration and skill demonstrations.
 
-**Updated** The platform now uses a coordinated image tagging system with the format `0.46.0-dev-k8s-<gitsha>` and provisions comprehensive secrets including execution signing/handoff tokens, browser credentials, and OTel push authentication for all eleven platform workloads.
+**Updated** The platform now uses a coordinated image tagging system with the format `0.46.0-dev-k8s-<gitsha>` and provisions comprehensive secrets including execution signing/handoff tokens, browser credentials, and OTel push authentication for all eleven platform workloads. For Australia-generation PDI environments, the platform provides concrete Machine Identity Console procedures for OAuth integration instead of generic OAuth setup steps.
 
 ## Project Structure
 The repository is organized into product-oriented services under products/, shared contracts and operations under shared/, samples under samples/, and documentation under docs/. The dev-k8s overlay in shared/platform-ops/gitops/dev-k8s defines the development deployment for all platform services and dependencies.
@@ -544,6 +546,43 @@ Key behaviors:
 - [reconcile-portal-oidc-client.sh:274-316](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh#L274-L316)
 - [getting-started.md:123-155](file://docs/guides/getting-started.md#L123-L155)
 
+### Australia-Generation PDI Environment: Machine Identity-Based OAuth Integration
+
+**Updated** For Australia-generation PDI environments, the platform provides concrete, tested procedures for creating machine identity-based OAuth integrations, superseding generic OAuth setup steps with specific guidance for the Machine Identity Console interface.
+
+#### Machine Identity Console Setup
+1. **Access the Machine Identity Console** in your ServiceNow instance
+2. **Navigate to System OAuth → Application Registry**
+3. **Create a new integration** by clicking "New integration"
+4. **Select OAuth – Client credentials grant** as the integration type
+5. **Bind the existing machine-identity user** (Identity type = Machine) in the *OAuth application user* field
+
+#### Platform Configuration Requirements
+- Ensure the platform property `glide.oauth.inbound.client.credential.grant_type.enabled=true` is enabled
+- This enables the client credentials grant flow for machine identities
+
+#### Client Configuration Details
+- **Client IDs**: Auto-generated (not settable) - copy directly from the console
+- **Client Secrets**: Auto-generated - copy securely to your local override environment
+- **Security Warning**: Never transmit client secrets through chat interfaces or CI logs
+- **Auth Scope**: Only `useraccount` ("full access to all REST APIs") is available
+- **Access Control**: Actual access remains bounded by the bound user's ACLs plus gateway-side admission allowlists
+
+#### Role Assignment Considerations
+- **No stock read-only role exists** on hardened PDI instances (`itil_read_only`/`readonly` absent)
+- **Deny-Unless hardening ACLs** gate ACL administration behind `security_admin` and harden `change_request`/`cmdb_ci` reads
+- **Deliberate deviation**: On production instances like `dev417985`, operators have accepted granting **`itil`** role to dedicated integration users (e.g., `luban_reader`) as a necessary deviation from least-privilege principles
+- **Production recommendation**: Properly ACL-hardened production tenants should follow the original least-privilege approach rather than broad role assignment
+
+#### Security Best Practices
+- Use dedicated machine-identity users for each integration
+- Apply principle of least privilege where possible within PDI constraints
+- Monitor integration usage patterns and adjust ACLs accordingly
+- Regularly audit machine identity permissions and rotation policies
+
+**Section sources**
+- [tool-configuration.md:859-878](file://docs/guides/tool-configuration.md#L859-L878)
+
 ### Verifying Service Health
 - Check pod status and services:
   - kubectl -n dev-luban-aiops get pods,svc
@@ -692,8 +731,13 @@ Common symptoms and resolutions:
 - **OTel push not working**:
   - Check OTEL_EXPORTER_OTLP_HEADERS in runtime secrets: kubectl -n dev-luban-aiops get secret -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.data.OTEL_EXPORTER_OTLP_HEADERS}{"\n"}{end}'
   - Re-run sync-otel-secrets.sh with proper OpenObserve credentials
+- **Australia PDI OAuth integration issues**:
+  - Verify Machine Identity Console integration was created via System OAuth → Application Registry
+  - Check that glide.oauth.inbound.client.credential.grant_type.enabled=true is set
+  - Ensure client credentials were copied securely from auto-generated values
+  - Verify the bound machine-identity user has appropriate ACLs (consider itil role for production PDI)
 
-**Updated** The most common issue after upgrading to v0.39.1+ is unexpected confirmation cards for http.get calls. This is intentional security hardening. Review the migration notes above to configure your environment appropriately. Additionally, ensure all eleven platform workloads have the coordinated image tag and that browser sidecar resources are adequate for your workload.
+**Updated** The most common issue after upgrading to v0.39.1+ is unexpected confirmation cards for http.get calls. This is intentional security hardening. Review the migration notes above to configure your environment appropriately. Additionally, ensure all eleven platform workloads have the coordinated image tag and that browser sidecar resources are adequate for your workload. For Australia PDI environments, ensure Machine Identity Console OAuth integrations are properly configured with appropriate role assignments.
 
 **Section sources**
 - [troubleshooting.md:32-67](file://docs/guides/troubleshooting.md#L32-L67)
@@ -708,9 +752,9 @@ Common symptoms and resolutions:
 - [acme-admin deploy.sh:135-163](file://samples/acme-admin/deploy.sh#L135-L163)
 
 ## Conclusion
-You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform includes powerful HTTP service-check tools with enhanced security controls requiring operator confirmation by default, an ACME Admin sample application with comprehensive endpoints and skill demonstrations, and a coordinated image tagging system ensuring version consistency across all eleven workloads. The tool-gateway's chromium headless-shell sidecar enables sophisticated browser automation capabilities, while comprehensive secret provisioning ensures secure operation of all platform components. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
+You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform includes powerful HTTP service-check tools with enhanced security controls requiring operator confirmation by default, an ACME Admin sample application with comprehensive endpoints and skill demonstrations, and a coordinated image tagging system ensuring version consistency across all eleven workloads. The tool-gateway's chromium headless-shell sidecar enables sophisticated browser automation capabilities, while comprehensive secret provisioning ensures secure operation of all platform components. For Australia-generation PDI environments, the platform provides concrete Machine Identity Console procedures for OAuth integration, replacing generic OAuth setup with tested, production-ready guidance. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
 
-**Updated** The coordinated image tagging system (0.46.0-dev-k8s-<gitsha>) ensures all platform workloads run consistently, while expanded secret provisioning covers execution signing/handoff security, browser credentials, and OTel push authentication. The tool-gateway's 2/2 pod architecture with chromium headless-shell sidecar provides robust browser automation capabilities for complex operational workflows.
+**Updated** The coordinated image tagging system (0.46.0-dev-k8s-<gitsha>) ensures all platform workloads run consistently, while expanded secret provisioning covers execution signing/handoff security, browser credentials, and OTel push authentication. The tool-gateway's 2/2 pod architecture with chromium headless-shell sidecar provides robust browser automation capabilities for complex operational workflows. For Australia PDI environments, the platform now includes comprehensive Machine Identity Console OAuth integration procedures with specific guidance for role assignments and security considerations.
 
 ## Appendices
 
@@ -809,3 +853,15 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 **Section sources**
 - [deploy.sh:11-52](file://shared/platform-ops/gitops/dev-k8s/deploy.sh#L11-L52)
 - [configuration-reference.md:704-724](file://docs/guides/configuration-reference.md#L704-L724)
+
+### Australia PDI OAuth Integration Reference
+- **Machine Identity Console**: Navigate to System OAuth → Application Registry
+- **Integration Type**: OAuth – Client credentials grant
+- **Platform Property**: glide.oauth.inbound.client.credential.grant_type.enabled=true
+- **Client Configuration**: Auto-generated client_id and client_secret
+- **Role Assignment**: Consider granting `itil` role for production PDI environments
+- **Security**: Never transmit client secrets through chat or CI logs
+- **Access Control**: Actual access bounded by bound user's ACLs plus gateway admission allowlists
+
+**Section sources**
+- [tool-configuration.md:859-878](file://docs/guides/tool-configuration.md#L859-L878)

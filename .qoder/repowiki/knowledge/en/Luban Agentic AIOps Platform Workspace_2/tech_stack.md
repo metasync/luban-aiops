@@ -1,1 +1,0 @@
-Python services managed by `uv` (pinning interpreter via `.python-version`), containerized on a shared `luban-aiops/base-uv` Amazon Linux 2023 image; Kubernetes deployment via kustomize GitOps overlays; OpenObserve dashboards validated offline; operator portal is a separate SPA built with Vitest + TypeScript/Vite.

@@ -3,7 +3,6 @@
 <cite>
 **Referenced Files in This Document**
 - [README.md](file://README.md)
-- [CHANGELOG.md](file://CHANGELOG.md)
 - [VERSION](file://VERSION)
 - [delivery-roadmap.md](file://docs/agentic-aiops-platform/delivery-roadmap.md)
 - [part-1-decision-matrix.md](file://docs/agentic-aiops-platform/part-1-decision-matrix.md)
@@ -15,15 +14,18 @@
 - [tool-gateway README.md](file://products/tool-gateway/README.md)
 - [policy-center README.md](file://products/policy-center/README.md)
 - [python-container-strategy.md](file://docs/workspace/python-container-strategy.md)
+- [SPEC-067-servicenow-mcp-ingestion-pilot spec.md](file://docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/spec.md)
+- [tool-configuration.md](file://docs/guides/tool-configuration.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated platform version to v0.46.0 reflecting the latest skill-retrieval ranking fidelity improvements
-- Enhanced release narrative to cover the complete delivery sequence through SPEC-066, including the four measured lexical fixes for skill retrieval
-- Corrected base image references to accurately reflect the shared `luban-aiops/base-uv` Docker image used across all products
-- Clarified policy-center as a design-stage stub while documenting that action-authorization is currently enforced within tool-gateway
-- Updated current state section to reflect the nine implemented and deployable products
+- Updated platform version to v0.49.0 reflecting the closure of OQ-5's gated second leg with successful live PDI validation
+- Enhanced delivery roadmap section to document the substantial 24-line addition marking completion of ServiceNow integration validation
+- Added technical context about live validation process discovery regarding legacy OAuth API Provider Client model deprecation
+- Documented new provisioning requirements using System OAuth → Application Registry with Machine Identity Console
+- Clarified platform property requirements and authentication scope limitations for hardened PDIs
+- Updated current state section to reflect the complete ServiceNow integration delivery including all six Open Questions resolution
 
 ## Table of Contents
 1. Introduction
@@ -155,7 +157,7 @@ The platform's core components are implemented as distinct products with clear r
 
 - Policy Center (policy-center): Design-stage stub defining the future control authority for authorization, policy evaluation, and approval routing. Currently not implemented as a running service; the action-authorization slice is evaluated inside tool-gateway.
 
-These components preserve clear ownership boundaries and rely on shared contracts for stable integration. All backend services build on the shared `luban-aiops/base-uv:al2023` Docker image, which provides Amazon Linux 2023 minimal with pinned uv and non-root user configuration.
+These components preserve clear ownership boundaries and rely on shared contracts for stable integration. All backend services build on the shared `luban-aiops/base-uv` Docker image, which provides Amazon Linux 2023 minimal with pinned uv and non-root user configuration.
 
 **Section sources**
 - [agent-platform README.md:1-280](file://products/agent-platform/README.md#L1-L280)
@@ -286,7 +288,7 @@ Response --> End
 - [platform-gateway README.md:1-88](file://products/platform-gateway/README.md#L1-L88)
 
 ### Tool Gateway: Normalized Connector Access and Redaction
-The tool-gateway product provides standardized tool and connector access. It normalizes connectors, exposes MCP-compatible tools, enforces tool policy, redacts credential-shaped output, and emits audit events. Connectors include Kubernetes, Elastic, skills-hub, incidents, and browser web-checks. Action-authorization is enforced here via deny-by-default policy evaluation against the shared role→action policy bundle. The policy-center product remains a design-stage stub; when it becomes a service, this module will lift behind a `/policy/evaluate` endpoint returning the same decision object.
+The tool-gateway product provides standardized tool and connector access. It normalizes connectors, exposes MCP-compatible tools, enforces tool policy, redacts credential-shaped output, and emits audit events. Connectors include Kubernetes, Elastic, skills-hub, incidents, browser web-checks, and ServiceNow ITSM systems. Action-authorization is enforced here via deny-by-default policy evaluation against the shared role→action policy bundle. The policy-center product remains a design-stage stub; when it becomes a service, this module will lift behind a `/policy/evaluate` endpoint returning the same decision object.
 
 ```mermaid
 sequenceDiagram
@@ -314,7 +316,7 @@ Gateway-->>Agent : Tool result + evidence envelope
 ### Spec-Driven Development Workflow and Releases
 The platform uses a spec-driven development workflow where every change that crosses product boundaries, affects trust, changes identity/policy/approval/audit behavior, or spans multiple focused pull requests is captured in a reviewable spec. Specs define requirements, technical plans, and task lists, and they are frozen after delivery. The spec index tracks status and links delivered specs to releases.
 
-Current platform state: **v0.46.0** (delivered 2026-10-03). All nine build products — `operator-portal`, `agent-platform`, `platform-gateway`, `tool-gateway`, `identity-broker`, `skills-hub`, `audit-service`, `incident-service`, and `execution-runtime` — are implemented, tested, and deployable to the `dev-k8s` overlay (eleven workloads in total, including Redis and PostgreSQL).
+Current platform state: **v0.49.0** (delivered 2026-10-20). All nine build products — `operator-portal`, `agent-platform`, `platform-gateway`, `tool-gateway`, `identity-broker`, `skills-hub`, `audit-service`, `incident-service`, and `execution-runtime` — are implemented, tested, and deployable to the `dev-k8s` overlay (eleven workloads in total, including Redis and PostgreSQL).
 
 Delivered release sequence:
 - **Release 0**: Platform foundation - established the usable portal and runtime baseline with core infrastructure
@@ -323,6 +325,9 @@ Delivered release sequence:
 - **Release 3**: Incident triage and collaboration - added alert/manual intake, canonical incident model, agent triage with validated reports, connector dispatch, and the Incidents panel
 - **Release 4+**: Approval-gated bounded actions, hardening, and external consumption (planned)
 - **SPEC-066** (v0.46.0): Skill-retrieval ranking fidelity - four measured lexical fixes including score the `skill_id` slug, corpus-derived IDF weighting, sublinear body-length normalization, and query-side-only CamelCase splitting, plus enforced cross-backend parity and de-duplication guardrail
+- **SPEC-067** (v0.49.0): ServiceNow ITSM MCP-ingestion pilot - completed all six Open Questions including the critical OQ-5 live PDI validation gate, delivering the `servicenow_native` REST/Table-API connector with six read-tier tools, deny-by-default policy coverage, audit attribution, and fail-closed guardrails
+
+**Updated** The delivery roadmap now includes substantial documentation marking the closure of OQ-5's gated second leg, representing the successful live validation of the ServiceNow integration against a real PDI instance (`dev417985`). This validation confirmed that the legacy OAuth API Provider Client model no longer exists in newer ServiceNow generations, requiring the use of System OAuth → Application Registry with Machine Identity Console using OAuth – Client credentials grant type. The platform property `glide.oauth.inbound.client.credential.grant_type.enabled` must be enabled, with the broad `useraccount` auth scope being the only available option. On hardened PDIs, no stock read-only roles exist, requiring deliberate operator decisions about granting appropriate permissions.
 
 ```mermaid
 flowchart TD
@@ -418,6 +423,7 @@ Common troubleshooting areas include:
 - Session issues: Validate session store backend, Postgres connectivity, and evidence store reachability
 - Model selection errors: Confirm model catalog entries, provider keys, and discovery settings
 - Base image issues: Ensure `luban-aiops/base-uv:al2023` is available locally via `make base-images`
+- ServiceNow integration issues: For ServiceNow-specific problems, verify the OAuth2 client_credentials setup using System OAuth → Application Registry with Machine Identity Console, ensure the platform property `glide.oauth.inbound.client.credential.grant_type.enabled=true` is set, and confirm appropriate ACL permissions for the integration user
 
 When investigating, correlate requests using x-request-id and inspect service metrics and logs. Use the policy matrix view to understand why a request was denied and review audit trails for decision provenance.
 
@@ -426,12 +432,15 @@ When investigating, correlate requests using x-request-id and inspect service me
 - [tool-gateway README.md:65-152](file://products/tool-gateway/README.md#L65-L152)
 - [agent-platform README.md:120-262](file://products/agent-platform/README.md#L120-L262)
 - [python-container-strategy.md:198-205](file://docs/workspace/python-container-strategy.md#L198-L205)
+- [tool-configuration.md:859-878](file://docs/guides/tool-configuration.md#L859-L878)
 
 ## Conclusion
 Luban AIOPS provides an enterprise-grade agentic AIOps workspace that separates identity, policy, and execution while preserving clear ownership boundaries. Its modular product-oriented architecture enables automated incident triage, guided operational procedures, and secure tool execution with comprehensive audit trails. The top-level structure organizes capabilities under products/, shared contracts and operations under shared/, and design and delivery documentation under docs/. 
 
-The platform is currently at **v0.46.0**, representing significant maturity with nine fully implemented and deployable products. The spec-driven development workflow drives incremental capability delivery through self-contained releases, starting with platform foundation (Release 0), read-only operations (Release 1), skills and grounded guidance (Release 2), incident triage and collaboration (Release 3), and continuing with skill-retrieval ranking fidelity improvements (SPEC-066). All backend services build on the shared `luban-aiops/base-uv:al2023` base image, ensuring consistent Python environments and security posture.
+The platform is currently at **v0.49.0**, representing significant maturity with nine fully implemented and deployable products. The spec-driven development workflow drives incremental capability delivery through self-contained releases, starting with platform foundation (Release 0), read-only operations (Release 1), skills and grounded guidance (Release 2), incident triage and collaboration (Release 3), skill-retrieval ranking fidelity improvements (SPEC-066), and culminating in the complete ServiceNow ITSM integration (SPEC-067). The successful closure of OQ-5's gated second leg marks a major milestone, demonstrating that the platform can successfully validate integrations against real production instances while maintaining security and governance boundaries.
 
-The policy-center remains a design-stage stub, with action-authorization currently enforced within tool-gateway, demonstrating the platform's commitment to gradual evolution while maintaining operational safety. This approach fits modern AIOps practices by treating automation as auditable, approval-gated workflows with strong governance, making it easier for operations teams to adopt, verify, and trust automated assistance.
+All backend services build on the shared `luban-aiops/base-uv:al2023` base image, ensuring consistent Python environments and security posture. The policy-center remains a design-stage stub, with action-authorization currently enforced within tool-gateway, demonstrating the platform's commitment to gradual evolution while maintaining operational safety.
+
+The ServiceNow integration delivery showcases the platform's ability to handle complex enterprise system integrations, adapting to modern ServiceNow architectures that have deprecated legacy OAuth models in favor of System OAuth → Application Registry with Machine Identity Console. This flexibility and adaptability, combined with comprehensive audit trails and policy enforcement, makes Luban well-suited for modern AIOps practices that treat automation as auditable, approval-gated workflows with strong governance, enabling operations teams to adopt, verify, and trust automated assistance at enterprise scale.
 
 [No sources needed since this section summarizes without analyzing specific files]
