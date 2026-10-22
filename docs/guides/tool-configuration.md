@@ -847,6 +847,36 @@ run out-of-band:
    `target_identity_mode=acting_service`, and — on any unreachable-target fault —
    `failure_class=target_unavailable`.
 
+**Executed 2026-10-22 on `dev417985` — PASSED.** All legs above were run against
+the real PDI: the six read tools returned real records (list+get per table), the
+`sys_user` projection stripped `password`/`user_password` on live data, fail-closed
+negatives held, no credential literal appeared in any tool result or gateway log,
+and every call was durably audited with `target_system=servicenow` +
+`target_identity_mode=acting_service`. Afterwards the cluster was restored to the
+committed mock state (re-run `sync-servicenow-credentials.sh` without overrides and
+repoint `GATEWAY_SERVICENOW_BASE_URL` back to the mock).
+
+**Provisioning notes for the Australia-generation PDI (amend steps 1–2 above):**
+
+- The legacy "OAuth API Provider Client" (`oauth_configuration`) model no longer
+  exists. Create the integration under **System OAuth → Application Registry** via
+  the **Machine Identity Console** → *New integration* → **OAuth – Client
+  credentials grant**; bind the existing machine-identity user (Identity type =
+  Machine) in the *OAuth application user* field. This flow requires the platform
+  property `glide.oauth.inbound.client.credential.grant_type.enabled=true`.
+- The only selectable auth scope is the broad `useraccount` ("full access to all
+  REST APIs"); actual access stays bounded by the bound user's ACLs plus the
+  gateway-side admission allowlist.
+- Client IDs are auto-generated (not settable); the auto-generated client secret
+  should be copied by the operator directly into the local override env — never
+  through chat or CI logs.
+- No stock read-only role exists on a hardened PDI (`itil_read_only`/`readonly`
+  absent), and Deny-Unless hardening ACLs gate ACL administration behind
+  `security_admin` and harden `change_request`/`cmdb_ci` reads. On `dev417985` the
+  operator accepted granting **`itil`** to the dedicated integration user as a
+  deliberate deviation from the least-privilege ideal; a properly ACL-hardened
+  production tenant should still follow step 1 as written.
+
 **No ServiceNow MCP server.** Stage-0 (2026-10-19) confirmed the PDI does not
 expose ServiceNow's own MCP server (AI Platform / AI Agent Studio / AI Control
 Tower unprovisioned). Should a future instance expose one, the generic

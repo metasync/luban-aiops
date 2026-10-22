@@ -386,6 +386,34 @@ three PDI-gated live-target facts — were resolved by operator direction 2026-1
 
 ## Changelog
 
+- 2026-10-22: **gated live-PDI operator check (OQ-5's second leg) EXECUTED and
+  PASSED against the real PDI (`dev417985`).** The connector ran live against the
+  real instance through the governed path: the six read-tier tools exercised with
+  real `sys_id`s (`incident` list+get, `change_request` list+get, `user.get`,
+  `cmdb_ci.get`); the `sys_user` projection **stripped `password`/`user_password`
+  on live data**; fail-closed negatives (write verb, deferred `problem`, malformed
+  `sys_id`) intact under the real-target config; no credential literal in any
+  tool-result body or tool-gateway log; the durable audit store carried every call
+  with `target_system=servicenow` + `target_identity_mode=acting_service` at
+  `risk_level=read`. Post-check, the cluster was restored to the committed
+  `servicenow-dev` mock state (regenerated dev credentials; PDI credential lives
+  only in a gitignored local env file). **Provisioning findings (Australia build):**
+  the legacy "OAuth API Provider Client" model no longer exists — `client_credentials`
+  integrations are created via **System OAuth → Application Registry / Machine
+  Identity Console** ("OAuth – Client credentials grant", bound to an existing
+  machine-identity user), gated on the platform property
+  `glide.oauth.inbound.client.credential.grant_type.enabled=true`; the only
+  selectable auth scope is the broad `useraccount`; and **no stock read-only role
+  exists** (`itil_read_only`/`readonly` absent) — plus Deny-Unless hardening ACLs
+  on the ACL table itself (needing `security_admin`) and on `change_request`/
+  `cmdb_ci` reads. Operator decision 2026-10-21/22: grant **`itil`** to the
+  dedicated integration user `luban_reader` instead of authoring custom ACLs —
+  a deliberate deviation from OQ-1's ideal least-privilege target account;
+  target-side reads are bounded by `itil` ACLs and the read tier remains enforced
+  gateway-side (admission allowlist + risk classification + audit). OQ-1's
+  `client_credentials` scheme itself is **empirically confirmed** on the PDI
+  (token + four-table reads green). No code change, no bundle change, no version
+  bump; CI still makes no live external call.
 - 2026-10-20: **delivered as v0.49.0.** R-2–R-6 implemented on the OQ-3
   REST/Table-API fallback (Stage-0 2026-10-19 found the PDI exposes no ServiceNow
   MCP server). R-2: the `servicenow_native` connector + `servicenow_binding` (six

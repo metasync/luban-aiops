@@ -529,6 +529,30 @@ with no new dependency and the full `make verify` green. Commit/push and deploym
 separate boundaries. This supersedes the "remain open / no implementation authorized" tail of the
 2026-10-19 Stage-0 entry above.
 
+**SPEC-067 live-PDI operator check PASSED 2026-10-22 — OQ-5's gated second leg is
+closed.** The `servicenow_native` connector ran live against the operator's real PDI
+(`dev417985`, Australia build) through the full governed path: delegated operator
+token → gateway admission → OAuth2 `client_credentials` against the real instance →
+six read-tier tools exercised with real `sys_id`s (incident/change_request list+get,
+`user.get`, `cmdb_ci.get`), the `sys_user` projection stripping `password`/
+`user_password` **on live data**, fail-closed negatives intact, no credential literal
+in any tool result or gateway log, and every call durably audited with
+`target_system=servicenow` + `target_identity_mode=acting_service`. OQ-1's scheme is
+thereby **empirically confirmed** on a real tenant. Two provisioning findings amend
+the runbook's assumptions for this ServiceNow generation: `client_credentials`
+integrations are now created via **Application Registry / Machine Identity Console**
+(the legacy OAuth API Provider Client model is gone) behind the platform property
+`glide.oauth.inbound.client.credential.grant_type.enabled`, with only the broad
+`useraccount` auth scope selectable; and the PDI ships **no stock read-only role**
+(`itil_read_only`/`readonly` absent) plus Deny-Unless hardening ACLs (`security_admin`-gated
+ACL administration; hardened `change_request`/`cmdb_ci` reads) — so the operator
+approved granting **`itil`** to the dedicated integration user `luban_reader` as a
+deliberate deviation from the ideal least-privilege target account, with the read
+tier still enforced gateway-side. Post-check, the cluster was restored to the
+committed `servicenow-dev` mock state and the PDI credential removed from
+in-cluster secrets. CI still makes no live external call; no code, bundle, or
+version change.
+
 The theme's central scoping finding (recorded in the
 [machine-consumer credential memo](../workspace/machine-consumer-credential-model-spike.md)):
 the long-standing "`client_credentials` gap" label conflates two planes — the
