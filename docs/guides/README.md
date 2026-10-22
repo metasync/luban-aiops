@@ -15,6 +15,7 @@ Luban AIOps platform.
 | [Configuration Reference](configuration-reference.md) | Environment variables, secrets, and cross-service dependencies |
 | [Approval and HITL Governance](approval-and-hitl.md) | Four-layer approval model, auto-allow management, policy bundle workflow, HITL configuration knobs |
 | [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic/skills activation checklists, audit-service activation, adding new connectors |
+| [ServiceNow Live Integration Guide](servicenow-integration.md) | Wiring the read-tier `servicenow.*` surface to a real ServiceNow instance: tenant provisioning (machine user, ACLs, OAuth client credentials), gateway wiring, live validation, restore, operations, and troubleshooting |
 | [Adding a Tool to the Tool Gateway](adding-a-tool.md) | Contributor walkthrough: connector class, tool definition, error envelope, wiring, authorization, tests |
 | [Skills and Guidance Guide](skills-guide.md) | Managing skill content: add, revise, remove skills and sources; verification and troubleshooting |
 | [Incident Triage and Collaboration Guide](incident-guide.md) | Alertmanager wiring, incident lifecycle, running and interpreting triage, collaboration semantics |
@@ -29,7 +30,9 @@ Luban AIOps platform.
 1. Follow the [Getting Started](getting-started.md) walkthrough
 2. Learn the portal itself with the [Portal User Guide](portal-user-guide.md)
 3. Use the [Configuration Reference](configuration-reference.md) to tune settings
-4. Enable additional connectors via the [Tool and Connector Guide](tool-configuration.md)
+4. Enable additional connectors via the [Tool and Connector Guide](tool-configuration.md);
+   when the target is a real external tenant rather than a dev mock, follow the
+   [ServiceNow Live Integration Guide](servicenow-integration.md)
 5. Govern tool auto-allow and approvals via the [Approval and HITL Governance Guide](approval-and-hitl.md)
 6. Consult [Troubleshooting](troubleshooting.md) when something breaks
 

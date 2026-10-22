@@ -239,7 +239,10 @@ a ServiceNow instance returns can widen them.
 
 The connector deep-dive, activation checklist, and the operator's real-PDI
 read-only validation runbook are below
-([ServiceNow Connector](#servicenow-connector-spec-067)).
+([ServiceNow Connector](#servicenow-connector-spec-067)). Wiring a **real**
+ServiceNow tenant end to end — tenant-side provisioning, credential custody,
+live validation, restore, and day-2 operations — is the
+[ServiceNow Live Integration Guide](servicenow-integration.md).
 
 ### Mutating Tool Activation Checklist (`k8s.delete_pod`)
 
@@ -793,8 +796,11 @@ target contact, the live reads project the target's incident/change/user/CI
 records (gated on reachability, else a clean fail-closed code — and under
 `STRICT_LIVE=true` a skip *is* a failure), the `sys_user` read strips
 `password`/`user_password`, and the client-secret/access-token never appears in
-any tool result. `make e2e` deliberately runs it **without** `STRICT_LIVE`: OQ-5
-requires CI to pass with no live external call. To list the tools directly:
+any tool result. All of that holds **against the in-cluster mock**: the record
+assertions are canned mock data, so the script is a wire-path and
+fail-closed-behaviour test, not a live-target test. `make e2e` deliberately runs
+it **without** `STRICT_LIVE`: OQ-5 requires CI to pass with no live external call.
+To list the tools directly:
 
 ```bash
 kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
@@ -803,11 +809,14 @@ kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
 ```
 
 **Fail-closed error codes:** `TOOL_NOT_FOUND` (connector off, or a name outside
-the allowlist), `INVALID_PARAMETERS` (gateway-owned schema rejection — a missing
-or non-32-hex `sys_id`, an out-of-range `limit` — before any request),
+the allowlist), `INVALID_PARAMETERS` (connector-side validation — a missing or
+non-32-hex `sys_id`, a non-integer or sub-1 `limit` — before any request; a
+`limit` above 100 is silently clamped to 100 rather than rejected),
 `SERVICENOW_NOT_CONFIGURED` / `SERVICENOW_INVALID_BASE_URL` (config),
-`CREDENTIAL_SET_NOT_FOUND` / `CREDENTIAL_ACQUISITION_FAILED` /
-`CREDENTIAL_SCHEME_UNSUPPORTED` (credential resolution),
+`CREDENTIAL_SET_NOT_FOUND` / `CREDENTIAL_ACQUISITION_FAILED` (credential
+resolution — an unknown `scheme` is dropped at parse time, so a mistyped scheme
+surfaces as `CREDENTIAL_SET_NOT_FOUND`; `CREDENTIAL_SCHEME_UNSUPPORTED` is the
+MCP adapter's code and this native path does not emit it),
 `SERVICENOW_TIMEOUT` / `SERVICENOW_UNREACHABLE` (transport),
 `SERVICENOW_UPSTREAM_ERROR` (a 4xx/5xx fact), and `SERVICENOW_RESPONSE_INVALID`
 (a non-JSON body). `SERVICENOW_TIMEOUT` and `SERVICENOW_UNREACHABLE` are audited
@@ -821,7 +830,15 @@ user's delegated identity (per-user target RBAC is SPEC-070's seam).
 
 CI makes **no live external call** (OQ-5); the in-cluster thin mock stands in for
 a real instance. Validating against a **real** ServiceNow PDI is an operator step,
-run out-of-band:
+run out-of-band. The five steps below are the short form; the
+[ServiceNow Live Integration Guide](servicenow-integration.md) is the expanded
+runbook — it adds the tenant-side field values, both OAuth-administration
+generations, the credential-custody rules, a pre-flight credential smoke test,
+the live-data legs the shipped script cannot assert (**all** of its `[5/6]`
+record assertions are mock-canned, on the `list` legs as well as the `get` legs,
+so against a real tenant that leg fails and `STRICT_LIVE=true` cannot go green —
+only `[1/6]`–`[4/6]` are target-agnostic), the restore procedure, and day-2
+operations:
 
 1. **Least-privilege service account.** Create a dedicated read-only integration
    user and an OAuth2 `client_credentials` client scoped to the four tables
@@ -838,17 +855,20 @@ run out-of-band:
    admitted tool's returned columns match the binding's allowlist and that no
    secret-bearing column is present. Where a column must be renamed or added,
    edit `servicenow_binding.py` as config — never a connector-code change.
-4. **Run the live-check.** `STRICT_LIVE=true servicenow-check.sh` exercises the
-   same six reads against the real instance. Its canned-record assertions are
-   mock-specific; against a real PDI, confirm the structural reads return real
-   data, the `sys_user` read strips credential columns, and no write verb is
-   admitted.
+4. **Drive the six reads live.** `servicenow-check.sh` is mock-bound, so it is not
+   the instrument for this step: run it for the target-agnostic legs
+   (`[1/6]`–`[4/6]`) and drive the live reads yourself — `list` per table, then
+   `get` a `sys_id` that list actually returned — confirming real data comes back,
+   the `sys_user` read strips credential columns, and no write verb is admitted.
+   The expanded guide carries the exact legs and the audit query.
 5. **Audit.** Confirm each read audits `target_system=servicenow`,
    `target_identity_mode=acting_service`, and — on any unreachable-target fault —
    `failure_class=target_unavailable`.
 
-**Executed 2026-10-22 on `dev417985` — PASSED.** All legs above were run against
-the real PDI: the six read tools returned real records (list+get per table), the
+**Executed 2026-10-22 on `dev417985` — PASSED.** All five steps above were run
+against the real PDI (step 4 as a private variant with real sys_ids substituted,
+never as a change to the committed script): the six read tools returned real
+records (list+get per table), the
 `sys_user` projection stripped `password`/`user_password` on live data, fail-closed
 negatives held, no credential literal appeared in any tool result or gateway log,
 and every call was durably audited with `target_system=servicenow` +
@@ -876,6 +896,10 @@ repoint `GATEWAY_SERVICENOW_BASE_URL` back to the mock).
   operator accepted granting **`itil`** to the dedicated integration user as a
   deliberate deviation from the least-privilege ideal; a properly ACL-hardened
   production tenant should still follow step 1 as written.
+
+Both access postures and both OAuth-administration generations are walked through
+field by field in the
+[ServiceNow Live Integration Guide](servicenow-integration.md#3-provision-the-servicenow-side).
 
 **No ServiceNow MCP server.** Stage-0 (2026-10-19) confirmed the PDI does not
 expose ServiceNow's own MCP server (AI Platform / AI Agent Studio / AI Control

@@ -898,3 +898,58 @@ answerable on a live replica.
   fresh under the restarted service.
 - Approvals made before the restart are unaffected — decided records keep
   their outcome and attribution.
+
+## Symptom: `servicenow.*` or `ansible.*` tools are missing, or every call fails closed
+
+**Most likely cause:** The ingestion connector is not enabled in the pod, its
+credential-set secret was never written, or — for ServiceNow against a live
+tenant — the base URL or the OAuth client is wrong. Both connectors are
+deny-by-default and **fail closed by design**: an absent knob produces
+`TOOL_NOT_FOUND` or `CREDENTIAL_SET_NOT_FOUND` rather than an unauthenticated
+call, so a refusal is usually configuration, not a platform fault.
+
+**Diagnostic:**
+
+```bash
+# Which knobs does the pod actually see? (print names/values, never a secret)
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
+  sh -c 'echo "$GATEWAY_SERVICENOW_ENABLED $GATEWAY_SERVICENOW_BASE_URL $GATEWAY_SERVICENOW_CREDENTIAL_SET"'
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
+  sh -c 'echo "$GATEWAY_ANSIBLE_MCP_ENABLED $GATEWAY_ANSIBLE_MCP_TRANSPORT $GATEWAY_ANSIBLE_MCP_URL"'
+
+# Is the credential-set file mounted, and does it name the expected set?
+kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- \
+  sh -c 'wc -c < /etc/luban/servicenow-credentials/credential-sets.json'
+
+# Did the connector reach the target at all? A fail-closed refusal logs no
+# outbound request; a transport fault or an upstream 4xx/5xx does.
+kubectl -n dev-luban-aiops logs deployment/tool-gateway -c tool-gateway --tail=200 | \
+  grep -Ei "servicenow|ansible|api/now/table|/mcp"
+```
+
+Slim service images have no `python3` on `PATH`, so parse mounted JSON on the
+workstation rather than in the pod.
+
+**Resolution:**
+
+- `TOOL_NOT_FOUND` for a name that should exist: confirm
+  `GATEWAY_SERVICENOW_ENABLED=true` (or `GATEWAY_ANSIBLE_MCP_ENABLED=true`) in the
+  pod, and confirm the name against the admitted allowlist — a write verb, a
+  deferred capability (`servicenow.problem.*`, `servicenow.attachment.*`), or a
+  misspelling is denied by absence and never registers.
+- `CREDENTIAL_SET_NOT_FOUND`: re-run the connector's sync script
+  (`sync-servicenow-credentials.sh` / `sync-ansible-credentials.sh`), and check
+  that `GATEWAY_*_CREDENTIAL_SET` matches a key in the mounted JSON exactly. A
+  deploy with `SKIP_*_CREDENTIALS=true` leaves both sinks unwritten on purpose.
+- `CREDENTIAL_ACQUISITION_FAILED`: the client credentials or the token URL are
+  wrong, or the tenant's client-credentials grant is disabled. For ServiceNow,
+  smoke-test the credential locally before touching the cluster — see the
+  [ServiceNow Live Integration Guide](servicenow-integration.md).
+- `SERVICENOW_UPSTREAM_ERROR` with a 401/403: the OAuth application's bound user
+  lacks read ACLs on that table; fix the tenant side, not the platform side.
+- `SERVICENOW_TIMEOUT` / `SERVICENOW_UNREACHABLE` (audited as
+  `failure_class=target_unavailable`): egress, DNS, TLS trust, or instance
+  maintenance. Test reachability from inside the pod before raising the timeout.
+- Audit evidence: query the durable store, not `audit-service` stdout (which
+  carries only HTTP access lines) — see the guide's validation section for the
+  exact `audit_events` query.

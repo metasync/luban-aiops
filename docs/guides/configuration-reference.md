@@ -18,6 +18,8 @@ activate them. A feature is **active** when all required variables are set to no
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
 | **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **HTTP service-checks (`http.*`, SPEC-058)** | `GATEWAY_HTTP_ENABLED=true`, `GATEWAY_HTTP_ALLOW_ORIGINS` (deny-by-default); `http.post` (write) additionally needs `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0` + a `tools:mutate` grant; credentials via `GATEWAY_HTTP_CREDENTIAL_SETS` (defaults to the browser path) | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
+| **Ansible read-tier ingestion (`ansible.*`, SPEC-069)** | `GATEWAY_ANSIBLE_MCP_ENABLED=true` plus `GATEWAY_ANSIBLE_MCP_URL` (`streamable_http`) or `GATEWAY_ANSIBLE_MCP_COMMAND` (`stdio`); credentials via `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET`/`_CREDENTIAL_SETS`. The `GATEWAY_ANSIBLE_NATIVE_ENABLED` shell-out is the no-MCP-server fallback and stays off when a server is wired | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `ansible-dev` profile (in-cluster mock MCP server) |
+| **ServiceNow read-tier ingestion (`servicenow.*`, SPEC-067)** | `GATEWAY_SERVICENOW_ENABLED=true`, `GATEWAY_SERVICENOW_BASE_URL`, and an `oauth2_client_credentials` set named by `GATEWAY_SERVICENOW_CREDENTIAL_SET` at `GATEWAY_SERVICENOW_CREDENTIAL_SETS`; the six-tool admission allowlist, fixed tables, and field projections are gateway-owned config, never target- or model-derived | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `servicenow-dev` profile (in-cluster mock Table API). Repointing at a live tenant is config-only — see the [ServiceNow Live Integration Guide](servicenow-integration.md) |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
 | **Isolated execution worker (SPEC-038/063)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret`; durable admission below | agent-service, execution-runtime | **must be provisioned**; missing configuration refuses execution; transport loss after a possible send is uncertain, never proof of no effect |
 | **Durable mutation admission (SPEC-063)** | `AGENT_EXECUTION_STATE_DB_URL`, `AGENT_EXECUTION_ADMISSION_ENABLED=true`, `AGENT_EXECUTION_ADMISSION_EPOCH`; `EXECUTION_STATE_STORE_BACKEND=postgres`, `EXECUTION_STATE_DB_URL`, `EXECUTION_ADMISSION_ENABLED=true`, `EXECUTION_ADMISSION_EPOCH`; verified, enabled Postgres catalog with matching epoch | agent-service, execution-runtime | **disabled**; requires coordinated mutation-disabled migration/cutover and separate explicit enablement |
@@ -582,6 +584,20 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_HTTP_MAX_RESPONSE_BYTES` | Response-body projection cap; a larger body is cut and reported with `truncated: true` | `65536` | code default |
 | `GATEWAY_HTTP_MAX_REQUEST_BYTES` | Serialized `http.post` body cap (alongside depth ≤ 2 and ≤ 32 keys) | `4096` | code default |
 | `GATEWAY_HTTP_CREDENTIAL_SETS` | Secret-mounted credential-sets JSON path for `http.*` Basic auth; **defaults to `GATEWAY_BROWSER_CREDENTIAL_SETS`** when unset so one mounted file serves both surfaces; empty = a `credential_set` reference fails closed (`CREDENTIAL_SET_NOT_FOUND`) | *(browser path)* | **runtime-secrets** (mounted file) |
+| `GATEWAY_ANSIBLE_MCP_ENABLED` | Register the six `ansible.*` read tools through the server-agnostic MCP-ingestion connector (SPEC-069) | `false` | code default (dev-k8s merges `true` via `ansible-dev`) |
+| `GATEWAY_ANSIBLE_MCP_TRANSPORT` | `streamable_http` or `stdio`; any other value fails settings validation | `streamable_http` | code default |
+| `GATEWAY_ANSIBLE_MCP_URL` | Streamable-HTTP MCP endpoint (used with the `streamable_http` transport) | *(none)* | runtime-config |
+| `GATEWAY_ANSIBLE_MCP_COMMAND`, `GATEWAY_ANSIBLE_MCP_ARGS` | Local MCP server executable and arguments (used with the `stdio` transport) | *(none)* | runtime-config |
+| `GATEWAY_ANSIBLE_MCP_TIMEOUT_MS` | Per-request MCP timeout in milliseconds | `10000` | code default |
+| `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET` | Named credential set the connector presents (a `bearer` set for AAP) | *(none)* | runtime-config |
+| `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS` | Credential-sets JSON path; falls back to `GATEWAY_HTTP_CREDENTIAL_SETS` then `GATEWAY_BROWSER_CREDENTIAL_SETS` | *(http/browser path)*; dev `/etc/luban/ansible-credentials/credential-sets.json` | **runtime-secrets** (mounted file) |
+| `GATEWAY_ANSIBLE_NATIVE_ENABLED` | Native `ansible-inventory` shell-out fallback (SPEC-069 OQ-1) for when no MCP server is wired | `false` | code default |
+| `GATEWAY_ANSIBLE_INVENTORY_PATH`, `GATEWAY_ANSIBLE_NATIVE_EXECUTABLE` | Inventory file and executable for the native fallback | *(none)*, `ansible-inventory` | code default |
+| `GATEWAY_SERVICENOW_ENABLED` | Register the six `servicenow.*` read tools through the native REST/Table-API connector (SPEC-067) | `false` | code default (dev-k8s merges `true` via `servicenow-dev`) |
+| `GATEWAY_SERVICENOW_BASE_URL` | Table-API base: the in-cluster mock in dev, `https://<instance>.service-now.com` for a live tenant | *(none)* | runtime-config |
+| `GATEWAY_SERVICENOW_TIMEOUT_MS` | HTTP client timeout in milliseconds | `10000` | code default |
+| `GATEWAY_SERVICENOW_CREDENTIAL_SET` | Named `oauth2_client_credentials` set the connector presents (SPEC-068) | *(none)*; dev `servicenow-mock` | runtime-config |
+| `GATEWAY_SERVICENOW_CREDENTIAL_SETS` | Credential-sets JSON path; falls back to `GATEWAY_HTTP_CREDENTIAL_SETS` then `GATEWAY_BROWSER_CREDENTIAL_SETS` | *(http/browser path)*; dev `/etc/luban/servicenow-credentials/credential-sets.json` | **runtime-secrets** (mounted file) |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -747,6 +763,30 @@ Secrets are provisioned as Kubernetes `Secret` objects, never committed to Git.
 |---|---|---|
 | `credential-sets.json` | Named credential sets for `web.fill_credential` (JSON map `set`→`{"username", "password"}`); mounted at `GATEWAY_BROWSER_CREDENTIAL_SETS`; values never travel through skills, prompts, or tool results (SPEC-049 R-5) | `sync-browser-credentials.sh` (or `BROWSER_CREDENTIAL_SETS_FILE=<path>`) |
 
+### `tool-gateway-ansible-credentials`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `credential-sets.json` | Named credential sets for the Ansible MCP-ingestion connector (a `bearer` set); mounted at `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS`, one generator writing both this and the mock's gate so the two cannot drift (SPEC-069 R-6) | `sync-ansible-credentials.sh` (real server: `ANSIBLE_MCP_BEARER_TOKEN=<token>`; skip in CI: `SKIP_ANSIBLE_CREDENTIALS=true`) |
+
+### `ansible-mock-credentials`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `bearer-token` | The in-cluster mock MCP server's bearer gate — the same token the gateway's credential set presents | `sync-ansible-credentials.sh` (unused against a real AAP/AWX server) |
+
+### `tool-gateway-servicenow-credentials`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `credential-sets.json` | Named credential sets for the native ServiceNow REST connector — an `oauth2_client_credentials` entry (`token_url` + `client_id` + `client_secret`, SPEC-068); mounted at `GATEWAY_SERVICENOW_CREDENTIAL_SETS`; the mount is `optional: true` so the pod starts without it and the connector fails closed at call time (`CREDENTIAL_SET_NOT_FOUND`) | `sync-servicenow-credentials.sh` (live tenant: `SERVICENOW_CLIENT_ID` / `SERVICENOW_CLIENT_SECRET` / `SERVICENOW_TOKEN_URL` overrides; skip in CI: `SKIP_SERVICENOW_CREDENTIALS=true`) |
+
+### `servicenow-mock-credentials`
+
+| Key | Purpose | How to Provision |
+|---|---|---|
+| `client-id`, `client-secret`, `access-token` | The in-cluster mock Table API's OAuth + bearer gates, written from the same generated values as the gateway's credential set so client and server cannot disagree (SPEC-067 R-6) | `sync-servicenow-credentials.sh` (unused against a live tenant, which issues its own tokens) |
+
 ### `audit-service-runtime-secrets`
 
 | Key | Purpose | How to Provision |
@@ -788,13 +828,24 @@ Switch profiles with:
 shared/platform-ops/gitops/select-runtime-profile.sh <profile-name>
 ```
 
-Two non-LLM postures ride alongside the active profile permanently:
-`mutating-dev` (SPEC-022 R-3, pod-delete RBAC + `GATEWAY_MUTATING_TOOLS_ENABLED=true`)
-and `browser-dev` (SPEC-049 R-7, `GATEWAY_BROWSER_ENABLED=true` + the
+Five non-LLM postures ride alongside the active profile permanently in dev-k8s:
+`mutating-dev` (SPEC-022 R-3, pod-delete RBAC + `GATEWAY_MUTATING_TOOLS_ENABLED=true`),
+`browser-dev` (SPEC-049 R-7, `GATEWAY_BROWSER_ENABLED=true` + the
 chromium-headless-shell sidecar on tool-gateway; SPEC-061 retired the static
 sample target it once shipped, so its one allowlisted origin is now the
-out-of-band `acme-admin` sample app). Neither is switchable; both merge their env
-into `platform-runtime-config`, and the base stays deny-by-default.
+out-of-band `acme-admin` sample app), `secrets-dev` (SPEC-062 R-7,
+`GATEWAY_SECRETS_ENABLED=true`; env-only, it ships no resource),
+`ansible-dev` (SPEC-069 R-6, `GATEWAY_ANSIBLE_MCP_ENABLED=true` + the in-cluster
+mock MCP server + the gateway's Ansible credential-set mount), and
+`servicenow-dev` (SPEC-067 R-6, `GATEWAY_SERVICENOW_ENABLED=true` + the
+in-cluster mock Table-API/OAuth responder with its Ingress-only NetworkPolicy +
+the gateway's ServiceNow credential-set mount). None is switchable; each merges
+its env into `platform-runtime-config`, and the base stays deny-by-default. The
+two ingestion profiles point at mocks so the overlay validates end to end with no
+licensed target and no live external call (OQ-5); repointing either at a real
+target is a config-only change — see the
+[Tool and Connector Guide](tool-configuration.md) and, for ServiceNow, the
+[ServiceNow Live Integration Guide](servicenow-integration.md).
 
 The profile's `runtime-secrets.example.env` documents the active provider key plus the
 multi-model catalog knobs: every supported provider (`deepseek`, `dashscope`, `openai`,
