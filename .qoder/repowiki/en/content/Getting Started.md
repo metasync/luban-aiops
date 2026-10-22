@@ -10,6 +10,8 @@
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 - [tool-configuration.md](file://docs/guides/tool-configuration.md)
+- [servicenow-integration.md](file://docs/guides/servicenow-integration.md)
+- [guides README.md](file://docs/guides/README.md)
 - [dev-k8s README.md](file://shared/platform-ops/gitops/dev-k8s/README.md)
 - [deploy.sh](file://shared/platform-ops/gitops/dev-k8s/deploy.sh)
 - [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
@@ -46,7 +48,8 @@
 - Updated deployment workflow to document eleven platform workloads and their coordinated rollout
 - Enhanced troubleshooting guidance for new secret provisioning failures and browser sidecar issues
 - Updated Makefile command documentation to reflect the complete build and deploy pipeline
-- **Added comprehensive Australia-generation PDI environment provisioning instructions replacing generic OAuth setup with concrete Machine Identity Console procedures**
+- **Updated documentation structure to reference the new ServiceNow Live Integration Guide in the navigation**
+- **Added cross-references to the dedicated ServiceNow integration guide for comprehensive tenant setup procedures**
 
 ## Table of Contents
 1. Introduction
@@ -57,18 +60,19 @@
 6. Secret Provisioning and Security
 7. Tool-Gateway Browser Sidecar
 8. HTTP Service-Check Tools
-9. ACME Admin Sample Application
-10. Detailed Component Analysis
-11. Dependency Analysis
-12. Performance Considerations
-13. Troubleshooting Guide
-14. Conclusion
-15. Appendices
+9. ServiceNow Integration
+10. ACME Admin Sample Application
+11. Detailed Component Analysis
+12. Dependency Analysis
+13. Performance Considerations
+14. Troubleshooting Guide
+15. Conclusion
+16. Appendices
 
 ## Introduction
-This guide helps you set up the Luban AIOps platform locally and deploy it to a Kubernetes cluster using the dev-k8s overlay. It covers prerequisites, environment setup, building images with coordinated tagging, deploying with Make targets, first-time configuration (OIDC identity provider, operator accounts), and verifying service health. The platform includes HTTP service-check tools (`http.get`, `http.post`) with enhanced security controls and an ACME Admin sample application for quick platform exploration and skill demonstrations.
+This guide helps you set up the Luban AIOps platform locally and deploy it to a Kubernetes cluster using the dev-k8s overlay. It covers prerequisites, environment setup, building images with coordinated tagging, deploying with Make targets, first-time configuration (OIDC identity provider, operator accounts), and verifying service health. The platform includes HTTP service-check tools (`http.get`, `http.post`) with enhanced security controls, ServiceNow read-tier integration capabilities, and an ACME Admin sample application for quick platform exploration and skill demonstrations.
 
-**Updated** The platform now uses a coordinated image tagging system with the format `0.46.0-dev-k8s-<gitsha>` and provisions comprehensive secrets including execution signing/handoff tokens, browser credentials, and OTel push authentication for all eleven platform workloads. For Australia-generation PDI environments, the platform provides concrete Machine Identity Console procedures for OAuth integration instead of generic OAuth setup steps.
+**Updated** The platform now uses a coordinated image tagging system with the format `0.46.0-dev-k8s-<gitsha>` and provisions comprehensive secrets including execution signing/handoff tokens, browser credentials, and OTel push authentication for all eleven platform workloads. For ServiceNow integration, the platform provides a dedicated live integration guide covering comprehensive tenant provisioning procedures including machine user setup, ACL configuration, and OAuth client credentials management.
 
 ## Project Structure
 The repository is organized into product-oriented services under products/, shared contracts and operations under shared/, samples under samples/, and documentation under docs/. The dev-k8s overlay in shared/platform-ops/gitops/dev-k8s defines the development deployment for all platform services and dependencies.
@@ -94,6 +98,7 @@ EXE["execution-runtime"]
 ACM["acme-admin"]
 RDS["redis"]
 PGR["postgres"]
+SNOW["ServiceNow Instance"]
 end
 DEV --> MK
 MK --> IMG
@@ -110,6 +115,7 @@ NS --> EXE
 NS --> ACM
 NS --> RDS
 NS --> PGR
+TGW -.-> SNOW
 ```
 
 **Diagram sources**
@@ -133,6 +139,7 @@ NS --> PGR
 - Execution runtime (isolated worker for bounded actions): execution-runtime
 - ACME Admin sample application (sample admin console for skill demonstrations): samples/acme-admin
 - In-cluster dependencies: redis, postgres
+- External integrations: ServiceNow ITSM platform
 
 These components are deployed together by the dev-k8s overlay and coordinated via the root Makefile with unified image tagging.
 
@@ -142,7 +149,7 @@ These components are deployed together by the dev-k8s overlay and coordinated vi
 - [acme-admin README.md:1-16](file://samples/acme-admin/README.md#L1-L16)
 
 ## Architecture Overview
-The typical request flow starts at the portal web UI, which proxies API calls to the platform gateway. The gateway authenticates users via the identity broker, then relays chat and session requests to the agent service. For tool execution, the agent service calls the tool gateway, which may invoke Kubernetes or other connectors. The tool-gateway runs as a 2/2 pod with a chromium headless-shell sidecar for browser automation. The HTTP tools implement enhanced security controls requiring operator confirmation by default, while the ACME Admin sample provides a real target for demonstrating skill workflows.
+The typical request flow starts at the portal web UI, which proxies API calls to the platform gateway. The gateway authenticates users via the identity broker, then relays chat and session requests to the agent service. For tool execution, the agent service calls the tool gateway, which may invoke Kubernetes or other connectors. The tool-gateway runs as a 2/2 pod with a chromium headless-shell sidecar for browser automation. The HTTP tools implement enhanced security controls requiring operator confirmation by default, while the ServiceNow integration provides read-only access to ITSM data through a secure, bounded interface.
 
 ```mermaid
 sequenceDiagram
@@ -155,6 +162,7 @@ participant T as "tool-gateway"
 participant B as "browser sidecar"
 participant H as "HTTP Target"
 participant K as "Kubernetes / External Tools"
+participant S as "ServiceNow"
 U->>W : Open portal
 W->>G : /api/* requests
 G->>I : Verify JWT / exchange delegated token
@@ -170,6 +178,10 @@ T-->>A : Confirmation request (parked)
 A-->>G : Confirmation pending
 G-->>U : Approval card in portal
 Note over U,G : Operator approves in portal
+else ServiceNow integration
+T->>S : REST API call (read-only)
+S-->>T : ITSM data response
+T-->>A : Tool result
 else Other tool call
 T->>K : Execute connector action
 K-->>T : Result
@@ -403,6 +415,39 @@ For clusters upgrading from v0.39.0 that want agent-initiated `http.get` to stay
 - [egress-hardening release notes:59-116](file://docs/agentic-aiops-platform/release-notes/2026-09-20-post-web-checks-egress-hardening.md#L59-L116)
 - [http-check-demo.sh:10-34](file://shared/platform-ops/e2e/http-check-demo.sh#L10-L34)
 
+## ServiceNow Integration
+
+### Overview
+The platform includes a read-tier ServiceNow integration that provides secure, bounded access to ITSM data through six native tools: `servicenow.incident.list`, `servicenow.incident.get`, `servicenow.change_request.list`, `servicenow.change_request.get`, `servicenow.user.get`, and `servicenow.cmdb_ci.get`. This integration operates exclusively in read mode with no write capabilities, ensuring safe access to ServiceNow ITSM records.
+
+### Key Characteristics
+- **Read-only access**: All tools operate with `risk_level=read` and cannot modify any ServiceNow data
+- **Gateway-owned binding**: Tool names, fixed tables, field projections, and argument schemas are controlled by the platform
+- **Deny-by-default**: The connector is disabled by default and requires explicit enablement
+- **Field projection safety**: Each tool returns only predefined columns, excluding sensitive fields like passwords
+- **Acting-service identity**: Calls use the integration user's identity, not the requesting user's delegated identity
+
+### Quick Setup Reference
+For comprehensive ServiceNow integration setup, refer to the dedicated [ServiceNow Live Integration Guide](servicenow-integration.md) which covers:
+- ServiceNow instance provisioning (machine user, ACLs, OAuth client credentials)
+- Gateway configuration and wiring
+- Live validation procedures
+- Day-2 operations and troubleshooting
+
+### Basic Configuration
+```bash
+# Enable ServiceNow integration
+export GATEWAY_SERVICENOW_ENABLED=true
+export GATEWAY_SERVICENOW_BASE_URL="https://your-instance.service-now.com"
+export GATEWAY_SERVICENOW_CREDENTIAL_SET="servicenow-live"
+export GATEWAY_SERVICENOW_CREDENTIAL_SETS="/etc/luban/servicenow-credentials/credential-sets.json"
+```
+
+**Section sources**
+- [servicenow-integration.md:1-57](file://docs/guides/servicenow-integration.md#L1-L57)
+- [servicenow-integration.md:58-133](file://docs/guides/servicenow-integration.md#L58-L133)
+- [servicenow-integration.md:297-343](file://docs/guides/servicenow-integration.md#L297-L343)
+
 ## ACME Admin Sample Application
 
 ### Purpose
@@ -495,6 +540,7 @@ Each skill demonstrates different aspects of the platform's approval workflow, f
   - PostgreSQL: used for durable audit trail, skills store, incidents store, sessions, and agent state.
   - Elasticsearch: optional; enable via tool-gateway settings if needed.
   - OIDC Identity Provider: Keycloak realm configured by the overlay scripts.
+  - ServiceNow: Optional ITSM platform for read-tier integration.
 
 Recommended local cluster: kind, with optional auto-loading of images via make build.
 
@@ -519,17 +565,21 @@ Recommended local cluster: kind, with optional auto-loading of images via make b
 6. Configure HTTP tools (optional):
    - For card-free http.get in development, set `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get`
    - Enable HTTP connector and add allowlisted origins
-7. Deploy sample application (optional):
+7. Configure ServiceNow integration (optional):
+   - Follow the [ServiceNow Live Integration Guide](servicenow-integration.md) for comprehensive setup
+   - Enable ServiceNow connector and configure credential sets
+8. Deploy sample application (optional):
    - Run make deploy-sample-app to deploy the ACME Admin sample for skill demonstrations
-8. Install sample skills (optional):
+9. Install sample skills (optional):
    - Run make deploy-samples to install skill documents that demonstrate HTTP tools and browser flows
-9. Verify pods and services:
-   - Check that all eleven platform workloads are Running and Ready
+10. Verify pods and services:
+    - Check that all eleven platform workloads are Running and Ready
 
 **Section sources**
 - [getting-started.md:20-91](file://docs/guides/getting-started.md#L20-L91)
 - [dev-k8s README.md:311-338](file://shared/platform-ops/gitops/dev-k8s/README.md#L311-L338)
 - [deploy.sh:1-62](file://shared/platform-ops/gitops/dev-k8s/deploy.sh#L1-L62)
+- [servicenow-integration.md:297-343](file://docs/guides/servicenow-integration.md#L297-L343)
 - [acme-admin README.md:38-47](file://samples/acme-admin/README.md#L38-L47)
 
 ### First-Time Configuration: OIDC Identity Provider and Operator Accounts
@@ -546,43 +596,6 @@ Key behaviors:
 - [reconcile-portal-oidc-client.sh:274-316](file://shared/platform-ops/gitops/dev-k8s/reconcile-portal-oidc-client.sh#L274-L316)
 - [getting-started.md:123-155](file://docs/guides/getting-started.md#L123-L155)
 
-### Australia-Generation PDI Environment: Machine Identity-Based OAuth Integration
-
-**Updated** For Australia-generation PDI environments, the platform provides concrete, tested procedures for creating machine identity-based OAuth integrations, superseding generic OAuth setup steps with specific guidance for the Machine Identity Console interface.
-
-#### Machine Identity Console Setup
-1. **Access the Machine Identity Console** in your ServiceNow instance
-2. **Navigate to System OAuth → Application Registry**
-3. **Create a new integration** by clicking "New integration"
-4. **Select OAuth – Client credentials grant** as the integration type
-5. **Bind the existing machine-identity user** (Identity type = Machine) in the *OAuth application user* field
-
-#### Platform Configuration Requirements
-- Ensure the platform property `glide.oauth.inbound.client.credential.grant_type.enabled=true` is enabled
-- This enables the client credentials grant flow for machine identities
-
-#### Client Configuration Details
-- **Client IDs**: Auto-generated (not settable) - copy directly from the console
-- **Client Secrets**: Auto-generated - copy securely to your local override environment
-- **Security Warning**: Never transmit client secrets through chat interfaces or CI logs
-- **Auth Scope**: Only `useraccount` ("full access to all REST APIs") is available
-- **Access Control**: Actual access remains bounded by the bound user's ACLs plus gateway-side admission allowlists
-
-#### Role Assignment Considerations
-- **No stock read-only role exists** on hardened PDI instances (`itil_read_only`/`readonly` absent)
-- **Deny-Unless hardening ACLs** gate ACL administration behind `security_admin` and harden `change_request`/`cmdb_ci` reads
-- **Deliberate deviation**: On production instances like `dev417985`, operators have accepted granting **`itil`** role to dedicated integration users (e.g., `luban_reader`) as a necessary deviation from least-privilege principles
-- **Production recommendation**: Properly ACL-hardened production tenants should follow the original least-privilege approach rather than broad role assignment
-
-#### Security Best Practices
-- Use dedicated machine-identity users for each integration
-- Apply principle of least privilege where possible within PDI constraints
-- Monitor integration usage patterns and adjust ACLs accordingly
-- Regularly audit machine identity permissions and rotation policies
-
-**Section sources**
-- [tool-configuration.md:859-878](file://docs/guides/tool-configuration.md#L859-L878)
-
 ### Verifying Service Health
 - Check pod status and services:
   - kubectl -n dev-luban-aiops get pods,svc
@@ -596,6 +609,8 @@ Key behaviors:
   - kubectl -n dev-luban-aiops exec deployment/acme-admin -- curl http://localhost:8080/healthz
 - Check tool-gateway browser sidecar:
   - kubectl -n dev-luban-aiops get pods -l app=tool-gateway (should show 2/2 READY)
+- Verify ServiceNow integration (if configured):
+  - Check tool-gateway logs for ServiceNow connectivity and tool registration
 
 **Section sources**
 - [dev-k8s README.md:728-761](file://shared/platform-ops/gitops/dev-k8s/README.md#L728-L761)
@@ -631,11 +646,15 @@ Additional useful targets:
 - HTTP tool configuration:
   - Configure GATEWAY_HTTP_ENABLED, GATEWAY_HTTP_ALLOW_ORIGINS, and GATEWAY_MUTATING_TOOLS_ENABLED for HTTP tool functionality.
   - For card-free http.get in development, set AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
+- ServiceNow integration configuration:
+  - Refer to the [ServiceNow Live Integration Guide](servicenow-integration.md) for comprehensive setup procedures
+  - Configure GATEWAY_SERVICENOW_ENABLED, GATEWAY_SERVICENOW_BASE_URL, and credential sets
 
 **Section sources**
 - [dev-k8s README.md:243-259](file://shared/platform-ops/gitops/dev-k8s/README.md#L243-L259)
 - [dev-k8s README.md:340-414](file://shared/platform-ops/gitops/dev-k8s/README.md#L340-L414)
 - [configuration-reference.md:282-327](file://docs/guides/configuration-reference.md#L282-L327)
+- [servicenow-integration.md:297-343](file://docs/guides/servicenow-integration.md#L297-L343)
 - [http_connector.py:204-233](file://products/tool-gateway/src/tool_gateway/core/config.py#L204-L233)
 
 ## Dependency Analysis
@@ -646,6 +665,7 @@ The platform relies on several cross-service dependency chains:
 - Skills and incidents retrieval chains with their own credential registries.
 - HTTP tool chain from tool-gateway to allowlisted external services with enhanced security controls.
 - Browser automation chain from tool-gateway to chromium headless-shell sidecar.
+- ServiceNow integration chain from tool-gateway to ServiceNow ITSM platform.
 
 ```mermaid
 graph LR
@@ -654,6 +674,7 @@ AGS["agent-service"] --> |Tool invocation| TGW["tool-gateway"]
 TGW --> |Connectors| EXT["External systems / Kubernetes"]
 TGW --> |HTTP tools (confirmation required)| HTTP["HTTP Targets (allowlisted)"]
 TGW --> |CDP connection| BR["chromium headless-shell"]
+TGW --> |ServiceNow read tier| SNOW["ServiceNow ITSM"]
 PGW --> |Audit events| AUD["audit-service"]
 TGW --> |Audit events| AUD
 IDB --> |Audit events| AUD
@@ -669,6 +690,7 @@ TGW --> |Sample app| ACM["acme-admin"]
 - [configuration-reference.md:214-280](file://docs/guides/configuration-reference.md#L214-L280)
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
 - [tool-gateway-browser-sidecar.yaml:1-67](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/tool-gateway-browser-sidecar.yaml#L1-L67)
+- [servicenow-integration.md:19-57](file://docs/guides/servicenow-integration.md#L19-L57)
 
 **Section sources**
 - [configuration-reference.md:33-88](file://docs/guides/configuration-reference.md#L33-88)
@@ -686,6 +708,7 @@ TGW --> |Sample app| ACM["acme-admin"]
 - **Confirmation overhead**: The new confirmation requirement adds latency for HTTP tool calls; consider using AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA for high-volume development scenarios.
 - **Browser sidecar resources**: The chromium headless-shell sidecar consumes additional CPU and memory; monitor resource usage and adjust limits as needed.
 - **Coordinated rollouts**: All eleven workloads roll out together with the coordinated image tag, ensuring version consistency across the platform.
+- **ServiceNow integration performance**: The connector caps sysparm_limit at 100 and bounds HTTP client timeouts; monitor for upstream errors and adjust timeout settings appropriately.
 
 ## Troubleshooting Guide
 Common symptoms and resolutions:
@@ -731,13 +754,12 @@ Common symptoms and resolutions:
 - **OTel push not working**:
   - Check OTEL_EXPORTER_OTLP_HEADERS in runtime secrets: kubectl -n dev-luban-aiops get secret -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.data.OTEL_EXPORTER_OTLP_HEADERS}{"\n"}{end}'
   - Re-run sync-otel-secrets.sh with proper OpenObserve credentials
-- **Australia PDI OAuth integration issues**:
-  - Verify Machine Identity Console integration was created via System OAuth → Application Registry
-  - Check that glide.oauth.inbound.client.credential.grant_type.enabled=true is set
-  - Ensure client credentials were copied securely from auto-generated values
-  - Verify the bound machine-identity user has appropriate ACLs (consider itil role for production PDI)
+- **ServiceNow integration issues**:
+  - Check ServiceNow connectivity: kubectl -n dev-luban-aiops exec deployment/tool-gateway -c tool-gateway -- curl https://your-instance.service-now.com/api/now/table/incident
+  - Verify ServiceNow credentials and OAuth configuration
+  - Review ServiceNow-specific error codes and resolution steps in the [ServiceNow Live Integration Guide](servicenow-integration.md)
 
-**Updated** The most common issue after upgrading to v0.39.1+ is unexpected confirmation cards for http.get calls. This is intentional security hardening. Review the migration notes above to configure your environment appropriately. Additionally, ensure all eleven platform workloads have the coordinated image tag and that browser sidecar resources are adequate for your workload. For Australia PDI environments, ensure Machine Identity Console OAuth integrations are properly configured with appropriate role assignments.
+**Updated** The most common issue after upgrading to v0.39.1+ is unexpected confirmation cards for http.get calls. This is intentional security hardening. Review the migration notes above to configure your environment appropriately. Additionally, ensure all eleven platform workloads have the coordinated image tag and that browser sidecar resources are adequate for your workload. For ServiceNow integration issues, consult the dedicated ServiceNow Live Integration Guide for comprehensive troubleshooting procedures.
 
 **Section sources**
 - [troubleshooting.md:32-67](file://docs/guides/troubleshooting.md#L32-L67)
@@ -750,11 +772,12 @@ Common symptoms and resolutions:
 - [troubleshooting.md:450-484](file://docs/guides/troubleshooting.md#L450-L484)
 - [http-check-demo.sh:151-178](file://shared/platform-ops/e2e/http-check-demo.sh#L151-L178)
 - [acme-admin deploy.sh:135-163](file://samples/acme-admin/deploy.sh#L135-L163)
+- [servicenow-integration.md:633-649](file://docs/guides/servicenow-integration.md#L633-L649)
 
 ## Conclusion
-You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform includes powerful HTTP service-check tools with enhanced security controls requiring operator confirmation by default, an ACME Admin sample application with comprehensive endpoints and skill demonstrations, and a coordinated image tagging system ensuring version consistency across all eleven workloads. The tool-gateway's chromium headless-shell sidecar enables sophisticated browser automation capabilities, while comprehensive secret provisioning ensures secure operation of all platform components. For Australia-generation PDI environments, the platform provides concrete Machine Identity Console procedures for OAuth integration, replacing generic OAuth setup with tested, production-ready guidance. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
+You now have the essentials to set up the Luban AIOps platform locally, deploy it using the dev-k8s overlay, configure OIDC identity, create operator accounts, and verify service health. The platform includes powerful HTTP service-check tools with enhanced security controls requiring operator confirmation by default, ServiceNow read-tier integration capabilities for accessing ITSM data securely, an ACME Admin sample application with comprehensive endpoints and skill demonstrations, and a coordinated image tagging system ensuring version consistency across all eleven workloads. The tool-gateway's chromium headless-shell sidecar enables sophisticated browser automation capabilities, while comprehensive secret provisioning ensures secure operation of all platform components. For ServiceNow integration, the platform provides a dedicated live integration guide with comprehensive procedures for tenant provisioning, credential management, and operational best practices. Use the root Makefile targets to streamline your development workflow, and refer to the configuration reference and troubleshooting guide for deeper insights and issue resolution.
 
-**Updated** The coordinated image tagging system (0.46.0-dev-k8s-<gitsha>) ensures all platform workloads run consistently, while expanded secret provisioning covers execution signing/handoff security, browser credentials, and OTel push authentication. The tool-gateway's 2/2 pod architecture with chromium headless-shell sidecar provides robust browser automation capabilities for complex operational workflows. For Australia PDI environments, the platform now includes comprehensive Machine Identity Console OAuth integration procedures with specific guidance for role assignments and security considerations.
+**Updated** The coordinated image tagging system (0.46.0-dev-k8s-<gitsha>) ensures all platform workloads run consistently, while expanded secret provisioning covers execution signing/handoff security, browser credentials, and OTel push authentication. The tool-gateway's 2/2 pod architecture with chromium headless-shell sidecar provides robust browser automation capabilities for complex operational workflows. The ServiceNow integration offers secure, read-only access to ITSM data through a comprehensive guide covering tenant provisioning, OAuth configuration, and operational procedures.
 
 ## Appendices
 
@@ -791,6 +814,16 @@ You now have the essentials to set up the Luban AIOps platform locally, deploy i
 - [http_connector.py:204-233](file://products/tool-gateway/src/tool_gateway/core/config.py#L204-L233)
 - [http-check-demo.sh:136-145](file://shared/platform-ops/e2e/http-check-demo.sh#L136-L145)
 - [runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
+
+### ServiceNow Integration Quick Reference
+- Enable ServiceNow: GATEWAY_SERVICENOW_ENABLED=true
+- Configure base URL: GATEWAY_SERVICENOW_BASE_URL="https://your-instance.service-now.com"
+- Set credential set: GATEWAY_SERVICENOW_CREDENTIAL_SET="servicenow-live"
+- Configure credential sets path: GATEWAY_SERVICENOW_CREDENTIAL_SETS="/etc/luban/servicenow-credentials/credential-sets.json"
+- For comprehensive setup, refer to the [ServiceNow Live Integration Guide](servicenow-integration.md)
+
+**Section sources**
+- [servicenow-integration.md:330-343](file://docs/guides/servicenow-integration.md#L330-L343)
 
 ### ACME Admin Sample Commands
 - Deploy sample: make deploy-sample-app
@@ -853,15 +886,3 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 **Section sources**
 - [deploy.sh:11-52](file://shared/platform-ops/gitops/dev-k8s/deploy.sh#L11-L52)
 - [configuration-reference.md:704-724](file://docs/guides/configuration-reference.md#L704-L724)
-
-### Australia PDI OAuth Integration Reference
-- **Machine Identity Console**: Navigate to System OAuth → Application Registry
-- **Integration Type**: OAuth – Client credentials grant
-- **Platform Property**: glide.oauth.inbound.client.credential.grant_type.enabled=true
-- **Client Configuration**: Auto-generated client_id and client_secret
-- **Role Assignment**: Consider granting `itil` role for production PDI environments
-- **Security**: Never transmit client secrets through chat or CI logs
-- **Access Control**: Actual access bounded by bound user's ACLs plus gateway admission allowlists
-
-**Section sources**
-- [tool-configuration.md:859-878](file://docs/guides/tool-configuration.md#L859-L878)

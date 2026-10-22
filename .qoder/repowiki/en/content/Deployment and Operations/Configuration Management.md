@@ -12,6 +12,8 @@
 - [sync-incident-secrets.sh](file://shared/platform-ops/gitops/sync-incident-secrets.sh)
 - [sync-skills-secrets.sh](file://shared/platform-ops/gitops/sync-skills-secrets.sh)
 - [browser.env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [ansible.env](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env)
+- [servicenow.env](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env)
 - [tool-gateway runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env)
 - [agent-platform runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env)
 - [skills-hub runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
@@ -22,16 +24,19 @@
 - [skills_hub ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
 - [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
 - [secret_delivery.py](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py)
+- [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [runtime-profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
+- [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` environment variable for enabling agent-driven context compression (SPEC-064 R-2)
-- Updated configuration validation section to include trigger ratio constraints for compression functionality
-- Enhanced agent platform configuration section with detailed explanation of context compression behavior and relationship to trigger ratio configuration
-- Added troubleshooting guidance for compression-related startup failures
-- Updated performance considerations to address context compression impact on memory usage
-- Added reference to SPEC-064 agent-driven context compression feature
+- Added comprehensive documentation for Ansible read-tier ingestion configuration (SPEC-069) including `GATEWAY_ANSIBLE_*` environment variables and MCP transport options
+- Added comprehensive documentation for ServiceNow read-tier ingestion configuration (SPEC-067) including `GATEWAY_SERVICENOW_*` environment variables and REST/Table-API connector details
+- Updated Feature Activation Matrix to include new rows for Ansible and ServiceNow read-tier ingestion capabilities
+- Enhanced Secret Contracts sections with new credential secret types for ansible-mock and servicenow-mock OAuth2 client credentials
+- Corrected Runtime Profiles paragraph to reflect dev-k8s wiring five non-LLM postures: mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev
+- Added detailed environment variable documentation for both Ansible and ServiceNow configurations with security implications and validation rules
 
 ## Table of Contents
 1. Introduction
@@ -56,9 +61,11 @@ This document explains how the Luban AIOPS platform manages configuration and se
 - **New**: Skill composition configuration including the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` operator-tunable limit for controlling the maximum number of sub-skills in compositions.
 - **Updated**: Secret delivery configuration including the `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` environment variable for portal_copy channel TTL management in gated workflows.
 - **New**: Agent-driven context compression configuration including the `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` environment variable for enabling proactive context summarization with trigger ratio validation.
+- **New**: Ansible read-tier ingestion configuration through SPEC-069 with MCP server integration and native fallback support.
+- **New**: ServiceNow read-tier ingestion configuration through SPEC-067 with REST/Table-API connector and OAuth2 client credentials.
 
 ## Project Structure
-The configuration is assembled with Kustomize. The dev overlay defines a configMapGenerator that merges multiple env files into one ConfigMap named platform-runtime-config. Runtime profiles add additional environment fragments (for example, default, mutating-dev, browser-dev). Product deployments reference these ConfigMaps and Secrets through their deployment manifests.
+The configuration is assembled with Kustomize. The dev overlay defines a configMapGenerator that merges multiple env files into one ConfigMap named platform-runtime-config. Runtime profiles add additional environment fragments (for example, default, mutating-dev, browser-dev, ansible-dev, servicenow-dev). Product deployments reference these ConfigMaps and Secrets through their deployment manifests.
 
 ```mermaid
 graph TB
@@ -66,18 +73,22 @@ A["Kustomization<br/>dev-k8s/kustomization.yaml"] --> B["ConfigMap generator<br/
 A --> C["Runtime profile<br/>default/configmap.yaml"]
 A --> D["Mutating profile env<br/>mutating-dev/mutating.env"]
 A --> E["Browser profile env<br/>browser-dev/browser.env"]
-B --> F["Platform services read ConfigMap at startup"]
-F --> G["Skills Hub<br/>Composition Limits"]
-F --> H["Tool Gateway<br/>Secret Delivery TTL"]
-F --> I["Agent Platform<br/>Context Compression"]
+A --> F["Ansible profile env<br/>ansible-dev/ansible.env"]
+A --> G["ServiceNow profile env<br/>servicenow-dev/servicenow.env"]
+B --> H["Platform services read ConfigMap at startup"]
+H --> I["Skills Hub<br/>Composition Limits"]
+H --> J["Tool Gateway<br/>Secret Delivery"]
+H --> K["Agent Platform<br/>Context Compression"]
+H --> L["Tool Gateway<br/>Ansible Ingestion"]
+H --> M["Tool Gateway<br/>ServiceNow Ingestion"]
 ```
 
 **Diagram sources**
-- [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
+- [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 
 **Section sources**
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-40](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L40)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 
 ## Core Components
@@ -87,7 +98,9 @@ F --> I["Agent Platform<br/>Context Compression"]
 - Environment overlays: Profiles under runtime-profiles allow environment-specific configuration without changing application code.
 - **New**: Skills composition configuration: Operator-tunable limits for controlling the maximum number of sub-skills in skill compositions to prevent resource exhaustion and maintain security boundaries.
 - **Updated**: Secret delivery configuration: Portal_copy channel TTL management with configurable hold periods spanning full HITL approval workflows.
-- **New**: Agent-driven context compression: Opt-in feature that enables proactive context summarization before hard compression thresholds are reached, with strict trigger ratio validation.
+- **New**: Agent-driven context compression: Opt-in feature that enables proactive context summarization before hard compression thresholds are reached.
+- **New**: Ansible read-tier ingestion: MCP server integration with native fallback support for inventory discovery and read-only operations.
+- **New**: ServiceNow read-tier ingestion: REST/Table-API connector with OAuth2 client credentials for read-only table access.
 
 Key responsibilities:
 - Non-secret configuration: Managed via ConfigMap; changes can be applied without image rebuilds.
@@ -95,9 +108,11 @@ Key responsibilities:
 - **New**: Composition limits: Configurable bounds on skill composition complexity to balance functionality with resource constraints.
 - **Updated**: Secret delivery TTL: Configurable hold periods for portal_copy channels to support gated workflow scenarios.
 - **New**: Context compression: Opt-in agent-driven compression with trigger ratio validation to prevent premature context summarization.
+- **New**: Ansible ingestion: Server-agnostic MCP client with native fallback for inventory operations.
+- **New**: ServiceNow ingestion: Native REST connector with OAuth2 authentication for table data access.
 
 **Section sources**
-- [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
+- [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [runtime-secrets.example.env:1-57](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env#L1-L57)
 
 ## Architecture Overview
@@ -109,6 +124,8 @@ The platform uses a layered configuration approach:
 - **New**: Skills composition limits are enforced at ingestion time through configurable bounds.
 - **Updated**: Secret delivery hold TTL spans full HITL approval workflows for portal_copy channels.
 - **New**: Agent-driven context compression is opt-in and validates trigger ratios against buffer constraints.
+- **New**: Ansible read-tier ingestion provides MCP server connectivity with native fallback support.
+- **New**: ServiceNow read-tier ingestion provides REST/Table-API connectivity with OAuth2 authentication.
 
 ```mermaid
 graph TB
@@ -116,9 +133,13 @@ subgraph "Configuration Sources"
 P1["Default profile<br/>default/configmap.yaml"]
 P2["Mutating profile env<br/>mutating-dev/mutating.env"]
 P3["Browser profile env<br/>browser-dev/browser.env"]
-P4["Skills Hub config<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
-P5["Tool Gateway config<br/>GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
-P6["Agent Platform config<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED"]
+P4["Ansible profile env<br/>ansible-dev/ansible.env"]
+P5["ServiceNow profile env<br/>servicenow-dev/servicenow.env"]
+P6["Skills Hub config<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
+P7["Tool Gateway config<br/>GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
+P8["Agent Platform config<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED"]
+P9["Ansible config<br/>GATEWAY_ANSIBLE_*"]
+P10["ServiceNow config<br/>GATEWAY_SERVICENOW_*"]
 end
 subgraph "Kustomize Assembly"
 K["dev-k8s/kustomization.yaml<br/>configMapGenerator"]
@@ -130,7 +151,7 @@ end
 subgraph "Services"
 AG["Agent Service<br/>Context Compression"]
 PG["Platform Gateway"]
-TG["Tool Gateway<br/>Secret Delivery"]
+TG["Tool Gateway<br/>Secret Delivery + Ingestions"]
 IB["Identity Broker"]
 AS["Audit Service"]
 SH["Skills Hub<br/>Composition Validation"]
@@ -142,6 +163,10 @@ P3 --> K
 P4 --> K
 P5 --> K
 P6 --> K
+P7 --> K
+P8 --> K
+P9 --> K
+P10 --> K
 K --> CM
 S1 --> AG
 S1 --> PG
@@ -160,7 +185,7 @@ CM --> IS
 ```
 
 **Diagram sources**
-- [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
+- [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 
 ## Detailed Component Analysis
@@ -168,15 +193,90 @@ CM --> IS
 ### Hierarchical ConfigMap assembly
 - The Kustomization file declares a configMapGenerator that merges environment files from runtime profiles into a single ConfigMap named platform-runtime-config.
 - The default profile provides a ConfigMap with generic deploy labels and provider settings.
-- Additional profiles (mutating-dev, browser-dev) contribute environment fragments that are merged into the same ConfigMap.
+- Additional profiles (mutating-dev, browser-dev, ansible-dev, servicenow-dev) contribute environment fragments that are merged into the same ConfigMap.
 
 Operational implications:
 - Non-secret configuration is centralized in one ConfigMap and consumed by services at startup.
 - Adding or updating environment fragments in profiles updates the ConfigMap without rebuilding images.
+- Five non-LLM postures are permanently wired into dev-k8s: mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev.
 
 **Section sources**
-- [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
+- [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
+
+### Ansible read-tier ingestion configuration
+**New Feature**: The tool-gateway service now supports Ansible read-tier ingestion through SPEC-069, providing MCP server connectivity with native fallback support for inventory discovery and read-only operations. The configuration is controlled by `GATEWAY_ANSIBLE_*` environment variables.
+
+**MCP Server Configuration:**
+- **Variable**: `GATEWAY_ANSIBLE_MCP_ENABLED`
+- **Default**: `false` (opt-in, disabled by default)
+- **Transport Options**: `streamable_http` (default) or `stdio`
+- **Endpoint Configuration**: `GATEWAY_ANSIBLE_MCP_URL` for streamable HTTP or `GATEWAY_ANSIBLE_MCP_COMMAND` + `GATEWAY_ANSIBLE_MCP_ARGS` for stdio
+- **Timeout**: `GATEWAY_ANSIBLE_MCP_TIMEOUT_MS` (default: 10000ms)
+- **Credential Sets**: `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET` and `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS`
+
+**Native Fallback Configuration:**
+- **Variable**: `GATEWAY_ANSIBLE_NATIVE_ENABLED`
+- **Default**: `false` (fallback when no MCP server is wired)
+- **Inventory Path**: `GATEWAY_ANSIBLE_INVENTORY_PATH`
+- **Executable**: `GATEWAY_ANSIBLE_NATIVE_EXECUTABLE` (default: `ansible-inventory`)
+
+**Security Implications:**
+- Read-only operations only: inventory listing, fact gathering, job template monitoring
+- No mutating operations admitted regardless of configuration
+- Tool metadata from MCP servers is untrusted input - only explicitly named tools are admitted
+- Credential sets must be mounted as files (no inline secrets)
+- Native fallback uses shell-out but remains read-only
+
+**Development Configuration Example:**
+```bash
+# Dev environment - MCP server enabled with mock endpoint
+GATEWAY_ANSIBLE_MCP_ENABLED=true
+GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http
+GATEWAY_ANSIBLE_MCP_URL=http://ansible-mock-mcp:8000/mcp
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET=ansible-mock
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS=/etc/luban/ansible-credentials/credential-sets.json
+```
+
+**Section sources**
+- [config.py:480-512](file://products/tool-gateway/src/tool_gateway/core/config.py#L480-L512)
+- [ansible.env:1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
+
+### ServiceNow read-tier ingestion configuration
+**New Feature**: The tool-gateway service now supports ServiceNow read-tier ingestion through SPEC-067, providing REST/Table-API connectivity with OAuth2 client credentials for read-only table access. The configuration is controlled by `GATEWAY_SERVICENOW_*` environment variables.
+
+**REST Connector Configuration:**
+- **Variable**: `GATEWAY_SERVICENOW_ENABLED`
+- **Default**: `false` (opt-in, disabled by default)
+- **Base URL**: `GATEWAY_SERVICENOW_BASE_URL` (required)
+- **Timeout**: `GATEWAY_SERVICENOW_TIMEOUT_MS` (default: 10000ms)
+- **Credential Sets**: `GATEWAY_SERVICENOW_CREDENTIAL_SET` and `GATEWAY_SERVICENOW_CREDENTIAL_SETS`
+
+**OAuth2 Client Credentials:**
+- **Scheme**: `oauth2_client_credentials`
+- **Token URL**: Configured in credential set (e.g., `/oauth_token.do`)
+- **Client ID/Secret**: Managed through credential sets
+- **Authentication**: Acts as gateway's acting-service identity, not user delegation
+
+**Security Implications:**
+- Read-only operations only: six pinned tools for incident, change_request, sys_user, cmdb_ci tables
+- Field projection is a safety allowlist - only specified columns returned
+- No table write, update, delete, or attachment fetch admitted
+- Token never travels through prompts, skills, or tool results
+- Fail-closed on upstream errors (4xx/5xx)
+
+**Development Configuration Example:**
+```bash
+# Dev environment - REST connector enabled with mock endpoint
+GATEWAY_SERVICENOW_ENABLED=true
+GATEWAY_SERVICENOW_BASE_URL=http://servicenow-mock-table-api:8000
+GATEWAY_SERVICENOW_CREDENTIAL_SET=servicenow-mock
+GATEWAY_SERVICENOW_CREDENTIAL_SETS=/etc/luban/servicenow-credentials/credential-sets.json
+```
+
+**Section sources**
+- [config.py:513-532](file://products/tool-gateway/src/tool_gateway/core/config.py#L513-L532)
+- [servicenow.env:1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
 
 ### Agent auto-allow list configuration
 The agent-platform includes a sophisticated auto-allow list system that controls which tools can execute without operator confirmation. This system has two configuration surfaces:
@@ -287,6 +387,8 @@ Secrets are provisioned using dedicated sync scripts. Each script handles a spec
 - Incident secrets: sync-incident-secrets.sh provisions webhook tokens and query client secrets, ensures the incidents database exists, updates per-product runtime-secrets.env files, applies Secrets, and restarts workloads.
 - Skills secrets: sync-skills-secrets.sh provisions query secrets, ensures the skills database exists, updates per-product runtime-secrets.env files, applies Secrets, and restarts workloads.
 - Sessions database: sync-sessions-db.sh ensures the sessions database exists and restarts agent-service.
+- **New**: Ansible credentials: sync-ansible-credentials.sh provisions OAuth bearer tokens for Ansible MCP server authentication.
+- **New**: ServiceNow credentials: sync-servicenow-credentials.sh provisions OAuth2 client credentials for ServiceNow Table-API authentication.
 
 Non-secret vs protected values:
 - Non-secret values (e.g., provider selection, model names, base URLs) belong in ConfigMap fragments and are merged by Kustomize.
@@ -388,8 +490,8 @@ SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
 
 **Section sources**
 - [skills_hub config.py:161-178](file://products/skills-hub/src/skills_hub/core/config.py#L161-L178)
-- [skills_hub config.py:188-191](file://products/skills_hub/src/skills_hub/core/config.py#L188-L191)
-- [skills_hub config.py:211-213](file://products/skills_hub/src/skills_hub/core/config.py#L211-L213)
+- [skills_hub config.py:188-191](file://products/skills-hub/src/skills_hub/core/config.py#L188-L191)
+- [skills_hub config.py:211-213](file://products/skills-hub/src/skills_hub/core/config.py#L211-L213)
 - [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
 
 ### Secret delivery configuration
@@ -450,6 +552,8 @@ GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=600
 - Default profile: Provides baseline provider configuration and optional catalog entries.
 - Mutating-dev profile: Adds environment-specific flags via mutating.env.
 - Browser-dev profile: Adds browser-related configuration via browser.env and patches tool-gateway with a sidecar. Also enables HTTP connectors for service health checks.
+- **New**: Ansible-dev profile: Adds Ansible MCP-ingestion configuration via ansible.env with in-cluster mock MCP server.
+- **New**: ServiceNow-dev profile: Adds ServiceNow REST connector configuration via servicenow.env with in-cluster mock Table API.
 - **New**: Skills composition limits can be tuned per environment based on security requirements and operational needs.
 - **Updated**: Secret delivery hold TTL can be configured per environment based on HITL workflow requirements.
 - **New**: Agent-driven context compression can be enabled per environment based on memory constraints and session length requirements.
@@ -460,7 +564,7 @@ To switch environments:
 - Apply the overlay so Kustomize regenerates platform-runtime-config.
 
 **Section sources**
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-40](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L40)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 
 ### Configuration validation at service startup
@@ -470,6 +574,8 @@ To switch environments:
 - HTTP connector validation: When `GATEWAY_HTTP_ENABLED=false`, no HTTP tools are registered. When enabled but origin allowlist is empty, all HTTP requests are denied.
 - Browser connector validation: When `GATEWAY_BROWSER_ENABLED=false`, no browser tools are registered. When enabled but origin allowlist is empty, all browser navigation is denied.
 - Agent auto-allow validation: Tools listed in auto-allow configuration must be read-only; mutating tools are logged as misconfiguration but remain available for HITL approval.
+- **New**: Ansible ingestion validation: Invalid MCP transport values or missing required endpoints cause startup failure with descriptive error messages.
+- **New**: ServiceNow ingestion validation: Missing base URL or invalid credential set configuration causes startup failure with descriptive error messages.
 - **New**: Skills composition validation: Invalid `SKILLS_COMPOSITION_MAX_SUB_SKILLS` values (non-integer or < 1) cause immediate startup failure with descriptive error messages.
 - **Updated**: Secret delivery validation: Both `GATEWAY_SECRET_DELIVERY_TTL_SECONDS` and `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` must be positive integers; invalid values cause startup failure with `ValueError("Secret delivery TTL and capacity must be positive integers")`.
 - **New**: Context compression validation: When `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED=true`, requires `AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2`; invalid combinations cause startup failure with `ValueError` referencing the compression setting.
@@ -478,9 +584,10 @@ Operational guidance:
 - Validate that all required keys are present in the relevant runtime-secrets.env files before applying.
 - Use the SKIP_* environment variables in sync scripts to bypass provisioning when CI injects secrets externally.
 - Verify auto-allow list composition matches expected behavior for your environment.
-- **New**: Test context compression configuration with appropriate trigger ratios to ensure proper startup.
+- **New**: Test Ansible and ServiceNow ingestion configurations with appropriate endpoints and credentials.
 - **New**: Test composition limits during development to ensure they meet operational requirements before production deployment.
 - **Updated**: Verify secret delivery TTL values are appropriate for your HITL workflow timing requirements.
+- **New**: Test context compression configuration with appropriate trigger ratios to ensure proper startup.
 
 [No sources needed since this section synthesizes behavior described by scripts and examples]
 
@@ -490,6 +597,8 @@ Operational guidance:
 - HTTP connector changes: Toggle `GATEWAY_HTTP_ENABLED` and adjust timeout/size limits through ConfigMap updates without requiring image rebuilds.
 - Browser configuration changes: Modify browser profile settings through ConfigMap updates without requiring image rebuilds.
 - Agent auto-allow changes: Update `AGENT_GATEWAY_TOOL_AUTO_ALLOW` or `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` through ConfigMap updates; changes take effect on service restart.
+- **New**: Ansible ingestion changes: Update `GATEWAY_ANSIBLE_*` variables through ConfigMap updates; changes take effect on tool-gateway service restart.
+- **New**: ServiceNow ingestion changes: Update `GATEWAY_SERVICENOW_*` variables through ConfigMap updates; changes take effect on tool-gateway service restart.
 - **New**: Skills composition limit changes: Update `SKILLS_COMPOSITION_MAX_SUB_SKILLS` through ConfigMap updates; changes take effect on skills-hub service restart.
 - **Updated**: Secret delivery hold TTL changes: Update `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` through ConfigMap updates; changes take effect on tool-gateway service restart.
 - **New**: Context compression changes: Update `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` and `AGENTSCOPE_CONTEXT_TRIGGER_RATIO` through ConfigMap updates; changes take effect on agent-service restart with proper trigger ratio validation.
@@ -499,13 +608,13 @@ Best practice:
 - Keep sensitive configuration in Secrets and manage them exclusively via sync scripts.
 - Test HTTP and browser connector configurations in development profiles before promoting to production.
 - Use additive auto-allow patterns (`_EXTRA` variables) for environment-specific opt-ins rather than replacing entire default lists.
-- **New**: Test context compression with appropriate trigger ratios in development to validate memory savings before production deployment.
+- **New**: Test Ansible and ServiceNow ingestion configurations thoroughly in development environments before production deployment.
 - **New**: Ensure trigger ratio validation passes before enabling compression in production environments.
 - **New**: Test composition limits thoroughly in development environments to validate workflow complexity requirements before production deployment.
 - **Updated**: Test secret delivery hold TTL values to ensure they accommodate your HITL approval workflow timing before production deployment.
 
 **Section sources**
-- [kustomization.yaml:9-15](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L9-L15)
+- [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
 - [sync-delegation-secrets.sh:1-97](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L1-L97)
 - [sync-incident-secrets.sh:1-176](file://shared/platform-ops/gitops/sync-incident-secrets.sh#L1-L176)
@@ -576,6 +685,72 @@ Best practice:
 - [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 
+#### Enabling Ansible read-tier ingestion
+**New Scenario**: Configure Ansible MCP-ingestion for inventory discovery and read-only operations through the server-agnostic connector.
+
+**Development Environment (MCP Server Enabled):**
+```bash
+# Enable MCP server connectivity with in-cluster mock
+GATEWAY_ANSIBLE_MCP_ENABLED=true
+GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http
+GATEWAY_ANSIBLE_MCP_URL=http://ansible-mock-mcp:8000/mcp
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET=ansible-mock
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS=/etc/luban/ansible-credentials/credential-sets.json
+```
+
+**Production Environment (Real AAP Server):**
+```bash
+# Point to production Red Hat AAP MCP server
+GATEWAY_ANSIBLE_MCP_ENABLED=true
+GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http
+GATEWAY_ANSIBLE_MCP_URL=https://aap-server.example.com/mcp
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET=aap-production
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS=/etc/luban/ansible-credentials/credential-sets.json
+```
+
+**Fallback Configuration (Native Inventory):**
+```bash
+# Native fallback when no MCP server is available
+GATEWAY_ANSIBLE_NATIVE_ENABLED=true
+GATEWAY_ANSIBLE_INVENTORY_PATH=/etc/ansible/inventory.yml
+GATEWAY_ANSIBLE_NATIVE_EXECUTABLE=ansible-inventory
+```
+
+**Section sources**
+- [ansible.env:1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
+- [config.py:480-512](file://products/tool-gateway/src/tool_gateway/core/config.py#L480-L512)
+
+#### Enabling ServiceNow read-tier ingestion
+**New Scenario**: Configure ServiceNow REST/Table-API connector for read-only table data access with OAuth2 authentication.
+
+**Development Environment (Mock ServiceNow):**
+```bash
+# Enable REST connector with in-cluster mock
+GATEWAY_SERVICENOW_ENABLED=true
+GATEWAY_SERVICENOW_BASE_URL=http://servicenow-mock-table-api:8000
+GATEWAY_SERVICENOW_CREDENTIAL_SET=servicenow-mock
+GATEWAY_SERVICENOW_CREDENTIAL_SETS=/etc/luban/servicenow-credentials/credential-sets.json
+```
+
+**Production Environment (Live ServiceNow Tenant):**
+```bash
+# Point to production ServiceNow instance
+GATEWAY_SERVICENOW_ENABLED=true
+GATEWAY_SERVICENOW_BASE_URL=https://your-instance.service-now.com
+GATEWAY_SERVICENOW_CREDENTIAL_SET=servicenow-production
+GATEWAY_SERVICENOW_CREDENTIAL_SETS=/etc/luban/servicenow-credentials/credential-sets.json
+```
+
+**Security Notes:**
+- Six pinned read-only tools: incident, change_request, sys_user, cmdb_ci tables
+- Field projection restricts returned columns to safety allowlist
+- No write operations admitted regardless of configuration
+- OAuth2 token acquired in memory, never exposed in logs or results
+
+**Section sources**
+- [servicenow.env:1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+- [config.py:513-532](file://products/tool-gateway/src/tool_gateway/core/config.py#L513-L532)
+
 #### Opting in specific tools to auto-approval
 - Use `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` for additive opt-in of specific tools without restating the entire default list.
 - Use `AGENT_GATEWAY_TOOL_AUTO_ALLOW` for complete replacement of the default allow-list (advanced use cases).
@@ -599,7 +774,7 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 - [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
 
 #### Tuning skill composition limits
-**New Scenario**: Configure the maximum number of sub-skills allowed in skill compositions based on your environment's security requirements and operational needs.
+**Scenario**: Configure the maximum number of sub-skills allowed in skill compositions based on your environment's security requirements and operational needs.
 
 **Development Environment (Higher Complexity):**
 ```bash
@@ -630,7 +805,7 @@ echo "Testing composition with $(cat /proc/self/environ | tr '\0' '\n' | grep SK
 - [skills_hub config.py:161-178](file://products/skills_hub/src/skills_hub/core/config.py#L161-L178)
 
 #### Configuring secret delivery hold TTL for gated workflows
-**Updated Scenario**: Configure the portal_copy channel hold TTL to support gated workflow scenarios where passwords are generated before HITL approval completes.
+**Scenario**: Configure the portal_copy channel hold TTL to support gated workflow scenarios where passwords are generated before HITL approval completes.
 
 **Development Environment (Standard Support):**
 ```bash
@@ -671,7 +846,7 @@ echo "Testing secret delivery with $(cat /proc/self/environ | tr '\0' '\n' | gre
 - [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
 
 #### Enabling agent-driven context compression
-**New Scenario**: Enable proactive context compression to reduce memory usage in long-running agent sessions by summarizing context before reaching hard compression thresholds.
+**Scenario**: Enable proactive context compression to reduce memory usage in long-running agent sessions by summarizing context before reaching hard compression thresholds.
 
 **Development Environment (Aggressive Compression):**
 ```bash
@@ -714,13 +889,19 @@ UpdateCM --> Apply["Apply Kustomize overlay"]
 UpdateSecret --> Apply
 Apply --> Restart["Restart affected deployments"]
 Restart --> Verify["Verify services start and endpoints respond"]
-Verify --> CompositionCheck{"Skills composition limit?"}
+Verify --> AnsibleCheck{"Ansible ingestion?"}
+AnsibleCheck --> |Yes| ValidateAnsible["Validate GATEWAY_ANSIBLE_* configuration"]
+AnsibleCheck --> |No| ServiceNowCheck{"ServiceNow ingestion?"}
+ServiceNowCheck --> |Yes| ValidateServiceNow["Validate GATEWAY_SERVICENOW_* configuration"]
+ServiceNowCheck --> |No| CompositionCheck{"Skills composition limit?"}
 CompositionCheck --> |Yes| ValidateLimits["Validate SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
 CompositionCheck --> |No| SecretDeliveryCheck{"Secret delivery TTL?"}
 SecretDeliveryCheck --> |Yes| ValidateTTL["Validate GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
 SecretDeliveryCheck --> |No| CompressionCheck{"Context compression?"}
 CompressionCheck --> |Yes| ValidateCompression["Validate AGENTSCOPE_COMPRESS_CONTEXT_ENABLED + trigger ratio"]
 CompressionCheck --> |No| Complete["Configuration complete"]
+ValidateAnsible --> Complete
+ValidateServiceNow --> Complete
 ValidateLimits --> Complete
 ValidateTTL --> Complete
 ValidateCompression --> Complete
@@ -738,6 +919,8 @@ The sync scripts coordinate dependencies across services and databases:
 - HTTP connectors depend on configured origin allowlists and optional credential sets.
 - Browser connectors depend on CDP endpoint availability and configured origin allowlists.
 - Agent auto-allow list depends on tool definitions being available at toolkit construction time.
+- **New**: Ansible ingestion depends on MCP server availability and configured credential sets.
+- **New**: ServiceNow ingestion depends on REST endpoint availability and OAuth2 client credentials.
 - **New**: Skills composition limits depend on proper validation of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` during service startup.
 - **Updated**: Secret delivery hold TTL depends on proper validation of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` during service startup and appropriate backend selection for multi-replica deployments.
 - **New**: Context compression depends on proper validation of trigger ratio constraints relative to buffer ratio during service startup.
@@ -745,13 +928,15 @@ The sync scripts coordinate dependencies across services and databases:
 ```mermaid
 graph LR
 PGW["Platform Gateway"] --> IB["Identity Broker"]
-PGW --> TG["Tool Gateway<br/>Secret Delivery"]
+PGW --> TG["Tool Gateway<br/>Secret Delivery + Ingestions"]
 PGW --> IS["Incident Service"]
 TG --> IS
 TG --> SH["Skills Hub<br/>Composition Limits"]
 TG --> HTTP["HTTP Connectors"]
 TG --> BROWSER["Browser Connectors"]
 TG --> SECRET["Secret Delivery<br/>Hold TTL"]
+TG --> ANSIBLE["Ansible Ingestion<br/>MCP/Native"]
+TG --> SERVICENOW["ServiceNow Ingestion<br/>REST/Table-API"]
 AG["Agent Service<br/>Context Compression"] --> IS
 AG --> SH
 AG --> EXEC["Execution Runtime"]
@@ -767,6 +952,8 @@ AUTOALLOW --> TOOLS["Gateway Tools"]
 LIMITS --> VALIDATION["Ingestion Validation"]
 SECRET --> BUFFER["Delivery Buffer<br/>Memory/Redis"]
 COMPRESS --> TRIGGER["Trigger Ratio<br/>Buffer Validation"]
+ANSIBLE --> MCPSERVER["MCP Server<br/>or Native Inventory"]
+SERVICENOW --> SNOWAPI["ServiceNow Table-API<br/>REST Endpoint"]
 ```
 
 **Diagram sources**
@@ -796,6 +983,9 @@ COMPRESS --> TRIGGER["Trigger Ratio<br/>Buffer Validation"]
 - Monitor HTTP connector usage to tune timeout and size parameters based on actual service response patterns.
 - Browser connector performance depends on CDP endpoint responsiveness and session management settings.
 - Auto-allow list resolution occurs at service startup; frequent changes require service restarts.
+- **New**: Ansible ingestion performance depends on MCP server response times and credential set resolution.
+- **New**: ServiceNow ingestion performance depends on REST endpoint latency and pagination limits.
+- **New**: Consider worst-case scenarios for both Ansible and ServiceNow ingestion when planning resource allocation.
 - **New**: Skills composition limits directly impact memory usage and processing time; higher limits increase resource consumption proportionally.
 - **New**: Composition validation occurs during skill ingestion; excessive sub-skill counts can slow down sync operations.
 - **New**: Consider the worst-case scenario: `SKILLS_COMPOSITION_MAX_SUB_SKILLS × GATEWAY_BROWSER_FLOW_MAX_STEPS` for resource planning.
@@ -823,6 +1013,10 @@ Common issues and resolutions:
 - Browser navigation denied: Check that `GATEWAY_BROWSER_ALLOW_ORIGINS` includes `http://acme-admin:8080` and that the acme-admin sample is deployed.
 - Tool auto-approval not working: Verify auto-allow list configuration and check that tools are read-only; mutating tools cannot be auto-approved.
 - Unexpected tool parking: Check if tool is in the correct auto-allow list (built-in default vs. extra list) and verify environment-specific overrides.
+- **New**: Ansible ingestion not working: Verify `GATEWAY_ANSIBLE_MCP_ENABLED=true`, check MCP server connectivity, and ensure credential sets are properly mounted.
+- **New**: ServiceNow ingestion not working: Verify `GATEWAY_SERVICENOW_ENABLED=true`, check REST endpoint connectivity, and ensure OAuth2 client credentials are valid.
+- **New**: Ansible MCP server unreachable: Check network policies, service discovery, and credential set configuration for the MCP endpoint.
+- **New**: ServiceNow OAuth2 token acquisition failed: Verify client_id/client_secret pair and token_url configuration in credential sets.
 - **New**: Skills composition validation failed: Check `SKILLS_COMPOSITION_MAX_SUB_SKILLS` value and ensure it's a valid integer ≥ 1. Review error messages for specific validation failures.
 - **New**: Composition rejected during ingestion: Verify that the composition doesn't exceed the configured `SKILLS_COMPOSITION_MAX_SUB_SKILLS` limit. Check for duplicate sub-skill IDs or invalid references.
 - **New**: Skills-hub startup failure: Inspect logs for `SettingsError` related to `SKILLS_COMPOSITION_MAX_SUB_SKILLS` parsing or validation.
@@ -846,6 +1040,8 @@ Verification steps:
 - Verify browser connectivity to acme-admin sample through the CDP endpoint.
 - Check agent-service logs for auto-allow list resolution and tool registration.
 - Verify tool auto-approval behavior matches expected environment posture.
+- **New**: Test Ansible MCP server connectivity and credential set resolution.
+- **New**: Test ServiceNow REST endpoint connectivity and OAuth2 token acquisition.
 - **New**: Verify skills-hub logs for composition limit validation and successful ingestion of compositions.
 - **New**: Test composition creation with various sub-skill counts to validate limit enforcement.
 - **Updated**: Verify tool-gateway logs for secret delivery TTL validation and successful portal copy delivery handling.
@@ -869,12 +1065,14 @@ Luban's configuration system separates non-secret and secret concerns:
 - HTTP connector configuration provides flexible service health checking capabilities with security controls.
 - Browser connector configuration enables web application testing through Chromium automation with strict origin controls.
 - Agent auto-allow list configuration supports both hardened defaults and environment-specific opt-ins through additive patterns.
+- **New**: Ansible read-tier ingestion configuration provides MCP server connectivity with native fallback support for inventory discovery and read-only operations.
+- **New**: ServiceNow read-tier ingestion configuration provides REST/Table-API connectivity with OAuth2 authentication for read-only table access.
 - **New**: Skills composition configuration provides operator control over composition complexity through the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` knob, balancing functionality with security and resource constraints.
 - **Updated**: Secret delivery configuration provides operator control over portal_copy channel hold periods through the `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` knob, supporting gated workflow scenarios with configurable TTL validation.
 - **New**: Agent-driven context compression configuration provides operator control over proactive context summarization through the `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` knob, with strict trigger ratio validation to ensure proper compression timing.
 - Following the documented procedures ensures consistent, auditable, and recoverable configuration management across development, staging, and production.
 
-**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios. **Updated**: The addition of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` enables precise control over portal_copy channel TTL management, supporting gated workflow scenarios with robust validation and flexible backend options. **New**: The addition of `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` enables proactive context compression for memory optimization in long-running agent sessions, with comprehensive validation to prevent misconfiguration.
+**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios. **Updated**: The addition of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` enables precise control over portal_copy channel TTL management, supporting gated workflow scenarios with robust validation and flexible backend options. **New**: The addition of `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` enables proactive context compression for memory optimization in long-running agent sessions, with comprehensive validation to prevent misconfiguration. **New**: The addition of Ansible and ServiceNow read-tier ingestion configurations enables secure, read-only integration with external systems through standardized MCP and REST protocols.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -887,6 +1085,8 @@ Luban's configuration system separates non-secret and secret concerns:
 - sync-incident-secrets.sh: Provisions incident webhook and query secrets and ensures incidents database.
 - sync-skills-secrets.sh: Provisions skills query secrets and ensures skills database.
 - sync-sessions-db.sh: Ensures sessions database exists and restarts agent-service.
+- **New**: sync-ansible-credentials.sh: Provisions Ansible MCP server bearer tokens and mock credentials.
+- **New**: sync-servicenow-credentials.sh: Provisions ServiceNow OAuth2 client credentials and mock tokens.
 
 **Section sources**
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
@@ -941,6 +1141,71 @@ Luban's configuration system separates non-secret and secret concerns:
 - [config.py:72-80](file://products/tool-gateway/src/tool_gateway/core/config.py#L72-L80)
 - [browser.env:1-15](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L15)
 
+### Ansible Ingestion Configuration Reference
+**New Feature**: Ansible read-tier ingestion configuration for SPEC-069 MCP server integration and native fallback support.
+
+**Environment Variables:**
+- `GATEWAY_ANSIBLE_MCP_ENABLED`: Enable/disable MCP server connectivity (default: false)
+- `GATEWAY_ANSIBLE_MCP_TRANSPORT`: Transport type - `streamable_http` or `stdio` (default: streamable_http)
+- `GATEWAY_ANSIBLE_MCP_URL`: Streamable-HTTP MCP endpoint (used with streamable_http transport)
+- `GATEWAY_ANSIBLE_MCP_COMMAND`, `GATEWAY_ANSIBLE_MCP_ARGS`: Local MCP server executable and arguments (used with stdio transport)
+- `GATEWAY_ANSIBLE_MCP_TIMEOUT_MS`: Per-request MCP timeout in milliseconds (default: 10000)
+- `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET`: Named credential set for MCP authentication
+- `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS`: Credential-sets JSON path (falls back to http/browser paths)
+- `GATEWAY_ANSIBLE_NATIVE_ENABLED`: Enable native `ansible-inventory` fallback (default: false)
+- `GATEWAY_ANSIBLE_INVENTORY_PATH`: Inventory file path for native fallback
+- `GATEWAY_ANSIBLE_NATIVE_EXECUTABLE`: Executable for native fallback (default: ansible-inventory)
+
+**Security Features:**
+- Read-only operations only - no mutating operations admitted
+- Untrusted MCP server metadata filtered through admission allowlist
+- File-based credential management only
+- Native fallback remains read-only despite shell-out
+
+**Development Configuration:**
+```bash
+# MCP server enabled with in-cluster mock
+GATEWAY_ANSIBLE_MCP_ENABLED=true
+GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http
+GATEWAY_ANSIBLE_MCP_URL=http://ansible-mock-mcp:8000/mcp
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET=ansible-mock
+GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS=/etc/luban/ansible-credentials/credential-sets.json
+```
+
+**Section sources**
+- [config.py:480-512](file://products/tool-gateway/src/tool_gateway/core/config.py#L480-L512)
+- [ansible.env:1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
+
+### ServiceNow Ingestion Configuration Reference
+**New Feature**: ServiceNow read-tier ingestion configuration for SPEC-067 REST/Table-API connector with OAuth2 authentication.
+
+**Environment Variables:**
+- `GATEWAY_SERVICENOW_ENABLED`: Enable/disable REST connector (default: false)
+- `GATEWAY_SERVICENOW_BASE_URL`: Table-API base URL (required)
+- `GATEWAY_SERVICENOW_TIMEOUT_MS`: HTTP client timeout in milliseconds (default: 10000)
+- `GATEWAY_SERVICENOW_CREDENTIAL_SET`: Named OAuth2 client credentials set
+- `GATEWAY_SERVICENOW_CREDENTIAL_SETS`: Credential-sets JSON path (falls back to http/browser paths)
+
+**Security Features:**
+- Read-only operations only - six pinned tools for specific tables
+- Field projection restricts returned columns to safety allowlist
+- OAuth2 token acquired in memory, never exposed in logs/results
+- Fail-closed on upstream errors (4xx/5xx)
+- Acting-service identity only, no user delegation
+
+**Development Configuration:**
+```bash
+# REST connector enabled with in-cluster mock
+GATEWAY_SERVICENOW_ENABLED=true
+GATEWAY_SERVICENOW_BASE_URL=http://servicenow-mock-table-api:8000
+GATEWAY_SERVICENOW_CREDENTIAL_SET=servicenow-mock
+GATEWAY_SERVICENOW_CREDENTIAL_SETS=/etc/luban/servicenow-credentials/credential-sets.json
+```
+
+**Section sources**
+- [config.py:513-532](file://products/tool-gateway/src/tool_gateway/core/config.py#L513-L532)
+- [servicenow.env:1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+
 ### Agent Auto-Allow List Configuration Reference
 **Environment Variables:**
 - `AGENT_GATEWAY_TOOL_AUTO_ALLOW`: Replacement allow-list (comma-separated dotted tool names)
@@ -978,7 +1243,7 @@ AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA=http.get
 - [agent-platform runtime-config.env:23-30](file://shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime-config.env#L23-L30)
 
 ### Skills Composition Configuration Reference
-**New Feature**: Skill composition configuration for SPEC-057 runbooks.
+**Feature**: Skill composition configuration for SPEC-057 runbooks.
 
 **Environment Variables:**
 - `SKILLS_COMPOSITION_MAX_SUB_SKILLS`: Maximum number of sub-skills in compositions (default: 8)
@@ -1021,7 +1286,7 @@ SKILLS_COMPOSITION_MAX_SUB_SKILLS=4
 - [skills-hub runtime-config.env:4-8](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env#L4-L8)
 
 ### Secret Delivery Configuration Reference
-**Updated Feature**: Secret delivery configuration for SPEC-062 secure password generation and delivery.
+**Feature**: Secret delivery configuration for SPEC-062 secure password generation and delivery.
 
 **Environment Variables:**
 - `GATEWAY_SECRETS_ENABLED`: Enable/disable secret delivery tools (default: false)
@@ -1084,7 +1349,7 @@ GATEWAY_SECRET_DELIVERY_MAX_ENTRIES=512
 - [tool-gateway runtime-config.env:84-97](file://shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-config.env#L84-L97)
 
 ### Agent-Driven Context Compression Configuration Reference
-**New Feature**: Agent-driven context compression configuration for SPEC-064 R-2 proactive context summarization.
+**Feature**: Agent-driven context compression configuration for SPEC-064 R-2 proactive context summarization.
 
 **Environment Variables:**
 - `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED`: Enable/disable agent-driven compression (default: false)
@@ -1135,3 +1400,58 @@ AGENTSCOPE_COMPRESS_CONTEXT_ENABLED=false
 - [runtime_settings.py:313-328](file://products/agent-platform/src/agent_service/runtime_settings.py#L313-L328)
 - [runtime_settings.py:530-532](file://products/agent-platform/src/agent_service/runtime_settings.py#L530-L532)
 - [kernel_middleware.py:105-117](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L105-L117)
+
+### Runtime Profiles Reference
+**Updated**: The dev-k8s overlay wires five non-LLM postures permanently: mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev. These are not switchable LLM provider profiles but complementary development postures that enhance the base configuration.
+
+**Profile Types:**
+- **Switchable LLM Provider Profiles**: Traditional profiles that select different LLM providers
+- **Non-LLM Postures**: Permanent development enhancements that add capabilities without changing LLM provider
+
+**Permanent Dev Postures:**
+- `mutating-dev`: Enables mutating tools with pod-delete RBAC
+- `browser-dev`: Enables browser web-check tools with chromium sidecar
+- `secrets-dev`: Enables secret delivery and email functionality
+- `ansible-dev`: Enables Ansible MCP-ingestion with in-cluster mock
+- `servicenow-dev`: Enables ServiceNow REST connector with in-cluster mock
+
+**Section sources**
+- [select-runtime-profile.sh:14-21](file://shared/platform-ops/gitops/select-runtime-profile.sh#L14-L21)
+- [kustomization.yaml:6-10](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L6-L10)
+- [runtime-profiles README.md:114-144](file://shared/platform-ops/gitops/runtime-profiles/README.md#L114-L144)
+
+### Feature Activation Matrix
+**Updated**: The following table maps platform capabilities to the environment variables and secrets that activate them. A feature is **active** when all required variables are set to non-empty values.
+
+| Capability | Required Variables | Service(s) | Default (dev-k8s) |
+|---|---|---|---|
+| **Chat and sessions** | `AGENT_SERVICE_URL`, `SESSION_STORE_BACKEND`, `SESSION_DB_URL`, `AGENT_STATE_STORE_BACKEND`, `AGENT_STATE_DB_URL` | platform-gateway, agent-service | enabled |
+| **Portal authentication** | `PLATFORM_GATEWAY_REQUIRE_AUTH=true`, `IDENTITY_TOKEN_AUDIENCE` | platform-gateway, identity-service | enabled |
+| **Token delegation** | `PLATFORM_GATEWAY_SERVICE_CLIENT_SECRET` ↔ `IDENTITY_SERVICE_CLIENTS` | platform-gateway ↔ identity-service | **must be provisioned** |
+| **Kubernetes tools** | `GATEWAY_K8S_ENABLED=true`, `GATEWAY_K8S_NAMESPACE` | tool-gateway | enabled (`dev-luban-aiops`) |
+| **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
+| **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
+| **HTTP service-checks (`http.*`, SPEC-058)** | `GATEWAY_HTTP_ENABLED=true`, `GATEWAY_HTTP_ALLOW_ORIGINS` (deny-by-default); `http.post` (write) additionally needs `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0` + a `tools:mutate` grant; credentials via `GATEWAY_HTTP_CREDENTIAL_SETS` (defaults to the browser path) | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
+| **Ansible read-tier ingestion (`ansible.*`, SPEC-069)** | `GATEWAY_ANSIBLE_MCP_ENABLED=true` plus `GATEWAY_ANSIBLE_MCP_URL` (`streamable_http`) or `GATEWAY_ANSIBLE_MCP_COMMAND` (`stdio`); credentials via `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET`/`_CREDENTIAL_SETS`. The `GATEWAY_ANSIBLE_NATIVE_ENABLED` shell-out is the no-MCP-server fallback and stays off when a server is wired | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `ansible-dev` profile (in-cluster mock MCP server) |
+| **ServiceNow read-tier ingestion (`servicenow.*`, SPEC-067)** | `GATEWAY_SERVICENOW_ENABLED=true`, `GATEWAY_SERVICENOW_BASE_URL`, and an `oauth2_client_credentials` set named by `GATEWAY_SERVICENOW_CREDENTIAL_SET` at `GATEWAY_SERVICENOW_CREDENTIAL_SETS`; the six-tool admission allowlist, fixed tables, and field projections are gateway-owned config, never target- or model-derived | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `servicenow-dev` profile (in-cluster mock Table API). Repointing at a live tenant is config-only — see the [ServiceNow Live Integration Guide](servicenow-integration.md) |
+| **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |
+| **Isolated execution worker (SPEC-038/063)** | `AGENT_EXECUTION_WORKER_URL` + `AGENT_EXECUTION_HANDOFF_TOKEN` ↔ `execution-handoff-secret`; durable admission below | agent-service, execution-runtime | **must be provisioned**; missing configuration refuses execution; transport loss after a possible send is uncertain, never proof of no effect |
+| **Durable mutation admission (SPEC-063)** | `AGENT_EXECUTION_STATE_DB_URL`, `AGENT_EXECUTION_ADMISSION_ENABLED=true`, `AGENT_EXECUTION_ADMISSION_EPOCH`; `EXECUTION_STATE_STORE_BACKEND=postgres`, `EXECUTION_STATE_DB_URL`, `EXECUTION_ADMISSION_ENABLED=true`, `EXECUTION_ADMISSION_EPOCH`; verified, enabled Postgres catalog with matching epoch | agent-service, execution-runtime | **disabled**; requires coordinated mutation-disabled migration/cutover and separate explicit enablement |
+| **Elastic observability** | `GATEWAY_ELASTIC_ENABLED=true`, `GATEWAY_ELASTIC_URL`, auth (`_API_KEY` or `_USERNAME`+`_PASSWORD`) | tool-gateway | disabled |
+| **Secure password generation / Copy password (SPEC-062)** | `GATEWAY_SECRETS_ENABLED=true`, readable `GATEWAY_PASSWORD_POLICY_PATH`, delegation + `tools:invoke` | tool-gateway, agent-service, platform-gateway, portal | disabled (`false`); no SMTP required |
+| **Email secret delivery (SPEC-062)** | Secrets + mutating/HITL/signed execution enabled; `GATEWAY_EMAIL_HOST`, sender, TLS, optional SMTP Secret; paired gateway/agent recipient allowlists; `secrets:deliver` + `tools:mutate` | tool-gateway, agent-service, platform-gateway, policy bundle | SMTP unconfigured; inert |
+| **Output redaction** | `GATEWAY_REDACTION_ENABLED` | tool-gateway | enabled (`true`) |
+| **Policy enforcement** | `GATEWAY_POLICY_PATH`, `PLATFORM_GATEWAY_POLICY_PATH` | tool-gateway, platform-gateway | `/etc/luban/policy/policy.yaml` |
+| **OpenTelemetry push** | `OTEL_ENABLED=true`, `OTEL_EXPORTER_OTLP_ENDPOINT`, auth `OTEL_EXPORTER_OTLP_HEADERS` | all services | enabled (OpenObserve; header via `sync-otel-secrets.sh`) |
+| **Observability dashboards (SPEC-065)** | *(no activation switch — config-as-code)*; rendering requires the **OpenTelemetry push** row above (`OTEL_ENABLED=true`) so the mirrored domain metrics reach OpenObserve; the token panel additionally needs traffic on the always-on `agent_llm_tokens_total`. Dashboard JSON lives under `shared/platform-ops/dashboards/`, validated by `make validate-dashboards` and applied by `apply-dashboards.sh` | all services (mirrored via the OTel push); dashboards are a platform-ops artifact | applied by `apply-dashboards.sh` (an operator step, not on deploy); panels empty when `OTEL_ENABLED=false` |
+| **LLM runtime** | `AGENTSCOPE_PROVIDER`, `AGENTSCOPE_MODEL_NAME`, `AGENTSCOPE_API_KEY` | agent-service | via runtime profile |
+| **Workload identity** | `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, `IDENTITY_WORKLOAD_ISSUER_URL`, `IDENTITY_WORKLOAD_CLIENTS` | platform-gateway, identity-service | disabled (dev) |
+| **Durable audit trail** | `*_AUDIT_SERVICE_URL`, `*_AUDIT_CLIENT_SECRET` ↔ `AUDIT_INGEST_CLIENTS` | audit-service, tool-gateway, platform-gateway, identity-service, incident-service, skills-hub, agent-service | **must be provisioned** (`sync-audit-secrets.sh`) |
+| **Skills and grounded guidance** | `SKILLS_SOURCES`, `GATEWAY_SKILLS_SERVICE_URL`, `GATEWAY_SKILLS_CLIENT_SECRET`, `PLATFORM_GATEWAY_SKILLS_HUB_URL`, `PLATFORM_GATEWAY_SKILLS_CLIENT_SECRET` ↔ `SKILLS_QUERY_CLIENTS` | skills-hub, tool-gateway, platform-gateway | **must be provisioned** (`sync-skills-secrets.sh`) |
+| **Skill compositions (`kind: composition`, SPEC-057)** | *(no activation switch — additive on the skills path above)*; `SKILLS_COMPOSITION_MAX_SUB_SKILLS` bounds a composition's `sub_skills` count. A composition carries no authority (ADR-0011): no new policy action, no new audit event type, no new gate — each sub-skill keeps its own HITL gate | skills-hub | enabled (`8`); `make policy-diff` reports zero transitions |
+| **Incident intake and triage** | `INCIDENT_WEBHOOK_TOKEN`, `PLATFORM_GATEWAY_INCIDENT_SERVICE_URL`, `PLATFORM_GATEWAY_INCIDENT_CLIENT_SECRET`, `AGENT_INCIDENT_SERVICE_URL`, `AGENT_INCIDENT_CLIENT_SECRET` (SPEC-043 incident-report documents) ↔ `INCIDENT_QUERY_CLIENTS` | incident-service, platform-gateway, tool-gateway, agent-service | **must be provisioned** (`sync-incident-secrets.sh`) |
+| **Portal voice input** | *(none — browser Web Speech API; `input_modality` passes through gateway/agent and is audited only)* | operator-portal, platform-gateway, agent-service | enabled (browser-capability gated) |
+| **Agent-driven context compression (`CompressContext`, SPEC-064)** | `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED=true` + `AGENTSCOPE_CONTEXT_TRIGGER_RATIO>0.2`; *(no execution/audit surface — kernel-local, state-only, no `offloader`)* | agent-service | disabled (`false`) |
+
+**Section sources**
+- [configuration-reference.md:7-40](file://docs/guides/configuration-reference.md#L7-L40)

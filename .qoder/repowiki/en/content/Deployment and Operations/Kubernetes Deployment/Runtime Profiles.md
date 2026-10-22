@@ -15,7 +15,9 @@
 - [mutating.env (mutating-dev)](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 - [tool-gateway-pod-delete.yaml](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml)
 - [secrets.env (secrets-dev)](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env)
-- [kustomization.yaml (dev-k8s)](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [kustomization.yaml (ansible-dev)](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/kustomization.yaml)
+- [ansible.env (ansible-dev)](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env)
+- [mock_ansible_mcp_server.py](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/mock_ansible_mcp_server.py)
 - [kustomization.yaml (servicenow-dev)](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/kustomization.yaml)
 - [servicenow.env (servicenow-dev)](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env)
 - [mock_servicenow_table_api.py](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py)
@@ -24,7 +26,9 @@
 - [servicenow-mock-network-policy.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-network-policy.yaml)
 - [tool-gateway-servicenow-credentials.yaml](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/tool-gateway-servicenow-credentials.yaml)
 - [sync-servicenow-credentials.sh](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh)
+- [sync-ansible-credentials.sh](file://shared/platform-ops/gitops/sync-ansible-credentials.sh)
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
+- [kustomization.yaml (dev-k8s)](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
 - [config.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [app.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/app.py)
 - [password-policy.yaml (contract)](file://shared/shared-contracts/policies/password-policy.yaml)
@@ -32,12 +36,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added ServiceNow development runtime profile section documenting mock Table-API responder, OAuth2 client_credentials integration, and Kubernetes deployment manifests
-- Updated dev-k8s overlay configuration to include the new servicenow-dev posture overlay alongside existing profiles
-- Enhanced architecture diagrams to show the fifth posture layer for ServiceNow read-tier ingestion
-- Added operational script documentation for credential synchronization using sync-servicenow-credentials.sh
-- Updated troubleshooting guidance to cover ServiceNow connectivity issues and mock service validation
-- Added security considerations for the servicenow-dev profile's read-only posture with bearer token authentication
+- Expanded runtime profiles documentation from three to six profiles, adding secrets-dev, ansible-dev, and servicenow-dev profiles with their specific purposes and capabilities
+- Added comprehensive documentation for the secrets-dev profile enabling secure password generation through portal-copy handoff mechanism
+- Added detailed coverage of the ansible-dev profile providing Ansible MCP ingestion with mock server and bearer token authentication
+- Enhanced ServiceNow-dev profile documentation with complete OAuth2 client_credentials flow and mock Table-API implementation
+- Updated architecture diagrams to reflect all six profiles including the new posture overlays
+- Added operational guidance for credential synchronization scripts and mock service validation procedures
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -57,12 +61,13 @@ This document explains the runtime profiles system that customizes platform beha
 - The browser-dev profile for web automation testing with a Playwright-compatible sidecar and posture configuration only (sample targets are deployed out-of-band).
 - The mutating-dev profile for testing write operations with elevated permissions scoped to bounded actions.
 - The secrets-dev profile for enabling development-time password generation capabilities without email delivery, providing secure credential generation through the portal-copy handoff mechanism.
+- The ansible-dev profile for Ansible read-tier MCP-ingestion with a mock server and bearer token authentication.
 - **New**: The servicenow-dev profile for ServiceNow read-tier Table-API ingestion with a mock OAuth2 client_credentials endpoint and bearer token authentication.
 
 It also documents how each profile configures security policies, network policies, resource allocations, and service integrations; how tool execution policies and approval workflows are affected; and how to use the select and verify scripts to switch and validate profiles. Finally, it provides guidance for creating custom profiles and understanding their security implications.
 
 ## Project Structure
-Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Five "posture" profiles (mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev) are always wired into dev-k8s alongside the active LLM provider profile. A sixth profile (default) is the current LLM provider profile used by dev-k8s.
+Runtime profiles are implemented as Kustomize overlays under shared/platform-ops/gitops/runtime-profiles. Each profile directory contributes resources and environment variables that the dev-k8s overlay merges into the running platform. Six "posture" profiles (mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev) are always wired into dev-k8s alongside the active LLM provider profile. A seventh profile (default) is the current LLM provider profile used by dev-k8s.
 
 ```mermaid
 graph TB
@@ -101,13 +106,14 @@ D --> SN
 - Browser-dev posture: Adds a headless browser sidecar to the tool-gateway Deployment, mounts credential sets, and restricts network access to the CDP port. Sample target applications are deployed out-of-band via `make deploy-sample-app`.
 - Mutating-dev posture: Grants a minimal RBAC Role/RoleBinding for deleting pods in the dev namespace and enables mutating tools via a ConfigMap flag.
 - Secrets-dev posture: Enables secure password generation through the `secrets.generate_password` tool with one-time portal-copy handoff, without email delivery capabilities.
+- **New**: Ansible-dev posture: Deploys a thin mock Ansible MCP server with streamable-HTTP transport and bearer token authentication, providing read-only inventory and job management capabilities.
 - **New**: ServiceNow-dev posture: Deploys a thin mock ServiceNow Table-API + OAuth2 client_credentials responder, provides GATEWAY_SERVICENOW_* configuration, and mounts credential sets for read-only ingestion of incident, change_request, sys_user, and cmdb_ci tables.
 
 These components affect:
 - Security policies: Deny-by-default posture unless explicitly enabled by a profile.
-- Network policies: Restrict cross-pod access to the browser's debugging port and ServiceNow mock endpoints.
+- Network policies: Restrict cross-pod access to the browser's debugging port, Ansible MCP endpoints, and ServiceNow mock endpoints.
 - Resource allocations: Sidecar CPU/memory requests and limits.
-- Service integrations: Tool-gateway integration with the browser sidecar, optional credentials, secret delivery buffer, and ServiceNow mock server.
+- Service integrations: Tool-gateway integration with the browser sidecar, optional credentials, secret delivery buffer, Ansible MCP server, and ServiceNow mock server.
 
 **Section sources**
 - [configmap.yaml (default):1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
@@ -117,6 +123,7 @@ These components affect:
 - [mutating.env (mutating-dev):1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 - [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
+- [ansible.env (ansible-dev):1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
 - [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
 
 ## Architecture Overview
@@ -338,6 +345,66 @@ Deny --> End
 - [app.py (tool-gateway):119-164](file://products/tool-gateway/src/tool_gateway/app.py#L119-L164)
 - [password-policy.yaml (contract):1-48](file://shared/shared-contracts/policies/password-policy.yaml#L1-L48)
 
+### Ansible-Dev Profile (Read-Tier MCP Ingestion)
+**New** The ansible-dev profile enables Ansible read-tier MCP-ingestion with a mock server and bearer token authentication.
+
+Purpose:
+- Provides a complete Ansible development environment with a thin mock MCP server implementing streamable-HTTP transport, enabling end-to-end testing of the ansible.* tools without requiring a licensed AAP instance.
+
+Key configurations:
+- Environment variables merged into platform-runtime-config:
+  - Enable Ansible MCP connector (`GATEWAY_ANSIBLE_MCP_ENABLED=true`).
+  - Configure streamable-HTTP transport (`GATEWAY_ANSIBLE_MCP_TRANSPORT=streamable_http`).
+  - Point to mock MCP endpoint (`GATEWAY_ANSIBLE_MCP_URL=http://ansible-mock-mcp:8000/mcp`).
+  - Configure timeout and credential set mounting.
+- Mock Ansible MCP deployment:
+  - Thin Starlette/uvicorn server implementing the real `.py` source pattern.
+  - Streamable-HTTP transport compatible with production `ansible/aap-mcp-server`.
+  - Bearer token gate for all MCP requests.
+  - Canned data for inventories, job templates, and completed jobs.
+- Network policy:
+  - Restricts access to port 8000 only from tool-gateway pods.
+  - Defense-in-depth complementing the bearer token authentication.
+
+Tool execution and approvals:
+- Six read-tier tools: controller.inventories_list, controller.inventories_read, controller.job_templates_list, controller.jobs_read, controller.jobs_stdout_retrieve, controller.ping_list.
+- All tools operate at read tier with no write capabilities.
+- Authentication handled automatically via bearer token from credential sets.
+- Field projection enforced by gateway to exclude sensitive information.
+
+Security boundaries:
+- Read-only posture with no mutation capabilities.
+- Bearer token authentication for all MCP requests.
+- NetworkPolicy restricts access to tool-gateway pods only.
+- Mock credentials fail closed when not provisioned (unguessable random values).
+
+```mermaid
+flowchart TD
+Start(["Ansible tool invoked"]) --> CheckEnabled{"GATEWAY_ANSIBLE_MCP_ENABLED?"}
+CheckEnabled --> |False| Deny["Deny invocation"]
+CheckEnabled --> |True| GetToken["Resolve bearer token from credential set"]
+GetToken --> AuthSuccess{"Bearer token valid?"}
+AuthSuccess --> |No| FailClosed["Fail closed (401 Unauthorized)"]
+AuthSuccess --> |Yes| CallMCP["Call MCP server with bearer token"]
+CallMCP --> ValidateTool{"Tool in admitted set?"}
+ValidateTool --> |No| FailClosed
+ValidateTool --> |Yes| ProjectFields["Apply field projection"]
+ProjectFields --> ReturnData["Return sanitized data"]
+Deny --> End(["Result returned"])
+FailClosed --> End
+ReturnData --> End
+```
+
+**Diagram sources**
+- [ansible.env (ansible-dev):1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
+- [mock_ansible_mcp_server.py:180-200](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/mock_ansible_mcp_server.py#L180-L200)
+
+**Section sources**
+- [kustomization.yaml (ansible-dev):1-43](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/kustomization.yaml#L1-L43)
+- [ansible.env (ansible-dev):1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
+- [mock_ansible_mcp_server.py:1-200](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/mock_ansible_mcp_server.py#L1-L200)
+- [sync-ansible-credentials.sh:1-153](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L1-L153)
+
 ### ServiceNow-Dev Profile (Read-Tier Table-API Ingestion)
 **New** The servicenow-dev profile enables ServiceNow read-tier Table-API ingestion with a mock OAuth2 client_credentials endpoint and bearer token authentication.
 
@@ -450,6 +517,11 @@ Profiles compose through Kustomize:
   - tool-gateway ServiceAccount in the dev namespace.
   - Password policy contract mounted via base platform-policy ConfigMap.
   - Ephemeral secret delivery buffer (memory backend by default).
+- **New**: ansible-dev depends on:
+  - tool-gateway ServiceAccount in the dev namespace.
+  - Mock Ansible MCP Server Deployment/Service/NetworkPolicy.
+  - Bearer token setup via sync-ansible-credentials.sh.
+  - Credential set mounted at GATEWAY_ANSIBLE_MCP_CREDENTIAL_SETS path.
 - **New**: servicenow-dev depends on:
   - tool-gateway ServiceAccount in the dev namespace.
   - Mock ServiceNow Table-API Deployment/Service/NetworkPolicy.
@@ -471,8 +543,10 @@ RB["Role/RoleBinding"]
 SA["ServiceAccount"]
 PP["Password Policy Contract"]
 DB["Secret Delivery Buffer"]
-Mock["ServiceNow Mock Server"]
+MockA["Ansible Mock Server"]
+MockN["ServiceNow Mock Server"]
 OAuth["OAuth2 Client Credentials"]
+BT["Bearer Token"]
 DevK8s --> Def
 DevK8s --> Br
 DevK8s --> Mut
@@ -485,7 +559,9 @@ Mut --> RB
 Mut --> SA
 Sec --> PP
 Sec --> DB
-Sn --> Mock
+Ans --> MockA
+Ans --> BT
+Sn --> MockN
 Sn --> OAuth
 ```
 
@@ -515,6 +591,11 @@ Sn --> OAuth
   - Memory backend provides single-replica ephemeral storage with TTL expiration.
   - Redis backend available for multi-replica deployments with proper TTL support.
   - Password generation follows cryptographic standards with entropy floor validation.
+- **New**: Ansible mock server:
+  - Lightweight Starlette/uvicorn server with minimal resource footprint.
+  - Single replica deployment with TCP readiness probe.
+  - No external dependencies beyond tool-gateway image runtime.
+  - Mock data is static and in-memory, providing fast response times.
 - **New**: ServiceNow mock server:
   - Lightweight Starlette/uvicorn server with minimal resource footprint (50m CPU, 64Mi memory requests).
   - Single replica deployment with TCP readiness probe.
@@ -542,6 +623,13 @@ Common issues and resolutions:
   - Ensure secret delivery buffer is initialized and accessible.
   - For email delivery failures, confirm SMTP configuration is provisioned via sync-email-secrets.sh.
   - Validate password policy compliance if generation requests are rejected.
+- **New**: Ansible tools failing:
+  - Verify GATEWAY_ANSIBLE_MCP_ENABLED is true in the ansible-dev profile.
+  - Check that the ansible-mock-mcp deployment is running and healthy.
+  - Ensure sync-ansible-credentials.sh has been executed to provision both secrets.
+  - Verify the mock Service is reachable from tool-gateway pods.
+  - Check NetworkPolicy allows traffic from tool-gateway to the mock on port 8000.
+  - Validate bearer tokens are correctly synchronized between tool-gateway and mock.
 - **New**: ServiceNow tools failing:
   - Verify GATEWAY_SERVICENOW_ENABLED is true in the servicenow-dev profile.
   - Check that the servicenow-mock-table-api deployment is running and healthy.
@@ -555,9 +643,10 @@ Operational steps:
 - Re-run verify-runtime-profile.sh to validate overlay rendering.
 - Deploy sample applications using `make deploy-sample-app` if browser tools cannot connect to targets.
 - Inspect logs of tool-gateway and browser sidecar if connectivity issues persist.
+- **New**: Run sync-ansible-credentials.sh to provision Ansible mock credentials and restart deployments.
 - **New**: Run sync-servicenow-credentials.sh to provision ServiceNow mock credentials and restart deployments.
 - Check tool-gateway logs for secret delivery buffer initialization and password policy validation errors.
-- **New**: Verify ServiceNow mock health with `kubectl get pods -l app=servicenow-mock-table-api` and check readiness probe status.
+- **New**: Verify mock service health with `kubectl get pods -l app=<service-name>` and check readiness probe status.
 
 **Section sources**
 - [verify-runtime-profile.sh:8-23](file://shared/platform-ops/gitops/verify-runtime-profile.sh#L8-L23)
@@ -566,7 +655,9 @@ Operational steps:
 - [mutating.env (mutating-dev):1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [tool-gateway-pod-delete.yaml:1-48](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/tool-gateway-pod-delete.yaml#L1-L48)
 - [secrets.env (secrets-dev):1-15](file://shared/platform-ops/gitops/runtime-profiles/secrets-dev/secrets.env#L1-L15)
+- [ansible.env (ansible-dev):1-28](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/ansible.env#L1-L28)
 - [servicenow.env (servicenow-dev):1-27](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow.env#L1-L27)
+- [sync-ansible-credentials.sh:1-153](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L1-L153)
 - [sync-servicenow-credentials.sh:1-192](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh#L1-L192)
 - [config.py (tool-gateway):118-136](file://products/tool-gateway/src/tool_gateway/core/config.py#L118-L136)
 
@@ -576,9 +667,10 @@ Runtime profiles provide a layered, deny-by-default approach to configuring plat
 - The browser-dev posture enables safe, scoped browser automation with strict network and credential controls, relying on out-of-band sample applications.
 - The mutating-dev posture enables bounded write operations with minimal RBAC and enforced approvals.
 - The secrets-dev posture enables secure password generation with one-time portal-copy handoff, maintaining strong security boundaries while providing development-time credential generation capabilities.
+- **New**: The ansible-dev posture enables read-only Ansible MCP ingestion with a complete mock server and bearer token authentication, allowing end-to-end testing without requiring a licensed AAP instance.
 - **New**: The servicenow-dev posture enables read-only ServiceNow Table-API ingestion with a complete mock OAuth2 client_credentials endpoint, allowing end-to-end testing without requiring a licensed ServiceNow instance.
 
-Use the select script to switch the active LLM profile while keeping all posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments. Remember that sample applications must be deployed separately using `make deploy-sample-app` when testing browser functionality, email delivery requires additional SMTP configuration beyond the secrets-dev profile scope, and ServiceNow mock credentials must be provisioned using sync-servicenow-credentials.sh before testing ServiceNow functionality.
+Use the select script to switch the active LLM profile while keeping all posture overlays permanently enabled. Use the verify script to validate the overlay before deploying. Follow the security boundaries and approval workflows described above to maintain safe operations across environments. Remember that sample applications must be deployed separately using `make deploy-sample-app` when testing browser functionality, email delivery requires additional SMTP configuration beyond the secrets-dev profile scope, Ansible mock credentials must be provisioned using sync-ansible-credentials.sh, and ServiceNow mock credentials must be provisioned using sync-servicenow-credentials.sh before testing respective functionality.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -588,7 +680,7 @@ Use the select script to switch the active LLM profile while keeping all posture
 Guidance:
 - Create a new directory under runtime-profiles with a kustomization.yaml listing resources to include.
 - If you need environment variables, add an env file and merge it via the dev-k8s overlay's configMapGenerator.
-- For posture-like features (sidecars, network policies, RBAC), follow the patterns in browser-dev, mutating-dev, secrets-dev, and servicenow-dev.
+- For posture-like features (sidecars, network policies, RBAC), follow the patterns in browser-dev, mutating-dev, secrets-dev, ansible-dev, and servicenow-dev.
 - Keep defaults deny-by-default; only enable capabilities explicitly through your profile.
 - Update dev-k8s to include your profile if it replaces the active LLM profile, or keep it as an additional posture overlay if appropriate.
 
@@ -599,6 +691,7 @@ Security considerations:
 - Ensure secrets are provisioned out-of-band and mounted as optional where possible to avoid blocking startup.
 - For browser-related profiles, remember that sample applications should be deployed out-of-band rather than included in the profile resources.
 - For secret-related profiles, ensure password policy compliance and consider whether email delivery capabilities should be enabled based on security requirements.
+- **New**: For MCP-like profiles (ansible-dev), implement proper bearer token authentication flows and network isolation for mock servers.
 - **New**: For ServiceNow-like profiles, implement proper OAuth2 authentication flows, bearer token validation, and network isolation for mock services.
 
 [No sources needed since this section provides general guidance]
@@ -623,3 +716,22 @@ The mock ServiceNow instance provides:
 - [sync-servicenow-credentials.sh:1-192](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh#L1-L192)
 - [servicenow-mock-deployment.yaml:1-95](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/servicenow-mock-deployment.yaml#L1-L95)
 - [mock_servicenow_table_api.py:180-256](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L180-L256)
+
+### Ansible Development Workflow
+**New** Complete workflow for Ansible development profile:
+
+1. Select the ansible-dev profile (it's always included as a posture overlay).
+2. Provision credentials: `./shared/platform-ops/gitops/sync-ansible-credentials.sh`
+3. Verify overlay rendering: `./shared/platform-ops/gitops/verify-runtime-profile.sh`
+4. Deploy the overlay: `make deploy`
+5. Test Ansible tools through the platform interface.
+
+The mock Ansible MCP server provides:
+- Streamable-HTTP transport at `/mcp`
+- Bearer token authentication for all MCP requests
+- Canned data for inventories, job templates, and completed jobs
+- NetworkPolicy restricting access to tool-gateway pods only
+
+**Section sources**
+- [sync-ansible-credentials.sh:1-153](file://shared/platform-ops/gitops/sync-ansible-credentials.sh#L1-L153)
+- [mock_ansible_mcp_server.py:180-200](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/mock_ansible_mcp_server.py#L180-L200)

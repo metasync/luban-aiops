@@ -5,6 +5,13 @@
 - [README.md](file://README.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [servicenow-integration.md](file://docs/guides/servicenow-integration.md)
+- [servicenow_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py)
+- [servicenow_binding.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py)
+- [test_servicenow_native.py](file://products/tool-gateway/tests/test_servicenow_native.py)
+- [mock_servicenow_table_api.py](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py)
+- [sync-servicenow-credentials.sh](file://shared/platform-ops/gitops/sync-servicenow-credentials.sh)
+- [servicenow-check.sh](file://shared/platform-ops/e2e/servicenow-check.sh)
 - [SPEC-005-observability-baseline/spec.md](file://docs/specs/SPEC-005-observability-baseline/spec.md)
 - [observability-conventions.md](file://shared/shared-contracts/observability-conventions.md)
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
@@ -28,6 +35,14 @@
 - [DocumentsView.tsx](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive ServiceNow integration troubleshooting section with 55 new lines covering connectivity problems, authentication failures, and mock service validation
+- Updated tool execution errors section to include ServiceNow-specific diagnostic steps
+- Enhanced frequently asked questions with ServiceNow-specific scenarios
+- Added ServiceNow integration architecture diagram
+- Expanded environment-specific troubleshooting for ServiceNow deployments
+
 ## Table of Contents
 1. Introduction
 2. Project Structure
@@ -41,7 +56,7 @@
 10. Appendices
 
 ## Introduction
-This document provides a symptom-based troubleshooting guide for the Luban AIOPS platform, covering deployment failures, authentication problems, tool execution errors, performance issues, and data consistency problems. It includes diagnostic steps, log analysis techniques, remediation procedures, frequently asked questions, known limitations, upgrade considerations, and guidance for using observability tools such as metrics, traces, and audit logs across services.
+This document provides a symptom-based troubleshooting guide for the Luban AIOPS platform, covering deployment failures, authentication problems, tool execution errors, performance issues, data consistency problems, and ServiceNow integration issues. It includes diagnostic steps, log analysis techniques, remediation procedures, frequently asked questions, known limitations, upgrade considerations, and guidance for using observability tools such as metrics, traces, and audit logs across services.
 
 ## Project Structure
 The platform is organized into product-oriented services with clear boundaries:
@@ -62,6 +77,7 @@ PGW --> AGP["Agent Platform"]
 AGP --> TGW["Tool Gateway"]
 AGP --> ERW["Execution Runtime Worker"]
 TGW --> EXT["External Systems"]
+TGW --> SNOW["ServiceNow"]
 PGW --> AUD["Audit Service"]
 AGP --> AUD
 TGW --> AUD
@@ -84,6 +100,7 @@ ERW --> AUD
   - Agent platform manages sessions, transcripts, and evidence stores with graceful degradation on backend failure.
 - Tool execution:
   - Tool gateway exposes tools/connectors; mutating tools are deny-by-default and require explicit activation and approvals.
+  - ServiceNow integration provides read-only access to ITSM records through native REST/Table-API connector.
 - Audit trail:
   - Fire-and-forget ingestion from multiple emitters to audit-service; counters expose delivery health.
 - Observability:
@@ -108,6 +125,7 @@ participant IDB as "Identity Broker"
 participant AGP as "Agent Platform"
 participant TGW as "Tool Gateway"
 participant ERW as "Execution Runtime"
+participant SNOW as "ServiceNow"
 participant AUD as "Audit Service"
 U->>PGW : HTTP request (Bearer token)
 PGW->>IDB : Verify token / delegate token
@@ -122,10 +140,15 @@ PGW->>AGP : Resume under approver token
 end
 AGP->>ERW : Handoff approved mutation (signed envelope)
 ERW-->>AGP : Result (success/timeout/failure)
+alt ServiceNow read operation
+AGP->>SNOW : Table API GET request
+SNOW-->>AGP : Record data
+end
 AGP-->>U : Streamed response
 PGW-->>AUD : Emit audit events (fire-and-forget)
 AGP-->>AUD : Emit audit events
 TGW-->>AUD : Emit audit events
+SNOW-->>AUD : Audit attribution
 ```
 
 **Diagram sources**
@@ -139,7 +162,7 @@ TGW-->>AUD : Emit audit events
 Symptoms:
 - Login fails or portal shows unauthorized
 - Tool invocation returns 401/403
-- “Stream never completes” due to expired delegated tokens
+- "Stream never completes" due to expired delegated tokens
 
 Diagnostics:
 - Check identity broker OIDC configuration and reachability
@@ -167,8 +190,8 @@ Observability:
 
 ### Tool Execution Errors
 Symptoms:
-- “No tools available” or empty tool list
-- “ELASTIC_NOT_CONFIGURED”
+- "No tools available" or empty tool list
+- "ELASTIC_NOT_CONFIGURED"
 - Mutating tool absent from discovery
 - Mutating tool invoke returns 403 denied
 - Confirming a parked mutating call returns 403
@@ -198,6 +221,92 @@ Remediation:
 - [troubleshooting.md:698-718](file://docs/guides/troubleshooting.md#L698-L718)
 - [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
 - [configuration-reference.md:452-494](file://docs/guides/configuration-reference.md#L452-L494)
+
+### ServiceNow Integration Issues
+**Updated** Added comprehensive ServiceNow troubleshooting covering connectivity, authentication, and mock service validation
+
+#### Connectivity Problems
+Symptoms:
+- `SERVICENOW_UNREACHABLE` errors
+- DNS resolution failures
+- TLS certificate validation errors
+- NetworkPolicy blocking egress traffic
+
+Diagnostics:
+- Probe from inside the pod using curl: `kubectl exec deployment/tool-gateway -c tool-gateway -- curl -sS -o /dev/null -w '%{http_code} %{ssl_verify_result}\n' --max-time 10 https://<instance>.service-now.com/api/now/table/incident`
+- Check SSL certificate trust chain: non-zero ssl_verify_result indicates trust-chain problem
+- Verify NetworkPolicy allows egress to ServiceNow on port 443
+- Test DNS resolution within the cluster
+
+Remediation:
+- Mount custom CA bundle for private CA environments: `SSL_CERT_FILE=/etc/ssl/certs/servicenow-ca-bundle.pem`
+- Add egress rules for ServiceNow instance host on port 443
+- Verify ServiceNow instance is accessible from outside the cluster first
+- Check for corporate proxies or TLS inspection that may interfere
+
+#### Authentication Failures
+Symptoms:
+- `CREDENTIAL_SET_NOT_FOUND` errors
+- `CREDENTIAL_ACQUISITION_FAILED` errors
+- 401 Unauthorized responses from ServiceNow
+- Invalid client credentials
+
+Diagnostics:
+- Verify credential set exists and has correct scheme: `oauth2_client_credentials`
+- Check OAuth application configuration in ServiceNow Application Registry
+- Validate grant type is enabled: `glide.oauth.inbound.client.credential.grant_type.enabled=true`
+- Test credentials locally using smoke test script
+- Confirm client_id and client_secret match ServiceNow configuration
+
+Remediation:
+- Re-run sync script: `shared/platform-ops/gitops/sync-servicenow-credentials.sh dev-luban-aiops`
+- Verify OAuth application user is bound to integration user
+- Check ACL permissions for the four tables: incident, change_request, sys_user, cmdb_ci
+- Ensure client secret is properly stored without shell metacharacters breaking parsing
+
+#### Mock Service Validation
+Symptoms:
+- Mock service not responding
+- Inconsistent behavior between mock and live ServiceNow
+- Test failures in CI environment
+
+Diagnostics:
+- Check mock service deployment status: `kubectl get pods -l app=servicenow-mock-table-api`
+- Verify mock credentials secret exists: `kubectl get secret servicenow-mock-credentials`
+- Test mock service directly: `curl http://servicenow-mock-table-api:8000/api/now/table/incident`
+- Review mock service logs for authentication failures
+
+Remediation:
+- Restart mock service if needed
+- Regenerate mock credentials using sync script
+- Verify mock service network policies allow communication
+- Test against real ServiceNow instance separately from mock validation
+
+#### Field Projection and Data Issues
+Symptoms:
+- Missing fields in returned data
+- Unexpected columns appearing in results
+- Credential columns leaking in responses
+
+Diagnostics:
+- Check field projection allowlists in binding configuration
+- Verify ServiceNow table schema matches expected columns
+- Review audit logs for field-level details
+- Test field projection with mock service
+
+Remediation:
+- Update field allowlists in `servicenow_binding.py` if tenant schema changed
+- Verify no secret-bearing columns in projections
+- Confirm credential stripping works for sys_user table
+- Test against real ServiceNow instance to validate field mappings
+
+**Section sources**
+- [servicenow-integration.md:633-649](file://docs/guides/servicenow-integration.md#L633-L649)
+- [servicenow_native.py:96-103](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L96-L103)
+- [servicenow_native.py:344-368](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L344-L368)
+- [servicenow_binding.py:56-77](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py#L56-L77)
+- [mock_servicenow_table_api.py:136-158](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L136-L158)
+- [test_servicenow_native.py:349-423](file://products/tool-gateway/tests/test_servicenow_native.py#L349-L423)
 
 ### Performance Issues
 Symptoms:
@@ -251,7 +360,7 @@ Remediation:
 ### Deployment Failures
 Symptoms:
 - Pods fail with ErrImagePull after deployment
-- Readiness shows “degraded” due to policy bundle load failure
+- Readiness shows "degraded" due to policy bundle load failure
 
 Diagnostics:
 - Inspect pod images and overlay state
@@ -274,11 +383,17 @@ Remediation:
   - Keycloak reachability and redirect URIs must match portal origins
   - Elastic connector requires URL and auth; output redaction can be toggled
   - Incident intake requires webhook token; misconfigurations return 503 or 401
+- ServiceNow integration:
+  - ServiceNow base URL must be HTTPS and reachable from cluster
+  - OAuth client credentials must be properly configured in ServiceNow Application Registry
+  - Network policies must allow egress to ServiceNow on port 443
+  - Custom CA bundles may be required for private CA environments
 
 **Section sources**
 - [configuration-reference.md:682-724](file://docs/guides/configuration-reference.md#L682-L724)
 - [troubleshooting.md:102-135](file://docs/guides/troubleshooting.md#L102-L135)
 - [troubleshooting.md:450-484](file://docs/guides/troubleshooting.md#L450-L484)
+- [servicenow-integration.md:68-96](file://docs/guides/servicenow-integration.md#L68-L96)
 
 ## Dependency Analysis
 Cross-service dependency chains that commonly cause failures:
@@ -288,6 +403,7 @@ Cross-service dependency chains that commonly cause failures:
 - Audit ingestion chain: misaligned secrets lead to 401 ingest rejections
 - Skills retrieval chain: missing URL/credentials hides skills tools
 - Incident intake/triage chain: webhook token or query clients misconfigured blocks intake and triage
+- ServiceNow integration chain: base URL, credential sets, and OAuth configuration must all be aligned
 
 ```mermaid
 graph LR
@@ -299,6 +415,8 @@ PGW -- "Audit events" --> AUD
 AGP -- "Audit events" --> AUD
 TGW -- "Audit events" --> AUD
 IDB -- "Audit events" --> AUD
+TGW -- "ServiceNow API" --> SNOW["ServiceNow"]
+SNOW -- "Audit attribution" --> AUD
 ```
 
 **Diagram sources**
@@ -315,6 +433,7 @@ IDB -- "Audit events" --> AUD
 - Use evidence store size caps and session budgets to bound memory usage
 - Keep OTel push enabled for correlation; ensure collector endpoint is reachable
 - Monitor RED metrics and domain counters to detect degradation early
+- ServiceNow read operations are bounded by limit parameters and timeout settings
 
 [No sources needed since this section provides general guidance]
 
@@ -367,6 +486,25 @@ IDB -- "Audit events" --> AUD
 - [troubleshooting.md:588-718](file://docs/guides/troubleshooting.md#L588-L718)
 - [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
 
+#### ServiceNow Integration Errors
+- ServiceNow tools not available:
+  - Diagnose: GATEWAY_SERVICENOW_ENABLED, base URL configuration
+  - Remediate: enable ServiceNow integration; set base URL
+- Connection failures:
+  - Diagnose: network reachability, DNS resolution, TLS certificates
+  - Remediate: check NetworkPolicy, mount CA bundle, verify ServiceNow accessibility
+- Authentication failures:
+  - Diagnose: credential set configuration, OAuth application setup
+  - Remediate: re-run sync script, verify OAuth configuration in ServiceNow
+- Mock service issues:
+  - Diagnose: mock deployment status, credential synchronization
+  - Remediate: restart mock service, regenerate credentials
+
+**Section sources**
+- [servicenow-integration.md:633-649](file://docs/guides/servicenow-integration.md#L633-L649)
+- [servicenow_native.py:344-368](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L344-L368)
+- [mock_servicenow_table_api.py:136-158](file://shared/platform-ops/gitops/runtime-profiles/servicenow-dev/mock_servicenow_table_api.py#L136-L158)
+
 #### Performance Issues
 - Stream stalls or timeouts:
   - Diagnose: provider health, CHAT_RESPONSE_TIMEOUT_SECONDS
@@ -400,8 +538,8 @@ IDB -- "Audit events" --> AUD
 - [runtime_kernel.py:1826-1857](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1826-L1857)
 
 ### Frequently Asked Questions
-- Why do I see “denied by policy” for a tool?
-  - The user’s role lacks the required action; verify OIDC groups and policy bundle grants.
+- Why do I see "denied by policy" for a tool?
+  - The user's role lacks the required action; verify OIDC groups and policy bundle grants.
 - How do I enable mutating tools safely?
   - Enable GATEWAY_MUTATING_TOOLS_ENABLED, apply RBAC, enable HITL bridging, and grant tools:mutate.
 - What happens if audit-service is down?
@@ -410,26 +548,37 @@ IDB -- "Audit events" --> AUD
   - Yes; /metrics remains always-on; OTel push is gated by OTEL_ENABLED and fails open.
 - How do I rotate secrets safely?
   - Use provided sync scripts to regenerate and propagate secrets; restart affected deployments.
+- Why are ServiceNow tools not available?
+  - Check GATEWAY_SERVICENOW_ENABLED is true and base URL is configured; verify ServiceNow integration is properly deployed.
+- How do I troubleshoot ServiceNow connectivity issues?
+  - Probe from inside the pod using curl, check NetworkPolicy egress rules, and verify TLS certificate trust chain.
+- What causes ServiceNow authentication failures?
+  - Verify OAuth application configuration, grant type enablement, and credential set synchronization.
 
 **Section sources**
 - [configuration-reference.md:17-21](file://docs/guides/configuration-reference.md#L17-L21)
 - [configuration-reference.md:128-168](file://docs/guides/configuration-reference.md#L128-L168)
 - [SPEC-005-observability-baseline/spec.md:27-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L27-L35)
+- [servicenow-integration.md:633-649](file://docs/guides/servicenow-integration.md#L633-L649)
 
 ### Known Limitations and Workarounds
 - Shared query credential for audit-service allows ingest clients to query directly; plan to split registries for non-dev deployments.
 - Mutating tools are deny-by-default; enabling them requires full activation checklist including RBAC and HITL.
 - Evidence persistence is best-effort; failures do not fail turns but reduce replay fidelity.
+- ServiceNow integration is read-only; write operations require separate specification and implementation.
+- ServiceNow MCP server is not used; native REST/Table-API connector is employed instead.
 
 **Section sources**
 - [configuration-reference.md:159-168](file://docs/guides/configuration-reference.md#L159-L168)
 - [troubleshooting.md:588-613](file://docs/guides/troubleshooting.md#L588-L613)
 - [troubleshooting.md:750-783](file://docs/guides/troubleshooting.md#L750-L783)
+- [servicenow-integration.md:17-57](file://docs/guides/servicenow-integration.md#L17-L57)
 
 ### Upgrade Considerations
 - Policy bundle rollout requires editing canonical source, validating scenarios, syncing replicas, and restarting gateways to reload bundles.
 - Image tag management relies on deploy-overlay; avoid raw kubectl apply -k to prevent placeholder tags.
 - Secret provisioning scripts centralize rotation; prefer scripts over manual edits.
+- ServiceNow integration upgrades require re-validation of field projections and OAuth configuration.
 
 **Section sources**
 - [configuration-reference.md:282-327](file://docs/guides/configuration-reference.md#L282-L327)
@@ -445,6 +594,8 @@ IDB -- "Audit events" --> AUD
   - Enable OTel push; correlate logs via x-request-id and trace_id; ensure headers and endpoint are configured.
 - Audit logs:
   - Check emitter delivery counters; validate audit-service readiness; review retention and max event caps.
+- ServiceNow audit attribution:
+  - Query durable audit store for target_system=servicenow events; check target_identity_mode=acting_service and failure_class=target_unavailable for connectivity issues.
 
 **Section sources**
 - [SPEC-005-observability-baseline/spec.md:12-35](file://docs/specs/SPEC-005-observability-baseline/spec.md#L12-L35)
@@ -456,7 +607,7 @@ IDB -- "Audit events" --> AUD
 - [observability.py (incident-service):9-23](file://products/incident-service/src/incident_service/core/observability.py#L9-L23)
 
 ## Conclusion
-Use this guide to systematically diagnose and resolve common issues across deployment, authentication, tool execution, performance, and data consistency. Leverage the platform’s built-in observability surfaces (/metrics, OTel, audit trail) and follow the documented secret provisioning and policy rollout procedures to maintain reliability and security. When in doubt, start with readiness endpoints, metrics, and structured logs to narrow the problem scope before making configuration changes.
+Use this guide to systematically diagnose and resolve common issues across deployment, authentication, tool execution, performance, data consistency, and ServiceNow integration. Leverage the platform's built-in observability surfaces (/metrics, OTel, audit trail) and follow the documented secret provisioning and policy rollout procedures to maintain reliability and security. When in doubt, start with readiness endpoints, metrics, and structured logs to narrow the problem scope before making configuration changes. For ServiceNow issues, focus on connectivity, authentication, and field projection validation.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -483,3 +634,14 @@ Use this guide to systematically diagnose and resolve common issues across deplo
 
 **Section sources**
 - [DocumentsView.tsx:70-102](file://products/operator-portal/web-ui/app/src/views/workspace/DocumentsView.tsx#L70-L102)
+
+### ServiceNow Integration Reference
+- ServiceNow read-tier tools provide access to incident, change_request, sys_user, and cmdb_ci tables
+- All operations are read-only with strict field projection and credential protection
+- Integration uses native REST/Table-API connector rather than MCP adapter
+- Audit attribution tracks acting_service identity and target_unavailable failures
+
+**Section sources**
+- [servicenow-integration.md:17-57](file://docs/guides/servicenow-integration.md#L17-L57)
+- [servicenow_binding.py:110-175](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py#L110-L175)
+- [servicenow_native.py:458-471](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L458-L471)
