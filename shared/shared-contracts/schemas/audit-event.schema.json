@@ -70,6 +70,11 @@
       "type": "string",
       "description": "Delegation actor (act.sub) — the service that acted on the user's behalf, when applicable."
     },
+    "delegation_mode": {
+      "type": "string",
+      "enum": ["user_delegated", "acting_service", "none"],
+      "description": "SPEC-070: verified acquisition mode. Omitted for legacy events; absence is not an assertion of none. Authorization lifecycle outcomes remain in details.authorization_outcome; no credential or provider URL belongs in either field."
+    },
     "roles": {
       "type": "array",
       "items": {"type": "string"},

@@ -5,8 +5,12 @@
 > and the ratified OQ-7 handoff remain the design. Development acceptance (R-1–R-6d) is
 > independent of AAP availability; OQ-3/R-6e are the separate
 > [DI-070 deployment-integration task](tasks.md#post-delivery-deployment-integration-di-070).
-> The attached kickoff plan and accepted ADR bodies remain unchanged. This documentation
-> amendment precedes operator review and runtime code; no delivery or version bump is claimed.
+> The attached kickoff plan and accepted ADR bodies remain unchanged. The documentation
+> amendment preceded implementation. **Later checkpoint, 2026-10-23:** the additive OQ-7
+> contracts are implemented and verified, and the operator approved their contract-only
+> **v0.50.0** release. Full SPEC-070 delivery remains open for a later, unselected release;
+> OAuth workflow/custody is not enabled. See [checkpoint evidence](tasks.md#additive-oq-7-contract-increment).
+> **AAP compatibility unverified**; this technical plan's remaining requirements still apply.
 
 ## Approach
 

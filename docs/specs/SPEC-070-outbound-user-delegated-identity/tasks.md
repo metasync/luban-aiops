@@ -2,12 +2,13 @@
 
 Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
 
-> **Approved; delivery boundary amended 2026-10-23.** ADR-0016 remains accepted and OQ-7
+> **In progress; contract-only v0.50.0 release approved 2026-10-23.** ADR-0016 remains accepted and OQ-7
 > ratified. Development acceptance covers R-1–R-6d without a real AAP dependency. OQ-3 and
 > former acceptance criterion R-6e are tracked under **DI-070** below: mandatory before
-> production target enablement, not a development-delivery or version-bump gate. No runtime
-> task is complete. The attached kickoff plan and accepted ADR bodies are unchanged.
-> This documentation commit is for operator review before code; other handoff gates remain.
+> production target enablement, not a development-delivery or version-bump gate. The additive
+> contract increment is implemented; OAuth runtime and custody tasks remain open. The attached
+> kickoff plan and accepted ADR bodies are unchanged. This increment enables no authorization
+> flow and does not deliver SPEC-070; other handoff gates remain.
 
 ## Historical Stage 0 — 2026-10-12
 
@@ -61,12 +62,82 @@ when the real environment and authorization are available, not as a prerequisite
 
 ## Additive OQ-7 Contract Increment
 
-- [ ] Add tool-result authorization-required signal, stream v13 with all consumer surfaces,
+- [x] Add tool-result authorization-required signal, stream v13 with all consumer surfaces,
       and audit delegation-mode contract/query parity; preserve existing callers and keep
       runtime delegation inert until configured (R-2b/c, R-4b).
-- [ ] Define route/request/response shapes and transaction-store Protocol/record fields with
+- [x] Define route/request/response shapes and transaction-store Protocol/record fields with
       pinned TTL defaults; do not expose a usable authorization flow before trust/custody
       and policy checks are implemented. Test schema/consumer parity and safe omission.
+
+**Implementation checkpoint — 2026-10-23 (contract increment only):**
+
+- Tool-result serialization accepts closed, error-only metadata under the reserved code;
+  legacy callers omit it. Canonical and packaged agent/worker schemas match; the worker
+  accepts the reserved error as a failed report without retry. Stream v13 is represented
+  in the schema, agent model/allowlist/normalizer, and portal model/decoder. Normalization
+  projects only routing metadata; the portal deliberately performs no navigation,
+  confirmation, or follow-up request.
+- Audit stores persist/filter the optional top-level mode through query, summary, export,
+  and gateway proxy. Legacy absence remains absent in responses and NULL in Postgres;
+  it does not match explicit `none`. Existing CSV columns are unchanged. The additive
+  column/index upgrade is exercised against a literal pre-increment schema.
+- Closed public start/status and internal handoff models, strict 60/600-second defaults,
+  and the frozen routing record/Protocol are defined. Internal code/state/provider URL
+  values redact in ordinary dumps; future authenticated transport must explicitly unwrap
+  them. Shape validation supplies no trust, endpoint allowlisting, or execution authority.
+- **Not implemented:** transaction factory/backends, single-use start/state claims, encrypted
+  PKCE/credential custody, provider URL construction/trust validation, callback handlers,
+  acquisition, signal production/promotion and bounded stop, `targets:authorize` policy,
+  authorization controls/status polling/Continue, or verified delegation emission. These
+  remain R-1/R-6 foundation and R-2–R-5 workflow work; no usable OAuth route is registered.
+- Evidence: tool-gateway `tests/test_tool_registry.py` and `tests/test_authorization_contracts.py`;
+  agent-platform `tests/test_contract_adapter.py`; portal `stream/__tests__/decoder.test.ts`
+  and `useChatStream.test.ts`; audit-service `tests/test_contracts.py`, `test_audit_store.py`,
+  and `test_reporting.py`; platform-gateway `tests/test_authorization_contracts.py` and
+  `test_audit_proxy.py`; execution-runtime `tests/test_signing.py` and `test_executor.py`.
+  Failure-first signal/consumer/filter checks failed before support was added; negative,
+  omission, legacy, and no-route checks pass. The first full execution campaign exposed
+  stale packaged tool-result schemas (four parity failures; 788 checks passed). Fast
+  regressions reproduced both schema drift and worker rejection, then all three passed
+  after both packaged copies were corrected. The complete post-fix gate also passed.
+- `make audit-contract-test` (also required by root `make verify`) passed against a fresh,
+  loopback-bound disposable Postgres: legacy upgrade, idempotent initialization, NULL/none
+  separation, committed round-trip through a fresh store, dedupe, combined filters,
+  summary/window, and pagination. This is audit persistence evidence, **not** the R-6
+  multiprocess custody/concurrency proof.
+- Final verification: root `make verify` passed after the packaged-schema correction.
+  All eight frozen Python product suites passed (**3,252 tests**, including 82 execution
+  unit tests); portal **496 tests** and typechecked production build passed. Overlays,
+  dashboards, policy/scenarios, version, secret vocabulary, password policy, secret-delivery
+  demo, and disposable audit proof passed. The full execution-failure campaign passed
+  **792 tests** (two baseline-red controls deselected by the existing campaign runner;
+  no development subset), including the four previously failing parity cases.
+  Local campaign evidence: `.workspaces/spec063-evidence/20261023T090319Z-c4c535bb76f7/`
+  (`evidence.json` and `junit.xml`); exit 0, no host suspension or live acceptance.
+  Scoped `git diff --check` passed, excluding untouched preexisting `.qoder` changes.
+- This closes only the contract-increment checkpoint; rerun the full gate after subsequent
+  runtime/foundation changes. At this pre-release checkpoint no version bump, commit of the
+  increment, push, deployment, or live target validation had occurred. The later release
+  authorization below supersedes that handoff state. **AAP compatibility unverified**;
+  DI-070 remains pending.
+
+**Release checkpoint — v0.50.0 (operator approved 2026-10-23):**
+
+- Code and documentation review passed with no high-confidence correctness or security
+  findings in the 37-file contract increment; unrelated repowiki changes were excluded.
+- The operator explicitly selected **v0.50.0 for this contract-only increment**, authorizing
+  version bookkeeping, commit/tag/push, image rebuild, and local Kubernetes deployment.
+  Full SPEC-070 delivery moves to a later release, not yet selected; foundation/runtime
+  tasks below remain open. No live AAP work or production delegation enablement is included.
+- Release-version verification: root `make verify` passed again with all product versions
+  at **0.50.0**: **3,252 Python tests**, **496 portal tests**, typechecked production build,
+  static/overlay/policy/secret checks, and the disposable audit migration proof. The full
+  execution-failure campaign passed **792 tests**, with the same two baseline-red controls
+  deselected and no development subset; exit 0, no host suspension or live acceptance.
+  Release campaign evidence: `.workspaces/spec063-evidence/20261023T150420Z-360617be3111/`
+  (`evidence.json` and `junit.xml`). All eight regenerated lockfiles changed only their
+  local package version, with no dependency upgrades. This evidence is separate from the
+  pre-release implementation proof above; see the [changelog](../../../CHANGELOG.md#0500--2026-10-23).
 
 ## R-1: Credential Configuration
 
@@ -142,8 +213,10 @@ when the real environment and authorization are available, not as a prerequisite
 
 ## Acceptance-to-Test Matrix
 
-Development entries R-1a–R-6d are **planned / not run**. Replace each obligation with concrete
-test paths/names and results before delivery; this matrix is not execution evidence. Tests
+Full development acceptance R-1a–R-6d remains **open**. The contract-only evidence above
+covers a subset of R-2/R-4 shapes, not the runtime/security obligations below. Replace each
+obligation with concrete test paths/names and results before delivery; this matrix is not
+execution evidence. Tests
 must exercise real Luban enforcement against deterministic OAuth and per-user target fixtures,
 not canned shared-bearer success. DI-070 separately tracks actual AAP evidence.
 

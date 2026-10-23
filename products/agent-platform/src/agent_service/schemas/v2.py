@@ -111,7 +111,10 @@ class AgentChatConfirmRequest(BaseModel):
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v11).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v13).
+
+    v12 adds secret-delivery metadata; v13 adds authorization-required metadata,
+    a separate signal with no confirmation or execution authority.
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
@@ -150,6 +153,7 @@ class AgentStreamEvent(BaseModel):
         "confirmation_request",
         "confirmation_result",
         "secret_delivery",
+        "authorization_required",
     ]
     session_id: str
     request_id: str
@@ -158,6 +162,8 @@ class AgentStreamEvent(BaseModel):
     confirm_id: str | None = None
     pending_calls: list[dict[str, Any]] | None = None
     delivery_id: str | None = None
+    auth_challenge_id: str | None = None
+    target: str | None = None
     channel: str | None = None
     expires_at: str | None = None
     recipient: str | None = None

@@ -73,6 +73,30 @@ class ReportingRouteTests(unittest.TestCase):
         )
         assert response.status_code == 202, response.text
 
+    def test_delegation_filter_reaches_query_summary_and_export(self) -> None:
+        self._seed(_event_payload("legacy"),
+                   _event_payload("none", delegation_mode="none"),
+                   _event_payload("delegated", delegation_mode="user_delegated", username="alice"))
+        all_events = self.client.get("/api/v1/audit/events", headers=self.auth).json()["events"]
+        legacy = next(event for event in all_events if event["event_id"] == "legacy")
+        self.assertNotIn("delegation_mode", legacy)
+        explicit_none = self.client.get("/api/v1/audit/events?delegation_mode=none", headers=self.auth)
+        self.assertEqual([event["event_id"] for event in explicit_none.json()["events"]], ["none"])
+        params = {"delegation_mode": "user_delegated", "username": "alice"}
+        query = self.client.get("/api/v1/audit/events", params=params, headers=self.auth)
+        self.assertEqual(query.status_code, 200)
+        self.assertEqual([e["event_id"] for e in query.json()["events"]], ["delegated"])
+        self.assertEqual(query.json()["events"][0]["delegation_mode"], "user_delegated")
+        summary = self.client.get("/api/v1/audit/summary", params=params, headers=self.auth)
+        self.assertEqual(summary.json()["total_events"], 1)
+        self.assertEqual(summary.json()["window"], params)
+        exported = self.client.get("/api/v1/audit/export", params=params, headers=self.auth)
+        rows = list(csv.DictReader(io.StringIO(exported.text)))
+        self.assertEqual([row["request_id"] for row in rows], ["req-delegated"])
+        for leg in ("events", "summary", "export"):
+            response = self.client.get(f"/api/v1/audit/{leg}?delegation_mode=invalid", headers=self.auth)
+            self.assertEqual(response.status_code, 422)
+
     # --- Summary (R-1) ------------------------------------------------------
 
     def test_summary_aggregates_and_projects_decision_chain(self) -> None:

@@ -89,6 +89,19 @@ def _make_envelope(key: str, **overrides) -> dict:
     return envelope
 
 
+class PackagedContractParityTests(unittest.TestCase):
+    def test_execution_consumers_package_canonical_schemas(self) -> None:
+        canonical = REPO_ROOT / "shared/shared-contracts/schemas"
+        for name in ("execution-request", "execution-receipt", "execution-observation",
+                     "execution-recovery", "execution-handoff-response", "tool-result"):
+            expected = (canonical / f"{name}.schema.json").read_bytes()
+            for product, package in (("agent-platform", "agent_service"),
+                                     ("execution-runtime", "execution_runtime")):
+                with self.subTest(product=product, schema=name):
+                    actual = REPO_ROOT / f"products/{product}/src/{package}/contracts/{name}.schema.json"
+                    self.assertEqual(actual.read_bytes(), expected)
+
+
 class CanonicalizationTests(unittest.TestCase):
     def test_canonical_json_sorts_keys_without_whitespace(self) -> None:
         self.assertEqual(

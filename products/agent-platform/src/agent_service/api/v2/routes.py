@@ -577,6 +577,7 @@ _STREAM_EVENT_TYPES = frozenset(
         "confirmation_request",
         "confirmation_result",
         "secret_delivery",
+        "authorization_required",
     }
 )
 
@@ -618,6 +619,16 @@ def _normalize_stream_event(
     event_type = str(raw.get("event", raw.get("type", "message_delta")))
     if event_type not in _STREAM_EVENT_TYPES:
         event_type = "message_delta"
+    if event_type == "authorization_required":
+        # Closed sibling projection: never carry approval fields, arbitrary
+        # tool data, or provider error text into an authorization frame.
+        return AgentStreamEvent(
+            type="authorization_required", session_id=session_id, request_id=request_id,
+            auth_challenge_id=(raw.get("auth_challenge_id")
+                               if isinstance(raw.get("auth_challenge_id"), str) else None),
+            target=raw.get("target") if isinstance(raw.get("target"), str) else None,
+            expires_at=raw.get("expires_at") if isinstance(raw.get("expires_at"), str) else None,
+        )
     return AgentStreamEvent(
         type=event_type,  # type: ignore[arg-type]
         session_id=session_id,

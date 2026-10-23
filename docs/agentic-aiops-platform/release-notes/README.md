@@ -1,6 +1,9 @@
 # Release Notes
 
 This folder captures milestone-oriented release notes for the workspace.
+The current release and complete release history are authoritative in
+[VERSION](../../../VERSION) and [CHANGELOG.md](../../../CHANGELOG.md); not every
+release has a standalone milestone note in this folder.
 
 During the current pre-release phase, release notes describe implementation
 waves and validation outcomes rather than published product releases.

@@ -8,6 +8,30 @@ function sseBlock(payload: Record<string, unknown>): string {
 }
 
 describe("decodeEventBlock", () => {
+  it("decodes authorization metadata without navigation or approval fields", () => {
+    const payload = { type: "authorization_required",
+      auth_challenge_id: "11111111-1111-4111-8111-111111111111",
+      target: "Automation", expires_at: "2030-01-01T00:00:00Z",
+      provider_url: "https://example.test", code: "must-not-survive",
+      state: "must-not-survive", approval_kind: "flow", confirm_id: "cf-1" };
+    expect(decodeEventBlock(sseBlock(payload))?.frame).toEqual({
+      kind: "authorization_required", authChallengeId: payload.auth_challenge_id,
+      target: payload.target, expiresAt: payload.expires_at,
+    });
+    for (const override of [{ auth_challenge_id: "invalid" },
+      { auth_challenge_id: "11111111-1111-1111-8111-111111111111" },
+      { auth_challenge_id: payload.auth_challenge_id + "\n" },
+      { target: " " }, { target: 1 }, { expires_at: "invalid" },
+      { expires_at: "2030-01-01T00:00:00" }]) {
+      expect(decodeEventBlock(sseBlock({ ...payload, ...override }))?.frame).toBeNull();
+    }
+    const { expires_at: _, ...withoutExpiry } = payload;
+    expect(decodeEventBlock(sseBlock(withoutExpiry))?.frame).toEqual({
+      kind: "authorization_required", authChallengeId: payload.auth_challenge_id,
+      target: payload.target,
+    });
+  });
+
   it("accepts only delivery metadata, never a value", () => {
     const payload = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
       channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z", value: "must-not-survive" };

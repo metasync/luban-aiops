@@ -203,8 +203,11 @@ research or evidence limits. It does not declare any AAP behavior proven.
 
 - **Development:** R-1–R-6d must pass deterministic OAuth/target integration tests, cross-product
   workflow/contract tests, real disposable-Postgres multiprocess custody tests, and root
-  `make verify`. Only then may SPEC-070 be delivered and its planned v0.50.0 release be
-  separately authorized. No development test has run as part of this documentation amendment.
+  `make verify`. Only then may SPEC-070 be marked delivered. No development test ran as
+  part of the documentation-only amendment. **Later on 2026-10-23**, the operator approved
+  releasing the reviewed, fully verified additive OQ-7 contract checkpoint as **v0.50.0**;
+  this does not close full development acceptance or enable OAuth. Remaining SPEC-070
+  delivery targets a later, unselected release; see [checkpoint evidence](tasks.md#additive-oq-7-contract-increment).
 - **Deployment:** OQ-3 and R-6e are retained as the separate, pending
   [DI-070 task](tasks.md#post-delivery-deployment-integration-di-070), mandatory before
   production user-delegated AAP enablement. It needs the real target, administrator facts,

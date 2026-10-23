@@ -115,6 +115,23 @@ class AuditProxyRouteTests(unittest.TestCase):
             fake.calls[0]["url"], "http://audit-service:8000/api/v1/audit/events"
         )
 
+    def test_delegation_filter_forwarded_on_every_leg(self) -> None:
+        for leg in ("events", "summary", "export"):
+            for mode in ("user_delegated", "acting_service", "none"):
+                fake = _FakeAsyncClient(response=_FakeResponse(200, {}, content=b"csv"))
+                with (self._patch_identity("auditor"),
+                      patch("platform_gateway.api.routes.audit.httpx.AsyncClient", return_value=fake)):
+                    response = self.client.get(f"/api/v1/audit/{leg}",
+                                               params={"delegation_mode": mode, "username": "alice"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(fake.calls[0]["params"]["delegation_mode"], mode)
+                self.assertEqual(fake.calls[0]["params"]["username"], "alice")
+        fake = _FakeAsyncClient(response=_FakeResponse(422, {}))
+        with (self._patch_identity("auditor"),
+              patch("platform_gateway.api.routes.audit.httpx.AsyncClient", return_value=fake)):
+            response = self.client.get("/api/v1/audit/events?delegation_mode=invalid")
+        self.assertEqual(response.status_code, 422)
+
     def test_platform_admin_allowed(self) -> None:
         upstream = _FakeResponse(200, {"events": [], "next_cursor": None})
         fake = _FakeAsyncClient(response=upstream)

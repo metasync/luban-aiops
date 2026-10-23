@@ -145,6 +145,41 @@ class ToolDefinitionTests(unittest.TestCase):
 
 
 class ToolResultTests(unittest.TestCase):
+    def test_authorization_signal_is_closed_and_error_only(self) -> None:
+        import json
+        from pathlib import Path
+        import jsonschema
+
+        schema = json.loads((Path(__file__).resolve().parents[3] / "shared" /
+                             "shared-contracts/schemas/tool-result.schema.json").read_text())
+        metadata = {"challenge_id": "11111111-1111-4111-8111-111111111111",
+                    "target": "Automation", "expires_at": "2030-01-01T00:00:00Z"}
+        result = ToolResult(
+            tool_name="test.echo", status="error",
+            evidence=build_evidence("read", "test", 0),
+            error={"code": "TARGET_AUTHORIZATION_REQUIRED", "message": "Authorize Automation."},
+            authorization_required=metadata,
+        )
+        payload = result.to_dict()
+        self.assertEqual(payload["authorization_required"], metadata)
+        jsonschema.validate(payload, schema, format_checker=jsonschema.FormatChecker())
+        for patch in ({"status": "success"}, {"error": None},
+                      {"error": {"code": "OTHER", "message": "failed"}},
+                      {"authorization_required": {**metadata, "provider_url": "https://example.test"}}):
+            with self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate({**payload, **patch}, schema)
+        result.status = "success"
+        with self.assertRaises(ValueError):
+            result.to_dict()
+        result.status = "error"
+        result.authorization_required = {**metadata, "access_token": "must-not-survive"}
+        with self.assertRaises(ValueError):
+            result.to_dict()
+
+    def test_authorization_omitted_for_legacy_results(self) -> None:
+        for status in ("success", "error", "denied"):
+            self.assertNotIn("authorization_required", ToolResult("test.echo", status).to_dict())
+
     def test_to_dict_success(self) -> None:
         result = ToolResult(
             tool_name="test.echo",

@@ -94,6 +94,29 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(call["headers"]["Authorization"], "Bearer tok")
         self.assertEqual(call["headers"]["x-request-id"], "req-1")
 
+    def test_authorization_required_is_a_failed_tool_report_without_retry(self) -> None:
+        gateway_result = _result(
+            status="error", error={"code": "TARGET_AUTHORIZATION_REQUIRED", "message": "Authorize Automation."},
+            authorization_required={"challenge_id": "11111111-1111-4111-8111-111111111111",
+                                    "target": "Automation"},
+        )
+        self.outcomes.append(_JsonResponse(gateway_result))
+        result = _run(executor.execute_tool(_settings(), "k8s.scale_deployment", {}, "tok", "req-auth"))
+        self.assertEqual(result, gateway_result)
+        self.assertEqual(executor.map_result_status(result), "failed")
+        self.assertEqual(len(self.captured), 1)
+
+    def test_authorization_metadata_cannot_masquerade_as_success_or_carry_secrets(self) -> None:
+        metadata = {"challenge_id": "11111111-1111-4111-8111-111111111111", "target": "Automation"}
+        for result in (
+            _result(authorization_required=metadata),
+            _result(status="error", error={"code": "TARGET_AUTHORIZATION_REQUIRED", "message": "Authorize."},
+                    authorization_required={**metadata, "state": "opaque-secret"}),
+        ):
+            self.outcomes.append(_JsonResponse(result))
+            with self.assertRaisesRegex(executor.GatewayUncertain, "response_invalid"):
+                _run(executor.execute_tool(_settings(), "k8s.scale_deployment", {}, "tok", "req-auth"))
+
     def test_execution_id_is_a_header_not_connector_parameters(self) -> None:
         self.outcomes.append(_JsonResponse(_result()))
         execution_id = "11111111-2222-4333-8444-555555555555"

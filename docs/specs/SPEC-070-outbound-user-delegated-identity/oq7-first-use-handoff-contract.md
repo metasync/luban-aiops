@@ -2,13 +2,18 @@
 
 > **RATIFIED 2026-10-19; delivery boundary amended 2026-10-23.** This is the OQ-7
 > detailed contract named in [spec.md](spec.md#open-questions) and
-> [plan.md](plan.md#first-use-handoff--ratified-contract-boundary-oq-7), not shipped behavior.
+> [plan.md](plan.md#first-use-handoff--ratified-contract-boundary-oq-7), not a claim that
+> the complete authorization workflow has shipped.
 > The operator approved provider-independent development acceptance and a separate
 > [DI-070 deployment-integration task](tasks.md#post-delivery-deployment-integration-di-070).
 > §8/§13 now pin local TTL defaults and retain mandatory S256; OQ-3 verifies the actual
 > deployment rather than blocking development or release. R-1 capability behavior is pinned
-> in the spec/plan; runtime implementation and asserting tests remain pending. Live tests,
-> client registration, push, deployment, and version changes remain separately authorized.
+> in the spec/plan; OAuth runtime implementation and its acceptance tests remain pending.
+> The additive contract increment is implemented and verified, and its contract-only
+> **v0.50.0** release/local deployment was separately approved on 2026-10-23; see
+> [scoped evidence and exclusions](tasks.md#additive-oq-7-contract-increment). Full SPEC-070
+> delivery remains open. **AAP compatibility unverified**; live tests, client registration,
+> and production delegation enablement are not included in that authorization.
 
 ## 1. Purpose and scope
 

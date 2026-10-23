@@ -169,6 +169,8 @@ def _matches(event: AuditEvent, filters: AuditQuery) -> bool:
         return False
     if filters.outcome and event.outcome != filters.outcome:
         return False
+    if filters.delegation_mode and event.delegation_mode != filters.delegation_mode:
+        return False
     if filters.since and event.occurred_at < filters.since:
         return False
     if filters.until and event.occurred_at > filters.until:
@@ -236,6 +238,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
     outcome     TEXT NOT NULL,
     details     JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS delegation_mode TEXT;
+CREATE INDEX IF NOT EXISTS idx_audit_delegation_mode
+    ON audit_events (delegation_mode);
 CREATE INDEX IF NOT EXISTS idx_audit_occurred_at
     ON audit_events (occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_username
@@ -251,18 +256,18 @@ CREATE INDEX IF NOT EXISTS idx_audit_event_type
 _INSERT = """
 INSERT INTO audit_events (
     event_id, occurred_at, event_type, service, request_id,
-    subject, username, actor, roles, session_id, outcome, details
+    subject, username, actor, roles, session_id, outcome, details, delegation_mode
 ) VALUES (
     %(event_id)s, %(occurred_at)s, %(event_type)s, %(service)s, %(request_id)s,
     %(subject)s, %(username)s, %(actor)s, %(roles)s, %(session_id)s,
-    %(outcome)s, %(details)s
+    %(outcome)s, %(details)s, %(delegation_mode)s
 )
 ON CONFLICT (event_id) DO NOTHING
 """
 
 _ROW_COLUMNS = (
     "event_id, occurred_at, event_type, service, request_id, subject, "
-    "username, actor, roles, session_id, outcome, details"
+    "username, actor, roles, session_id, outcome, details, delegation_mode"
 )
 
 ConnectFactory = Callable[[], AsyncIterator[Any]]
@@ -282,6 +287,7 @@ def _row_to_event(row: dict[str, Any]) -> AuditEvent:
         session_id=row["session_id"],
         outcome=row["outcome"],
         details=row["details"] or {},
+        delegation_mode=row["delegation_mode"],
     )
 
 
@@ -312,6 +318,9 @@ def _filter_clause(
         # the other envelope-column equality predicates.
         where.append("outcome = %(outcome)s")
         params["outcome"] = filters.outcome
+    if filters.delegation_mode:
+        where.append("delegation_mode = %(delegation_mode)s")
+        params["delegation_mode"] = filters.delegation_mode
     if filters.since:
         where.append("occurred_at >= %(since)s")
         params["since"] = filters.since
@@ -377,6 +386,7 @@ class PostgresAuditStore:
                             "session_id": payload.get("session_id"),
                             "outcome": payload["outcome"],
                             "details": Jsonb(payload.get("details", {})),
+                            "delegation_mode": payload.get("delegation_mode"),
                         },
                     )
                     inserted += cur.rowcount if cur.rowcount > 0 else 0

@@ -97,6 +97,30 @@ class AuditEventContractTests(unittest.TestCase):
         model_outcomes = set(getattr(Outcome, "__args__", Outcome))
         self.assertEqual(model_outcomes, contract_outcomes)
 
+    def test_delegation_mode_vocabulary_omission_and_rejection(self) -> None:
+        from audit_service.schemas.audit import AuditQuery, DelegationMode
+
+        schema = _load_schema(self.schema_name)
+        self.assertEqual(set(DelegationMode.__args__),
+                         set(schema["properties"]["delegation_mode"]["enum"]))
+        self.assertNotIn("delegation_mode", _event().model_dump(exclude_none=True))
+        for event in (_event(), _event(delegation_mode=None)):
+            self.assertNotIn("delegation_mode", event.model_dump(mode="json"))
+            self.assertNotIn("delegation_mode", json.loads(event.model_dump_json()))
+            self.assertNotIn("delegation_mode", IngestRequest(events=[event]).model_dump()["events"][0])
+            self.assertIsNone(event.model_dump()["subject"])  # Existing optional fields unchanged.
+        for mode in ("user_delegated", "acting_service", "none"):
+            payload = _event(delegation_mode=mode).model_dump(mode="json", exclude_none=True)
+            jsonschema.validate(payload, schema)
+            self.assertEqual(AuditQuery(delegation_mode=mode).delegation_mode, mode)
+        for invalid in ("delegated", "", 1):
+            with self.assertRaises(ValidationError):
+                _event(delegation_mode=invalid)
+            with self.assertRaises(ValidationError):
+                AuditQuery(delegation_mode=invalid)
+            with self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate({**payload, "delegation_mode": invalid}, schema)
+
     def test_session_deleted_event_validates(self) -> None:
         # SPEC-022 R-1: the gateway emits session_deleted on workspace
         # deletes; the model must accept it like the contract does.

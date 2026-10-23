@@ -11,6 +11,55 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.50.0 — 2026-10-23
+
+Feature checkpoint: additive OQ-7 contracts for
+[SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md), explicitly
+approved as a contract-only minor release. **SPEC-070 remains in progress**, with full
+development acceptance targeting a later, unselected release. **AAP compatibility
+unverified**; [DI-070](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+is mandatory before production user-delegated AAP enablement, independently of
+provider-independent development delivery.
+
+### Added
+
+- Closed, optional `authorization_required` tool-result metadata, permitted only on an
+  error with `TARGET_AUTHORIZATION_REQUIRED`; legacy callers remain compatible. Stream
+  v13 carries the additive sibling frame through agent and portal consumers, projecting
+  only opaque routing metadata. The portal consumer is deliberately inert.
+- Optional top-level audit `delegation_mode` (`user_delegated`, `acting_service`, `none`)
+  with memory/Postgres persistence, query/summary/export filtering, and gateway proxy
+  parity. An additive nullable column/index upgrade preserves legacy omission; unknown
+  legacy mode does not match explicit `none`. CSV columns and `audit:read` are unchanged.
+- Strict public/internal authorization models and a transaction record/store Protocol,
+  including 60-second start and 600-second transaction defaults. These are contracts,
+  not routes or custody implementations; no new runtime dependency is introduced.
+- Disposable-Postgres audit legacy-upgrade/round-trip proof, now in root `make verify`,
+  plus packaged-schema parity and real worker-consumer regression tests. Canonical and
+  both packaged tool-result schemas are synchronized, preventing valid metadata from
+  being rejected by the execution worker as an invalid response.
+
+### Changed
+
+- Root version, all eight Python product/service versions, package constants, and
+  regenerated lockfiles move together to 0.50.0; the portal consumes root `VERSION`.
+- Release bookkeeping distinguishes this verified checkpoint from full SPEC-070 delivery.
+  Optional endpoint capabilities, immutable target-account verification, no fallback,
+  no callback dispatch/replay, and the separately tracked AAP integration gate remain
+  requirements for the future runtime, not capabilities claimed by this release.
+
+### Verification and limitations
+
+- Pre-release implementation verification: all 3,252 Python tests and 496 portal tests,
+  the typechecked portal build, disposable audit proof, and full execution-failure
+  campaign (792 passed; two existing baseline-red controls deselected) passed under
+  root `make verify`. Code/documentation review found no high-confidence correctness
+  or security issue. Release-version verification is recorded in
+  [tasks.md](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#additive-oq-7-contract-increment).
+- No OAuth start/callback/status routes, credential/PKCE custody backend, authorization
+  controls/Continue, acquisition/renewal/revocation, verified delegation emitter, or
+  production authorization signal is enabled. No live AAP proof is claimed.
+
 ## 0.49.0 — 2026-10-20
 
 Feature release: ServiceNow ITSM read-tier MCP-ingestion pilot. The second

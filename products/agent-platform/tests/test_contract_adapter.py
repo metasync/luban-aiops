@@ -236,6 +236,30 @@ def test_chat_response_does_not_leak_framework_types() -> None:
 # --- Stream event adapter (SPEC-011 R-1 evidence frames) ---
 
 
+def test_authorization_frame_v13_contract_and_consumer_parity() -> None:
+    from agent_service.schemas.v2 import AgentStreamEvent
+    from agent_service.api.v2.routes import _STREAM_EVENT_TYPES
+
+    schema = load_schema("agent-stream-event.schema.json")
+    assert schema["title"] == "Agent Stream Event (v13)"
+    assert set(schema["properties"]["type"]["enum"]) == _STREAM_EVENT_TYPES
+    assert set(AgentStreamEvent.model_fields["type"].annotation.__args__) == _STREAM_EVENT_TYPES
+    assert set(AgentStreamEvent.model_fields) == set(schema["properties"])
+    raw = {"type": "authorization_required",
+           "auth_challenge_id": "11111111-1111-4111-8111-111111111111",
+           "target": "Automation", "expires_at": "2030-01-01T00:00:00Z"}
+    dirty = {**raw, "state": "must-not-survive", "code": "must-not-survive",
+             "provider_url": "https://example.test", "approval_kind": "flow",
+             "confirm_id": "must-not-survive", "data": {"token": "must-not-survive"},
+             "message": "must-not-survive", "pending_calls": []}
+    dumped = _normalize_stream_event(dirty, "ses-1", "req-1").model_dump(exclude_none=True)
+    assert dumped == {**raw, "session_id": "ses-1", "request_id": "req-1"}
+    jsonschema.validate(dumped, schema, format_checker=jsonschema.FormatChecker())
+    legacy = _normalize_stream_event({"type": "message_end"}, "ses-1", "req-1")
+    assert "auth_challenge_id" not in legacy.model_dump(exclude_none=True)
+    assert "target" not in legacy.model_dump(exclude_none=True)
+
+
 def test_tool_call_frame_passes_through() -> None:
     raw = {
         "type": "tool_call",

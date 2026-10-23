@@ -110,10 +110,26 @@ export function toSecretDeliveryFrame(payload: {
   return { kind: "secret_delivery", deliveryId, expiresAt, channel: "portal_copy" };
 }
 
+export function toAuthorizationRequiredFrame(payload: {
+  auth_challenge_id?: unknown; target?: unknown; expires_at?: unknown;
+}): import("./models").AuthorizationRequiredFrame | null {
+  const authChallengeId = asString(payload.auth_challenge_id);
+  const target = asString(payload.target);
+  const expiresAt = asString(payload.expires_at);
+  if (!authChallengeId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(authChallengeId) ||
+    !target?.trim()) return null;
+  if (payload.expires_at !== undefined && (!expiresAt ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(expiresAt) ||
+    !Number.isFinite(Date.parse(expiresAt)))) return null;
+  return { kind: "authorization_required", authChallengeId, target,
+    ...(expiresAt ? { expiresAt } : {}) };
+}
+
 function toFrame(payload: RawPayload): StreamFrame | null {
   const eventType = streamEventType(payload);
 
   if (eventType === "secret_delivery") return toSecretDeliveryFrame(payload);
+  if (eventType === "authorization_required") return toAuthorizationRequiredFrame(payload);
   if (eventType === "tool_call") {
     return {
       kind: "tool_call",

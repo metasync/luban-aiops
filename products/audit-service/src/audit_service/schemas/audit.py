@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 EventType = Literal[
     "tool_invoked",
@@ -43,6 +43,7 @@ EventType = Literal[
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]
+DelegationMode = Literal["user_delegated", "acting_service", "none"]
 
 
 class AuditEvent(BaseModel):
@@ -59,7 +60,16 @@ class AuditEvent(BaseModel):
     roles: list[str] | None = None
     session_id: str | None = None
     outcome: Outcome
+    # Unset on legacy envelopes; never infer verified delegation from details.
+    delegation_mode: DelegationMode | None = None
     details: dict = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _omit_unknown_delegation(self, handler: SerializerFunctionWrapHandler) -> dict:
+        payload = handler(self)
+        if self.delegation_mode is None:
+            payload.pop("delegation_mode", None)
+        return payload
 
 
 class IngestRequest(BaseModel):
@@ -82,5 +92,6 @@ class AuditQuery(BaseModel):
     event_type: str | None = None
     service: str | None = None
     outcome: Outcome | None = None
+    delegation_mode: DelegationMode | None = None
     since: datetime | None = None
     until: datetime | None = None

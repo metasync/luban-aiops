@@ -154,6 +154,21 @@ class InMemoryStoreTests(unittest.TestCase):
         )
         self.assertEqual(page.events, [])
 
+    def test_delegation_filter_distinguishes_legacy_from_explicit_none(self) -> None:
+        events = [_event("legacy"), _event("none", delegation_mode="none"),
+                  _event("service", delegation_mode="acting_service"),
+                  _event("user", delegation_mode="user_delegated", username="alice")]
+        _run(self.store.add(events))
+        self.assertEqual(len(_run(self.store.query(AuditQuery(), None, 50)).events), 4)
+        for event in events[1:]:
+            filters = AuditQuery(delegation_mode=event.delegation_mode)
+            self.assertEqual(_run(self.store.query(filters, None, 50)).events, [event])
+            summary = _run(self.store.summarize(filters))
+            self.assertEqual(summary.total_events, 1)
+            self.assertEqual(summary.window, {"delegation_mode": event.delegation_mode})
+        combined = AuditQuery(delegation_mode="user_delegated", username="bob")
+        self.assertEqual(_run(self.store.query(combined, None, 50)).events, [])
+
     def test_filters_by_session_and_request_id(self) -> None:
         _run(
             self.store.add(
@@ -402,6 +417,7 @@ def _pg_row(event: AuditEvent) -> tuple:
         event.session_id,
         event.outcome,
         event.details,
+        event.delegation_mode,
     )
 
 

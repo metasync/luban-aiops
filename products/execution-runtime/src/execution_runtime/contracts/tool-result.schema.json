@@ -47,6 +47,17 @@
       },
       "additionalProperties": false
     },
+    "authorization_required": {
+      "type": ["object", "null"],
+      "description": "SPEC-070: only on error with TARGET_AUTHORIZATION_REQUIRED. Opaque owner-scoped routing metadata, never credentials or a provider URL. No execution authority.",
+      "additionalProperties": false,
+      "required": ["challenge_id", "target"],
+      "properties": {
+        "challenge_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+        "target": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "Configured display label, not an endpoint." },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
     "error": {
       "type": ["object", "null"],
       "description": "Error details. Present when status is error or denied.",
@@ -64,5 +75,18 @@
       "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [{
+    "if": {
+      "required": ["authorization_required"],
+      "properties": { "authorization_required": { "type": "object" } }
+    },
+    "then": {
+      "required": ["error"],
+      "properties": {
+        "status": { "const": "error" },
+        "error": { "type": "object", "properties": { "code": { "const": "TARGET_AUTHORIZATION_REQUIRED" } } }
+      }
+    }
+  }]
 }

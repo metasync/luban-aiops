@@ -1,4 +1,4 @@
-// Typed models for the platform SSE stream contract (stream schema v6).
+// Typed models for the platform SSE stream contract (stream schema v13).
 // SPEC-023 R-2: these models are the only representation of the wire
 // format that views consume — nothing outside src/stream/ parses frames.
 import type { ExecutionRecovery } from "../api/sessions";
@@ -59,6 +59,14 @@ export interface SecretDeliveryFrame {
   deliveryId: string;
   channel: "portal_copy";
   expiresAt: string;
+}
+
+// SPEC-070 v13: routing metadata only; never a mutation approval or provider URL.
+export interface AuthorizationRequiredFrame {
+  kind: "authorization_required";
+  authChallengeId: string;
+  target: string;
+  expiresAt?: string;
 }
 
 export interface PendingCall {
@@ -150,6 +158,7 @@ export type StreamFrame =
   | ToolCallFrame
   | ToolResultFrame
   | SecretDeliveryFrame
+  | AuthorizationRequiredFrame
   | ConfirmationRequestFrame
   | ConfirmationResultFrame
   | ErrorFrame;

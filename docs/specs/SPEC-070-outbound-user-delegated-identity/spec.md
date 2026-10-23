@@ -2,13 +2,18 @@
 
 ## Status
 
-- status: `approved` — redirect-based direction ratified 2026-10-18; OQ-7 handoff contract
+- status: `in-progress` — redirect-based direction ratified 2026-10-18; OQ-7 handoff contract
   ratified 2026-10-19. **Delivery-boundary amendment approved 2026-10-23:** development
   acceptance is independent of AAP availability. R-1–R-6d remain development obligations;
   R-6e and OQ-3 move to a separately tracked deployment-integration task, not a release gate.
-  No runtime implementation or test pass is claimed. This amendment is committed separately
-  for operator review before code; push, live tests, deployment, and version changes remain
-  separate authorization boundaries.
+  The amendment was committed separately for operator review before code; push, live tests,
+  deployment, and version changes remain separate authorization boundaries.
+- implementation checkpoint (2026-10-23): the separately reviewable additive OQ-7 contract
+  increment is implemented and root `make verify` passes. Signal/stream/audit shapes,
+  packaged consumer parity, audit persistence/filtering, and inert route/store models have
+  asserting tests; see [scoped evidence and exclusions](tasks.md#additive-oq-7-contract-increment).
+  No usable OAuth flow or custody backend is enabled. R-1–R-6d acceptance remains open;
+  **AAP compatibility unverified**.
 - owner: luban-platform-team
 - created: 2026-10-12
 - current decision: first-use target OAuth authorization redirects are allowed; no manual
@@ -35,11 +40,13 @@
   read-only **dev** slice is **not** blocked on this spec (it validates against a
   self-hosted server's own auth); only the **production** user-delegated path depends on
   it (see the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md#r6-external-system-integration-via-mcp-ingestion)).
-- target version: **v0.50.0** — re-slotted at SPEC-067's 2026-10-20 approval. The
-  2026-10-23 amendment permits delivery and a separately authorized version bump after
-  development acceptance passes, even while DI-070 is pending. The release must disclose
-  **AAP deployment compatibility unverified**; it cannot claim production integration.
-  SPEC-068/069/067 have already shipped. No `VERSION` change is made by this amendment.
+- release checkpoint: **v0.50.0 — additive OQ-7 contracts only**, explicitly approved by
+  the operator on 2026-10-23 after code/documentation review and full verification.
+  This supersedes the earlier full-feature planning target for v0.50.0; the remaining
+  SPEC-070 development targets a **later release, not yet selected**. This checkpoint
+  does not satisfy R-1–R-6d or enable OAuth. Full development delivery remains gated on
+  its acceptance tests, independently of DI-070. **AAP compatibility unverified**;
+  production user-delegated target enablement still requires DI-070 evidence.
 - related ADRs: [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md)
   (**accepted** 2026-10-18, supersedes [ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)).
   This spec establishes the platform's **first outbound
@@ -138,10 +145,11 @@ extends the same `credential_set` seam rather than replacing it.
 ## Requirements
 
 The amended direction is **target-issued authorization-code plus server-side renewal**.
-The development criteria below (R-1–R-6d) remain ratified acceptance obligations; none is
-shipped behavior yet, and each maps to a planned (not run) test in the task matrix. The
-2026-10-23 amendment moves R-6e to DI-070 deployment integration, preserving its identifier
-and live-proof obligation without counting it as development acceptance.
+The development criteria below (R-1–R-6d) remain ratified acceptance obligations, not
+completed runtime behavior. The task matrix retains the pending full acceptance tests;
+contract-only asserting evidence is recorded separately in the implementation checkpoint.
+The 2026-10-23 amendment moves R-6e to DI-070 deployment integration, preserving its
+identifier and live-proof obligation without counting it as development acceptance.
 
 ### R-1: User-delegated outbound credential scheme (extends SPEC-068 additively)
 
@@ -393,6 +401,18 @@ distinguishes development proof from missing organization-specific evidence.
 
 ## Changelog
 
+- 2026-10-23 (operator-approved release checkpoint): release the reviewed and verified
+  additive OQ-7 increment as **v0.50.0**, with coordinated versions, commit/tag/push, and
+  local Kubernetes rebuild/deployment authorized. Move status to `in-progress`; full
+  SPEC-070 acceptance remains open for a later, unselected release. No authorization
+  workflow or custody backend is enabled, and **AAP compatibility unverified** remains
+  the release limitation. This supersedes the earlier full-feature v0.50.0 planning
+  target, without changing requirements, DI-070, or accepted ADR bodies.
+- 2026-10-23 (additive contract increment): implement error-only tool-result metadata,
+  stream v13 consumer support, optional audit delegation mode with durable filtering,
+  and inert route/store models. Record contract/compatibility tests and a disposable
+  Postgres legacy-upgrade proof in tasks.md. Authorization, trust/custody implementation,
+  and full development acceptance remain open; no release or AAP compatibility claim.
 - 2026-10-23 (operator-approved delivery-boundary amendment): separate development delivery
   from actual AAP deployment integration because the target is not expected to be available
   soon. R-1–R-6d retain failure-first protocol/workflow/contract tests, real disposable-Postgres

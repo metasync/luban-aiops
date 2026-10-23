@@ -214,6 +214,10 @@ observability-livecheck: ## Observability live-check (SPEC-065 R-4): mocked proo
 secret-delivery-demo: ## Run the local sample handoff proof (uv + installed portal npm dependencies; no cluster)
 	@sh $(SAMPLES_DIR)/acme-admin/password-reset/demo/demo.sh --secret-delivery-local
 
+.PHONY: audit-contract-test
+audit-contract-test: ## Prove audit delegation filtering and legacy migration with disposable Postgres
+	@uv run --frozen --project products/audit-service python products/audit-service/tests/integration/audit_contract.py
+
 .PHONY: execution-failure-test
 execution-failure-test: ## Prove crash safety with disposable Postgres and independent processes
 	@sh $(E2E_DIR)/execution-failure-test.sh
@@ -232,7 +236,7 @@ portal-test: ## Run the operator-portal SPA unit suite and production build (vit
 	@$(MAKE) -C products/operator-portal web-build || exit 1
 
 .PHONY: verify
-verify: test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, portal, secret-delivery, and execution failure proofs
+verify: test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test audit-contract-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, portal, secret-delivery, and execution failure proofs
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

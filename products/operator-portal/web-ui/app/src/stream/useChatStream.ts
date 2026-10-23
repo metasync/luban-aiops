@@ -195,6 +195,10 @@ export function useChatStream(): ChatStreamApi {
           turn.segmentBreak = true;
           turn.toolResults.push(frame);
           break;
+        case "authorization_required":
+          // Contract-only increment: no control, navigation, or confirmation.
+          // The workflow consumer is enabled only with trusted custody/routes.
+          break;
         case "secret_delivery":
           turn.secretDeliveries ??= [];
           if (!turn.secretDeliveries.some((item) => item.deliveryId === frame.deliveryId)) {

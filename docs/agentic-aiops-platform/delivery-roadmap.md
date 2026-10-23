@@ -478,18 +478,29 @@ is **accepted**; ADR-0015 is `superseded by ADR-0016` (accepted body unchanged).
 confirms the documented grant family but leaves actual AAP/MCP versions, client security, and
 renewal/account/RBAC lifecycle (OQ-3, pre-live) open. The detailed cross-product contract
 (OQ-7) was **ratified 2026-10-19**, closing the pre-runtime gate, so R-1–R-6 implementation
-may now begin against it; **no R-1–R-6 runtime work or version change is claimed yet.** This
-remains SPEC-069's production identity dependency; its delivered read-only **dev** slice is
-unaffected.
+may proceed against it. The additive contract checkpoint below is implemented; OAuth
+workflow and custody remain open. SPEC-070 remains SPEC-069's production identity
+dependency; its delivered read-only **dev** slice is unaffected.
 
 **SPEC-070 delivery-boundary amendment approved 2026-10-23.** AAP availability no longer
-blocks development delivery or the separately authorized v0.50.0 bump. R-1–R-6d still need
+blocks development delivery or separately authorized releases. R-1–R-6d still need
 asserting protocol/workflow/security tests, real disposable-Postgres multiprocess custody
 proof, consumer-contract coverage, operator documentation, and root `make verify`.
 The operator approved optional-but-validated renewal/revocation/identity endpoints with
 fail-closed missing-capability behavior; immutable account verification, S256, no fallback,
 and no mutation replay remain mandatory. Local start-token / transaction-state defaults
 are 60 / 600 seconds, not measured AAP values. No runtime code is delivered by this amendment.
+
+**SPEC-070 contract-only v0.50.0 release approved 2026-10-23.** The additive OQ-7 increment
+passed full root verification and code/documentation review: closed error-only tool metadata,
+stream v13 with packaged/portal consumer parity, durable audit delegation-mode filtering, and
+inert authorization models/transaction Protocol. The operator approved this checkpoint's
+version bump, commit/tag/push, and local Kubernetes rebuild/deployment. It enables no OAuth
+flow, custody backend, authorization UI, or verified delegation emission. SPEC-070 is
+`in-progress`, not delivered; full development acceptance targets a later, unselected release.
+This supersedes the earlier full-feature v0.50.0 planning slot. **AAP compatibility unverified**;
+DI-070 remains mandatory before production target enablement. Current release details remain
+in [VERSION](../../VERSION) and [CHANGELOG](../../CHANGELOG.md).
 
 | Deployment-integration follow-up | Owner / trigger | Closure and release boundary |
 | --- | --- | --- |
@@ -531,8 +542,9 @@ schema each — `change_request` kept **in scope** by operator amendment, with
 separately-authorized live-PDI operator check**, never a CI dependency. The transport
 merits **no ADR** (a connector-local REST binding reusing SPEC-068, mirroring its no-ADR
 Option A). The target version **v0.49.0** (the next minor after SPEC-069's delivered
-v0.48.0) is now realized — the `VERSION` file reads 0.49.0; SPEC-070's planning target
-re-slots **v0.49.0 → v0.50.0** to keep the two R6 tracks distinct.
+v0.48.0) was realized by that release; SPEC-070's then-planning target re-slotted
+**v0.49.0 → v0.50.0** to keep the two R6 tracks distinct. The later contract-only
+release decision above supersedes that full-feature planning slot.
 Per the SPEC-066/069 precedent, the 2026-10-20 approval authorized implementation, now
 **delivered as v0.49.0** — the `servicenow_native` REST/Table-API connector, six read-tier
 tools behind the `SERVICENOW_ADMITTED_TOOLS` admission allowlist (`GATEWAY_SERVICENOW_ENABLED`

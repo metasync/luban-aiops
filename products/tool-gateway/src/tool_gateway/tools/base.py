@@ -6,6 +6,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from tool_gateway.schemas.authorization import AuthorizationRequired
+
+TARGET_AUTHORIZATION_REQUIRED = "TARGET_AUTHORIZATION_REQUIRED"
+
 # Tool risk tiers (SPEC-007 vocabulary, enforced since SPEC-021 R-1).
 # read tools require tools:invoke; write/admin tools additionally require
 # tools:mutate at the gateway and can never be auto-approved by the agent.
@@ -52,6 +56,7 @@ class ToolResult:
     data: dict | None = None
     evidence: dict = field(default_factory=dict)
     error: dict | None = None
+    authorization_required: dict | None = None
 
     def to_dict(self) -> dict:
         result: dict = {
@@ -63,6 +68,15 @@ class ToolResult:
             result["data"] = self.data
         if self.error is not None:
             result["error"] = self.error
+        if self.authorization_required is not None:
+            if (self.status != "error" or not isinstance(self.error, dict)
+                    or self.error.get("code") != TARGET_AUTHORIZATION_REQUIRED):
+                raise ValueError("authorization metadata requires the reserved error result")
+            # Closed validation, not a trust decision: only the future verified
+            # acquisition path may mint a challenge. Existing callers omit it.
+            result["authorization_required"] = AuthorizationRequired.model_validate(
+                self.authorization_required
+            ).model_dump(mode="json", exclude_none=True)
         return result
 
 

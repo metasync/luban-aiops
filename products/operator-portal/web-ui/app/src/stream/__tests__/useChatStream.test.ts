@@ -51,6 +51,29 @@ afterEach(() => {
 });
 
 describe("useChatStream", () => {
+  it("keeps authorization metadata inert without approval, navigation, or follow-up requests", async () => {
+    const location = { href: "https://portal.test/" };
+    vi.stubGlobal("location", location);
+    const calls = queueFetch(okStream(sse(
+      { type: "message_start", session_id: "s-1" },
+      { type: "authorization_required", auth_challenge_id: "11111111-1111-4111-8111-111111111111",
+        target: "Automation", expires_at: "2030-01-01T00:00:00Z",
+        provider_url: "https://provider.test/", confirm_id: "cf-injected", approval_kind: "flow" },
+      { type: "message_end", session_id: "s-1" },
+    )));
+    const { result } = renderHook(() => useChatStream());
+    await act(async () => { await result.current.send("Check Automation"); });
+    expect(calls).toHaveLength(1);
+    expect(location.href).toBe("https://portal.test/");
+    expect(result.current.streaming).toBe(false);
+    const turn = result.current.turns[0];
+    expect(turn.completed).toBe(true);
+    expect(turn.confirmationPending).toBe(false);
+    expect(turn.confirmations).toEqual([]);
+    expect(JSON.stringify(turn)).not.toContain("cf-injected");
+    expect(JSON.stringify(turn)).not.toContain("https://provider.test/");
+  });
+
   it("retains delivery metadata and relays email acknowledgment on resume", async () => {
     const delivery = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
       channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z" };

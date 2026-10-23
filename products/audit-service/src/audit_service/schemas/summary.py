@@ -72,6 +72,8 @@ def window_echo(filters: AuditQuery) -> dict[str, str]:
         echo["service"] = filters.service
     if filters.outcome:
         echo["outcome"] = filters.outcome
+    if filters.delegation_mode:
+        echo["delegation_mode"] = filters.delegation_mode
     if filters.since:
         echo["since"] = filters.since.isoformat()
     if filters.until:
