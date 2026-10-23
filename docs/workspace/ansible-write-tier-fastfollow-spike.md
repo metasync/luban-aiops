@@ -19,9 +19,13 @@ Lineage: SPEC-069 **OQ-2** (the deliberate two-layer model) and its **Non-Goals*
 blast-radius / uncertain-outcome / idempotency problems) + **§5** (the connector
 invariants, including "post-timeout blind retries need reconciliation or idempotency").
 Depends on (production path only): [SPEC-070 outbound user-delegated
-identity](../specs/SPEC-070-outbound-user-delegated-identity/spec.md) — itself gated on
-the still-open **OQ-3** AAP deployment facts. See §5; this is the single most important
-caveat in the memo.
+identity](../specs/SPEC-070-outbound-user-delegated-identity/spec.md) plus actual AAP
+integration evidence. **Update 2026-10-23:** the operator separated SPEC-070 development
+delivery/version eligibility from AAP readiness. OQ-3/R-6e remain open under
+[DI-070](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+before production target enablement, not as development-delivery gates. The dated study
+below retains its original sequencing language; references to SPEC-070 itself being blocked
+by OQ-3 are superseded by this update. No write-tier approval is added.
 
 ## 1. Question and recommendation
 

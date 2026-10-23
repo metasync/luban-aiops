@@ -482,6 +482,19 @@ may now begin against it; **no R-1–R-6 runtime work or version change is claim
 remains SPEC-069's production identity dependency; its delivered read-only **dev** slice is
 unaffected.
 
+**SPEC-070 delivery-boundary amendment approved 2026-10-23.** AAP availability no longer
+blocks development delivery or the separately authorized v0.50.0 bump. R-1–R-6d still need
+asserting protocol/workflow/security tests, real disposable-Postgres multiprocess custody
+proof, consumer-contract coverage, operator documentation, and root `make verify`.
+The operator approved optional-but-validated renewal/revocation/identity endpoints with
+fail-closed missing-capability behavior; immutable account verification, S256, no fallback,
+and no mutation replay remain mandatory. Local start-token / transaction-state defaults
+are 60 / 600 seconds, not measured AAP values. No runtime code is delivered by this amendment.
+
+| Deployment-integration follow-up | Owner / trigger | Closure and release boundary |
+| --- | --- | --- |
+| [DI-070: actual AAP user-delegated integration](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070) (OQ-3 + R-6e) | Workspace operator with AAP administrator; pending environment readiness and separate live-test authorization | Exact target profile plus two-user first-use/renewal/RBAC/lifecycle proof required before production target enablement. Not a SPEC-070 development-delivery or version-bump gate. Release documentation must state AAP compatibility unverified while pending. |
+
 **SPEC-067 Stage-0 transport verified read-only 2026-10-19 — REST fallback taken.**
 The one Stage-0 step executable before approval — the OQ-3 transport check — was run
 read-only against the operator's PDI (`dev417985`, Australia build): ServiceNow's own

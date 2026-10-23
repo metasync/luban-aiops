@@ -1,16 +1,14 @@
 # SPEC-070 OQ-7: First-Use Authorization Handoff — Detailed Cross-Product Contract
 
-> **RATIFIED 2026-10-19 — pre-runtime design gate closed.** This document is the OQ-7
+> **RATIFIED 2026-10-19; delivery boundary amended 2026-10-23.** This is the OQ-7
 > detailed contract named in [spec.md](spec.md#open-questions) and
-> [plan.md](plan.md#first-use-handoff--ratified-contract-boundary-oq-7). It is a
-> **design deliverable only**. Nothing here is implemented yet; the operator has ratified
-> it, which authorizes the R-1..R-6 **runtime implementation to begin** against this
-> contract. Ratification does **not** authorize runtime code that depends on the still-open
-> [OQ-3](spec.md#open-questions) deployment facts (which pin the **[OQ-3]** TTL/PKCE values
-> in §13.1–13.2), live target tests, client registration, deployment, commit/push, a
-> `VERSION` bump, or a `delivered` status. Every route, field, and file named below is a
-> **ratified design** surface, not yet a shipped one. Where a value depends on the actual
-> AAP/MCP profile it is flagged **[OQ-3]** and left unpinned until those facts arrive.
+> [plan.md](plan.md#first-use-handoff--ratified-contract-boundary-oq-7), not shipped behavior.
+> The operator approved provider-independent development acceptance and a separate
+> [DI-070 deployment-integration task](tasks.md#post-delivery-deployment-integration-di-070).
+> §8/§13 now pin local TTL defaults and retain mandatory S256; OQ-3 verifies the actual
+> deployment rather than blocking development or release. R-1 capability behavior is pinned
+> in the spec/plan; runtime implementation and asserting tests remain pending. Live tests,
+> client registration, push, deployment, and version changes remain separately authorized.
 
 ## 1. Purpose and scope
 
@@ -32,9 +30,11 @@ It pins, per the plan's "Before OQ-7 can close" list:
 5. stream projection and schema versioning (§4);
 6. continue semantics against the shipped signed-execution / HITL / durable-claim path (§9).
 
-Out of scope: the credential parser fields (R-1, pinned with OQ-3), the encrypted custody
-schema internals (R-6 foundation, pinned with OQ-3 key/rotation facts), and any live AAP
-behavior (OQ-3 / R-6e).
+Outside this handoff contract: R-1 credential-parser and R-6 encrypted-custody internals,
+owned by [plan.md](plan.md#design-per-requirement). The 2026-10-23 amendment makes their
+configuration/capability and key/rotation design provider-independent; no actual AAP fact
+is needed to implement or test them. Live AAP behavior remains unverified under
+[DI-070](tasks.md#post-delivery-deployment-integration-di-070), outside development acceptance.
 
 ## 2. Design principles (all grounded in shipped precedent)
 
@@ -176,8 +176,8 @@ The portal then performs a **top-level navigation**: `window.location.href = sta
 ### 5.2 Provider redirect — `GET /api/v1/targets/authorizations/start/{start_token}`
 
 - Auth: **no bearer**; authenticates by **atomically consuming** the single-use
-  `start_token` (owner-bound, TTL ~60s **[OQ-3]** may adjust). Spent/expired/wrong →
-  **404 no-oracle** with `Cache-Control: no-store`.
+  `start_token` (owner-bound, configured TTL default 60 seconds, capped by transaction expiry).
+  Spent/expired/wrong → **404 no-oracle** with `Cache-Control: no-store`.
 - Effect: platform-gateway calls the tool-gateway internal handoff (§6.1) to build the
   provider authorization URL. **Tool-gateway alone** selects endpoint, scope, exact
   registered callback, PKCE S256 verifier, and `state` (R-3a; plan §3). The verifier and
@@ -298,24 +298,28 @@ A dedicated **`AuthorizationTransactionStore`** in tool-gateway, shaped as a
 
 ## 8. Browser-session binding and lifetimes
 
-- **`start_token`** — opaque uuid4, single-use, TTL **~60s** **[OQ-3]**, bound to
+- **`start_token`** — opaque uuid4, single-use, configured TTL default **60 seconds**, bound to
   `{owner_sub, challenge_id}`; consumed atomically at §5.2. Solves top-level-navigation auth
   without a bearer header and without a cookie session the platform does not use.
 - **`state`** — opaque, unguessable, single-use, server-side bound to `{challenge_id,
   owner_sub, config_generation, return_url}`. Rejects login CSRF, replay, issuer mix-up,
   wrong-session callbacks, arbitrary return URLs, and verifier mismatch (R-3a).
-- **Transaction TTL** — bounds the whole provider login/consent round trip; proposed
-  **10 minutes** **[OQ-3]** (must be reconciled with the provider's own `state`/session
-  lifetime and any consent-page dwell). On breach, status → `expired`; re-initiation
-  required. Expiry never silently evicts a mid-flight callback: consumption is atomic and a
-  late callback on an expired/spent transaction fails closed to `expired`.
+- **Transaction/state TTL** — bounds the whole provider login/consent round trip; configured
+  default **600 seconds (10 minutes)**. State and browser binding expire no later than the
+  transaction; issuing a start handle cannot extend it. On breach, status → `expired`;
+  re-initiation is required. Consumption checks expiry atomically; a late callback fails
+  closed even if an expiry sweep has not removed the row. Provider authorization-session/code
+  limits may end the flow earlier; local TTL never extends provider validity.
 - **Binding is to the authenticated owner captured at §5.1**, never to anything the browser
   sends on callback. A wrong user/tab-session, stale config generation, duplicate callback,
   or lost provider response cannot overwrite another user's credential or resurrect a revoked
   one (plan §5).
 
-Lifetimes are mechanism-pinned here; the numeric TTLs are **[OQ-3]** because they depend on
-the actual provider's session/consent behavior.
+Local defaults are pinned by the 2026-10-23 amendment. Configuration must use positive
+integer seconds with start TTL no greater than transaction TTL; invalid or unbounded values
+fail closed. DI-070 reconciles these bounds with the actual provider's authorization-session,
+code, and consent behavior before target enablement. OAuth `state` is client-owned; no
+separate provider-owned `state` lifetime is assumed.
 
 ## 9. Continue semantics vs the shipped signed-execution path
 
@@ -424,23 +428,22 @@ Written failure-first (R-5):
 - Continue turn → assert it re-passes policy + HITL + signed execution + durable claim, and
   that no consumed claim is reused and no uncertain write is replayed (§9, R-2d).
 
-## 13. Sub-decisions: resolved and OQ-3-gated
+## 13. Sub-decisions and deployment checks
 
-Items 3–5 were **resolved by the operator on 2026-10-19**; items 1–2 remain gated on the
-OQ-3 deployment facts (their mechanism/policy is already fixed, only the value/fact is open).
-The contract was **ratified 2026-10-19** (see the banner and §14); items 1–2 stay open
-purely as OQ-3 value/fact pins to fill when the deployment facts arrive — not as design
-decisions, and they do not hold the pre-runtime gate open.
+Items 3–5 were resolved 2026-10-19. The 2026-10-23 amendment pins item 1's development
+defaults and separates item 2's fixed security policy from actual provider verification.
+Neither requires an available AAP instance to implement; deployment reconciliation remains
+mandatory under DI-070.
 
-1. **[OQ-3 — open] Numeric TTLs** for `start_token`, `state`, and the transaction (§8).
-   Mechanism fixed (opaque, owner-bound, single-use, TTL-bounded); proposed defaults
-   `start_token` ≈ 60s and transaction/`state` ≈ 10 min, to be reconciled with the actual
-   provider's session/consent lifetimes (the transaction TTL must be ≤ the provider's
-   `state` lifetime).
-2. **[OQ-3 — open] PKCE enforcement.** Policy fixed (baseline requires S256; an unsupported
-   provider **blocks** that target with **no downgrade**, R-3a). Only the fact remains: does
-   this specific AAP OAuth app support/enforce S256? If not, the target is blocked and any
-   exception is a separate operator decision, never a code fallback.
+1. **[RESOLVED 2026-10-23] Local numeric defaults:** `start_token` 60 seconds;
+   transaction/`state` 600 seconds. Configurable positive integer lifetimes, start bounded
+   by transaction expiry, atomic expiry checks, and no extension of a provider's code or
+   authorization-session validity (§8). DI-070 verifies suitability against real consent
+   dwell and provider limits; no provider-owned OAuth `state` lifetime is assumed.
+2. **[POLICY FIXED; DI-070 EVIDENCE PENDING] PKCE S256 is mandatory.** Development tests
+   prove S256 requests/verifiers and no downgrade. Actual app support/enforcement is still
+   unknown: an unsupported, disabled, or unverified profile blocks production target
+   enablement. AAP version alone is not proof. No exception or fallback is authorized here.
 3. **[RESOLVED 2026-10-19] Transaction-store backend → Postgres.** The replica-safe
    authorization-transaction store (holding `state` + the encrypted PKCE verifier from
    initiation to callback) uses the **R-6 gateway-owned Postgres**, not Redis, so the
@@ -463,14 +466,21 @@ decisions, and they do not hold the pre-runtime gate open.
 
 ## 14. What this document does not authorize
 
-OQ-7 was **ratified 2026-10-19**, which authorizes the R-1..R-6 **runtime implementation to
-begin** against this contract. It does **not** authorize: runtime code that depends on the
-still-open OQ-3 deployment facts (the §13.1–13.2 TTL/PKCE pins); live target/token tests;
-client registration; deployment; commit/push; a `VERSION` bump; or a `delivered` status.
-Those remain separate boundaries (spec Status; ADR-0016 deciders).
+OQ-7 ratification and the 2026-10-23 amendment permit provider-independent implementation,
+not claims about unverified AAP behavior. This documentation amendment is committed separately
+for operator review before code. Development delivery still requires all R-1–R-6d tests and
+root verification; it does not wait for DI-070. Production target enablement still requires
+DI-070. Live target/token tests, client registration, push, deployment, and version changes
+remain separate authorization boundaries (spec Status; ADR-0016 deciders).
 
 ## Revision history
 
+- 2026-10-23: operator approved the development/integration boundary amendment. R-1/R-6
+  internals no longer await AAP facts; local TTL defaults fixed at 60/600 seconds, S256
+  mandatory, actual deployment verification retained under DI-070. Corrected the lifetime
+  wording: OAuth state is client-owned; provider session/code limits are separate. No API,
+  stream, audit, or continue semantics changed; no runtime or AAP proof claimed. Earlier
+  ratification records below remain unchanged.
 - 2026-10-19 (ratification): the operator **ratified** the OQ-7 contract, closing the
   pre-runtime design gate — banner flipped PROPOSED → RATIFIED, and §13/§14 updated to
   record that R-1..R-6 implementation may now begin against this contract. Items §13.1–13.2

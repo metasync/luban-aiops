@@ -3,8 +3,9 @@
 > **Historical zero-redirect assessment.** The original report below is preserved. Later on
 > 2026-10-18 the operator agreed to first-use authorization redirects without credential
 > settings. See the [redirect-based reassessment](#redirect-based-reassessment-2026-10-18)
-> for the current decision and remaining gate; the old zero-redirect requirement is no
-> longer the implementation direction.
+> for the redirect decision and the [2026-10-23 delivery-boundary amendment](#development-delivery-and-deployment-integration-2026-10-23)
+> for the current gate. Both earlier assessments below are historical evidence; the old
+> zero-redirect requirement is no longer the implementation direction.
 
 - Assessed: 2026-10-18.
 - Outcome: **NO-GO for R-1–R-6 implementation on the available evidence.**
@@ -193,3 +194,34 @@ an operation or permit replay of a write.
 **No zero-redirect grant evidence is requested under this revised direction.** The next
 external input is the actual AAP client/renewal/security profile. Documentation-only checks
 do not satisfy any runtime or live acceptance gate.
+
+## Development Delivery and Deployment Integration (2026-10-23)
+
+The operator approved a delivery-boundary amendment because AAP is not expected to be
+available soon. This supersedes the earlier delivery-blocking disposition above, not its
+research or evidence limits. It does not declare any AAP behavior proven.
+
+- **Development:** R-1–R-6d must pass deterministic OAuth/target integration tests, cross-product
+  workflow/contract tests, real disposable-Postgres multiprocess custody tests, and root
+  `make verify`. Only then may SPEC-070 be delivered and its planned v0.50.0 release be
+  separately authorized. No development test has run as part of this documentation amendment.
+- **Deployment:** OQ-3 and R-6e are retained as the separate, pending
+  [DI-070 task](tasks.md#post-delivery-deployment-integration-di-070), mandatory before
+  production user-delegated AAP enablement. It needs the real target, administrator facts,
+  two distinct-RBAC users, and separate authorization. Mock success cannot close it.
+- **Configuration:** local start-token and transaction/state defaults are 60/600 seconds;
+  S256 is required with no downgrade. Renewal, revocation, and identity endpoints are
+  optional-but-validated configuration, never inferred from AAP version or URL conventions.
+  Missing renewal yields an explicit unsupported outcome; missing provider revocation does
+  not prevent local revocation or justify reporting remote success. Missing verifiable
+  target identity blocks authorization, even though an identity endpoint field is optional.
+- **Residual risk:** actual client/PKCE settings, refresh issuance/rotation, identity response
+  formats/linkage, token/consent lifetimes, and RBAC/offboarding propagation may differ from
+  fixtures. Such differences block the affected target, not the already-tested substrate's
+  development release. Product gaps found during integration require separately scoped fixes.
+
+[ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md) remains accepted and
+unchanged: two-user AAP proof is still mandatory, now explicitly assigned to integration
+acceptance. The spec/task amendment changes when it is required; it does not remove the
+security obligation. No target registration, runtime code, live test, deployment, or version
+change is performed by this amendment.

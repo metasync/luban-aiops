@@ -1,12 +1,12 @@
 # SPEC-070 Plan: Outbound User-Delegated Execution Identity (Tool-Gateway Substrate)
 
-> **Approved (amended) — 2026-10-18.** The operator ratified the first-use authorization
-> redirect direction without credential settings. The earlier 2026-10-12 approval is
-> preserved in the spec's history. [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md)
-> is **accepted**; ADR-0015 is `superseded by ADR-0016` and the separate attached kickoff
-> plan is unchanged. Approval authorized the OQ-7 detailed-contract design, which was
-> **ratified 2026-10-19** — the pre-runtime gate is closed and R-1..R-6 implementation may
-> begin against it; the OQ-3 target profile remains the sole open (pre-live) gate.
+> **Approved; delivery boundary amended 2026-10-23.** First-use redirects without
+> credential settings, accepted [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md),
+> and the ratified OQ-7 handoff remain the design. Development acceptance (R-1–R-6d) is
+> independent of AAP availability; OQ-3/R-6e are the separate
+> [DI-070 deployment-integration task](tasks.md#post-delivery-deployment-integration-di-070).
+> The attached kickoff plan and accepted ADR bodies remain unchanged. This documentation
+> amendment precedes operator review and runtime code; no delivery or version bump is claimed.
 
 ## Approach
 
@@ -20,24 +20,24 @@ then returns to the owned conversation. Renewal is server-to-server until reauth
 is required; normal Luban login does not connect every target. No settings page, token
 copying, or enrollment helper is part of the user experience.
 
-## Gate 0 — Target Profile and Revised Approval
+## Gate 0 — Development Approval and Integration Boundary
 
-- Record exact AAP release/patch, MCP build, endpoint, and Keycloak/SSO deployment facts.
-  The current `ansible-dev` shared-bearer mock cannot answer these questions.
-- Pin confidential-client auth, exact callback, PKCE S256 behavior, requested/granted
-  scopes, verified target-account lookup/linkage, refresh issuance/rotation, revocation,
-  and explicit token/cache lifetimes. Do not assume one-time consent lasts forever or that
-  OAuth access tokens are short-lived by default. No automatic PKCE downgrade or upgrade.
-- Review the API/stream and workflow handoff contract below; enumerate exact affected
-  schemas, policy actions, services, and asserting tests before implementation approval.
-- Keep documentation evidence separate from deployment evidence in the
-  [report](compatibility-report.md#redirect-based-reassessment-2026-10-18). Live registration,
-  deployment, account tests, and token acquisition require separate permission.
-- Amended `spec.md`/`plan.md`/`tasks.md` and ADR-0016 were ratified 2026-10-18; ADR-0015 is
-  superseded through its status/link convention. Version stays unchanged. Approval authorized
-  the OQ-7 contract design, which was **ratified 2026-10-19** — the pre-runtime gate is closed
-  and R-1..R-6 may begin against it; OQ-3 remains the sole open (pre-live) gate and pins the
-  contract's two **[OQ-3]** value/fact items (numeric TTLs, PKCE enforcement).
+- Spec/ADR direction was approved 2026-10-18, OQ-7 ratified 2026-10-19, and the delivery
+  boundary amended by the operator 2026-10-23. Preserve accepted ADR bodies and dated history.
+- Implement the provider-independent OAuth contract: confidential client, exact HTTPS
+  callback, S256 without downgrade, explicit scopes/destinations, verified immutable account
+  linkage, encrypted Postgres custody, and bounded lifecycle handling. Optional endpoint
+  behavior is pinned below; missing capability never authorizes a weaker fallback.
+- Pin local defaults to 60 seconds for start handles and 600 seconds for transaction/state;
+  validate positive bounded lifetimes and fail closed on expiry. These are Luban defaults,
+  not measured AAP values; deployment reconciliation belongs to DI-070.
+- Keep development evidence (deterministic OAuth/target fixtures, real Postgres, consumer
+  contracts, workflow/security tests) separate from deployment evidence in the
+  [report](compatibility-report.md#development-delivery-and-deployment-integration-2026-10-23).
+- DI-070 records actual AAP/MCP/SSO versions, endpoints, client registration, enforced S256,
+  renewal/revocation, account linkage, and RBAC/lifetime measurements. No shared-bearer mock
+  can close it. It blocks production target enablement, not the substrate's release.
+  Registration, deployment, and live token/account tests still need separate permission.
 
 ## First-Use Handoff — Ratified Contract Boundary (OQ-7)
 
@@ -69,11 +69,11 @@ semantics against the shipped signed-execution call chain — are specified in
 shipped secret-delivery single-use handles, HITL registry, stream v12, tool-result error
 object, gateway confirm routing, and audit attribution seams. The operator **ratified** that
 document on 2026-10-19, closing the pre-runtime gate: R-1..R-6 implementation may now begin
-against it. Two items inside it stay **[OQ-3]-gated** value/fact pins — numeric TTLs and PKCE
-enforcement — to be filled when the [OQ-3](spec.md#open-questions) deployment facts arrive;
-they are not open design decisions and do not hold the gate. The contract confirms the current
-tool-result schema allows only error `code`/`message`, so the handoff is a genuinely new
-additive contract, not an implemented feature.
+against it. The 2026-10-23 amendment pins local TTL defaults and mandatory S256; actual
+provider enforcement and deployment lifetime reconciliation remain DI-070 checks. R-1 and
+R-6 internals no longer depend on AAP facts. The contract confirms the current tool-result
+schema allows only error `code`/`message`, so the handoff is a genuinely new additive
+contract, not an implemented feature.
 
 ## Design Per Requirement
 
@@ -82,8 +82,31 @@ additive contract, not an implemented feature.
 - Extend `tools/credential_sets.py` scheme validation and field projection; preserve every
   existing scheme, omitted-scheme behavior, and browser credential consumer.
 - Declare target authorization/token endpoints, confidential client auth, callback, scopes,
-  target/resource binding, PKCE profile, identity/renewal profile, and store reference.
-  Field names/types are pinned with OQ-3/OQ-7 before implementation; no speculative fields.
+  target/resource binding, S256, trusted identity-linkage configuration, and store reference.
+  The 2026-10-23 amendment removes the requirement to derive parser/custody design from AAP
+  deployment facts. These are operator-supplied protocol configuration, not discovered AAP
+  defaults. Preserve the existing string-valued credential-set projection and keep the
+  delegated scheme's validation separate from existing scheme behavior.
+- **Optional endpoint contract:** renewal, revocation, and identity-resolution endpoints
+  may be absent. If supplied, each is a non-empty string naming a trusted HTTPS destination;
+  reject invalid type, blank value, userinfo, fragment, untrusted origin, and unsupported
+  profile before network use. No automatic endpoint discovery, guessed AAP paths, or reuse
+  of an unrelated allowlisted origin. A renewal endpoint may explicitly equal the configured
+  token endpoint; omission must not silently enable renewal.
+- **Missing renewal:** return an explicit unsupported-renewal result; no invented refresh
+  token, machine/PAT fallback, or automatic redirect loop. A supported refresh flow must still
+  be implemented and tested with deterministic endpoints before development delivery.
+- **Missing provider revocation:** local disconnect/revocation, durable generation changes,
+  and cross-replica cache invalidation remain mandatory. Report provider revocation as
+  unsupported/unconfirmed; never label local removal as remote success. A configured endpoint
+  failure remains visible and cannot undo local revocation.
+- **Missing identity endpoint:** optional configuration is not optional identity proof. Before
+  reporting authorization success or opening a resource session, verify the token's immutable
+  target account through the configured trusted evidence path and match its administered
+  linkage to the Luban subject. OAuth-only targets without an identity endpoint are unusable;
+  an independently validated ID-token evidence path, where supported, must verify signature,
+  issuer, audience, and nonce. Neither a mapping alone nor matching names/emails proves the
+  token's account. Missing or unsupported evidence blocks authorization, not another redirect.
 - Validate before network use. Keep existing machine-set reload semantics; delegated config
   removal/change must invalidate its generation across replicas, not retain stale grants
   indefinitely under keep-last-good configuration behavior.
@@ -143,8 +166,8 @@ additive contract, not an implemented feature.
 - Reuse connector attribution hooks and `services/gateway_service.py`; retain human `sub`,
   actor, target system/account, and signed correlation. Delegation mode comes from verified
   acquisition, not a configuration label. Failed enrollment is not a successful delegated call.
-- Add narrowly scoped audit query/filter/schema changes if existing contracts cannot filter
-  delegation mode; enumerate them under OQ-7 before approval.
+- Implement the top-level delegation-mode field and durable audit query/filter/schema changes
+  ratified in OQ-7 §10/§13.4; preserve existing event types and non-delegated callers.
 - **Gate:** signed-path integration, two-user attribution, redaction overflow, durable audit
   round-trip/filter assertions, and safe authorization/renewal/revocation failure reporting.
 
@@ -167,32 +190,44 @@ additive contract, not an implemented feature.
   config; add gateway Postgres/key provisioning and least-privilege network access.
 - Keep disabled until configured. No per-user provisioning script/settings UI. Provide
   operator revocation/offboarding and recovery procedures, not manual target-token entry.
-- **Gate:** `make overlays`, existing-guide updates, real custody tests, and separately
-  authorized two-user AAP proof of enrollment, renewal, denial, revocation/group changes,
-  restart, unavailable target, and config removal. Generic mocks do not satisfy live proof.
+- **Development gate:** `make overlays`, existing-guide updates, real custody tests, and
+  exercised setup/revocation/recovery/rollback procedures using deterministic OAuth/target
+  fixtures. CI makes no live external call. A static shared-bearer mock cannot replace the
+  user-delegated protocol, account-binding, lifecycle, and denial tests.
+- **Integration gate (DI-070):** separately authorized two-user AAP proof of first-use,
+  renewal, denial, revocation/group changes, restart, unavailable target, and config removal.
+  Required before production target enablement, not before development delivery. No mock
+  or documentation research satisfies this target-specific proof.
 
 ## Sequencing And Dependencies
 
-1. **Gate 0 (approved 2026-10-18; OQ-7 ratified 2026-10-19):** spec/ADR ratified (ADR-0016
-   accepted, ADR-0015 superseded) and the detailed OQ-7 handoff contract ratified, closing the
-   pre-runtime gate. One gate remains open: the OQ-3 target/security/renewal facts (pre-live),
-   which also pin the contract's two **[OQ-3]** value/fact items. The 2026-10-12 mechanism
-   decision is history, not a live compatibility pass.
-2. **R-1 configuration** and failure-first parser tests.
-3. **R-6 store foundation** with real Postgres and callback/rotation/revocation invariants.
+1. **Documentation amendment:** commit the approved 2026-10-23 scope change separately for
+   operator review before runtime code. Preserve the ADR bodies and historical approvals.
+2. **Additive OQ-7 contract increment:** tool-result signal, stream v13 consumer lockstep,
+   audit mode/query contract, route shapes, and transaction-store Protocol/record fields.
+   Test parity; no usable delegated flow until trust, custody, and policy checks exist.
+3. **R-1 + R-6 foundation increment:** provider-independent configuration/capability behavior
+   and encrypted custody, reviewed separately from the contract increment. Failure-first
+   parser tests and real Postgres callback/rotation/revocation tests remain mandatory.
 4. **R-2/R-3 acquisition + first-use workflow + trust** across HTTP/MCP, gateways, agent, portal.
-5. **R-4 verified audit attribution and queryability.**
-6. **R-6 provisioning/guide completion** and separately authorized live target proof.
-7. **Delivery gates:** acceptance traceability and root `make verify`; commit/push, deployment,
-   version bump, and release remain separately authorized.
+5. **R-4 verified audit attribution and queryability** exercised end to end.
+6. **R-6 provisioning/guide completion** with deterministic protocol/target fixtures and real
+   custody proof. No live AAP dependency in the development acceptance matrix.
+7. **Development delivery:** R-1–R-6d acceptance traceability and root `make verify`;
+   release notes disclose DI-070 pending / AAP compatibility unverified. Commit/push,
+   deployment, version bump, and release remain separately authorized.
+8. **DI-070 deployment integration:** OQ-3 profile and actual AAP two-user proof when the
+   environment and separate authorization arrive; mandatory before production target
+   enablement, but not a prerequisite to step 7 or subsequent development.
 
 R-5 negative tests accompany every stage. SPEC-069's delivered dev slice remains unaffected;
 its production user-delegated path still depends on this undelivered substrate.
 
 ## Test Strategy
 
-- Map every labeled criterion R-1a–R-6e to an actual asserting test before delivery; the
+- Map every development criterion R-1a–R-6d to actual asserting tests before delivery; the
   [task matrix](tasks.md#acceptance-to-test-matrix) lists planned coverage, not test passes.
+  R-6e is relocated to DI-070, not waived or represented as a passed mock test.
 - Protocol unit/integration tests use deterministic fake OAuth endpoints; they do not prove
   AAP support. Custody tests use real disposable Postgres and independent processes.
 - Contract tests cover every consumer of changed API/stream/audit schemas. Portal tests
@@ -202,10 +237,14 @@ its production user-delegated path still depends on this undelivered substrate.
   regression tests prove the normal SSO path remains unchanged.
 - Full gate: root `make verify`, including product/portal, overlay, policy, dashboard,
   version, secret-vocabulary, and disposable execution-failure checks. Unit tests alone
-  cannot replace it. Separately authorized AAP live tests remain explicitly pending.
+  cannot replace it. Separately authorized AAP live tests remain explicitly pending under
+  DI-070 and are not a dependency of this gate.
 
 ## Rollout And Migration
 
+- Development delivery does not enable or certify a production AAP target. Keep it disabled
+  until DI-070 supplies its verified profile and actual two-user proof. Authorized integration
+  testing may provision only its scoped validation target; it is not general production rollout.
 - New tables, key/database mounts, callback routes, browser-binding controls, and safe
   access-log configuration must exist before enabling a delegated set. No product upgrade
   or target registration is assumed authorized by this document.
@@ -220,6 +259,12 @@ its production user-delegated path still depends on this undelivered substrate.
 
 ## Revision History
 
+- 2026-10-23: operator approved separating development delivery/version eligibility from
+  AAP readiness. R-1–R-6d retain asserting tests and real-Postgres custody proof; OQ-3/R-6e
+  move to DI-070 before production target enablement. Pinned optional-but-validated endpoint
+  behavior and local 60/600-second TTL defaults, retaining mandatory account proof/S256 and
+  no fallback/replay. Sequenced a documentation commit for review, then separately reviewable
+  contract and foundation increments. No runtime work or release claim; earlier entries intact.
 - 2026-10-12: original scaffold approved around provisioning-time per-user consent and
   ADR-0015; no runtime implementation recorded.
 - 2026-10-18: revised draft for operator-agreed first-use redirects/no settings UI, encrypted

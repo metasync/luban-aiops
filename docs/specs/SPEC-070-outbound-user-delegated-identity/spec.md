@@ -2,23 +2,25 @@
 
 ## Status
 
-- status: `approved` — amended redirect-based direction ratified 2026-10-18; the OQ-7
-  detailed handoff contract was **ratified 2026-10-19**, closing the pre-runtime design
-  gate. R-1..R-6 implementation may now begin against that contract. Approval + ratification
-  do not authorize runtime code that depends on the still-open OQ-3 deployment facts (which
-  pin the contract's **[OQ-3]** TTL/PKCE values), live target tests, deployment, commit/push,
-  or a version bump.
+- status: `approved` — redirect-based direction ratified 2026-10-18; OQ-7 handoff contract
+  ratified 2026-10-19. **Delivery-boundary amendment approved 2026-10-23:** development
+  acceptance is independent of AAP availability. R-1–R-6d remain development obligations;
+  R-6e and OQ-3 move to a separately tracked deployment-integration task, not a release gate.
+  No runtime implementation or test pass is claimed. This amendment is committed separately
+  for operator review before code; push, live tests, deployment, and version changes remain
+  separate authorization boundaries.
 - owner: luban-platform-team
 - created: 2026-10-12
 - current decision: first-use target OAuth authorization redirects are allowed; no manual
   credential entry, enrollment command, or credential-settings UI. Later acquisition uses
   server-to-server renewal; revoked/expired grants may require another authorization.
-- remaining gates: **OQ-7** (detailed cross-product handoff contract) is **ratified
-  2026-10-19** — the pre-runtime design gate is closed and R-1..R-6 may begin against it.
-  **OQ-3** (exact AAP release/MCP build, client/PKCE/renewal/lifecycle profile, identity
-  binding) is now the sole open gate — a pre-live gate supplied by the operator/admin, which
-  also pins the contract's two **[OQ-3]** value/fact items (numeric TTLs, PKCE enforcement).
-  See the [compatibility update](compatibility-report.md#redirect-based-reassessment-2026-10-18).
+- remaining gates: development requires the asserting tests and root verification listed
+  in [tasks.md](tasks.md#delivery-gate). **OQ-3** (actual AAP/MCP profile, PKCE enforcement,
+  renewal, identity linkage, and RBAC lifecycle) remains open under
+  [DI-070](tasks.md#post-delivery-deployment-integration-di-070), owned by the workspace
+  operator with the AAP administrator. Its evidence is mandatory before production
+  user-delegated target enablement, but no longer blocks development delivery or a
+  separately authorized release. OQ-7 remains ratified; local TTL defaults are pinned.
 - superseding ADR: [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md)
   (**accepted** 2026-10-18) records the first-use workflow and encrypted Postgres custody.
   [ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md) is now
@@ -33,13 +35,11 @@
   read-only **dev** slice is **not** blocked on this spec (it validates against a
   self-hosted server's own auth); only the **production** user-delegated path depends on
   it (see the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md#r6-external-system-integration-via-mcp-ingestion)).
-- target version: **v0.50.0** — re-slotted from v0.49.0 at SPEC-067's 2026-10-20
-  approval (SPEC-067 took the v0.49.0 slot as R6's next slice); still a retained
-  planning target from the 2026-10-12 approval, not a delivery commitment while OQ-3
-  remains open (OQ-7 was ratified 2026-10-19). SPEC-068 shipped at v0.47.0; SPEC-069's
-  read-only **dev** slice shipped at v0.48.0 without this substrate; SPEC-067 targets
-  v0.49.0. The `VERSION` file remains unchanged; release/version changes require
-  separate approval.
+- target version: **v0.50.0** — re-slotted at SPEC-067's 2026-10-20 approval. The
+  2026-10-23 amendment permits delivery and a separately authorized version bump after
+  development acceptance passes, even while DI-070 is pending. The release must disclose
+  **AAP deployment compatibility unverified**; it cannot claim production integration.
+  SPEC-068/069/067 have already shipped. No `VERSION` change is made by this amendment.
 - related ADRs: [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md)
   (**accepted** 2026-10-18, supersedes [ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)).
   This spec establishes the platform's **first outbound
@@ -81,9 +81,10 @@
 > is **accepted**, ADR-0015 is **superseded**, and this spec is **approved**. Approval
 > authorized the OQ-7 detailed-contract design, which was subsequently **ratified
 > 2026-10-19** — closing the pre-runtime gate so R-1..R-6 implementation may begin against
-> it. Live target work still waits for the OQ-3 deployment facts (which also pin the
-> contract's **[OQ-3]** TTL/PKCE values). The dated changelog preserves the original
-> approval; the attached kickoff plan is not edited.
+> it. On 2026-10-23 the operator approved separating development delivery from actual AAP
+> integration, including optional-but-validated profile endpoints and local TTL defaults.
+> OQ-3 and R-6e remain mandatory integration checks under DI-070, not development acceptance.
+> The dated changelog preserves earlier decisions; the attached kickoff plan is not edited.
 
 ## Summary
 
@@ -137,8 +138,10 @@ extends the same `credential_set` seam rather than replacing it.
 ## Requirements
 
 The amended direction is **target-issued authorization-code plus server-side renewal**.
-The criteria below are the ratified acceptance obligations for this approval; none is
-shipped behavior yet, and each maps to a planned (not run) test in the task matrix.
+The development criteria below (R-1–R-6d) remain ratified acceptance obligations; none is
+shipped behavior yet, and each maps to a planned (not run) test in the task matrix. The
+2026-10-23 amendment moves R-6e to DI-070 deployment integration, preserving its identifier
+and live-proof obligation without counting it as development acceptance.
 
 ### R-1: User-delegated outbound credential scheme (extends SPEC-068 additively)
 
@@ -150,9 +153,14 @@ Acceptance criteria:
   parsing/projection/resolution remain unchanged. No delegated set means no new behavior.
 - **R-1b:** Require operator-configured authorization/token endpoints, target identity and
   allowed resource destinations, confidential-client authentication, exact callback URI,
-  permitted/requested scopes, PKCE security profile, and store reference. The target's
-  verified profile determines renewal/revocation and identity-resolution endpoints. Do not
-  require an OIDC discovery endpoint from an OAuth-only provider.
+  permitted/requested scopes, mandatory PKCE S256, and store reference. Renewal/revocation
+  and identity-resolution endpoints are **optional-but-validated**: when supplied, require
+  valid, explicitly trusted HTTPS configuration; never guess paths or discover capabilities
+  from an AAP version. Missing renewal is explicitly unsupported. Missing provider revocation
+  leaves local revocation mandatory and remote revocation unconfirmed. Missing verifiable
+  account evidence blocks authorization under R-3b; an optional endpoint is not an optional
+  identity check. Do not require OIDC discovery from an OAuth-only provider. See the
+  [capability behavior](plan.md#r-1-credential-configuration) for the absence/error contract.
 - **R-1c:** Reject incomplete, unsupported, untrusted, or over-scoped configuration before
   token acquisition or target connection. Warnings contain safe failure classes, never
   submitted values. Model/tool arguments cannot select endpoints, trust, or user identity.
@@ -180,7 +188,7 @@ Acceptance criteria:
   refusal status. OAuth completion never dispatches an operation itself. Continuing a read
   uses fresh authorization checks; a write remains behind existing HITL, signed-request,
   and durable-claim checks. Never replay an already attempted/uncertain write or treat
-  OAuth consent as mutation approval. Resume details must be ratified before implementation.
+  OAuth consent as mutation approval. Follow the continue semantics ratified in OQ-7.
 - **R-2e:** Subsequent calls renew server-to-server under the verified target contract.
   Unsupported renewal is reported explicitly; no fabricated refresh token or PAT fallback.
   Target credentials never reach the model, kernel state, transcript, or browser storage.
@@ -195,7 +203,7 @@ Acceptance criteria:
 - **R-3a:** Use HTTPS endpoints and exact registered callback URIs. Bind short-lived,
   single-use state to the initiating authenticated user/browser session, target, scope,
   configuration generation, and approved local return location. Require PKCE S256 in the
-  proposed baseline; unverified/unsupported provider behavior blocks that target rather
+  approved baseline; unverified/unsupported provider behavior blocks that target rather
   than silently disabling PKCE. Reject login CSRF, state/code replay, issuer mix-up,
   wrong-session callbacks, arbitrary return URLs, and verifier mismatch.
 - **R-3b:** Link the target's verified immutable account identity to the requesting Luban
@@ -208,9 +216,11 @@ Acceptance criteria:
 - **R-3d:** Bind credentials to the configured target/resource destinations, including HTTP
   redirects and MCP sessions. Another generally allowlisted origin cannot receive them.
   Token endpoint redirects must not forward client credentials to an untrusted endpoint.
-- **R-3e:** Pin access/refresh lifetimes, target revocation, account-disable and group-removal
-  behavior, and maximum local cache/config invalidation delays. Test those limits; SSO
-  logout or a group-name change is not a guarantee of immediate target-token revocation.
+- **R-3e:** Require explicit access/refresh lifetime policy and pin maximum local cache/config
+  invalidation delays. Test expiry, revocation, account-disable and group-removal response
+  handling with deterministic target fixtures, including the configured delay bounds. Actual
+  provider lifetimes and propagation measurements belong to DI-070; SSO logout or a group-name
+  change is not a guarantee of immediate target-token revocation.
 
 ### R-4: End-to-end attribution fidelity
 
@@ -271,10 +281,20 @@ Acceptance criteria:
   rotation, backup/recovery, local and target revocation, offboarding, rollback, and group
   synchronization limits in existing operator guides. A local disconnect prevents use
   immediately under the documented cache contract; target revocation failure is visible.
-- **R-6e:** Separately authorized live proof uses the actual approved AAP/MCP target and two
-  users with distinct RBAC: first-use redirects, later renewal without another prompt,
-  wrong-account rejection, denied operation, disablement/group removal, restart, and
-  configuration removal. Deterministic mocks prove protocol handling, not AAP compatibility.
+
+### Deployment integration — R-6e relocated to DI-070
+
+**R-6e** is retained as a separate integration obligation, not a development acceptance
+criterion (operator amendment 2026-10-23). Separately authorized live proof uses the actual
+approved AAP/MCP target and two users with distinct RBAC: first-use redirects, later renewal
+without another prompt, wrong-account rejection, denied operation, disablement/group removal,
+restart, and configuration removal. OQ-3 supplies its deployment facts. Deterministic mocks
+prove protocol handling, not AAP compatibility. See the owned, trigger-gated
+[DI-070 task](tasks.md#post-delivery-deployment-integration-di-070).
+
+Development may close with DI-070 pending; production user-delegated AAP enablement may not.
+The release must disclose that distinction. Local key/custody and all no-fallback,
+no-disclosure, account-binding, and execution-safety tests remain delivery gates.
 
 ## Non-Goals
 
@@ -309,13 +329,12 @@ Acceptance criteria:
 - **Platform-gateway and operator-portal:** authenticated first-use initiation, backend
   callback forwarding, owner-scoped status/return handling, and minimal authorization
   feedback in the existing workflow. No credential-settings screen or target tokens in JS.
-- **Agent-platform / shared contracts:** bounded authorization-required signaling and safe
-  stop/continue integration are in scope for design. The existing tool-result error object
-  admits only `code`/`message`; it is not an existing structured authorization handoff.
-  Pin the additive contract, persistence, and resume semantics before approval. Do not claim
-  the kernel is untouched until that call-chain design is proven.
-- **Audit-service / query contracts:** an additive delegation-mode filter/schema change if
-  needed to meet R-4b; record the exact impact in the revised approval checkpoint.
+- **Agent-platform / shared contracts:** implement the bounded authorization-required signal,
+  persistence, and safe stop/continue contract ratified in OQ-7. The existing tool-result error
+  object admits only `code`/`message`; the new top-level object and stream v13 frame remain
+  unimplemented. Verify every consuming surface and the signed-execution continuation path.
+- **Audit-service / query contracts:** implement OQ-7's ratified top-level delegation-mode
+  field and additive durable query/filter contract to meet R-4b; preserve existing event types.
 - **Identity-broker:** no planned code or upstream login-custody change. Its existing
   verified internal subject is reused; no new outbound signing authority or identity-token
   claim/audience class. This boundary must remain explicit in the final contract design.
@@ -331,21 +350,20 @@ Acceptance criteria:
 
 ## Open Questions
 
-The operator has resolved the UX direction, approved this amended spec, and **ratified the
-OQ-7 detailed contract (2026-10-19)** — the pre-runtime design gate is closed; the
-deployment facts are not yet supplied. OQ-3 is now the sole open gate — a **pre-live** gate
-(deployment facts before target tests/deployment), which also pins the two **[OQ-3]**
-value/fact items the ratified contract flags. Live acceptance remains a separately authorized
-delivery gate. The [report update](compatibility-report.md#redirect-based-reassessment-2026-10-18)
-distinguishes documented support from missing organization-specific evidence.
+The operator ratified OQ-7 on 2026-10-19 and approved the development/integration split on
+2026-10-23. No AAP fact gates provider-independent development acceptance. **OQ-3 stays open
+under DI-070**, not marked resolved: actual AAP compatibility and production enablement
+still need separately authorized evidence. The
+[report amendment](compatibility-report.md#development-delivery-and-deployment-integration-2026-10-23)
+distinguishes development proof from missing organization-specific evidence.
 
 - **OQ-1 — resolved (direction ratified 2026-10-18):** target authorization-code, first-use
   and reauthorization redirects allowed; no credential settings, manual tokens, or CLI helper.
   Consent is not necessarily once forever. Subsequent renewal is server-to-server.
 - **OQ-2 — resolved:** no outbound broker mint, no upstream Keycloak-token custody change,
   and no internal identity-token schema change. Target-issued credentials remain gateway-owned.
-- **OQ-3 — deployment facts OPEN (pre-live gate):** exact AAP release/patch and MCP build;
-  configured
+- **OQ-3 — deployment facts OPEN (DI-070, not a development gate):** exact AAP release/patch
+  and MCP build; configured
   confidential-client authentication, callback, PKCE S256 support/enforcement, scopes,
   refresh issuance/rotation/revocation, lifetimes, external-user token setting, target
   identity endpoint/linkage, and group/RBAC lifecycle. AAP 2.6 documents explicit endpoints
@@ -368,14 +386,26 @@ distinguishes documented support from missing organization-specific evidence.
   [OQ-7: First-Use Authorization Handoff](oq7-first-use-handoff-contract.md), grounded in the
   shipped secret-delivery, HITL, stream-v12, tool-result, gateway-routing, and audit seams.
   The operator **ratified** it on 2026-10-19, closing the pre-runtime design gate: R-1..R-6
-  implementation may now begin against the contract. Two items inside it stay **[OQ-3]-gated**
-  value/fact pins — numeric TTLs and PKCE enforcement — to be filled when the OQ-3 deployment
-  facts arrive; they are not open design decisions and do not hold the gate. These were new
-  design decisions beyond the original connector-only assumption, tracked in accepted ADR-0016
-  and the plan.
+  implementation may begin against the contract. The 2026-10-23 amendment pins local TTL
+  defaults (start 60 seconds; transaction/state 600 seconds) and mandatory S256 for
+  provider-independent development. Actual app enforcement and deployment lifetime
+  reconciliation remain DI-070 evidence, not parser/custody design prerequisites.
 
 ## Changelog
 
+- 2026-10-23 (operator-approved delivery-boundary amendment): separate development delivery
+  from actual AAP deployment integration because the target is not expected to be available
+  soon. R-1–R-6d retain failure-first protocol/workflow/contract tests, real disposable-Postgres
+  multiprocess custody tests, and root verification. R-6e and OQ-3 move to the owned DI-070
+  follow-up, mandatory before production target enablement but not a development-delivery or
+  version-bump gate. R-1b profile endpoints become optional-but-validated with explicit
+  unsupported renewal/remote-revocation outcomes; local revocation and verifiable immutable
+  account binding remain mandatory. Pin local 60/600-second TTL defaults and retain S256
+  without downgrade. Development may close and v0.50.0 may be separately authorized with
+  AAP compatibility explicitly unverified. This is a scope amendment, not completion evidence;
+  no runtime code, live test, deployment, push, or version change. Documentation is committed
+  separately for operator review before contract and foundation implementation increments.
+  Accepted ADR bodies, the attached kickoff plan, and earlier dated entries are preserved.
 - 2026-10-20 (planning-target re-slot): SPEC-067's approval pinned its target version to
   **v0.49.0** (R6's next slice after SPEC-069's delivered v0.48.0), so this spec's
   retained planning target re-slots **v0.49.0 → v0.50.0** to keep the two R6 tracks on
