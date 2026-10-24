@@ -258,6 +258,12 @@ v2 confirm route uses. These routes are **internal only** (not portal-reachable)
 - Effect: validate `state`, redeem code (PKCE), verify target account, commit encrypted
   custody, flip challenge `authorized`. Returns `{ status, return_url }`. On any failure
   returns a safe `{ status: failed|canceled|expired }` with no provider internals.
+  **R-6b amendment approved 2026-10-24:** encrypted staging is unusable; atomic database
+  publication activates custody and marks the challenge authorized together. If publication
+  commits but its acknowledgment/final response is lost, the uncertain caller releases no
+  token and does not manufacture success. A later owner-scoped status read may discover the
+  committed authorization. Error cleanup cannot overwrite that published status; abandoned
+  pre-publication staging requires reauthorization and is never published by recovery.
 
 ### 6.3 `GET /api/v2/targets/authorizations/{challenge_id}` (tool-gateway)
 
@@ -285,8 +291,9 @@ A dedicated **`AuthorizationTransactionStore`** in tool-gateway, shaped as a
   PKCE verifier reuses the existing authenticated-encryption + versioned key mounts and the
   callback's redeem→verify→commit is transactionally adjacent to the custody write.
   Single-use consumption uses the execution-ledger advisory/row-lock pattern
-  (`SELECT … FOR UPDATE SKIP LOCKED`); Postgres has no native TTL, so an expiry sweep bounds
-  the transaction lifetime.
+  (`SELECT … FOR UPDATE SKIP LOCKED`). **Foundation clarification, 2026-10-24:** every
+  transition enforces database-time expiry; the bounded sweep only reclaims terminal records.
+  Correctness does not depend on the sweep running.
 - **Fail-closed selection (differs from secret delivery):** `SecretDeliveryStore` fails
   *open* to in-memory. An authorization transaction **must** be visible to whichever replica
   receives the callback, so for `replicas>1` with no shared backend configured, delegated

@@ -629,6 +629,71 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 | `IDENTITY_AUDIT_CLIENT_ID` | Audit ingest client id | `identity-broker` | runtime-config |
 | `IDENTITY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
 
+### Delegated custody foundation (SPEC-070; not enabled)
+
+These are internal library/file contracts, **not new environment settings or an enablement
+recipe**. The parser recognizes `oauth2_authorization_code`; HTTP/MCP acquisition, OAuth
+routes, portal controls, provider identity verification, and production provisioning remain
+unimplemented. Supplying a valid set does not enable delegation. **AAP compatibility unverified**.
+
+Every supplied field is a nonempty string. Unknown fields and invalid optional values fail
+closed; the machine schemes retain their existing projection and mtime/keep-last-good behavior.
+
+| Required field(s) | Foundation contract |
+|---|---|
+| `scheme`, `target` | `oauth2_authorization_code`; explicit target binding |
+| `authorization_url`, `token_url` | Explicit HTTPS endpoints within this set's `oauth_origins` |
+| `client_id`, `client_secret` | Backend-only confidential-client configuration; never tool arguments |
+| `client_auth` | Explicit `client_secret_basic` or `client_secret_post`; no delegated default |
+| `redirect_uri` | Exact deployment-trusted HTTPS URI ending in `/api/v1/targets/authorizations/callback`; no query or fragment |
+| `scope`, `allowed_scopes` | Single-space-delimited OAuth scope tokens; requested subset of permitted scopes; no duplicates |
+| `oauth_origins`, `resource_origins` | Separate single-space-delimited exact HTTPS origins; no paths, wildcards, userinfo, or duplicates (including equivalent default ports) |
+| `pkce_method`, `store` | `S256`, `postgres` only |
+| `config_revision` | Positive decimal, 1–18 digits; strictly newer on replacement/reactivation |
+| `identity_profile`, `identity_claim` | `json_immutable_id` and a simple configured immutable claim; name/email/username profiles are not accepted |
+| `identity_mapping_path` | Absolute administrator-controlled JSON mapping-file path |
+
+Optional fields: `renewal_url`, `revocation_url`, `identity_url`, `audience`, `resource`.
+Endpoints must belong to `oauth_origins`; `resource` must belong to `resource_origins`.
+Omitted renewal is unsupported; remote revocation is unconfirmed when absent; missing identity
+is `identity_evidence_unavailable` and cannot authorize. No endpoint discovery, guessed URLs,
+implicit token-endpoint renewal, or ID-token profile is implemented. URLs reject whitespace,
+control characters, ambiguous authority, invalid ports, userinfo, fragments, and backslashes.
+The trusted callback is supplied by deployment-owned construction, never a model/tool argument.
+
+Mapping rows contain exactly `owner_namespace`, `owner_sub`, and `target_account`, all nonempty
+strings; owner namespace/subject pairs are unique. Example shape (placeholders only):
+
+```json
+[{"owner_namespace":"<trusted-issuer>","owner_sub":"<immutable-subject>","target_account":"<immutable-target-id>"}]
+```
+
+The mounted keyring contains exactly `active_key_id`, `recovery_epoch`, `fingerprint_key`, and
+`keys`. Key IDs/epoch use 1–128 ASCII letters, digits, underscores, or hyphens. `keys` maps 1–32
+versioned IDs to strict base64-encoded 32-byte AES keys; the active ID must exist.
+`fingerprint_key` is a stable, separately managed base64-encoded 32-byte HMAC key, not an AES key.
+The recovery epoch is independently managed from database backups. Mount this material separately
+from database credentials/data; keep files out of source control and logs. Duplicate JSON keys,
+malformed/missing files, unknown versions, and policy mismatches fail closed without retained-key fallback.
+
+The registry stores HMAC fingerprints of the complete validated set and mapping content, not
+plaintext client configuration. One authoritative row per set ID includes its target, revision,
+generation, and active/tombstoned state, so changing targets cannot bypass revision ordering.
+The credential key additionally includes target and owner namespace/subject. Same-revision
+changed content invalidates; older revisions cannot overwrite newer state. Observed removal or
+unreadability invalidates the last observed generation, without invalidating a newer replica's
+replacement. Every protected lookup rereads local configuration/key files and checks Postgres;
+there is no positive generation cache. Secret-volume propagation before observation is separate
+from this database guarantee. Already-dispatched target requests cannot be canceled by it.
+
+The internal transaction factory accepts `memory` only for one process, or `postgres` with
+explicit custody; no fallback after failure. Durable credentials are always Postgres. Start and
+transaction defaults are 60/600 seconds, strict positive integers, start no greater than transaction.
+Migration is explicit (`migrate_custody`), separate from runtime initialization; runtime verifies
+schema version 1 and never creates tables. This unshipped foundation proves fresh-schema creation
+and idempotence, not an upgrade from an earlier prototype also labeled version 1. No existing
+production custody schema is migrated by this increment. See [lifecycle and recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation).
+
 ### audit-service
 
 Source: `products/audit-service/src/audit_service/core/config.py`

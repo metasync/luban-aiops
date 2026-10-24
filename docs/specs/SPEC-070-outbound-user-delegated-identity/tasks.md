@@ -6,9 +6,10 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 > ratified. Development acceptance covers R-1–R-6d without a real AAP dependency. OQ-3 and
 > former acceptance criterion R-6e are tracked under **DI-070** below: mandatory before
 > production target enablement, not a development-delivery or version-bump gate. The additive
-> contract increment is implemented; OAuth runtime and custody tasks remain open. The attached
-> kickoff plan and accepted ADR bodies are unchanged. This increment enables no authorization
-> flow and does not deliver SPEC-070; other handoff gates remain.
+> contract increment is released; the internal R-1/R-6 foundation is implemented and verified
+> as recorded below. OAuth workflow and production provisioning remain open. The attached
+> kickoff/foundation plans and accepted ADR bodies are unchanged. No usable authorization flow
+> or full SPEC-070 delivery is claimed; other handoff gates remain.
 
 ## Historical Stage 0 — 2026-10-12
 
@@ -139,25 +140,214 @@ when the real environment and authorization are available, not as a prerequisite
   local package version, with no dependency upgrades. This evidence is separate from the
   pre-release implementation proof above; see the [changelog](../../../CHANGELOG.md#0500--2026-10-23).
 
+**Release handoff completed — 2026-10-24:** commit `199331f` and annotated `v0.50.0`
+were pushed after the L3 security review reported no issues. All nine platform images were
+rebuilt and deployed to `orbstack` / `dev-luban-aiops` using
+`0.50.0-dev-k8s-199331f-dirty-20261024004646`. Backend version/readiness, the deployed audit
+migration, preserved credentials/SSO, and portal v0.50.0/ready indicators were verified.
+Portal evidence was rendered DOM inspection; screenshot capture was unavailable. This
+closes the contract-only release workflow, not SPEC-070 or DI-070.
+
+## R-1/R-6 Foundation Increment — Verified; Runtime Integration Pending
+
+The separately approved foundation adds strict delegated configuration, encrypted Postgres
+custody, concrete single-use transaction stores, and fencing/recovery proofs. Factories
+remain internal and disconnected from OAuth routes and connector acquisition. No release,
+deployment, client registration, or live AAP testing is included. Existing machine-scheme
+behavior and the v0.50.0 public contracts remain unchanged. Results below must distinguish
+library/state-machine proof from the still-pending workflow and production provisioning.
+
+**Pre-amendment foundation verification checkpoint — historical, incomplete:**
+
+- The focused parser, custody, HTTP, browser, MCP, and unchanged authorization-contract
+  tests passed (**406 tests**). The full tool-gateway suite passed (**793 tests**);
+  shutdown telemetry exporters logged connection failures against the test loopback sink.
+- The disposable Postgres proof passed in **17.4 seconds**, including the newly added
+  explicit recovery-epoch operation. That run checked uncertainty only after cleanup.
+- A subsequent stronger multiprocess proof **failed for both refresh and authorization
+  completion**: pause the writer after its database commit but before completion returns,
+  read from a separate store, terminate the writer, and read again. The installed grant
+  remains usable; process-local blocking and compensating cleanup do not close this window.
+  Reproduction: `UV_CACHE_DIR="$PWD/.workspaces/uv-cache" uv run --frozen --project
+  products/tool-gateway python products/tool-gateway/tests/integration/delegated_custody.py`
+  (one shell command). At that checkpoint both assertions failed; the earlier passing run
+  did not establish the stronger completion guarantee. The amended expectations are below.
+- The authoritative completion/acknowledgment boundary then required resolution before custody
+  could be marked complete. Staged publication needed an explicit decision on survival of a
+  lost final application response; this amended the absolute uncertain-completion quarantine
+  guarantee, not merely its cleanup implementation.
+- No disposable custody containers remained after those runs. Root `make verify`, Makefile
+  custody-target integration, remaining fault coverage, and operator-guide handoff were then
+  pending. No version, public schema, route, release, or deployment change was made.
+  **AAP compatibility unverified**; SPEC-070 and DI-070 remain open.
+
+**Publication amendment — operator approved 2026-10-24:** the operator selected database
+publication as authoritative after reviewing the preceding failure. Unusable encrypted staging
+is followed by atomic grant/authorization-status publication under fresh generation/epoch/key
+checks. Lost provider responses or unacknowledged staging require reauthorization with no replay.
+A committed publication may survive loss of its database acknowledgment or final application
+response; the uncertain caller releases no token. Cleanup cannot revoke published/newer grants.
+This supersedes the blanket uncertain-completion quarantine requirement, not the no-replay or
+revocation guarantees. The attached foundation plan and accepted ADR bodies remain untouched.
+
+**Post-amendment implementation/evidence:**
+
+- Strict delegated parser and fresh-file reload, mapping-bound HMAC generations, AES-256-GCM
+  keyring/envelopes, schema-version-1 migration, memory/Postgres transactions, start/state
+  claims, staged publication, refresh/revoke, key rotation, and explicit recovery are internal
+  library primitives. App wiring and public schemas are unchanged; existing schemes retain
+  their projection and machine keep-last-good behavior.
+- The single-use operation records are fields on locked credential/transaction-secret rows;
+  there is no replayable generic payload or separate provider-operation queue. The registry
+  uses one row per named set with a target field to prevent target replacement bypassing
+  revision ordering; credential bindings additionally include the target and owner namespace.
+- `products/tool-gateway/tests/test_delegated_configuration.py` and `test_delegated_custody.py`
+  cover parser, crypto, and memory boundaries. HTTP, browser, MCP HTTP/stdio diagnostic,
+  credential-set, and unchanged contract/no-route regressions pass. The initial post-amendment
+  full tool-gateway suite passed **797 tests** (5.31 seconds). A later 22-case addition covered
+  missing fields, ambiguous bracket authorities, and unknown-scheme log safety; its first run
+  found supplied values in the legacy unknown-scheme warning (**1 failed, 209 passed**).
+  After replacing that warning with a fixed message, the full suite passed **819 tests**
+  (5.32 seconds), including all 210 delegated-configuration tests. Shutdown telemetry exporters
+  logged nonfatal connection failures against the test loopback sink.
+- `make delegated-custody-test` passed (**28.7 seconds**) and is now mandatory in `make verify`.
+  Evidence source: `products/tool-gateway/tests/integration/delegated_custody.py`. Real
+  Postgres 16, a dedicated non-superuser runtime role, four spawned contenders, repeated
+  callback/refresh/revocation races, killed claimants, old-ciphertext restoration, absent
+  capabilities, mapping/config fences, keyless revoke, pending-PKCE rotation, and offline
+  recovery are asserted. Runtime cannot change key-policy values or migration version.
+- Staging/publication boundaries are tested separately for refresh and authorization:
+  concurrent reads and process termination before return, injected pre/post-commit errors,
+  and a loopback PostgreSQL wire proxy that discards COMMIT acknowledgment before the driver
+  sees it. Only published state survives response loss; unpublished candidates cannot renew.
+  Intervening cancellation, expiry, revoke, and newer authorization fence publication; old
+  cleanup preserves the newer grant. The formerly failing absolute-quarantine expectation
+  was replaced explicitly under the approved contract, not reported as fixed unchanged.
+- The dump assertion includes live encrypted PKCE material and encrypted refresh credentials;
+  secrets/DSNs are never printed or retained as proof artifacts. These are custody/state-machine
+  tests, **not** production provider identity verification or R-2/R-3 protocol evidence.
+- The first foundation root `make verify` passed, including portal **496 tests** and the
+  typechecked production build, disposable audit proof (**2.3 seconds**), custody proof
+  (**26.7 seconds**), and the full execution-failure campaign (**792 passed, 2 deselected**,
+  1493.04 seconds; existing baseline-red controls excluded, no development subset).
+  Campaign evidence: `.workspaces/spec063-evidence/20261024T153130Z-4cd4a3a382d6/`
+  (`evidence.json`, `junit.xml`); exit 0, no host suspension or live acceptance. Its tool-gateway
+  stage preceded the final 22 tests/logging fix, so it was followed by the final-code rerun below.
+- Existing configuration/tool/troubleshooting guides document inert behavior, fields/key format,
+  publication, privilege separation, revocation, and externally fenced recovery. Schema proof is
+  fresh creation/idempotence, not upgrading an older version-1 prototype. Full runtime integration,
+  provisioning, R-4 attribution, R-5 disclosure, and development acceptance remain open.
+
+**Final foundation verification and handoff:**
+
+- Final-code root `make verify` passed: all eight frozen Python product suites (**3,472 tests**,
+  including **819 tool-gateway tests**), portal **496 tests** and typechecked production build,
+  all six overlays, dashboards, policy/scenarios, version lockstep at **0.50.0**, secret vocabulary,
+  password policy, and the local secret-delivery demo. Disposable audit proof passed in
+  **2.2 seconds**; the mandatory custody proof passed in **27.6 seconds**.
+- The full execution-failure campaign passed **792 tests**, with the same **two baseline-red
+  controls deselected** by its existing runner and no development subset (**1542.80 seconds**).
+  Evidence: `.workspaces/spec063-evidence/20261024T160153Z-688fed78aa1a/` (`evidence.json`,
+  `junit.xml`); exit 0, no host suspension, no live acceptance. Root output is retained locally
+  in `.workspaces/spec070-foundation-verify-final.log`. The manifest's `delivery_complete:false`
+  is not a test failure or a claim of live acceptance.
+- Nonfatal warnings: test-sink OTLP export failures, Starlette/httpx deprecation, portal jsdom/
+  notification limitations, and the existing Vite chunk-size warning. Scoped `git diff --check`
+  and new-foundation-file trailing-whitespace checks passed. IDE diagnostics were unavailable
+  because the language server was not ready; no IDE clean-bill claim is made.
+- Disposable custody/audit/execution proof containers were absent after completion. Dependency
+  changes are limited to psycopg/psycopg-binary **3.3.6** and its Windows tzdata dependency in
+  tool-gateway's frozen lockfile; existing package versions were not upgraded.
+- Only this internal foundation checkpoint is complete. No usable OAuth route/acquisition,
+  provider identity verification, portal authorization control, production provisioning, version
+  bump, commit/push/tag, image rebuild, or deployment was performed. Unrelated `.qoder/repowiki`
+  work and the attached plan were preserved. **AAP compatibility unverified**; DI-070 is pending.
+
+**Post-review concurrency correction — foundation re-verified before commit:**
+
+- A code review of the uncommitted foundation, after the passing run above, found **two blocking
+  P1 concurrency defects**. The earlier green suite is historical evidence and did **not** close
+  them; the foundation was not checkpoint-ready until both were corrected and re-proved.
+  - *Defect 1 — epoch reuse after rollback.* Uncertainty cleanup matched only
+    binding/generation/epoch/unpublished-status. A claim whose transaction rolled back left the
+    epoch unadvanced, so an independent successor could claim the same next epoch; the original
+    attempt's late cleanup then revoked the valid successor (refresh) or broadly failed every
+    pending owner transaction at the reused epoch (authorization).
+  - *Defect 2 — mutable observed generation.* `invalidate_observed` re-read `self._observed`
+    after its first await, so a delayed invalidation of generation G1 could invalidate a G2 that
+    another coroutine activated on the same store while G1 awaited a connection.
+- Correction: unpublished credential operations now carry an immutable random `attempt_id`,
+  distinct from the operation/publication capability hash, generated before the claim can suspend
+  and carried through claim → staging → publication → cleanup. Refresh keeps one attempt identity;
+  authorization completion mints a fresh completion attempt associated with its exact challenge.
+  Uncertainty cleanup is a compare-and-set on the full binding, generation, epoch, attempt
+  identity, and unpublished status, so it can never revoke an active publication or a successor
+  that reused an epoch; refresh cleanup touches no transaction and authorization cleanup fails
+  only its own challenge. Process-local uncertainty blocks are attempt-scoped
+  (`_blocked: set[(Owner, attempt_id)]`), so resolving one attempt cannot clear another's block.
+  Callback-claim uncertainty is a compare-and-set on the stored callback operation, so an
+  unacknowledged old claim cannot cancel a successor claim of the same challenge.
+  `invalidate_observed` snapshots the observed generation before its first await and compares
+  against that immutable local value only. Attempt metadata is cleared on publication, revoke,
+  configuration invalidation, recovery, and generation reset.
+- Schema fencing ships as an **explicit versioned migration to version 2**, not runtime DDL:
+  `custody_schema.SCHEMA_VERSION == 2`, `DDL` creates a fresh v2 schema with `attempt_id` and two
+  CHECK invariants (`credentials_attempt_fenced`, `credentials_attempt_cleared`), and
+  `UPGRADE_V1_TO_V2` idempotently adds the column, fences legacy unpublished rows that lack
+  attempt identity, preserves published active rows, adds the constraints, and bumps the version.
+  Runtime `initialize()` rejects any schema whose version is not exactly 2.
+- Failure-first regression evidence (deterministic, real Postgres, no timing sleeps):
+  `tests/integration/delegated_custody.py` adds `refresh_successor_survives_stale_cleanup`,
+  `authorization_successor_survives_stale_cleanup`, `callback_claim_cleanup_is_attempt_scoped`,
+  `observed_generation_snapshot_is_immutable`, and `migration_upgrades_v1_and_fences_legacy`.
+  Removing the `attempt_id` predicate from cleanup failed the proof at *"stale attempt cleanup
+  cannot revoke the successor refresh"*; reverting the observed-generation snapshot failed it at
+  *"a delayed G1 invalidation leaves G2 active"*. With both corrections restored the full proof
+  passed (**30.6 seconds**). `tests/test_delegated_custody.py` adds three pure-Python regressions
+  for attempt-scoped local blocks, the versioned schema/attempt invariants, and the immutable
+  refresh-claim attempt identity; the focused file passed **10 tests** and the full tool-gateway
+  suite passed **822 tests** (5.08 seconds), with only the known nonfatal test-sink OTLP export
+  warnings. **AAP compatibility unverified**; DI-070 remains pending.
+- Post-correction root `make verify` passed (exit 0, **29m44s**): all eight frozen Python product
+  suites (agent-platform 1539, audit-service 144, execution-runtime 82, identity-broker 61,
+  incident-service 138, platform-gateway 398, skills-hub 291, tool-gateway **822**), portal **496
+  tests** and the typechecked production build, all overlays/dashboards/policy/scenarios, version
+  lockstep at **0.50.0**, secret vocabulary, password policy, and the secret-delivery demo. The
+  audit-contract proof passed (**2.1s**), the mandatory custody proof passed (**28.7s**) including
+  the new attempt-fencing/callback-CAS/observed-snapshot/v1→v2-migration block, and the full
+  execution-failure campaign passed **792 tests, 2 deselected** (**1544.80s**, exit 0). Evidence:
+  `.workspaces/spec070-foundation-verify-postcorrect.log` and
+  `.workspaces/spec063-evidence/20261024T181017Z-f80b24431add/` (`evidence.json`, `junit.xml`).
+  No host suspension and no live acceptance; the manifest's `delivery_complete:false` is not a
+  test failure. Nonfatal warnings were limited to the known test-sink OTLP export failures and
+  Starlette/httpx deprecation notices.
+
 ## R-1: Credential Configuration
 
-- [ ] Pin provider-independent parser field names/types, then add `oauth2_authorization_code`
-      validation/projection under the R-1 capability contract; preserve existing scheme/default
-      parsing and browser credential behavior (R-1a–c).
-- [ ] Reject unsupported/incomplete/untrusted config with safe warnings and zero network calls;
-      enforce delegated generation invalidation on change/removal without changing machine sets.
-- [ ] Test optional endpoints absent/present/invalid; absent renewal is explicitly unsupported,
-      absent provider revocation still revokes locally, and absent verifiable target identity
-      blocks authorization. No guessed endpoint, degraded identity check, or fallback.
+- [x] Pin provider-independent parser field names/types and `oauth2_authorization_code`
+      validation/projection; preserve existing scheme/default parsing and browser credential
+      behavior (R-1a–c foundation; parser and connector regressions above).
+- [x] Reject unsupported/incomplete/untrusted config with safe warnings and zero network calls;
+      prove delegated generation invalidation on change/removal without changing machine sets.
+- [x] Test optional endpoints absent/present/invalid in parser/custody primitives: absent renewal
+      is explicitly unsupported, absent provider revocation still permits local revoke, and
+      missing identity evidence blocks installation. No guessed endpoint or fallback.
+- [ ] Exercise these capabilities through actual delegated acquisition and provider identity
+      verification with deterministic OAuth/target fixtures (R-1 runtime integration with R-2/R-3).
 
 ## R-6 Foundation: Encrypted Postgres Custody
 
-- [ ] Implement gateway-owned tables/role, versioned authenticated encryption, owner/target
-      binding, separately mounted keys, and product dependency/frozen lockfile (R-6a).
-- [ ] Implement single-use authorization transactions and cross-process credential generation,
-      refresh rotation, local revocation, and cache invalidation; fail closed on store/key failure.
-- [ ] Prove real-Postgres concurrency, ciphertext substitution denial, key rotation, crash/restart,
-      lost provider refresh response/commit, and no revoked-record resurrection (R-6b).
+- [x] Implement gateway-owned schema and isolated proof role, versioned authenticated encryption,
+      owner/target binding, per-operation key loading, and product dependency/frozen lockfile
+      (R-6a library foundation; production role/key mounts remain below).
+- [x] Implement single-use memory/Postgres transactions and cross-process generation/epoch
+      fences, staged publication, refresh rotation, local revoke, and cache-check primitives;
+      fail closed on store/key failure. No access-token cache/acquisition is wired yet.
+- [x] Prove real-Postgres concurrency, ciphertext substitution denial, key rotation, crash/restart,
+      simulated lost provider response, actual lost commit acknowledgment, and no revoked-epoch
+      resurrection (R-6b foundation under the approved database-publication amendment).
+- [ ] Integrate custody into actual provider acquisition/callback/cache behavior and exercise
+      the complete lifecycle against deterministic OAuth/target fixtures (R-2/R-3 and R-6 completion).
 
 ## R-2: Acquisition and First-Use Workflow
 
@@ -188,8 +378,10 @@ when the real environment and authorization are available, not as a prerequisite
 
 - [ ] Record human, service actor, verified target identity, mode, signed correlation, and
       safe authorization/acquisition failure classes; preserve redaction-overflow attribution.
-- [ ] Implement any ratified audit filter/schema change and asserting durable query test;
-      a configured mode label alone cannot mark successful delegation (R-4a–c).
+- [x] Implement the ratified audit schema/filter change and asserting durable query proof
+      (R-4b contract/persistence groundwork; v0.50.0 evidence above).
+- [ ] Emit and test verified delegation attribution end to end; a configured mode label
+      alone cannot mark successful delegation (R-4a/c and runtime R-4b integration).
 
 ## R-5: Failure-First Security Invariants
 
@@ -213,12 +405,12 @@ when the real environment and authorization are available, not as a prerequisite
 
 ## Acceptance-to-Test Matrix
 
-Full development acceptance R-1a–R-6d remains **open**. The contract-only evidence above
-covers a subset of R-2/R-4 shapes, not the runtime/security obligations below. Replace each
-obligation with concrete test paths/names and results before delivery; this matrix is not
-execution evidence. Tests
-must exercise real Luban enforcement against deterministic OAuth and per-user target fixtures,
-not canned shared-bearer success. DI-070 separately tracks actual AAP evidence.
+Full development acceptance R-1a–R-6d remains **open**. Evidence above covers R-2/R-4 contract
+shapes and R-1/R-6 internal configuration/custody primitives, not the full runtime/security
+obligations below. Replace each remaining obligation with concrete test paths/names and results
+before delivery; this matrix is not execution evidence. Integration tests must exercise real
+Luban enforcement against deterministic OAuth and per-user target fixtures, not canned
+shared-bearer success. DI-070 separately tracks actual AAP evidence.
 
 | Criteria | Planned asserting coverage | Primary boundary |
 | --- | --- | --- |
@@ -238,6 +430,9 @@ not canned shared-bearer success. DI-070 separately tracks actual AAP evidence.
 | R-6c, R-6d | Overlay rendering; disabled-until-configured; exercised setup/revocation/recovery/rollback; pending-integration disclosure | GitOps + operator guides + deterministic target |
 
 ## Delivery Gate
+
+These gates apply to eventual full-spec delivery. Passing contract/foundation checkpoints above
+does not close runtime acceptance or replace verification after the remaining implementation.
 
 - [ ] Gate 0 and 2026-10-23 amendment recorded; all development criteria R-1a–R-6d mapped
       to actual asserting tests and passed; every changed contract tested in its consumers.

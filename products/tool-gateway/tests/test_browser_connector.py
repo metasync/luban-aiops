@@ -1521,6 +1521,17 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(result.status, "error")
         self.assertEqual(result.error["code"], "INVALID_PARAMETERS")
 
+    def test_delegated_foundation_cannot_fill_browser_credentials(self) -> None:
+        from test_delegated_configuration import entry
+
+        with open(self._tmp.name, "w", encoding="utf-8") as handle:
+            json.dump({"inventory-app": entry()}, handle)
+        result = _run(self.registry.invoke("web.fill_credential",
+            {"ref": 1, "credential_set": "inventory-app", "field": "password"}, IDENTITY))
+        self.assertEqual(result.status, "error")
+        self.assertEqual(self.password_field.fills, [])
+        self.assertNotIn("opaque-client-value", json.dumps(result.to_dict()))
+
     def test_non_basic_set_fails_closed(self) -> None:
         # SPEC-068 R-1: a bearer set carries no username/password, so a
         # browser login flow naming it must fail closed rather than fill a

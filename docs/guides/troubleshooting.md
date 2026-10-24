@@ -48,6 +48,35 @@ Use readiness metadata and scoped logs, not raw environment/Secret dumps: never
 paste DSNs, tokens, passwords, or delivery bodies into troubleshooting artifacts.
 Stopping a worker does not cancel remote work or release its dispatch claim.
 
+## Symptom: A delegated target set is configured but authorization is unavailable
+
+The SPEC-070 foundation is deliberately **not wired into OAuth routes or acquisition**.
+A valid `oauth2_authorization_code` entry still fails closed in HTTP/MCP consumers and cannot
+fill browser credentials. Do not substitute a PAT, shared bearer, machine grant, or impersonated
+account to bypass that boundary. It is separate from the inbound Luban delegation chain below.
+
+For internal custody tests and later integration, use fixed failure classes and owner-scoped
+status, never raw DSNs, key files, token responses, or database dumps in diagnostics:
+
+| Failure/state | Meaning and safe response |
+|---|---|
+| `configuration_unavailable` | Current set/mapping is missing, unreadable, or invalid. Machine keep-last-good does not apply. Restore valid administrator configuration; an observed invalidated generation requires a newer revision and fresh authorization. |
+| `configuration_revision_reused`, `configuration_invalidated`, `stale_configuration` | Changed content reused a revision, a tombstone prevents restoration, or this replica has an older mount. Reconcile mounts and monotonically advance the revision; never clear tombstones or lower the database revision. |
+| `keyring_unavailable`, `key_policy_mismatch`, `decryption_failed` | Missing/malformed keys, stale write policy, wrong recovery epoch, or authenticated-ciphertext mismatch. Deny cache use. Restore the correct operator-managed mount/policy; do not fall back to retained process keys or plaintext. |
+| `renewal_unsupported`, `identity_evidence_unavailable` | The configured capability is absent or identity evidence/linkage is unusable. Do not guess endpoints or start repeated consent loops. Mapping equality is not production provider identity verification. |
+| In-flight or staged after process death | No takeover, provider replay, or recovery publication. The binding remains unusable and needs fresh authorization. Cleanup is not required for denial to hold. |
+| Lost response after committed publication | Database publication is authoritative (approved 2026-10-24). The uncertain caller releases no token; a fresh checked read may find an active grant/authorized status. Do not undo publication solely because its final response was lost. Revocation/configuration fences still apply. |
+| `publication_fenced`, `publication_expired` | Revocation, cancellation, newer authorization/configuration, or expiry won before publication. A late candidate cannot be installed. |
+| `store_unavailable` | Database access failed. No shared-to-memory fallback and no cached grant checkout. Restore availability without resetting consumed claims. |
+| `local_revoked_remote_unconfirmed` | Local tombstone committed; it does not assert provider revocation. Remote HTTP revocation remains unimplemented in this increment. |
+
+Run `make delegated-custody-test` for the isolated real-Postgres proof. Docker is required;
+its absence is a failure, not a skipped pass. The test creates its own loopback-bound temporary
+database and restricted role, accepts no external database input, and stops its container.
+See [key rotation and disabled backup recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation).
+Production provisioning, end-to-end workflow, and full disclosure checks remain pending.
+**AAP compatibility unverified.**
+
 ## Symptom: "Agent says access not granted" or "no tools available"
 
 **Most likely cause:** Token delegation secrets are missing or mismatched.

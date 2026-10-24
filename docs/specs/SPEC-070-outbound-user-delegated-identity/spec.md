@@ -279,8 +279,13 @@ Acceptance criteria:
 - **R-6b:** Rotation, local revocation, configuration removal, and cache invalidation work
   across replicas. Real disposable-Postgres tests cover concurrency, restart, key rotation,
   revoked-record resurrection, and refresh/revocation races. If the provider rotates a
-  refresh token but the response/commit is lost, fail closed into reauthorization; do not
-  claim an atomic transaction spanning the provider and Postgres.
+  refresh token but its response or pre-publication staging is lost/uncertain, fail closed
+  into reauthorization without replay. **Amended 2026-10-24 (operator approved):** encrypted
+  staged candidates are unusable; atomic database publication is authoritative. A committed
+  publication may survive a lost final application response or database acknowledgment.
+  The uncertain caller releases no token; later use requires fresh configuration, identity,
+  credential-epoch, and revocation checks. Never publish abandoned staging during recovery,
+  or claim an atomic transaction spanning the provider and Postgres.
 - **R-6c:** Reuse `credential-sets.json` and `sync-browser-credentials.sh` for operator
   target/client configuration. Provision database/key mounts and least-privilege network
   access through GitOps; delegated mode stays disabled until configured. No user secrets

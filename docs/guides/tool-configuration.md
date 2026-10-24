@@ -400,6 +400,76 @@ still include a `basic` `acme-admin` set or the script fails closed. A dedicated
 sync/secret for a real non-sample target is **optional**, owned by the consuming
 pilot (SPEC-067), not by this substrate.
 
+### Delegated custody lifecycle (SPEC-070 foundation)
+
+`oauth2_authorization_code` is a **parser/custody foundation only**. It is not resolved by
+HTTP/MCP acquisition and cannot fill browser credentials. Valid configuration still opens no
+OAuth, target, or MCP session; there are no usable authorization routes or new portal controls.
+Existing Basic, bearer, and client-credentials behavior is unchanged. See the
+[complete delegated field/key contract](configuration-reference.md#delegated-custody-foundation-spec-070-not-enabled).
+
+The internal Postgres primitives implement:
+
+- AES-256-GCM envelopes with fresh 96-bit nonces, bound to purpose/version, recovery epoch,
+  owner namespace/subject, target/set, configuration generation, credential epoch, granted
+  scopes, and target account. Durable PKCE envelopes also bind challenge/routing/expiry.
+  Refresh credentials and PKCE are encrypted; start/state/operation capabilities are hashed.
+  Access tokens and authorization codes have no database columns or generic payload fields.
+- Insert-only challenges, one live start handle, single-use state claims committed before
+  any future provider exchange, and expiry enforced by database time on every transition.
+  The memory routing backend uses monotonic deadlines and is single-process development/test
+  only; it cannot manufacture an authorized result. Terminal routing records are retained
+  for owner-only reads and reclaimed in bounded batches after expiry plus 300 seconds.
+- Refresh single-flight: a committed in-flight epoch removes reusable refresh ciphertext
+  before the winner receives the old secret. No database transaction spans provider I/O.
+  Abandoned claims/lost provider responses require reauthorization; no retry or takeover.
+- **Publication contract approved 2026-10-24:** encrypted staging is unusable. Only the live
+  worker holding the unpersisted publication capability after acknowledged staging can
+  attempt publication. A second transaction rechecks configuration, keys, identity linkage,
+  epochs, lifetime, and cancellation before atomically activating the grant and authorization
+  status. Committed publication survives a lost final response or commit acknowledgment.
+  The uncertain caller releases no token; fresh authoritative reads may discover the grant.
+  Cleanup only quarantines unpublished state and cannot undo a newer or published grant.
+- Local revoke advances the credential epoch, clears ciphertext, and burns pending claims
+  without needing keys or a readable configuration. Its result is
+  `local_revoked_remote_unconfirmed`; no provider revocation HTTP call exists here.
+  Each later checkout checks Postgres and local snapshots; there is no positive generation
+  cache. This cannot cancel already-dispatched target requests.
+
+**Operator procedures (internal primitives, not production enablement):**
+
+1. Provision schema version 1 through `migrate_custody` using a separate migration identity.
+   Runtime has DML only on configurations, credentials, transactions, and transaction secrets;
+   SELECT on schema version/key policy; and `UPDATE(singleton)` on key policy solely for row
+   locking. It cannot alter policy values, migrate tables, or read unrelated application data.
+   Key rotation/recovery require an operator identity. The disposable proof exercises this
+   separation; production roles, mounts, network policy, and app wiring remain R-6 work.
+2. Replace/reactivate a configuration with a strictly higher revision, including when its
+   administered mapping changes. Same-revision changed content invalidates the generation;
+   restoration does not revive grants. Require fresh user authorization. Do not reset registry
+   revisions or remove tombstones to force reuse.
+3. For encryption rotation, distribute a keyring retaining old decryption versions, then use
+   `rotate_key(expected_key_id)` with operator privileges to advance authoritative write policy.
+   Run per-set `reencrypt(limit=...)` in batches of 1–1000 (default 100), covering active refresh
+   and pending PKCE envelopes. Stale mounts cannot write the retired version. Retain old keys
+   until all relevant rows are migrated and staged/expired transactions are invalidated or no
+   longer publishable; removing a needed key fails closed, never revives a revoked row.
+4. For backup recovery, keep delegation disabled and workers stopped. Restore the database
+   while fenced; supply a **new independently managed recovery epoch** through the key mount.
+   Run `recover_custody(expected_epoch=...)` with the operator identity, invalidating all old
+   generations/grants/pending secrets. Previously recorded epochs cannot be reused. Mount the
+   new epoch everywhere, advance configuration revisions, and require fresh authorization.
+   Re-enable only through the later reviewed provisioning workflow and DI-070 target gate.
+   A complete database-and-key rollback cannot detect itself; external epoch custody and the
+   disabled restore procedure are essential, not an automatic rollback detector.
+
+`make delegated-custody-test` is mandatory in root `make verify`. It uses generated test keys,
+a unique loopback-only disposable Postgres, a restricted runtime role, spawned worker races,
+process termination, and a commit-acknowledgment fault proxy. It accepts no external database
+input and does not skip when Docker is missing. This proves custody/state transitions, not
+provider identity verification, end-to-end OAuth, audit attribution, or production readiness.
+**AAP compatibility unverified.**
+
 ## Kubernetes Connector
 
 The Kubernetes connector provides read-only access to pod status, events, and logs using the

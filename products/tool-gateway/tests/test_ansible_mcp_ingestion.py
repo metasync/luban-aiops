@@ -450,6 +450,29 @@ class CredentialResolutionTests(unittest.TestCase):
         # ...and never appears in the tool result envelope.
         self.assertNotIn(token, json.dumps(result.to_dict()))
 
+    def test_delegated_foundation_denies_calls_and_diagnostics_on_all_transports(self) -> None:
+        from test_delegated_configuration import entry
+
+        path = self._cred_file({"user": entry()})
+        for transport in (McpTransport(url="https://resource.test/mcp"),
+                          McpTransport(kind="stdio", command="must-not-run")):
+            with self.subTest(transport=transport):
+                server = FakeServer()
+                connector = McpIngestionConnector(transport=transport, admitted=tuple(ANSIBLE_ADMITTED_TOOLS),
+                    source_system="ansible", credential_set="user", credential_sets_path=path,
+                    session_opener=server.opener())
+                registry = ToolRegistry()
+                connector.register_tools(registry)
+                result = _run(registry.invoke("ansible.list_inventories", {}, {}))
+                names, error = _run(connector.list_server_tools())
+                self.assertEqual(result.status, "error")
+                self.assertIsNone(names)
+                self.assertIsNotNone(error)
+                self.assertEqual(server.calls, [])
+                self.assertEqual(server.bearers, [])
+                self.assertEqual(server.discoveries, 0)
+                self.assertNotIn("opaque-client-value", json.dumps(result.to_dict()))
+
     def test_basic_set_has_no_bearer_form_and_fails_closed(self) -> None:
         path = self._cred_file({"awx-basic": {"username": "u", "password": "p"}})
         server = FakeServer()

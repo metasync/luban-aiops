@@ -128,7 +128,14 @@ contract, not an implemented feature.
   verifiers if durable. Do not persist authorization codes.
 - Coordinate refresh with row-level locking/generation checks and local revocation across
   processes. A provider rotation and local database commit cannot be one atomic transaction:
-  lost/uncertain rotation requires reauthorization, never stale-token resurrection.
+  lost provider responses and uncertain pre-publication staging require reauthorization,
+  never stale-token resurrection. **Operator amendment, 2026-10-24:** stage encrypted
+  candidates as unusable, then atomically publish after fresh authoritative fence checks.
+  Only the live stager with an acknowledged staging commit proceeds to publication; no
+  recovery/replay path publishes abandoned candidates. Publication atomically activates
+  the grant and (for authorization) marks its transaction authorized. A committed publication
+  survives loss of its final response/acknowledgment; the uncertain caller returns no token.
+  Subsequent use checks current database state, not a positive local-generation cache.
 - Recheck credential/config generation before serving cache hits; bound and test propagation.
   Store/key unavailability fails closed even if a process still holds a cached token.
 - **Gate:** real disposable-Postgres tests for ciphertext-only persistence, owner/target
@@ -263,6 +270,13 @@ its production user-delegated path still depends on this undelivered substrate.
 
 ## Revision History
 
+- 2026-10-24: operator approved authoritative database publication after a failing
+  multiprocess proof exposed the commit-to-response cleanup window. Added unusable staging,
+  single-use publication capabilities, atomic grant/status publication, and separate
+  staging/publication crash and wire-acknowledgment proofs. This supersedes the blanket
+  uncertain-completion quarantine wording; provider replay remains prohibited. The attached
+  foundation plan and accepted ADR bodies are preserved. Implementation/evidence is tracked
+  in the existing task file; no OAuth routes, release, deployment, or AAP validation implied.
 - 2026-10-23: operator approved separating development delivery/version eligibility from
   AAP readiness. R-1–R-6d retain asserting tests and real-Postgres custody proof; OQ-3/R-6e
   move to DI-070 before production target enablement. Pinned optional-but-validated endpoint

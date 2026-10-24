@@ -700,6 +700,17 @@ class CredentialTests(unittest.TestCase):
             base64.b64decode(second.split(" ", 1)[1]).decode(), "svc:second"
         )
 
+    def test_delegated_foundation_opens_no_target_or_token_connection(self) -> None:
+        from test_delegated_configuration import entry
+
+        _write_credentials(self.cred_path, {"user": entry()})
+        router = _Router({})
+        connector = _connector(router, credential_sets_path=str(self.cred_path))
+        result = _call(connector, "http.get", {"url": ALLOWED + "/health", "credential_set": "user"})
+        self.assertEqual(result.status, "error")
+        self.assertEqual(router.call_count, 0)
+        self.assertNotIn("opaque-client-value", json.dumps(result.to_dict()))
+
     # --- SPEC-068 R-3: bearer + oauth2 resolve to an Authorization header ---
 
     def test_bearer_set_sends_bearer_header(self) -> None:

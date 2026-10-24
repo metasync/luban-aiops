@@ -68,11 +68,16 @@ def _parse_set(name: object, value: object) -> dict[str, str] | None:
         LOGGER.warning("credential set %r ignored: not a JSON object", name)
         return None
     scheme = value.get("scheme", DEFAULT_SCHEME)
+    if scheme == "oauth2_authorization_code":
+        from tool_gateway.tools.delegated_configuration import ConfigurationError, DelegatedConfiguration
+
+        try:
+            return DelegatedConfiguration.parse(value).projection()
+        except ConfigurationError as exc:
+            LOGGER.warning("delegated credential set ignored: %s", str(exc))
+            return None
     if not isinstance(scheme, str) or scheme not in _SCHEME_REQUIRED_FIELDS:
-        LOGGER.warning(
-            "credential set %r ignored: unknown scheme %r (expected one of: %s)",
-            name, scheme, ", ".join(sorted(_SCHEME_REQUIRED_FIELDS)),
-        )
+        LOGGER.warning("credential set ignored: unknown scheme")
         return None
     required = _SCHEME_REQUIRED_FIELDS[scheme]
     if any(
@@ -109,12 +114,36 @@ class CredentialSetStore:
     def names(self) -> list[str]:
         """Set names are safe to surface (names are not secrets)."""
         self._maybe_reload()
+        self._fresh_delegated()
         return sorted(self._sets)
 
     def get(self, name: str) -> dict[str, str] | None:
         """Resolve one named set; None when unconfigured or unknown."""
         self._maybe_reload()
-        return self._sets.get(name)
+        self._fresh_delegated()
+        entry = self._sets.get(name)
+        return dict(entry) if entry and scheme_of(entry) == "oauth2_authorization_code" else entry
+
+    def _fresh_delegated(self) -> None:
+        # Delegated sets never inherit the machine loader's keep-last-good policy.
+        from tool_gateway.tools.delegated_configuration import ConfigurationError, SCHEME, read_json
+
+        self._sets = {name: value for name, value in self._sets.items() if scheme_of(value) != SCHEME}
+        if not self._path:
+            return
+        try:
+            raw = read_json(self._path)
+        except ConfigurationError:
+            return
+        if not isinstance(raw, dict):
+            return
+        for name, value in raw.items():
+            if isinstance(value, dict) and value.get("scheme") == SCHEME:
+                entry = _parse_set(name, value)
+                # A malformed delegated replacement cannot expose an old machine set.
+                self._sets.pop(name, None)
+                if entry is not None:
+                    self._sets[name] = entry
 
     def _maybe_reload(self) -> None:
         if not self._path:
