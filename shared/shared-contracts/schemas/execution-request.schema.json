@@ -36,7 +36,17 @@
       }
     }
   ],
+  "dependentRequired": {
+    "requester_namespace": ["requester_sub", "decider_namespace", "decider_sub", "protocol_version"],
+    "requester_sub": ["requester_namespace", "decider_namespace", "decider_sub", "protocol_version"],
+    "decider_namespace": ["requester_namespace", "requester_sub", "decider_sub", "protocol_version"],
+    "decider_sub": ["requester_namespace", "requester_sub", "decider_namespace", "protocol_version"]
+  },
   "properties": {
+    "requester_namespace": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Configured trusted issuer of the verified original requester; never an unsigned header or username."},
+    "requester_sub": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Verified immutable original requester subject owning the target grant."},
+    "decider_namespace": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Configured trusted issuer of the verified approving identity."},
+    "decider_sub": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Verified approver subject; approval authority does not transfer target grant ownership."},
     "protocol_version": {"const": 3},
     "expires_at": {"type": "string", "format": "date-time", "maxLength": 40},
     "run_id": {"type": "string", "format": "uuid", "maxLength": 36},
@@ -59,7 +69,7 @@
     },
     "owner_user_id": {
       "type": "string",
-      "description": "The session owner whose delegated token executes the call."
+      "description": "Existing UI/session owner identifier. The primary execution bearer authorizes the approver; requester_namespace/sub separately bind requester-owned target grants."
     },
     "decider_user_id": {
       "type": "string",

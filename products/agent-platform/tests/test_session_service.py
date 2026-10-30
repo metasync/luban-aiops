@@ -174,6 +174,7 @@ def test_create_named_session_lost_race_surfaces_as_404(monkeypatch):
             user_id, session_id=session_id, session_type=session_type
         )
         if session_id == "incident-inc-race01":
+            store.delete_session(session_id)
             real_create("other-user", session_id=session_id)
         return record
 

@@ -85,6 +85,7 @@ from agent_service.services.runtime_dependencies import (
     get_confirmation_registry,
     get_runtime_kernel,
 )
+from agent_service.services.delegated_identity import DelegatedIdentityError, verify_delegated_human
 from agent_service.services.session_service import (
     create_named_session,
     delete_session,
@@ -157,6 +158,18 @@ def _bearer_token(authorization: str | None) -> str | None:
     if scheme.lower() != "bearer" or not token:
         return None
     return token
+
+
+async def _verified_requester(authorization: str | None, user_id: str):
+    import asyncio
+
+    settings = get_runtime_kernel().settings
+    if not getattr(settings, "target_authorization_enabled", False):
+        return None
+    try:
+        return await asyncio.to_thread(verify_delegated_human, settings, _bearer_token(authorization), user_id=user_id)
+    except DelegatedIdentityError:
+        raise HTTPException(status_code=401, detail="verified human identity required") from None
 
 
 def _validated_skill_target(raw: str) -> str:
@@ -285,7 +298,8 @@ async def chat(
     user_id = _user_id(x_user_id)
     request_id = x_request_id or "untracked"
     record_chat_request()
-    session = ensure_session(body.session_id, user_id)
+    requester = await _verified_requester(authorization, user_id)
+    session = ensure_session(body.session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
     resolved_model = _resolve_model(body.model, session.model)
     pin_session_model(session.session_id, resolved_model)
@@ -301,7 +315,7 @@ async def chat(
         },
     )
     mark_session_turn(session.session_id, body.message)
-    content, structured_output = await get_runtime_kernel().reply_text(
+    reply = await get_runtime_kernel().reply_text(
         message=body.message,
         session_id=session.session_id,
         user_name=user_id,
@@ -310,9 +324,12 @@ async def chat(
         model_id=resolved_model,
         read_only=body.read_only,
     )
+    content, structured_output = reply
     return AgentChatResponse(
         session_id=session.session_id,
         request_id=request_id,
+        authorization_required=getattr(reply, "authorization_required", None),
+        status="partial" if getattr(reply, "authorization_required", None) else "ok",
         content=content,
         structured_output=structured_output,
         model=resolved_model,
@@ -336,7 +353,8 @@ async def chat_stream(
     user_id = _user_id(x_user_id)
     request_id = x_request_id or "untracked"
     record_chat_request()
-    session = ensure_session(session_id, user_id)
+    requester = await _verified_requester(authorization, user_id)
+    session = ensure_session(session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
     resolved_model = _resolve_model(model, session.model)
     pin_session_model(session.session_id, resolved_model)
@@ -388,6 +406,7 @@ async def chat_confirm(
     request_id = x_request_id or "untracked"
     session = get_session(body.session_id)
     kernel = get_runtime_kernel()
+    await _verified_requester(authorization, user_id)
     registry = get_confirmation_registry()
     candidate = registry.peek_parked(session.session_id)
     if (
@@ -854,6 +873,7 @@ def _load_confirmation_cards(
 async def create_session(
     body: AgentSessionCreateRequest | None = None,
     x_user_id: str | None = Header(None),
+    authorization: str | None = Header(None),
 ) -> AgentSession:
     """Open a session, optionally as a develop-as-you-go one (SPEC-055 R-4).
 
@@ -902,11 +922,13 @@ async def create_session(
         if body and body.skill_target
         else None
     )
+    requester = await _verified_requester(authorization, user_id)
+    requester_args = {"requester": requester} if requester else {}
     if requested_id:
         # Dedicated named session (SPEC-015 R-3): idempotent for the owner.
-        session = create_named_session(requested_id, user_id, session_type)
+        session = create_named_session(requested_id, user_id, session_type, **requester_args)
     else:
-        session = ensure_session(None, user_id, session_type)
+        session = ensure_session(None, user_id, session_type, **requester_args)
     if skill_target:
         AUTHORING_TRACE_STORE.declare_target(session.session_id, skill_target)
     return AgentSession(

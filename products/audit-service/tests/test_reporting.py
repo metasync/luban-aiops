@@ -97,6 +97,56 @@ class ReportingRouteTests(unittest.TestCase):
             response = self.client.get(f"/api/v1/audit/{leg}?delegation_mode=invalid", headers=self.auth)
             self.assertEqual(response.status_code, 422)
 
+    def test_target_authorization_and_overflow_attribution_round_trip(self) -> None:
+        # SPEC-070 plan line 156 end-to-end: the audit-service ingests, persists, and
+        # queries the exact envelope shapes the gateway emits — a target_authorization
+        # lifecycle success carrying its top-level mode, and a tool_invoked whose
+        # attribution survives a REDACTION_OVERFLOW error outcome. Attribution is
+        # queryable by delegation_mode regardless of outcome and by event_type; a plain
+        # no-credential tool_invoked omits the mode and is never returned by a filter.
+        self._seed(
+            _event_payload("plain", username="alice"),
+            _event_payload(
+                "authz", event_type="target_authorization", outcome="success",
+                delegation_mode="user_delegated", session_id="ses-1", subject="issuer:alice",
+                details={"operation": "enroll", "authorization_outcome": "authorized",
+                         "challenge_id": "11111111-1111-4111-8111-111111111111",
+                         "target": "Automation"}),
+            _event_payload(
+                "overflow", outcome="error", delegation_mode="acting_service",
+                details={"tool_name": "test.leaky_basic", "status": "error",
+                         "error_code": "REDACTION_OVERFLOW"}),
+        )
+        # By event_type: only the lifecycle event, carrying its bounded details + mode.
+        by_type = self.client.get("/api/v1/audit/events",
+                                  params={"event_type": "target_authorization"}, headers=self.auth)
+        self.assertEqual([e["event_id"] for e in by_type.json()["events"]], ["authz"])
+        self.assertEqual(by_type.json()["events"][0]["delegation_mode"], "user_delegated")
+        self.assertEqual(by_type.json()["events"][0]["details"]["authorization_outcome"],
+                         "authorized")
+        # By delegation_mode: attribution survives an error outcome (the overflow
+        # event), and the user_delegated lifecycle event is separately queryable.
+        acting = self.client.get("/api/v1/audit/events",
+                                 params={"delegation_mode": "acting_service"}, headers=self.auth)
+        self.assertEqual([e["event_id"] for e in acting.json()["events"]], ["overflow"])
+        self.assertEqual(acting.json()["events"][0]["outcome"], "error")
+        delegated = self.client.get("/api/v1/audit/events",
+                                    params={"delegation_mode": "user_delegated"}, headers=self.auth)
+        self.assertEqual([e["event_id"] for e in delegated.json()["events"]], ["authz"])
+        # A no-credential tool_invoked omits the mode entirely (legacy byte-identical).
+        everything = self.client.get("/api/v1/audit/events", headers=self.auth).json()["events"]
+        plain = next(e for e in everything if e["event_id"] == "plain")
+        self.assertNotIn("delegation_mode", plain)
+        # Summary and export honor the same event_type / delegation_mode filters.
+        summary = self.client.get("/api/v1/audit/summary",
+                                  params={"event_type": "target_authorization"}, headers=self.auth)
+        self.assertEqual(summary.json()["total_events"], 1)
+        self.assertEqual(summary.json()["window"], {"event_type": "target_authorization"})
+        exported = self.client.get("/api/v1/audit/export",
+                                   params={"delegation_mode": "acting_service"}, headers=self.auth)
+        rows = list(csv.DictReader(io.StringIO(exported.text)))
+        self.assertEqual([row["request_id"] for row in rows], ["req-overflow"])
+
     # --- Summary (R-1) ------------------------------------------------------
 
     def test_summary_aggregates_and_projects_decision_chain(self) -> None:

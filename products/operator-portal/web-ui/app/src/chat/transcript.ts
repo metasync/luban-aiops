@@ -22,7 +22,7 @@ import type {
   ToolResultFrame,
 } from "../stream/models";
 import type { ChatTurn, ConfirmationCard } from "../stream/useChatStream";
-import { toSecretDeliveryFrame } from "../stream/decoder";
+import { toAuthorizationRequiredFrame, toSecretDeliveryFrame } from "../stream/decoder";
 
 // Frame mapping mirrors the live decoder's tool_call/tool_result handling
 // field-for-field so a replayed card is prop-identical to its live twin.
@@ -94,6 +94,14 @@ function attachEvidence(turns: ChatTurn[], groups: EvidenceTurn[]): void {
         target.toolCalls.push(toToolCallFrame(frame));
       } else if (frame.type === "tool_result") {
         target.toolResults.push(toToolResultFrame(frame));
+      } else if (frame.type === "authorization_required") {
+        const authorization = toAuthorizationRequiredFrame(frame);
+        if (authorization) {
+          target.authorizations ??= [];
+          if (!target.authorizations.some((item) => item.authChallengeId === authorization.authChallengeId)) {
+            target.authorizations.push(authorization);
+          }
+        }
       } else if (frame.type === "secret_delivery") {
         const delivery = toSecretDeliveryFrame(frame);
         if (delivery) {

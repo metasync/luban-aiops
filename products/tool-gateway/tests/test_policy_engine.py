@@ -61,6 +61,23 @@ class EvaluationSemanticsTests(unittest.TestCase):
             decision = evaluate(settings, ["read-only-observer"], action)
             self.assertEqual(decision.decision, "allow", action)
 
+    def test_targets_authorize_mirrors_invoke_holders(self) -> None:
+        # SPEC-070 OQ-7: targets:authorize is granted to exactly the
+        # tools:invoke holders — a requester may only drive enrollment for a
+        # target they may already invoke on behalf of — so no new role is
+        # synthesized. auditor (governance-only) and unknown roles stay denied
+        # by default; the administered-mapping and entitlement rechecks are
+        # route-level, never a bundle grant.
+        settings = _settings()
+        for role in [
+            "platform-admin", "approver", "operator", "developer", "read-only-observer",
+        ]:
+            decision = evaluate(settings, [role], "targets:authorize")
+            self.assertEqual(decision.decision, "allow", role)
+        for role in ["auditor", "ghost-role"]:
+            decision = evaluate(settings, [role], "targets:authorize")
+            self.assertEqual(decision.decision, "deny", role)
+
     def test_deny_by_default_for_unknown_action(self) -> None:
         settings = _settings()
         decision = evaluate(settings, ["operator"], "restart-service")
@@ -322,8 +339,10 @@ class ContractAlignmentTests(unittest.TestCase):
         # Health and metrics routes carry no action and are exempt; portal-
         # facing actions (chat, session:*) live in platform-gateway. This set
         # is the complete protected surface of the tool service; tools:mutate
-        # gates write/admin risk invocations (SPEC-021 R-1) and secrets:deliver
-        # gates external-channel secret delivery (SPEC-062 R-4).
+        # gates write/admin risk invocations (SPEC-021 R-1), secrets:deliver
+        # gates external-channel secret delivery (SPEC-062 R-4), and
+        # targets:authorize gates the human-initiated outbound user-delegated
+        # authorization workflow (SPEC-070 OQ-7).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset(
@@ -332,6 +351,7 @@ class ContractAlignmentTests(unittest.TestCase):
                     "tools:invoke",
                     "tools:mutate",
                     "secrets:deliver",
+                    "targets:authorize",
                 }
             ),
         )

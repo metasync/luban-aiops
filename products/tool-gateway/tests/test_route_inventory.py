@@ -15,6 +15,7 @@ EXPECTED_ROUTES = {
     ("GET", "/metrics"),
     ("GET", "/api/v2/tools"),
     ("POST", "/api/v2/tools/invoke"),
+    ("POST", "/api/v2/tools/invoke-delegated"),
 }
 
 

@@ -74,12 +74,24 @@ remains a separately-gated follow-up. ServiceNow ships as a native REST/Table-AP
 connector (its PDI exposed no MCP server at Stage-0), so it reuses the `BaseTool` /
 `ToolRegistry` seam and the SPEC-068 credential plane rather than the MCP adapter.
 
+[SPEC-070](../../docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md) adds
+**implemented, unreleased, default-off** user-delegated OAuth on the HTTP/MCP credential
+seam: encrypted Postgres custody, immutable target-account linkage, browser-bound
+first-use authorization, and requester-owned grants across cross-user approval.
+Callbacks never dispatch a tool; Continue starts a fresh governed turn. The
+[acceptance record](../../docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix)
+separates real TLS/Postgres and rendered-DOM coverage from environment-blocked browser
+screenshots. **AAP compatibility unverified**; DI-070 is required before production
+user-delegated enablement. See the [operator guide](../../docs/guides/tool-configuration.md)
+for configuration and custody procedures. The existing ServiceNow machine-grant connector
+is not automatically converted to user delegation.
+
 Current implementation artifacts:
 
 - `pyproject.toml`
 - `Dockerfile`
 - `src/tool_gateway/app.py`
-- `src/tool_gateway/api/routes/` (`health`, `tools`)
+- `src/tool_gateway/api/routes/` (`health`, `tools`, `authorizations`)
 - `src/tool_gateway/core/`
 - `src/tool_gateway/services/`
 - `src/tool_gateway/tools/`

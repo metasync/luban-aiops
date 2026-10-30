@@ -598,6 +598,12 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_SERVICENOW_TIMEOUT_MS` | HTTP client timeout in milliseconds | `10000` | code default |
 | `GATEWAY_SERVICENOW_CREDENTIAL_SET` | Named `oauth2_client_credentials` set the connector presents (SPEC-068) | *(none)*; dev `servicenow-mock` | runtime-config |
 | `GATEWAY_SERVICENOW_CREDENTIAL_SETS` | Credential-sets JSON path; falls back to `GATEWAY_HTTP_CREDENTIAL_SETS` then `GATEWAY_BROWSER_CREDENTIAL_SETS` | *(http/browser path)*; dev `/etc/luban/servicenow-credentials/credential-sets.json` | **runtime-secrets** (mounted file) |
+| `GATEWAY_DELEGATED_ACQUISITION_ENABLED` | Compose the send-path user-delegated client into the HTTP/MCP authentication seam (SPEC-070). While `false` no client is built, so an `oauth2_authorization_code` set fails closed at the connector (never a machine grant). Enabling requires the full Postgres-custody runtime below or startup fails closed | `false` | runtime-config |
+| `GATEWAY_DELEGATED_CUSTODY_DB_URL` | Postgres DSN for the delegated custody/transaction state (grant publication and authorization status are atomic). Required when acquisition is enabled | *(none)* | **runtime-secrets** |
+| `GATEWAY_DELEGATED_CUSTODY_KEYRING_PATH` | Path to the mounted versioned keyring JSON (AES-256-GCM key set + fingerprint key + recovery epoch). Required when acquisition is enabled | *(none)* | **runtime-secrets** (mounted file) |
+| `GATEWAY_DELEGATED_CUSTODY_CONFIG_PATH` | Path to the administered delegated target/client configuration snapshot. Required when acquisition is enabled | *(none)* | **runtime-secrets** (mounted file) |
+| `GATEWAY_DELEGATED_CUSTODY_SET_ID` | The single administered delegated credential-set id the custody store is bound to. Required when acquisition is enabled | *(none)* | runtime-config |
+| `GATEWAY_DELEGATED_CUSTODY_TRUSTED_CALLBACK` | The deployment-trusted HTTPS redirect URI; its path must equal `/api/v1/targets/authorizations/callback`. Required when acquisition is enabled | *(none)* | runtime-config |
 | `IDENTITY_SERVICE_URL` | Identity broker URL | `http://identity-service:8000` | shared/runtime.env |
 
 ### identity-service
@@ -631,10 +637,13 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 
 ### Delegated custody foundation (SPEC-070; not enabled)
 
-These are internal library/file contracts, **not new environment settings or an enablement
-recipe**. The parser recognizes `oauth2_authorization_code`; HTTP/MCP acquisition, OAuth
-routes, portal controls, provider identity verification, and production provisioning remain
-unimplemented. Supplying a valid set does not enable delegation. **AAP compatibility unverified**.
+These file contracts support the **unreleased, default-off** delegated runtime, not a production
+enablement recipe. Acquisition, custody, the challenge producer, bounded kernel stop, portal
+cards/Continue, and provisioning tooling are implemented; [development acceptance](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix)
+records real-TLS runtime/edge, Postgres multiprocess, and rendered-DOM portal tests. Real-browser
+screenshots remain environment-blocked. Supplying a valid set alone does not enable delegation.
+**AAP compatibility unverified**; [DI-070](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+and separate authorization are required before production AAP enablement.
 
 Every supplied field is a nonempty string. Unknown fields and invalid optional values fail
 closed; the machine schemes retain their existing projection and mtime/keep-last-good behavior.
@@ -652,6 +661,8 @@ closed; the machine schemes retain their existing projection and mtime/keep-last
 | `config_revision` | Positive decimal, 1–18 digits; strictly newer on replacement/reactivation |
 | `identity_profile`, `identity_claim` | `json_immutable_id` and a simple configured immutable claim; name/email/username profiles are not accepted |
 | `identity_mapping_path` | Absolute administrator-controlled JSON mapping-file path |
+| `access_cache_ttl_seconds` | Explicit positive decimal string, at most `300`; local access lifetime cap before the 30-second safety margin |
+| `refresh_max_lifetime_seconds` | Explicit positive decimal string, at most `2592000`; absolute local renewal deadline, shortened by any provider refresh expiry |
 
 Optional fields: `renewal_url`, `revocation_url`, `identity_url`, `audience`, `resource`.
 Endpoints must belong to `oauth_origins`; `resource` must belong to `resource_origins`.
@@ -683,16 +694,136 @@ The credential key additionally includes target and owner namespace/subject. Sam
 changed content invalidates; older revisions cannot overwrite newer state. Observed removal or
 unreadability invalidates the last observed generation, without invalidating a newer replica's
 replacement. Every protected lookup rereads local configuration/key files and checks Postgres;
-there is no positive generation cache. Secret-volume propagation before observation is separate
-from this database guarantee. Already-dispatched target requests cannot be canceled by it.
+there is no positive generation cache, so once an authoritative invalidation or a local revoke
+commits, every later credential check rejects immediately — no cached grant can outlive the
+commit. Mounted-file propagation is a separate, earlier step: a rewritten config/keyring/mapping
+secret-volume must propagate into the pod before the gateway can observe it, with a
+deployment-dependent delay and **no numeric Kubernetes guarantee**; until it lands the gateway
+keeps reading the previously mounted bytes (and the fingerprint it already validated).
+Already-dispatched target requests cannot be canceled by either mechanism.
 
 The internal transaction factory accepts `memory` only for one process, or `postgres` with
 explicit custody; no fallback after failure. Durable credentials are always Postgres. Start and
 transaction defaults are 60/600 seconds, strict positive integers, start no greater than transaction.
 Migration is explicit (`migrate_custody`), separate from runtime initialization; runtime verifies
-schema version 1 and never creates tables. This unshipped foundation proves fresh-schema creation
-and idempotence, not an upgrade from an earlier prototype also labeled version 1. No existing
-production custody schema is migrated by this increment. See [lifecycle and recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation).
+schema version **3** and never creates tables. Fresh creation, idempotence, and explicit prototype
+v1→v2→v3 upgrades are covered by the disposable Postgres proof. Version 2 fences unpublished legacy
+credential attempts; version 3 burns pending prototype transactions with incompatible verifier/browser
+bindings. Published grants are preserved. No production custody schema has been migrated.
+This is distinct from the execution-ledger v2 migration, which requires fenced,
+disabled admission and a new admission epoch. See [lifecycle and recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation)
+and [provisioning + operator CLI](tool-configuration.md#delegated-provisioning--operator-cli-spec-070-disabled-by-default).
+
+### Delegated requester identity groundwork (SPEC-070; default off)
+
+These settings enable strict inbound identity/session checks and the gated platform browser edge
+within the unreleased runtime. They are not sufficient alone to enable target OAuth: custody,
+acquisition, workload trust, administered linkage, and target qualification are also required.
+Keep production gates off pending DI-070 and separately authorized enablement.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `AGENT_TARGET_AUTHORIZATION_ENABLED` | Require verified human identity at agent routes, and arm the per-turn bounded kernel stop on a validated `TARGET_AUTHORIZATION_REQUIRED` gateway result | `false` |
+| `AGENT_DELEGATED_IDENTITY_ISSUER` | Explicit trusted broker issuer; also the immutable requester namespace | unset |
+| `AGENT_DELEGATED_IDENTITY_JWKS_URL` | Deployment-controlled verification key endpoint | unset |
+| `AGENT_DELEGATED_IDENTITY_AUDIENCE` | Exact expected delegated bearer audience | unset |
+| `AGENT_DELEGATED_IDENTITY_ACTORS` | Comma-separated allowed delegating service subjects | empty |
+| `PLATFORM_GATEWAY_TARGET_AUTHORIZATION_ENABLED` | Reject missing/development sources and failed exchange; bind cache reuse to exact source/trust configuration | `false` |
+
+Enabled verification requires RS256, issuer/audience, expiry/issued-at, immutable subject, username,
+expected actor, and broker-signed `oidc` provenance. It never promotes a development identity.
+New sessions freeze requester namespace/subject in backend-only metadata. Legacy sessions stay
+unbound and need a new verified session for delegated targets. The requester owns the target grant;
+the approver retains primary execution authorization and mutation-policy checks. Re-parking retains
+the original requester, not the approver's target identity. A lost/expired requester bearer requires
+a fresh requester turn; bearer material is held only in memory and cleared on completion/failure.
+The runtime fixture tests also cover requester-owned execution with a different approver;
+this does not establish real-AAP compatibility or browser screenshot evidence.
+**AAP compatibility unverified**.
+
+### Delegated browser handoff (SPEC-070; default off)
+
+These settings describe the unreleased runtime implementation, not the deployed contract-only
+release or a production enablement recipe. Development verification is recorded in the SPEC-070
+acceptance matrix; actual target qualification, browser screenshots, and production enablement
+remain separate outstanding work.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PLATFORM_GATEWAY_AUTHORIZATION_WORKLOAD_TOKEN_PATH` | Absolute path to the dedicated projected platform-gateway JWT mount; reread per browser handoff, at most 16 KiB | unset |
+| `GATEWAY_DELEGATED_AUTHORIZATION_ENABLED` | Compose six internal authorization routes with Postgres custody and both human/workload trust sets; independent of acquisition enablement | `false` |
+| `GATEWAY_AUTHORIZATION_WORKLOAD_ISSUER` | Exact trusted projected-token issuer | unset |
+| `GATEWAY_AUTHORIZATION_WORKLOAD_JWKS_URL` | Deployment-controlled verification-key endpoint | unset |
+| `GATEWAY_AUTHORIZATION_WORKLOAD_AUDIENCE` | Dedicated browser-handoff audience; must be `luban-target-authorization-handoff` | `luban-target-authorization-handoff` |
+| `GATEWAY_AUTHORIZATION_WORKLOAD_SUBJECTS` | Comma-separated exact platform-gateway workload subjects; no wildcard | empty, deny all |
+
+The platform edge also requires `PLATFORM_GATEWAY_TARGET_AUTHORIZATION_ENABLED=true`, genuine
+OIDC human authentication, `PLATFORM_GATEWAY_REQUIRE_AUTH=true`, internal delegation audience
+`tool-gateway`, and a `PLATFORM_GATEWAY_TOOL_GATEWAY_URL` with no userinfo, query, fragment, or
+non-root path. Tool-gateway requires the `GATEWAY_DELEGATED_CUSTODY_*` fields and
+`GATEWAY_DELEGATED_IDENTITY_*` trust set as well as the authorization workload trust above.
+Its runtime requires Postgres; the memory transaction backend is only for isolated route tests.
+
+The authorization mount is **separate from** `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`, used for
+identity-broker exchange. Bearerless provider navigation/callback uses only the dedicated mount:
+no Basic/static fallback and no saved human bearer. Tool-gateway verifies RS256, issuer, audience,
+expiry, and exact workload subject. The transaction plus browser proof selects the owner/set;
+workload identity is not owner authority. Execution handoff retains its separate
+`luban-target-execution-handoff` audience.
+
+Public prefix: `/api/v1/targets/authorizations`:
+
+| Method/path suffix | Authentication and result |
+|---|---|
+| `POST /{challenge_id}/start` | Human bearer; owned backend session and matching durable challenge/target evidence; no request body; returns only a backend start path and expiry |
+| `GET /start/{start_token}` | Initiating-browser cookie; dedicated internal workload handoff; empty 302 to a validated HTTPS provider URL |
+| `GET /callback` | Bounded query and browser proof, no body; dedicated internal workload handoff; every outcome is an empty noncacheable 302 |
+| `GET /{challenge_id}` | Human bearer plus owned session/evidence; safe authoritative status only |
+| `POST /{challenge_id}/cancel` | Human bearer and backend owner scope; no body; idempotent 204, matching cookie cleared only after a valid acknowledgment |
+| `POST /browser-reset` | Human bearer and matching cookie proofs; no body; logout cleanup, never target-grant revocation |
+
+Internal prefix `/api/v2/targets/authorizations` has the corresponding human start/status/cancel/reset
+routes and workload-only `POST /provider-url` and `POST /callback`. Portal nginx refuses `/api/v2/`.
+Cookie names are `__Host-luban-oauth-<challenge_uuid>` with 256-bit secrets, Secure/HttpOnly/
+SameSite=Lax/Path=/ and no Domain. At most eight bindings are accepted; malformed or duplicate
+cookies fail closed. Cookie expiry is capped at the transaction's remaining lifetime and 600 seconds.
+Same-browser tabs are allowed; another browser without the binding is not. Start tokens default to
+60 seconds and transactions to 600 seconds; retries never extend the transaction.
+
+Callback input never enters framework query-validation bodies or portal HTML. The edge rejects
+ambiguous, oversized, non-ASCII/whitespace-bearing code/state and body-bearing callbacks; provider
+descriptions/URIs are discarded and denials normalized. Responses carry no-store/no-cache and
+no-referrer. Unknown/invalid input returns to `/`; verified terminal results may return only to
+`/authorizations/return/<challenge_uuid>` matching the browser jar. The portal then fetches
+owner status/session/evidence, selects Chat/Studio, and replaces the path with `/`, without dispatch
+or confirmation resume. Signed-out returns give sign-in guidance; no human token is retained to
+complete them. Logout attempts cleanup for at most two seconds before clearing stored auth.
+
+Internal handoffs have no redirect/retry/environment-proxy inheritance, a 10-second total deadline,
+a 64-KiB response cap, and duplicate-JSON-key rejection. Application/uvicorn logs use safe route
+templates; platform HTTP diagnostics are suppressed before log handlers. Authorization server spans
+and platform handoff client instrumentation are excluded at source. Nginx logs status/bytes/duration
+only and suppresses raw server request-error diagnostics. In-process exported-span assertions and
+nginx syntax validation are isolated evidence; real nginx request-log canaries and complete
+provider-operation disclosure proof remain pending.
+
+Tool-gateway now consumes the browser-verified start handle and stores hash-only state plus
+authenticated PKCE ciphertext in one Postgres transaction. The guarded operation checks the current
+configuration, exact owner mapping, credential epoch, and database-clock expiry before mutation.
+Only an acknowledged commit releases preparation material for provider-URL construction; the
+service rechecks entitlement before building the URL. There is no separate state-preparation API.
+Encryption/pre-commit failure rolls back the entire preparation. If commit succeeds but its
+acknowledgment or the final response is lost, the start stays spent: no replacement URL, automatic
+retry, state reconstruction, or grant revocation. The pending challenge can still be canceled or
+expire normally. This uses the existing custody v3 schema; no additional migration is required.
+Disposable Postgres proof covers rollback, wire-level acknowledgment loss, cross-process races,
+process death, browser proof, configuration/epoch fencing, and expiry without sweeping.
+
+The bounded kernel stop and durable `authorization_required` evidence are implemented and loop-tested
+against contract fixtures, but the production challenge producer, Authorize/status/Cancel cards and
+fresh-turn Continue, and HTTPS multi-browser/provider/Postgres integrated proof remain pending, so the
+stop is not reachable end-to-end. These limits do not justify enabling a production target.
+**AAP compatibility unverified**.
 
 ### audit-service
 

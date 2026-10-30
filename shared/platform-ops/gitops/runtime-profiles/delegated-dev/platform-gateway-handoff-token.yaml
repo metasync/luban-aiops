@@ -1,0 +1,40 @@
+# Strategic merge patch applied by the delegated-dev overlay (SPEC-070).
+#
+# Projects a SHORT-LIVED, audience-bound service-account JWT into the
+# platform-gateway pod. This is the workload token the gateway VERIFIES on the
+# bearerless /api/v2/targets/authorizations provider-url and callback handoffs.
+# Its audience is DISTINCT from the execution-runtime handoff
+# (luban-target-execution-handoff), so neither handoff can replay the other's
+# token even though both originate inside the cluster.
+#
+# Explicit token lifetime (plan line 165): expirationSeconds bounds every
+# projected token; 600s covers a single authorization round-trip with skew
+# headroom and self-expires a leaked token.
+#
+# platform-gateway already mounts platform-policy; these append cleanly
+# (volumeMounts merge key mountPath, volumes merge key name). It runs as the
+# dedicated `platform-gateway` SA, so the projected subject is stable and
+# allowlistable: system:serviceaccount:dev-luban-aiops:platform-gateway (pin it in
+# GATEWAY_AUTHORIZATION_WORKLOAD_SUBJECTS — see delegated.env). No RBAC is needed:
+# the token is only presented to and verified by the tool-gateway.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: platform-gateway
+          volumeMounts:
+            - name: authorization-handoff-token
+              mountPath: /var/run/secrets/luban/authorization-handoff
+              readOnly: true
+      volumes:
+        - name: authorization-handoff-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: luban-target-authorization-handoff
+                  expirationSeconds: 600
+                  path: token

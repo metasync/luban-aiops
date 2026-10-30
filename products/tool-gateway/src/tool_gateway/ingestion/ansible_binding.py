@@ -176,13 +176,22 @@ ANSIBLE_ADMITTED_TOOLS: tuple[AdmittedTool, ...] = (
 )
 
 
-def build_ansible_mcp_connector(settings: "GatewaySettings") -> McpIngestionConnector:
+def build_ansible_mcp_connector(
+    settings: "GatewaySettings",
+    *,
+    delegated_client: object | None = None,
+) -> McpIngestionConnector:
     """Construct the generic adapter bound to the Ansible read-only config.
 
     The endpoint, transport, timeout, and optional credential set are operator
     configuration (never model-selected); the admitted-tool allowlist and tiers
     are the gateway-owned config above. This is the same adapter class a future
     ServiceNow binding (SPEC-067) or an AAP read-only-mode config reuses.
+
+    ``delegated_client`` is the SPEC-070 send-path user-delegated acquisition
+    client (``None`` when delegated mode is off, so a delegated credential set
+    then fails closed). It is threaded into the adapter's authentication seam;
+    the machine-grant token client the adapter builds internally is unchanged.
     """
     transport = McpTransport(
         kind=settings.ansible_mcp_transport,
@@ -203,4 +212,5 @@ def build_ansible_mcp_connector(settings: "GatewaySettings") -> McpIngestionConn
         source_system=SOURCE_SYSTEM,
         credential_set=settings.ansible_mcp_credential_set,
         credential_sets_path=settings.ansible_mcp_credential_sets_path,
+        delegated_client=delegated_client,
     )

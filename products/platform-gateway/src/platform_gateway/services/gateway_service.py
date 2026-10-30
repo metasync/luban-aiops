@@ -334,6 +334,8 @@ async def create_session(
     user_id: str,
     skill_target: str | None = None,
     session_type: str = "operation",
+    *,
+    delegated_token: str | None = None,
 ) -> dict:
     """Proxy a session create, optionally declaring its skill target (R-4).
 
@@ -350,7 +352,8 @@ async def create_session(
     """
     try:
         return await agent_client.create_session(
-            settings, request_id, user_id, skill_target, session_type
+            settings, request_id, user_id, skill_target, session_type,
+            **({"delegated_token": delegated_token} if delegated_token else {}),
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

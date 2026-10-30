@@ -12,9 +12,12 @@ the chat request still succeeds and the agent simply runs without tools.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
-from dataclasses import dataclass
+from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -32,11 +35,24 @@ LOGGER = logging.getLogger(__name__)
 
 # Re-exchange once a delegated token is within this fraction of its TTL.
 _REFRESH_FRACTION = 0.8
+_MAX_CACHE_ENTRIES = 1024
+
+
+def _verified_source_key(settings, subject, subject_token):
+    """Bind cache reuse to the source and the complete configured exchange trust."""
+    projection = [
+        subject, subject_token, settings.identity_token_issuer,
+        settings.identity_jwks_url, settings.token_audience,
+        settings.delegation_audience, settings.identity_service_url,
+        settings.service_client_id, settings.service_client_secret,
+        settings.workload_token_path,
+    ]
+    return "verified:" + hashlib.sha256(json.dumps(projection).encode()).hexdigest()
 
 
 @dataclass
 class _CacheEntry:
-    token: str
+    token: str = field(repr=False)
     expires_at: float
     refresh_at: float
 
@@ -45,7 +61,7 @@ class DelegationClient:
     """Per-replica, per-user delegated-token cache backed by broker exchange."""
 
     def __init__(self) -> None:
-        self._cache: dict[str, _CacheEntry] = {}
+        self._cache: OrderedDict[str, _CacheEntry] = OrderedDict()
         self._dev_key: rsa.RSAPrivateKey | None = None
         self._workload_fallback_warned = False
 
@@ -59,7 +75,8 @@ class DelegationClient:
         """Return a still-valid (not near-expiry) delegated token, if any."""
         entry = self._cache.get(subject)
         now = time.time()
-        if entry is not None and now < entry.refresh_at:
+        if entry is not None and now < min(entry.refresh_at, entry.expires_at):
+            self._cache.move_to_end(subject)
             record_delegation_cache("hit")
             return entry.token
         if entry is not None:
@@ -74,6 +91,9 @@ class DelegationClient:
             expires_at=now + expires_in,
             refresh_at=now + max(1, int(expires_in * _REFRESH_FRACTION)),
         )
+        self._cache.move_to_end(subject)
+        while len(self._cache) > _MAX_CACHE_ENTRIES:
+            self._cache.popitem(last=False)
 
     async def exchange(self, settings: PlatformGatewaySettings, subject_token: str) -> tuple[str, int]:
         """Exchange a subject token for a delegated token at the broker.
@@ -199,8 +219,20 @@ async def obtain_delegated_token(
     are logged, counted, and swallowed so chat never breaks on delegation.
     """
     client = get_delegation_client()
+    cache_key = subject
+    if settings.target_authorization_enabled:
+        # Source verification remains the caller's responsibility; never let a
+        # different source inherit a previously verified token's provenance.
+        if (subject == "dev" or not isinstance(subject_token, str)
+                or not subject_token.strip() or len(subject_token) > 16384):
+            return None
+        if not settings.workload_token_path and (
+            not settings.service_client_id or not settings.service_client_secret
+        ):
+            return None
+        cache_key = _verified_source_key(settings, subject, subject_token)
 
-    cached = client.get_cached(subject)
+    cached = client.get_cached(cache_key)
     if cached is not None:
         return cached
 
@@ -215,14 +247,11 @@ async def obtain_delegated_token(
     try:
         token_to_exchange = subject_token or client.mint_dev_subject_token(settings)
         delegated, expires_in = await client.exchange(settings, token_to_exchange)
-    except Exception as exc:  # noqa: BLE001 - delegation failure must be non-fatal
+    except Exception:  # noqa: BLE001 - delegation failure must be non-fatal
         record_delegation_exchange("failure")
-        LOGGER.warning(
-            "delegation exchange failed; proceeding tool-less",
-            extra={"subject": subject, "error": str(exc)},
-        )
+        LOGGER.warning("delegation exchange failed; proceeding tool-less")
         return None
 
     record_delegation_exchange("success")
-    client.put(subject, delegated, expires_in)
+    client.put(cache_key, delegated, expires_in)
     return delegated

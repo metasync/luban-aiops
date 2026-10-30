@@ -135,7 +135,7 @@ class TestSessionTypeRoundTrip:
 
         # Read: row[6] maps to session_type.
         read_calls: list[dict] = []
-        row = ("ses-1", "alice", NOW, None, None, None, "development")
+        row = ("ses-1", "alice", NOW, None, None, None, "development", None, None)
         reader = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(read_calls, rows=[row])
         )
@@ -306,7 +306,7 @@ class TestPostgresDDLAndBackfill:
         # A NULL row (impossible post-migration) still maps to ``operation``
         # rather than erroring, on both the single-row and list mappers.
         calls: list[dict] = []
-        null_row = ("ses-1", "alice", NOW, None, None, None, None)
+        null_row = ("ses-1", "alice", NOW, None, None, None, None, None, None)
         store = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(calls, rows=[null_row])
         )

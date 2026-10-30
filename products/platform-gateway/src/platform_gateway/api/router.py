@@ -4,6 +4,7 @@ from platform_gateway.api.routes import (
     approvals,
     audit,
     auth,
+    authorizations,
     chat,
     documents,
     health,
@@ -21,6 +22,7 @@ router = APIRouter()
 router.include_router(health.router)
 router.include_router(runtime.router)
 router.include_router(auth.router)
+router.include_router(authorizations.router)
 router.include_router(identity.router)
 router.include_router(sessions.router)
 router.include_router(chat.router)

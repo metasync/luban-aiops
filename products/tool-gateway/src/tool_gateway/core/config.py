@@ -68,6 +68,18 @@ DEFAULT_ANSIBLE_NATIVE_EXECUTABLE = "ansible-inventory"
 # seam (OQ-1 = ``oauth2_client_credentials``). No new dependency: ``httpx``.
 DEFAULT_SERVICENOW_TIMEOUT_MS = 10000
 
+# SPEC-070 delegated execution route defaults. The dedicated workload audience
+# pins the private ``/api/v2/tools/invoke-delegated`` handoff to the exact
+# execution-runtime projected service-account token; no public token carries it.
+DEFAULT_EXECUTION_WORKLOAD_AUDIENCE = "luban-target-execution-handoff"
+
+# SPEC-070 delegated target-authorization route defaults. A *second* dedicated
+# workload audience pins the bearerless ``/api/v2/targets/authorizations``
+# provider-url and callback handoffs to the exact platform-gateway projected
+# service-account token, distinct from the execution-runtime audience above so
+# neither handoff can replay the other's token.
+DEFAULT_AUTHORIZATION_WORKLOAD_AUDIENCE = "luban-target-authorization-handoff"
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -214,6 +226,57 @@ class GatewaySettings:
     servicenow_credential_set: str = ""
     servicenow_credential_sets_path: str = ""
     servicenow_timeout_ms: int = DEFAULT_SERVICENOW_TIMEOUT_MS
+    # SPEC-070 private delegated execution route (``/api/v2/tools/invoke-delegated``):
+    # off by default. When enabled the route is callable only by the exact
+    # execution-runtime workload identity (a projected service-account JWT with
+    # the dedicated ``luban-target-execution-handoff`` audience and a subject on
+    # the allowlist). Tool-gateway independently re-verifies the requester and
+    # approver human bearers against the signed projection using the delegated
+    # identity trust config below — the SAME issuer/audience/JWKS/actor set the
+    # worker uses — then applies the existing invocation/mutation policy under
+    # the approver's roles. The execution HMAC signing secret is never
+    # distributed here; workload authentication alone is not execution authority.
+    delegated_invoke_enabled: bool = False
+    delegated_identity_issuer: str = ""
+    delegated_identity_jwks_url: str = ""
+    delegated_identity_audience: str = ""
+    delegated_identity_actors: tuple[str, ...] = ()
+    execution_workload_issuer: str = ""
+    execution_workload_jwks_url: str = ""
+    execution_workload_audience: str = DEFAULT_EXECUTION_WORKLOAD_AUDIENCE
+    execution_workload_subjects: tuple[str, ...] = ()
+    # SPEC-070 delegated *acquisition* runtime — the send-path user-delegated
+    # client wired into the HTTP/MCP authentication seam (distinct from the
+    # machine-grant token client, which is unchanged). Off by default: the client
+    # is composed only when this gate is on AND the full Postgres-custody runtime
+    # below is configured, so until database schema, versioned key mount, trusted
+    # callback, and identity linkage are provisioned a delegated credential set
+    # fails closed at the connector — never a machine grant, never a reauth loop.
+    # The custody store is per-set; one administered delegated target set is wired.
+    delegated_acquisition_enabled: bool = False
+    delegated_custody_db_url: str = ""
+    delegated_custody_keyring_path: str = ""
+    delegated_custody_config_path: str = ""
+    delegated_custody_set_id: str = ""
+    delegated_custody_trusted_callback: str = ""
+    # SPEC-070 delegated target-authorization workflow — the human-initiated
+    # ``/api/v2/targets/authorizations`` routes (start/provider-url/callback/
+    # status/cancel/browser-reset) that enroll and renew a user-delegated grant.
+    # Off by default and *independent* of ``delegated_acquisition_enabled``: the
+    # send path can be provisioned without the enrollment portal and vice versa,
+    # but both compose over the same Postgres custody runtime above. Enabling
+    # requires (validated in ``__post_init__``) the full Postgres custody runtime,
+    # the delegated-human trust set (shared with the execution route — the
+    # owner_namespace is pinned to ``delegated_identity_issuer``), AND a separate
+    # authorization-workload trust set whose dedicated audience pins the
+    # bearerless provider-url/callback handoffs to the exact platform-gateway
+    # projected service-account token. The human edges reject permissive
+    # development minting; the workload edges take no Basic/static fallback.
+    delegated_authorization_enabled: bool = False
+    authorization_workload_issuer: str = ""
+    authorization_workload_jwks_url: str = ""
+    authorization_workload_audience: str = DEFAULT_AUTHORIZATION_WORKLOAD_AUDIENCE
+    authorization_workload_subjects: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Fail fast on a password-policy override that would *weaken* the floor.
@@ -227,6 +290,12 @@ class GatewaySettings:
         """
         if self.secret_delivery_backend not in {"memory", "redis"}:
             raise ValueError("GATEWAY_SECRET_DELIVERY_BACKEND must be memory or redis")
+        if self.delegated_invoke_enabled:
+            self._validate_delegated_invoke()
+        if self.delegated_acquisition_enabled:
+            self._validate_delegated_acquisition()
+        if self.delegated_authorization_enabled:
+            self._validate_delegated_authorization()
         for value in (
             self.secret_delivery_ttl_seconds,
             self.secret_delivery_hold_ttl_seconds,
@@ -263,6 +332,170 @@ class GatewaySettings:
                     or len(classes) != len(set(classes))
                     or not set(policy.required_classes).issubset(classes)):
                 raise ValueError("GATEWAY_PASSWORD_REQUIRED_CLASSES must retain every required class without unknowns or duplicates")
+
+    def _validate_delegated_invoke(self) -> None:
+        """Fail closed when the private delegated route is enabled but untrusted.
+
+        SPEC-070: enabling ``GATEWAY_DELEGATED_INVOKE_ENABLED`` requires an
+        explicit delegated-human trust set (issuer/audience/JWKS + a nonempty
+        actor allowlist) AND an explicit execution-workload trust set
+        (issuer/audience/JWKS + a nonempty subject allowlist). A missing or
+        unbounded value aborts startup rather than degrading to an
+        anything-goes route.
+        """
+        def _bounded(value: object) -> bool:
+            return (
+                isinstance(value, str) and 0 < len(value) <= 256
+                and value == value.strip()
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+            )
+
+        def _http_url(value: str) -> bool:
+            from urllib.parse import urlsplit
+
+            url = urlsplit(value or "")
+            return (
+                url.scheme in {"http", "https"} and bool(url.hostname)
+                and url.username is None and url.password is None
+                and not url.query and not url.fragment
+            )
+
+        if not (_bounded(self.delegated_identity_issuer)
+                and _bounded(self.delegated_identity_audience)
+                and _http_url(self.delegated_identity_jwks_url)
+                and self.delegated_identity_actors
+                and all(_bounded(actor) for actor in self.delegated_identity_actors)):
+            raise ValueError(
+                "GATEWAY_DELEGATED_INVOKE_ENABLED requires explicit delegated "
+                "identity trust (issuer, audience, JWKS URL, actor allowlist)"
+            )
+        if not (_bounded(self.execution_workload_issuer)
+                and _bounded(self.execution_workload_audience)
+                and _http_url(self.execution_workload_jwks_url)
+                and self.execution_workload_subjects
+                and all(_bounded(sub) for sub in self.execution_workload_subjects)):
+            raise ValueError(
+                "GATEWAY_DELEGATED_INVOKE_ENABLED requires explicit execution "
+                "workload trust (issuer, audience, JWKS URL, subject allowlist)"
+            )
+
+    def _validate_delegated_acquisition(self) -> None:
+        """Fail closed when delegated acquisition is enabled but unprovisioned.
+
+        SPEC-070 (plan §"Runtime composition and bounds"): the send-path
+        user-delegated client requires Postgres custody state and a versioned key
+        mount. Enabling ``GATEWAY_DELEGATED_ACQUISITION_ENABLED`` therefore
+        requires an explicit Postgres DSN, keyring path, delegated config path,
+        set id, and a trusted HTTPS callback whose path is the ratified
+        ``CALLBACK_PATH``. Missing infrastructure is a startup configuration
+        error — never a runtime reauthorization loop and never a silent fall-back
+        to a machine grant. ``CALLBACK_PATH`` is imported lazily so ``core.config``
+        keeps no module-level dependency on the tools package.
+        """
+        from urllib.parse import urlsplit
+
+        from tool_gateway.tools.delegated_configuration import CALLBACK_PATH
+
+        def _bounded(value: object) -> bool:
+            return (
+                isinstance(value, str) and 0 < len(value) <= 1024
+                and value == value.strip()
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+            )
+
+        dsn = urlsplit(self.delegated_custody_db_url or "")
+        callback = urlsplit(self.delegated_custody_trusted_callback or "")
+        if not (
+            dsn.scheme in {"postgres", "postgresql"}
+            and bool(dsn.hostname)
+            and _bounded(self.delegated_custody_keyring_path)
+            and _bounded(self.delegated_custody_config_path)
+            and _bounded(self.delegated_custody_set_id)
+            and callback.scheme == "https"
+            and bool(callback.hostname)
+            and callback.path == CALLBACK_PATH
+            and not callback.query
+        ):
+            raise ValueError(
+                "GATEWAY_DELEGATED_ACQUISITION_ENABLED requires explicit Postgres "
+                "custody runtime (DSN, keyring path, config path, set id, trusted "
+                "HTTPS callback)"
+            )
+
+    def _validate_delegated_authorization(self) -> None:
+        """Fail closed when the authorization workflow is enabled but untrusted.
+
+        SPEC-070 OQ-7: the human-initiated ``/api/v2/targets/authorizations``
+        routes enroll and renew a durable grant, so enabling
+        ``GATEWAY_DELEGATED_AUTHORIZATION_ENABLED`` requires all three legs at
+        startup — the same Postgres custody runtime as acquisition (DSN, keyring,
+        config path, set id, trusted HTTPS callback on the ratified
+        ``CALLBACK_PATH``), the delegated-human trust set that pins
+        ``owner_namespace`` to ``delegated_identity_issuer`` (issuer, audience,
+        JWKS URL, nonempty actor allowlist), and a *separate*
+        authorization-workload trust set whose dedicated audience pins the
+        bearerless provider-url/callback handoffs (issuer, audience, JWKS URL,
+        nonempty subject allowlist). A missing or unbounded value aborts startup
+        rather than degrading to an anything-goes enrollment surface; the human
+        edges never accept permissive development minting and the workload edges
+        never fall back to Basic/static auth.
+        """
+        from urllib.parse import urlsplit
+
+        from tool_gateway.tools.delegated_configuration import CALLBACK_PATH
+
+        def _bounded(value: object, maximum: int = 256) -> bool:
+            return (
+                isinstance(value, str) and 0 < len(value) <= maximum
+                and value == value.strip()
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+            )
+
+        def _http_url(value: str) -> bool:
+            url = urlsplit(value or "")
+            return (
+                url.scheme in {"http", "https"} and bool(url.hostname)
+                and url.username is None and url.password is None
+                and not url.query and not url.fragment
+            )
+
+        dsn = urlsplit(self.delegated_custody_db_url or "")
+        callback = urlsplit(self.delegated_custody_trusted_callback or "")
+        if not (
+            dsn.scheme in {"postgres", "postgresql"}
+            and bool(dsn.hostname)
+            and _bounded(self.delegated_custody_keyring_path, 1024)
+            and _bounded(self.delegated_custody_config_path, 1024)
+            and _bounded(self.delegated_custody_set_id, 1024)
+            and callback.scheme == "https"
+            and bool(callback.hostname)
+            and callback.path == CALLBACK_PATH
+            and not callback.query
+        ):
+            raise ValueError(
+                "GATEWAY_DELEGATED_AUTHORIZATION_ENABLED requires explicit Postgres "
+                "custody runtime (DSN, keyring path, config path, set id, trusted "
+                "HTTPS callback)"
+            )
+        if not (_bounded(self.delegated_identity_issuer)
+                and _bounded(self.delegated_identity_audience)
+                and _http_url(self.delegated_identity_jwks_url)
+                and self.delegated_identity_actors
+                and all(_bounded(actor) for actor in self.delegated_identity_actors)):
+            raise ValueError(
+                "GATEWAY_DELEGATED_AUTHORIZATION_ENABLED requires explicit delegated "
+                "identity trust (issuer, audience, JWKS URL, actor allowlist)"
+            )
+        if not (_bounded(self.authorization_workload_issuer)
+                and _bounded(self.authorization_workload_audience)
+                and _http_url(self.authorization_workload_jwks_url)
+                and self.authorization_workload_subjects
+                and all(_bounded(sub) for sub in self.authorization_workload_subjects)):
+            raise ValueError(
+                "GATEWAY_DELEGATED_AUTHORIZATION_ENABLED requires explicit "
+                "authorization workload trust (issuer, audience, JWKS URL, subject "
+                "allowlist)"
+            )
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -530,6 +763,88 @@ class GatewaySettings:
                     str(DEFAULT_SERVICENOW_TIMEOUT_MS),
                 )
             ),
+            # SPEC-070 private delegated execution route knobs. Off by default;
+            # enabling requires the full delegated-human and execution-workload
+            # trust sets (validated in ``__post_init__``). The workload audience
+            # defaults to the dedicated handoff audience; the allowlists are
+            # empty (deny-by-default) so an enabled-but-unconfigured route fails
+            # closed at startup rather than admitting any caller.
+            delegated_invoke_enabled=_env_bool(
+                "GATEWAY_DELEGATED_INVOKE_ENABLED", "false"
+            ),
+            delegated_identity_issuer=os.getenv(
+                "GATEWAY_DELEGATED_IDENTITY_ISSUER", ""
+            ),
+            delegated_identity_jwks_url=os.getenv(
+                "GATEWAY_DELEGATED_IDENTITY_JWKS_URL", ""
+            ),
+            delegated_identity_audience=os.getenv(
+                "GATEWAY_DELEGATED_IDENTITY_AUDIENCE", ""
+            ),
+            delegated_identity_actors=_env_optional_tuple(
+                "GATEWAY_DELEGATED_IDENTITY_ACTORS"
+            ) or (),
+            execution_workload_issuer=os.getenv(
+                "GATEWAY_EXECUTION_WORKLOAD_ISSUER", ""
+            ),
+            execution_workload_jwks_url=os.getenv(
+                "GATEWAY_EXECUTION_WORKLOAD_JWKS_URL", ""
+            ),
+            execution_workload_audience=os.getenv(
+                "GATEWAY_EXECUTION_WORKLOAD_AUDIENCE",
+                DEFAULT_EXECUTION_WORKLOAD_AUDIENCE,
+            ),
+            execution_workload_subjects=_env_optional_tuple(
+                "GATEWAY_EXECUTION_WORKLOAD_SUBJECTS"
+            ) or (),
+            # SPEC-070 delegated *acquisition* runtime (the send-path
+            # user-delegated client). Off by default; enabling requires the full
+            # Postgres-custody runtime (validated in ``__post_init__``) so an
+            # enabled-but-unprovisioned gateway fails closed at startup rather
+            # than composing a client with no durable custody authority.
+            delegated_acquisition_enabled=_env_bool(
+                "GATEWAY_DELEGATED_ACQUISITION_ENABLED", "false"
+            ),
+            delegated_custody_db_url=os.getenv(
+                "GATEWAY_DELEGATED_CUSTODY_DB_URL", ""
+            ),
+            delegated_custody_keyring_path=os.getenv(
+                "GATEWAY_DELEGATED_CUSTODY_KEYRING_PATH", ""
+            ),
+            delegated_custody_config_path=os.getenv(
+                "GATEWAY_DELEGATED_CUSTODY_CONFIG_PATH", ""
+            ),
+            delegated_custody_set_id=os.getenv(
+                "GATEWAY_DELEGATED_CUSTODY_SET_ID", ""
+            ),
+            delegated_custody_trusted_callback=os.getenv(
+                "GATEWAY_DELEGATED_CUSTODY_TRUSTED_CALLBACK", ""
+            ),
+            # SPEC-070 delegated target-authorization workflow knobs. Off by
+            # default and independent of the acquisition gate; enabling requires
+            # the full Postgres custody runtime (reused above), the delegated
+            # human trust set (reused above), AND the separate authorization
+            # workload trust set below (validated in ``__post_init__``). The
+            # workload audience defaults to the dedicated handoff audience and
+            # the subject allowlist is empty (deny-by-default), so an
+            # enabled-but-unconfigured route fails closed at startup rather than
+            # admitting any bearerless caller.
+            delegated_authorization_enabled=_env_bool(
+                "GATEWAY_DELEGATED_AUTHORIZATION_ENABLED", "false"
+            ),
+            authorization_workload_issuer=os.getenv(
+                "GATEWAY_AUTHORIZATION_WORKLOAD_ISSUER", ""
+            ),
+            authorization_workload_jwks_url=os.getenv(
+                "GATEWAY_AUTHORIZATION_WORKLOAD_JWKS_URL", ""
+            ),
+            authorization_workload_audience=os.getenv(
+                "GATEWAY_AUTHORIZATION_WORKLOAD_AUDIENCE",
+                DEFAULT_AUTHORIZATION_WORKLOAD_AUDIENCE,
+            ),
+            authorization_workload_subjects=_env_optional_tuple(
+                "GATEWAY_AUTHORIZATION_WORKLOAD_SUBJECTS"
+            ) or (),
         )
 
 

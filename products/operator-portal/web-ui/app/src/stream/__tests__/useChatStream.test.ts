@@ -70,6 +70,8 @@ describe("useChatStream", () => {
     expect(turn.completed).toBe(true);
     expect(turn.confirmationPending).toBe(false);
     expect(turn.confirmations).toEqual([]);
+    expect(turn.authorizations).toEqual([{ kind: "authorization_required",
+      authChallengeId: "11111111-1111-4111-8111-111111111111", target: "Automation", expiresAt: "2030-01-01T00:00:00Z" }]);
     expect(JSON.stringify(turn)).not.toContain("cf-injected");
     expect(JSON.stringify(turn)).not.toContain("https://provider.test/");
   });

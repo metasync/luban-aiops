@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,15 @@ from tool_gateway.services.delegated_custody import Owner, PostgresCustodyStore
 
 
 @dataclass(frozen=True)
+class PreparedStart:
+    """Private state released only after atomic preparation is acknowledged."""
+
+    transaction: AuthorizationTransaction
+    state: SecretStr = field(repr=False)
+    verifier: SecretStr = field(repr=False)
+
+
+@dataclass(frozen=True)
 class CallbackClaim:
     transaction: AuthorizationTransaction
     operation: SecretStr = field(repr=False)
@@ -23,8 +33,15 @@ class CallbackClaim:
 
 
 def transaction_binding(row):
+    # SPEC-070 v3: the authenticated verifier binding also covers the
+    # per-challenge browser-binding dimensions, so a verifier ciphertext sealed
+    # under the v2 binding (no browser proof) can never decrypt under v3. Both the
+    # encrypting (``consume_start``) and decrypting (``claim_state``) callers must
+    # supply these keys; ``browser_secret_hash`` is ``None`` until the start route
+    # stores it and ``start_attempt`` defaults to 0.
     return {**{key: row[key] for key in ("challenge_id", "set_id", "target", "owner_namespace", "owner_sub",
-        "config_generation", "credential_epoch", "session_id", "call_id", "return_url")},
+        "config_generation", "credential_epoch", "session_id", "call_id", "return_url",
+        "browser_secret_hash", "start_attempt")},
         "expires_at": row["expires_at"].isoformat()}
 
 
@@ -34,6 +51,60 @@ def projection(row):
         config_generation=row["config_generation"], session_id=row["session_id"], call_id=row["call_id"],
         return_url=row["return_url"], status=row["status"], consumed=row["consumed"],
         created_at=row["created_at"], updated_at=row["updated_at"], expires_at=row["expires_at"])
+
+
+# SPEC-070 initiating-browser binding. The browser holds one
+# ``__Host-luban-oauth-<challenge_uuid>`` cookie per outstanding challenge and
+# presents the whole jar on the bearerless provider-url navigation and again on
+# the provider callback. At most eight cookies may be outstanding per browser.
+MAX_BROWSER_BINDINGS = 8
+_BROWSER_COOKIE_NAME = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
+
+def select_browser_secret(challenge_id, browser_bindings):
+    """Return the single opaque browser secret presented for ``challenge_id``.
+
+    Bounds the jar to ``MAX_BROWSER_BINDINGS`` cookies, requires every cookie
+    name to be a well-formed challenge uuid, and returns this challenge's secret
+    or ``None``. It never guesses across an ambiguous, malformed, empty, or
+    oversized jar and never evicts a different live challenge: any other
+    outstanding cookie is simply ignored, not consumed.
+    """
+    if not isinstance(browser_bindings, dict) or not 0 < len(browser_bindings) <= MAX_BROWSER_BINDINGS:
+        return None
+    for name in browser_bindings:
+        if not isinstance(name, str) or not _BROWSER_COOKIE_NAME.match(name):
+            return None
+    secret = browser_bindings.get(challenge_id)
+    if not isinstance(secret, str) or not secret:
+        return None
+    return secret
+
+
+def browser_proof_matches(challenge_id, browser_secret_hash, browser_expires_at, browser_bindings, now):
+    """Verify the browser presented the secret bound to this challenge.
+
+    Fails closed on a missing or expired binding, or on a jar that is oversized,
+    ambiguous, malformed, or lacking this challenge. Only the stored hash is
+    compared; the plaintext secret is never persisted, so a leaked hash cannot
+    replay the proof.
+    """
+    if not browser_secret_hash or browser_expires_at is None or now >= browser_expires_at:
+        return False
+    secret = select_browser_secret(challenge_id, browser_bindings)
+    return secret is not None and capability_hash(SecretStr(secret)) == browser_secret_hash
+
+
+def _well_formed_jar(browser_bindings):
+    """True when the whole cookie jar is bounded and every name is a challenge uuid.
+
+    ``browser_reset`` validates the jar as a unit before cancelling anything, so a
+    single malformed or excess cookie fails the whole reset closed rather than
+    selectively guessing which cookies to honour.
+    """
+    if not isinstance(browser_bindings, dict) or not 0 < len(browser_bindings) <= MAX_BROWSER_BINDINGS:
+        return False
+    return all(isinstance(name, str) and _BROWSER_COOKIE_NAME.match(name) for name in browser_bindings)
 
 
 class MemoryAuthorizationTransactionStore:
@@ -94,10 +165,17 @@ class MemoryAuthorizationTransactionStore:
     async def cancel(self, challenge_id, owner_namespace, owner_sub, *, now):
         row = self._owned(challenge_id, owner_namespace, owner_sub, now)
         if row and row.status == "pending":
-            self._records[challenge_id] = row.model_copy(update={"status": "canceled", "updated_at": now})
+            canceled = row.model_copy(update={"status": "canceled", "updated_at": now})
+            self._records[challenge_id] = canceled
             self._secrets.pop(challenge_id, None)
+            # SPEC-070 R-4a/c: return the finalized transaction so the service emits
+            # one ``target_authorization`` for the actual transition. A non-pending,
+            # absent, or foreign row falls through to ``None`` — the single-use
+            # dedup identity that keeps a repeat cancel silent.
+            return canceled
+        return None
 
-    async def issue_start(self, challenge_id, owner_namespace, owner_sub, *, now):
+    async def issue_start(self, challenge_id, owner_namespace, owner_sub, *, browser_secret, now):
         row = self._owned(challenge_id, owner_namespace, owner_sub, now)
         if not row or row.status != "pending" or row.consumed:
             return None
@@ -105,39 +183,45 @@ class MemoryAuthorizationTransactionStore:
         if previous and previous.get("start_consumed"):
             return None
         token = SecretStr(str(uuid4()))
+        # Store only the hash of the per-challenge browser secret; the cookie
+        # lifetime never exceeds the transaction's remaining life.
         self._secrets[challenge_id] = dict(start_hash=capability_hash(token), start_consumed=False,
+            browser_secret_hash=capability_hash(browser_secret), browser_expires_at=row.expires_at,
             expires_at=min(row.expires_at, now + timedelta(seconds=self._lifetimes.start_ttl_seconds)),
             deadline=min(self._deadlines[challenge_id], self._clock() + self._lifetimes.start_ttl_seconds))
         return token
 
-    async def consume_start(self, token, *, now):
+    async def consume_start(self, token, *, browser_bindings, now):
+        """Atomically consume and prepare, without suspension in the memory backend."""
         digest = capability_hash(token)
-        for challenge_id, data in self._secrets.items():
+        for challenge_id, data in list(self._secrets.items()):
             if data["start_hash"] == digest:
                 row = self._records[challenge_id]
                 row = self._owned(challenge_id, row.owner_namespace, row.owner_sub, now)
                 if (row.status != "pending" or row.consumed or data["start_consumed"]
                         or self._clock() >= data["deadline"] or now >= data["expires_at"]):
                     return None
-                data["start_consumed"] = True
-                return row
+                # The browser proof is checked before consuming the start handle.
+                if not browser_proof_matches(challenge_id, data.get("browser_secret_hash"),
+                                             data.get("browser_expires_at"), browser_bindings, now):
+                    return None
+                state, verifier = SecretStr(secrets.token_urlsafe(32)), SecretStr(secrets.token_urlsafe(48))
+                prepared = PreparedStart(row, state, verifier)
+                self._secrets[challenge_id] = {**data, "start_hash": None, "start_consumed": True,
+                    "state_hash": capability_hash(state), "verifier": verifier}
+                return prepared
         return None
 
-    async def prepare_state(self, challenge_id, owner_namespace, owner_sub, *, now):
-        row = self._owned(challenge_id, owner_namespace, owner_sub, now)
-        data = self._secrets.get(challenge_id)
-        if (not row or row.status != "pending" or row.consumed or not data
-                or not data["start_consumed"] or "state_hash" in data):
-            return None
-        state, verifier = SecretStr(secrets.token_urlsafe(32)), SecretStr(secrets.token_urlsafe(48))
-        data.update(state_hash=capability_hash(state), verifier=verifier)
-        return state, verifier
-
-    async def claim_state(self, state, *, now):
+    async def claim_state(self, state, *, browser_bindings, now):
         digest = capability_hash(state)
         for challenge_id, data in list(self._secrets.items()):
             if data.get("state_hash") != digest:
                 continue
+            # The browser proof is checked again at the callback claim, before any
+            # state is consumed or a code-exchange authority is released.
+            if not browser_proof_matches(challenge_id, data.get("browser_secret_hash"),
+                                         data.get("browser_expires_at"), browser_bindings, now):
+                return None
             row = self._records[challenge_id]
             claimed = await self.claim_callback(challenge_id, row.owner_namespace, row.owner_sub,
                                                 row.config_generation, now=now)
@@ -147,6 +231,33 @@ class MemoryAuthorizationTransactionStore:
             data.pop("state_hash")
             return CallbackClaim(claimed, SecretStr(secrets.token_urlsafe(32)), verifier)
         return None
+
+    async def browser_reset(self, owner_namespace, owner_sub, *, browser_bindings, now):
+        """Cancel this owner's matching pending browser transactions; return the count.
+
+        Portal logout presents the whole cookie jar. The jar is validated as a
+        unit (bounded, every name a well-formed challenge uuid) and fails closed
+        to zero cancellations on any malformed input. Each cookie cancels only a
+        transaction that is owned by this exact subject, still pending, and whose
+        stored browser-secret hash matches the presented proof. It burns pending
+        secret state but never revokes an installed credential or creates a login
+        session.
+        """
+        if not _well_formed_jar(browser_bindings):
+            return 0
+        canceled = 0
+        for name in browser_bindings:
+            row = self._owned(name, owner_namespace, owner_sub, now)
+            if not row or row.status != "pending":
+                continue
+            data = self._secrets.get(name)
+            if not data or not browser_proof_matches(name, data.get("browser_secret_hash"),
+                                                     data.get("browser_expires_at"), browser_bindings, now):
+                continue
+            self._records[name] = row.model_copy(update={"status": "canceled", "updated_at": now})
+            self._secrets.pop(name, None)
+            canceled += 1
+        return canceled
 
     async def expire(self, *, now, limit):
         if type(limit) is not int or not 1 <= limit <= 1000:
@@ -227,44 +338,59 @@ class PostgresAuthorizationTransactionStore:
         return (current is not None and current["epoch"] == row["credential_epoch"]
                 and current["config_generation"] == row["config_generation"])
 
-    async def issue_start(self, challenge_id, owner_namespace, owner_sub, *, now):
+    async def issue_start(self, challenge_id, owner_namespace, owner_sub, *, browser_secret, now):
         async with self.custody.guarded() as (conn, config, linkage, keys, generation):
             row = await self._owned(conn, challenge_id, owner_namespace, owner_sub)
             if (not row or row["status"] != "pending" or row["consumed"] or row["config_generation"] != generation
                     or not await self._credential_current(conn, row)):
                 return None
             token = SecretStr(str(uuid4()))
+            # Store only the hash of the per-challenge browser secret; the cookie
+            # lifetime never exceeds the transaction's remaining life.
             result = await conn.execute("UPDATE gateway_custody.transaction_secrets SET start_hash=%s,"
+                "browser_secret_hash=%s,browser_expires_at=%s,"
                 "start_expires_at=LEAST(%s,clock_timestamp()+%s * interval '1 second')"
                 " WHERE challenge_id=%s AND NOT start_consumed",
-                (capability_hash(token), row["expires_at"], self.lifetimes.start_ttl_seconds, challenge_id))
+                (capability_hash(token), capability_hash(browser_secret), row["expires_at"],
+                 row["expires_at"], self.lifetimes.start_ttl_seconds, challenge_id))
             return token if result.rowcount else None
 
-    async def consume_start(self, token, *, now):
+    async def consume_start(self, token, *, browser_bindings, now):
+        """Consume the browser-bound handle and seal state/PKCE in one transaction.
+
+        No private material escapes before the explicit commit acknowledgment.
+        A lost acknowledgment leaves either the original start or an irreversibly
+        spent start with hash-only state; neither path reconstructs a provider URL.
+        """
         async with self.custody.guarded() as (conn, config, linkage, keys, generation):
-            row = await (await conn.execute("SELECT t.* FROM gateway_custody.transactions t JOIN gateway_custody.transaction_secrets s"
-                " USING(challenge_id) WHERE t.set_id=%s AND s.start_hash=%s AND NOT s.start_consumed"
+            row = await (await conn.execute("SELECT t.*,s.browser_secret_hash,s.browser_expires_at,s.start_attempt,"
+                "clock_timestamp() AS db_now FROM gateway_custody.transactions t"
+                " JOIN gateway_custody.transaction_secrets s USING(challenge_id)"
+                " WHERE t.set_id=%s AND s.start_hash=%s AND NOT s.start_consumed"
+                " AND s.state_hash IS NULL AND s.verifier_cipher IS NULL AND s.callback_hash IS NULL"
                 " AND s.start_expires_at>clock_timestamp() AND t.expires_at>clock_timestamp()"
                 " AND t.status='pending' AND NOT t.consumed AND t.config_generation=%s FOR UPDATE OF t,s",
                 (self.custody.set_id, capability_hash(token), generation))).fetchone()
-            if not row or not await self._credential_current(conn, row):
-                return None
-            await conn.execute("UPDATE gateway_custody.transaction_secrets SET start_consumed=TRUE,start_hash=NULL WHERE challenge_id=%s",
-                               (row["challenge_id"],))
-            return projection(row)
-
-    async def prepare_state(self, challenge_id, owner_namespace, owner_sub, *, now):
-        async with self.custody.guarded() as (conn, config, linkage, keys, generation):
-            row = await self._owned(conn, challenge_id, owner_namespace, owner_sub)
-            if (not row or row["status"] != "pending" or row["consumed"] or row["config_generation"] != generation
+            if (not row or row["target"] != config.value("target")
+                    or not linkage.get((row["owner_namespace"], row["owner_sub"]))
                     or not await self._credential_current(conn, row)):
+                return None
+            # The browser proof is checked before consuming the start handle.
+            if not browser_proof_matches(row["challenge_id"], row["browser_secret_hash"],
+                                         row["browser_expires_at"], browser_bindings, row["db_now"]):
                 return None
             state, verifier = SecretStr(secrets.token_urlsafe(32)), SecretStr(secrets.token_urlsafe(48))
             cipher = keys.encrypt(verifier, "verifier", transaction_binding(row))
-            result = await conn.execute("UPDATE gateway_custody.transaction_secrets SET state_hash=%s,verifier_cipher=%s,key_id=%s"
-                " WHERE challenge_id=%s AND start_consumed AND state_hash IS NULL",
-                (capability_hash(state), cipher, keys.active_key_id, challenge_id))
-            return (state, verifier) if result.rowcount else None
+            result = await conn.execute("UPDATE gateway_custody.transaction_secrets SET start_consumed=TRUE,start_hash=NULL,"
+                "state_hash=%s,verifier_cipher=%s,key_id=%s WHERE challenge_id=%s"
+                " AND start_expires_at>clock_timestamp() AND browser_expires_at>clock_timestamp()"
+                " AND %s>clock_timestamp()",
+                (capability_hash(state), cipher, keys.active_key_id, row["challenge_id"], row["expires_at"]))
+            if not result.rowcount:
+                return None
+            prepared = PreparedStart(projection(row), state, verifier)
+            await self.custody.commit(conn, "start_prepare")
+        return prepared
 
     async def claim_callback(self, challenge_id, owner_namespace, owner_sub, config_generation, *, now):
         # Routing-only claim: without a state proof it cannot install credentials.
@@ -279,15 +405,21 @@ class PostgresAuthorizationTransactionStore:
             await conn.execute("DELETE FROM gateway_custody.transaction_secrets WHERE challenge_id=%s", (challenge_id,))
             return projection({**row, "consumed": True})
 
-    async def claim_state(self, state: SecretStr, *, now):
+    async def claim_state(self, state: SecretStr, *, browser_bindings, now):
         claim = None
         try:
             async with self.custody.guarded() as (conn, config, linkage, keys, generation):
-                row = await (await conn.execute("SELECT t.*,s.verifier_cipher FROM gateway_custody.transactions t"
+                row = await (await conn.execute("SELECT t.*,s.verifier_cipher,s.browser_secret_hash,s.browser_expires_at,s.start_attempt"
+                    " FROM gateway_custody.transactions t"
                     " JOIN gateway_custody.transaction_secrets s USING(challenge_id) WHERE t.set_id=%s AND s.state_hash=%s"
                     " AND t.status='pending' AND NOT t.consumed AND t.expires_at>clock_timestamp()"
                     " AND t.config_generation=%s FOR UPDATE OF t,s", (self.custody.set_id, capability_hash(state), generation))).fetchone()
                 if not row or row["verifier_cipher"] is None or not await self._credential_current(conn, row):
+                    return None
+                # The browser proof is checked again at the callback claim, before
+                # the claim commits or any code-exchange authority is released.
+                if not browser_proof_matches(row["challenge_id"], row["browser_secret_hash"],
+                                             row["browser_expires_at"], browser_bindings, now):
                     return None
                 verifier = keys.decrypt(bytes(row["verifier_cipher"]), "verifier", transaction_binding(row))
                 operation = SecretStr(secrets.token_urlsafe(32))
@@ -386,6 +518,37 @@ class PostgresAuthorizationTransactionStore:
                 await conn.execute("UPDATE gateway_custody.transactions SET status='canceled',updated_at=clock_timestamp() WHERE challenge_id=%s",
                                    (challenge_id,))
                 await conn.execute("DELETE FROM gateway_custody.transaction_secrets WHERE challenge_id=%s", (challenge_id,))
+                # SPEC-070 R-4a/c: mirror the memory store's single-use cancel signal
+                # so the service records one ``target_authorization`` for the actual
+                # transition; a spent/absent/foreign row falls through to ``None``.
+                row.update(status="canceled")
+                return projection(row)
+        return None
+
+    async def browser_reset(self, owner_namespace, owner_sub, *, browser_bindings, now):
+        # Bounded portal-logout cleanup: cancel this owner's pending challenges whose
+        # stored browser-secret hash matches a presented cookie proof. The jar is
+        # validated as a unit; a malformed/oversized jar cancels nothing. It never
+        # revokes an installed credential or creates a login session.
+        if not _well_formed_jar(browser_bindings):
+            return 0
+        canceled = 0
+        async with self.custody.connection() as conn:
+            await conn.execute("SELECT set_id FROM gateway_custody.configurations WHERE set_id=%s FOR UPDATE", (self.custody.set_id,))
+            for name in browser_bindings:
+                row = await (await conn.execute("SELECT t.*,s.browser_secret_hash,s.browser_expires_at"
+                    " FROM gateway_custody.transactions t JOIN gateway_custody.transaction_secrets s"
+                    " USING(challenge_id) WHERE t.challenge_id=%s AND t.set_id=%s AND t.owner_namespace=%s"
+                    " AND t.owner_sub=%s AND t.status='pending' AND t.expires_at>clock_timestamp() FOR UPDATE OF t,s",
+                    (name, self.custody.set_id, owner_namespace, owner_sub))).fetchone()
+                if not row or not browser_proof_matches(row["challenge_id"], row["browser_secret_hash"],
+                                                        row["browser_expires_at"], browser_bindings, now):
+                    continue
+                await conn.execute("UPDATE gateway_custody.transactions SET status='canceled',updated_at=clock_timestamp() WHERE challenge_id=%s",
+                                   (name,))
+                await conn.execute("DELETE FROM gateway_custody.transaction_secrets WHERE challenge_id=%s", (name,))
+                canceled += 1
+        return canceled
 
     async def expire(self, *, now, limit):
         if type(limit) is not int or not 1 <= limit <= 1000:

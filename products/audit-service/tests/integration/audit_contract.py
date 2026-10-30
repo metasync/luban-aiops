@@ -77,6 +77,39 @@ async def prove(db_url):
     assert len(first_page.events) + len(next_page.events) == 4
     assert len({e.event_id for e in first_page.events + next_page.events}) == 4
     assert next_page.next_cursor is None
+    # SPEC-070 (plan line 156): the durable Postgres round-trip also covers the exact
+    # lifecycle/overflow envelope shapes the gateway emits — a target_authorization
+    # success carrying its top-level mode and a tool_invoked whose attribution survives
+    # a REDACTION_OVERFLOW error outcome — queried by event_type and by
+    # (delegation_mode, outcome). A distinct owner keeps the per-mode loop and the
+    # four-event pagination above unaffected.
+    spec070 = [
+        AuditEvent(event_id="evt-authz", occurred_at="2030-01-01T00:00:00Z",
+                   event_type="target_authorization", service="tool-gateway", request_id="req-authz",
+                   username="carol", subject="issuer:carol", actor="platform-gateway", session_id="ses-1",
+                   outcome="success", delegation_mode="user_delegated",
+                   details={"operation": "enroll", "authorization_outcome": "authorized",
+                            "challenge_id": "11111111-1111-4111-8111-111111111111", "target": "Automation"}),
+        AuditEvent(event_id="evt-overflow", occurred_at="2030-01-01T00:00:00Z",
+                   event_type="tool_invoked", service="tool-gateway", request_id="req-overflow",
+                   username="carol", subject="issuer:carol", actor="platform-gateway",
+                   outcome="error", delegation_mode="acting_service",
+                   details={"tool_name": "test.leaky_basic", "status": "error",
+                            "error_code": "REDACTION_OVERFLOW"}),
+    ]
+    assert await second.add(spec070) == 2
+    assert await second.add(spec070) == 0  # event_id primary key dedupes a re-delivery.
+    authz = await second.query(AuditQuery(event_type="target_authorization"), None, 50)
+    assert [e.event_id for e in authz.events] == ["evt-authz"]
+    assert authz.events[0].delegation_mode == "user_delegated"
+    assert authz.events[0].details["authorization_outcome"] == "authorized"
+    # Attribution survives an error outcome: the overflow event is queryable by its
+    # mode AND its outcome, and never surfaces under a success filter for this owner.
+    overflow = await second.query(AuditQuery(delegation_mode="acting_service", outcome="error"), None, 50)
+    assert [e.event_id for e in overflow.events] == ["evt-overflow"]
+    assert not (await second.query(AuditQuery(delegation_mode="acting_service", outcome="success",
+                                              username="carol"), None, 50)).events
+    assert (await second.summarize(AuditQuery(event_type="target_authorization"))).total_events == 1
     await second.close()
 
 

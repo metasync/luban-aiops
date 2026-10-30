@@ -98,6 +98,7 @@ async def coordinate_v3_invocation(
     settings: Any,
     attempt_request_id: str,
     current_request_id: str,
+    requester_token: str | None = None,
 ) -> InvocationOutcome:
     """Register, dispatch, and durably accept one approved mutating call.
 
@@ -115,9 +116,12 @@ async def coordinate_v3_invocation(
         guard.ensure_not_stopped()
         # 2. Register the immutable intent in-lane before any send.
         guard.recovery.register(envelope, attempt_request_id)
-        # 3. Dispatch; raw output returns only as a VerifiedOriginal.
+        # 3. Dispatch; raw output returns only as a VerifiedOriginal. The
+        # requester bearer (SPEC-070) rides separately from the approver token
+        # and is None for a machine (non-identity) envelope.
         original = await handoff_original(
-            envelope, arguments, delegated_token, settings, attempt_request_id
+            envelope, arguments, delegated_token, settings, attempt_request_id,
+            requester_token=requester_token,
         )
         # 4. Durably accept, then mint the single-use secret-release permit.
         permit = guard.release_permit(envelope, original, current_request_id)
@@ -125,9 +129,8 @@ async def coordinate_v3_invocation(
         return _stop_and_report(guard, envelope, exc.reason, key,
                                 attempt_request_id, current_request_id)
     result = original.result
-    # A permit authorizes secret release only for a successful gated write; a
-    # validated tool failure is still durably accepted (above) but releases
-    # nothing. The unused permit object is simply discarded.
+    # A validated failure is still durably accepted, but the guard mints no
+    # permit for it. Retain the result status gate as defense in depth.
     return InvocationOutcome(
         status="original",
         result=result,

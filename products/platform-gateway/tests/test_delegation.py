@@ -104,6 +104,90 @@ class ObtainDelegatedTokenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["aud"], ["platform-gateway"])
 
 
+class StrictDelegationTests(unittest.IsolatedAsyncioTestCase):
+    """SPEC-070: a cached delegation cannot substitute authentication provenance."""
+
+    def setUp(self) -> None:
+        dc.reset_delegation_state()
+        self.addCleanup(dc.reset_delegation_state)
+
+    async def test_missing_and_synthetic_sources_cannot_use_a_cached_human(self):
+        settings = _settings(target_authorization_enabled=True)
+        client = dc.get_delegation_client()
+        client.put("user-1", "previous-human", 300)
+        client.put("dev", "previous-human", 300)
+        with (
+            patch.object(client, "exchange", AsyncMock()) as exchange,
+            patch.object(client, "mint_dev_subject_token") as mint,
+        ):
+            for subject, token in (("user-1", None), ("user-1", ""), ("dev", "source.jwt")):
+                self.assertIsNone(await dc.obtain_delegated_token(settings, subject, token))
+            exchange.assert_not_awaited()
+            mint.assert_not_called()
+
+    async def test_cache_binds_exact_source_token_and_does_not_store_it_as_key(self):
+        settings = _settings(target_authorization_enabled=True)
+        exchange = AsyncMock(side_effect=[("oidc-delegation", 300), ("development-delegation", 300)])
+        with patch.object(dc.DelegationClient, "exchange", exchange):
+            first = await dc.obtain_delegated_token(settings, "user-1", "oidc-source.jwt")
+            second = await dc.obtain_delegated_token(settings, "user-1", "development-source.jwt")
+            again = await dc.obtain_delegated_token(settings, "user-1", "oidc-source.jwt")
+        self.assertEqual((first, second, again), ("oidc-delegation", "development-delegation", "oidc-delegation"))
+        self.assertEqual(exchange.await_count, 2)
+        self.assertNotIn("source.jwt", repr(list(dc.get_delegation_client()._cache)))
+
+    async def test_cache_cannot_cross_trust_or_exchange_configuration(self):
+        variants = [
+            {}, {"identity_token_issuer": "other-issuer"},
+            {"identity_jwks_url": "https://other.test/jwks"},
+            {"token_audience": "other-inbound"}, {"delegation_audience": "other-outbound"},
+            {"identity_service_url": "https://other-broker.test"},
+            {"service_client_id": "other-service"}, {"service_client_secret": "rotated-secret"},
+            {"workload_token_path": "/var/run/other-token"},
+        ]
+        exchange = AsyncMock(return_value=("delegation", 300))
+        with patch.object(dc.DelegationClient, "exchange", exchange):
+            for variant in variants:
+                await dc.obtain_delegated_token(
+                    _settings(target_authorization_enabled=True, **variant), "user-1", "source.jwt"
+                )
+        self.assertEqual(exchange.await_count, len(variants))
+        keys = repr(list(dc.get_delegation_client()._cache))
+        self.assertNotIn("rotated-secret", keys)
+
+    async def test_removed_service_configuration_cannot_use_cached_delegation(self):
+        exchange = AsyncMock(return_value=("delegation", 300))
+        with patch.object(dc.DelegationClient, "exchange", exchange):
+            await dc.obtain_delegated_token(_settings(target_authorization_enabled=True), "user-1", "source.jwt")
+            result = await dc.obtain_delegated_token(
+                _settings(target_authorization_enabled=True, service_client_id="", service_client_secret=""),
+                "user-1", "source.jwt",
+            )
+        self.assertIsNone(result)
+        self.assertEqual(exchange.await_count, 1)
+
+    async def test_exchange_failure_logs_no_provider_exception_or_source(self):
+        canary = "SECRET_SOURCE_CANARY"
+        with (
+            patch.object(dc.DelegationClient, "exchange", AsyncMock(side_effect=RuntimeError(canary))),
+            self.assertLogs(dc.LOGGER, level="WARNING") as logs,
+        ):
+            result = await dc.obtain_delegated_token(_settings(target_authorization_enabled=True), "user-1", canary)
+        self.assertIsNone(result)
+        self.assertNotIn(canary, repr([record.__dict__ for record in logs.records]))
+
+    def test_cache_has_lru_bound_and_secret_safe_repr(self):
+        client = dc.get_delegation_client()
+        for index in range(1024):
+            client.put(str(index), "SECRET_TOKEN_CANARY", 300)
+        self.assertEqual(client.get_cached("0"), "SECRET_TOKEN_CANARY")
+        client.put("new", "token", 300)
+        self.assertEqual(len(client._cache), 1024)
+        self.assertIsNone(client.get_cached("1"))
+        self.assertIsNotNone(client.get_cached("0"))
+        self.assertNotIn("SECRET_TOKEN_CANARY", repr(client._cache))
+
+
 class ExchangeRequestTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         dc.reset_delegation_state()

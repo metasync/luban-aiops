@@ -47,4 +47,35 @@ async def invoke_tool(
 
     request_id = getattr(request.state, "request_id", None) or resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
-    return await service_invoke(settings, registry, request, identity, request_id)
+    # SPEC-070 producer wiring: when the authorization runtime is provisioned
+    # (``delegated_authorization_enabled``), ``create_app`` publishes the
+    # ``AuthorizationService`` on app state; a verified read-path delegated
+    # re-authorization denial is then upgraded to a durable challenge. Absent it,
+    # the transitional denial passes through untouched.
+    producer = getattr(request.app.state, "authorization_service", None)
+    return await service_invoke(
+        settings, registry, request, identity, request_id,
+        challenge_producer=producer,
+    )
+
+
+@router.post("/invoke-delegated")
+async def invoke_tool_delegated(
+    request: Request,
+    x_request_id: str | None = Header(default=None),
+    settings: GatewaySettings = Depends(get_settings),
+    registry: ToolRegistry = Depends(get_tool_registry),
+) -> JSONResponse:
+    """SPEC-070 private delegated execution route.
+
+    Identity is *not* resolved from a portal bearer here: the caller must present
+    the exact execution-runtime workload token, and the two human bearers travel
+    in the body for independent re-verification against the signed projection.
+    Off by default (``GATEWAY_DELEGATED_INVOKE_ENABLED``); disabled fails closed.
+    """
+    from tool_gateway.services.gateway_service import (
+        invoke_delegated as service_invoke_delegated,
+    )
+
+    request_id = getattr(request.state, "request_id", None) or resolve_request_id(x_request_id)
+    return await service_invoke_delegated(settings, registry, request, request_id)

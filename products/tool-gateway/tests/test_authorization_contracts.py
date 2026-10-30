@@ -6,16 +6,21 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from tool_gateway.app import create_app
 from tool_gateway.schemas.authorization import (
+    MAX_BROWSER_BINDINGS,
     AuthorizationCallbackRequest,
     AuthorizationCallbackResponse,
     AuthorizationRequired,
+    AuthorizationStartRequest,
+    AuthorizationStartResponse,
     AuthorizationStatus,
     AuthorizationStatusResponse,
+    BrowserResetRequest,
     ProviderAuthorizationResponse,
+    ProviderUrlRequest,
 )
 from tool_gateway.services.authorization_transactions import (
     AuthorizationLifetimes,
@@ -58,29 +63,93 @@ def test_status_projection_has_exact_public_vocabulary():
 
 
 def test_internal_material_is_redacted_and_never_accepts_browser_identity():
-    request = AuthorizationCallbackRequest(code="opaque-code", state=HANDLE)
+    # The callback body is discriminated (code XOR denial), re-presents the
+    # browser cookie jar, and carries no owner identity: the stored state selects
+    # the owner/set. Every secret-bearing value is a SecretStr, so it is redacted
+    # from reprs and dumped bodies. The cookie NAME is the public challenge uuid
+    # and is deliberately not a secret.
+    opaque_state = "opaque-state-" + "a" * 48
+    jar = {HANDLE: SecretStr("cookie-secret-value")}
+    request = AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar, code="opaque-code")
     provider = ProviderAuthorizationResponse(provider_url="https://provider.test/authorize",
-                                             state=HANDLE, expires_at=EXPIRY)
+                                             expires_at=EXPIRY)
     for model, secret in ((request, "opaque-code"), (provider, "https://provider.test/authorize")):
         assert secret not in repr(model)
         assert secret not in model.model_dump_json()
-        assert HANDLE not in model.model_dump_json()
-    with pytest.raises(ValidationError):
-        AuthorizationCallbackRequest(code="opaque-code", state=HANDLE, owner_sub="mallory")
+    assert "cookie-secret-value" not in repr(request)
+    assert "cookie-secret-value" not in request.model_dump_json()
+    assert opaque_state not in request.model_dump_json()
+    assert HANDLE not in provider.model_dump_json()
     assert request.code.get_secret_value() == "opaque-code"
-    opaque_state = "opaque-state-" + "a" * 48
-    assert AuthorizationCallbackRequest(code="code", state=opaque_state).state.get_secret_value() == opaque_state
+    assert request.state.get_secret_value() == opaque_state
+    assert request.browser_bindings[HANDLE].get_secret_value() == "cookie-secret-value"
+    # A caller-supplied owner identity is rejected: extra fields are forbidden.
     with pytest.raises(ValidationError):
-        AuthorizationCallbackRequest(code="code", state="")
+        AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar,
+                                     code="opaque-code", owner_sub="mallory")
+    # Exactly one outcome: both code and denial, or neither, is rejected.
     with pytest.raises(ValidationError):
-        AuthorizationCallbackResponse(status="authorized")
+        AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar,
+                                     code="opaque-code", denial="access_denied")
     with pytest.raises(ValidationError):
-        AuthorizationCallbackResponse(status="failed", return_url="/")
-    assert AuthorizationCallbackResponse(status="authorized", return_url="/").return_url == "/"
+        AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar)
+    # The denial vocabulary is closed; provider error_description free text never
+    # fits, so it can never be forwarded onward.
+    denied = AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar, denial="access_denied")
+    assert denied.denial == "access_denied" and denied.code is None
+    with pytest.raises(ValidationError):
+        AuthorizationCallbackRequest(state=opaque_state, browser_bindings=jar, denial="error_description")
+    # Empty state is rejected; the cookie jar is bounded above.
+    with pytest.raises(ValidationError):
+        AuthorizationCallbackRequest(state="", browser_bindings=jar, code="opaque-code")
+    oversized = {str(index): SecretStr("s") for index in range(MAX_BROWSER_BINDINGS + 1)}
+    with pytest.raises(ValidationError):
+        AuthorizationCallbackRequest(state=opaque_state, browser_bindings=oversized, code="opaque-code")
+    # The return path is decoupled from status (a browser-verified transaction
+    # returns to /authorizations/return/<uuid> for ANY outcome; unknown input
+    # returns to /) but stays bounded to a local path.
+    assert AuthorizationCallbackResponse(status="authorized").model_dump(exclude_none=True) == {"status": "authorized"}
+    assert AuthorizationCallbackResponse(status="failed", return_url="/").return_url == "/"
+    return_path = f"/authorizations/return/{HANDLE}"
+    assert AuthorizationCallbackResponse(status="canceled", return_url=return_path).return_url == return_path
     for bad_path in ("https://evil.test", "//evil", "/?code=secret", "/%2fevil", "/a/../b", "/#secret"):
         with pytest.raises(ValidationError):
             AuthorizationCallbackResponse(status="authorized", return_url=bad_path)
-    assert AuthorizationCallbackResponse(status="failed").model_dump(exclude_none=True) == {"status": "failed"}
+
+
+def test_start_provider_url_and_browser_reset_shapes():
+    # The start request carries only the initiating browser's per-challenge cookie
+    # secret (bounded); the start response hands back a single-use SecretStr token
+    # plus expiry — never a provider URL, an owner, or a challenge.
+    start = AuthorizationStartRequest(browser_secret="browser-secret-value")
+    assert "browser-secret-value" not in repr(start)
+    assert "browser-secret-value" not in start.model_dump_json()
+    assert start.browser_secret.get_secret_value() == "browser-secret-value"
+    for bad in ("", "x" * 257):
+        with pytest.raises(ValidationError):
+            AuthorizationStartRequest(browser_secret=bad)
+    issued = AuthorizationStartResponse(start_token="start-token-value", expires_at=EXPIRY)
+    assert "start-token-value" not in issued.model_dump_json()
+    assert issued.start_token.get_secret_value() == "start-token-value"
+    with pytest.raises(ValidationError):
+        AuthorizationStartResponse(start_token="", expires_at=EXPIRY)
+    # The bearerless provider-url navigation presents the start token plus the
+    # whole cookie jar; both are bounded and redacted, and no owner is accepted.
+    jar = {HANDLE: SecretStr("cookie-secret-value")}
+    nav = ProviderUrlRequest(start_token="start-token-value", browser_bindings=jar)
+    assert "start-token-value" not in nav.model_dump_json()
+    assert "cookie-secret-value" not in nav.model_dump_json()
+    assert nav.browser_bindings[HANDLE].get_secret_value() == "cookie-secret-value"
+    with pytest.raises(ValidationError):
+        ProviderUrlRequest(start_token="", browser_bindings=jar)
+    with pytest.raises(ValidationError):
+        ProviderUrlRequest(start_token="start-token-value", browser_bindings=jar, owner_sub="mallory")
+    # Browser-reset presents only the cookie jar for bounded cleanup and refuses
+    # any caller-asserted owner identity.
+    reset = BrowserResetRequest(browser_bindings=jar)
+    assert "cookie-secret-value" not in reset.model_dump_json()
+    with pytest.raises(ValidationError):
+        BrowserResetRequest(browser_bindings=jar, owner_sub="mallory")
 
 
 def test_local_lifetimes_are_strict_and_bounded():
@@ -113,4 +182,15 @@ def test_routing_record_is_closed_and_store_interface_is_inert():
     for method in ("get", "claim_callback", "finish", "cancel"):
         params = inspect.signature(getattr(AuthorizationTransactionStore, method)).parameters
         assert {"owner_namespace", "owner_sub", "now"} <= set(params)
-    assert not any("/targets/authorizations" in path for path in create_app().openapi()["paths"])
+    # The six internal authorization routes are registered unconditionally and
+    # fail closed when the runtime gate is off, so they are always advertised.
+    paths = create_app().openapi()["paths"]
+    for expected in (
+        "/api/v2/targets/authorizations/{challenge_id}/start",
+        "/api/v2/targets/authorizations/provider-url",
+        "/api/v2/targets/authorizations/callback",
+        "/api/v2/targets/authorizations/browser-reset",
+        "/api/v2/targets/authorizations/{challenge_id}",
+        "/api/v2/targets/authorizations/{challenge_id}/cancel",
+    ):
+        assert expected in paths

@@ -193,6 +193,67 @@ class SessionWorkspaceProxyBase(unittest.TestCase):
         )
 
 
+class DelegatedSessionBirthTests(SessionWorkspaceProxyBase):
+    def setUp(self):
+        super().setUp()
+        self.client.app.dependency_overrides[get_settings] = lambda: PlatformGatewaySettings(
+            require_auth=True, target_authorization_enabled=True,
+        )
+
+    def test_verified_source_is_exchanged_and_forwarded_only_as_header(self):
+        from platform_gateway.services import agent_client
+        captured = []
+        def upstream(request):
+            captured.append(request)
+            return httpx.Response(200, json=CREATE_PAYLOAD)
+        real_client = httpx.AsyncClient
+        exchange = AsyncMock(return_value="delegated-human-canary")
+        with (
+            self._patch_identity("operator"),
+            patch("platform_gateway.api.routes.sessions.obtain_delegated_token", exchange),
+            patch.object(agent_client.httpx, "AsyncClient", side_effect=lambda **kwargs: real_client(
+                transport=httpx.MockTransport(upstream), **kwargs
+            )),
+        ):
+            response = self.client.post(SESSIONS_PATH, json={}, headers={"Authorization": "Bearer source-human-canary"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(exchange.await_args.args[1:], ("user-operator", "source-human-canary"))
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].headers["Authorization"], "Bearer delegated-human-canary")
+        self.assertEqual(captured[0].headers["X-User-ID"], "operator.user")
+        self.assertNotIn(b"canary", captured[0].content)
+        self.assertNotIn("canary", response.text)
+
+    def test_no_source_or_delegation_failure_cannot_create_session(self):
+        for headers, expected in (({}, 401), ({"Authorization": "Basic ignored"}, 401),
+                                  ({"Authorization": "Bearer source"}, 503)):
+            with self.subTest(expected=expected, headers=headers):
+                exchange = AsyncMock(return_value=None)
+                upstream = AsyncMock(return_value=CREATE_PAYLOAD)
+                with (
+                    self._patch_identity("operator"),
+                    patch("platform_gateway.api.routes.sessions.obtain_delegated_token", exchange),
+                    patch(CREATE_PATCH, upstream),
+                ):
+                    response = self.client.post(SESSIONS_PATH, json={}, headers=headers)
+                self.assertEqual(response.status_code, expected)
+                upstream.assert_not_awaited()
+                if expected == 401:
+                    exchange.assert_not_awaited()
+
+    def test_synthetic_identity_is_rejected_even_with_a_bearer(self):
+        identity = IdentityContext(subject="dev", username="operator.user", roles=["operator"])
+        with (
+            patch("platform_gateway.api.routes.sessions.resolve_request_identity", AsyncMock(return_value=identity)),
+            patch("platform_gateway.api.routes.sessions.obtain_delegated_token", AsyncMock()) as exchange,
+            patch(CREATE_PATCH, AsyncMock()) as upstream,
+        ):
+            response = self.client.post(SESSIONS_PATH, json={}, headers={"Authorization": "Bearer source"})
+        self.assertEqual(response.status_code, 401)
+        exchange.assert_not_awaited()
+        upstream.assert_not_awaited()
+
+
 class ListSessionsProxyTests(SessionWorkspaceProxyBase):
     def test_operator_lists_own_sessions_via_upstream(self) -> None:
         upstream = AsyncMock(return_value=LIST_PAYLOAD)

@@ -41,5 +41,10 @@ def test_status_has_exact_safe_fields_and_five_states():
         AuthorizationStatusResponse(**{**payload, "updated_at": "2030-01-01T00:00:00"})
 
 
-def test_contract_increment_does_not_register_authorization_routes():
-    assert not any("/targets/authorizations" in path for path in create_app().openapi()["paths"])
+def test_ratified_authorization_routes_are_registered():
+    base = "/api/v1/targets/authorizations"
+    paths = create_app().openapi()["paths"]
+    assert {path for path in paths if "/targets/authorizations" in path} == {
+        base + suffix for suffix in ("/callback", "/start/{start_token}", "/browser-reset",
+                                     "/{challenge_id}", "/{challenge_id}/start", "/{challenge_id}/cancel")
+    }

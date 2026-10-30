@@ -18,6 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from agent_service.services.delegated_identity import VerifiedHuman
 from agent_service.services.secret_params import (
     MASK,
     is_secret_param,
@@ -96,6 +97,7 @@ class PendingConfirmation:
     # run identity lives in the ledger's ``execution_runs`` row keyed by session.
     run_id: str | None = None
     requester_delegated_token: str | None = field(default=None, repr=False)
+    requester_identity: VerifiedHuman | None = field(default=None, repr=False)
     # SPEC-062 R-3 reveal-on-commit: portal_copy secret deliveries generated in
     # the turn that parked this card, held opaquely as ``{delivery_id, channel,
     # expires_at}`` dicts (never the plaintext) so they ride the park across

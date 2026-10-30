@@ -6,6 +6,11 @@
   "type": "object",
   "required": ["iss", "sub", "username", "aud", "iat", "exp"],
   "properties": {
+    "authentication_source": {
+      "type": "string",
+      "enum": ["oidc", "development"],
+      "description": "Broker-stamped authentication provenance, preserved by verified exchange. SPEC-070 requires oidc plus the expected delegation actor; missing or development provenance cannot authorize a target grant. Optional only for historical platform tokens."
+    },
     "iss": {
       "type": "string",
       "description": "Token issuer. Must match IDENTITY_TOKEN_ISSUER (default: luban-identity-broker)."

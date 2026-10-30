@@ -86,6 +86,8 @@ def issue_token(
     audience: str | list[str] | None = None,
     actor: dict[str, Any] | None = None,
     ttl_seconds: int | None = None,
+    *,
+    authentication_source: str = "development",
 ) -> tuple[str, int]:
     """Sign a JWT for the given identity claims.
 
@@ -99,6 +101,10 @@ def issue_token(
 
     Returns (token_string, expires_in_seconds).
     """
+    # Only trusted login/refresh and verified exchange code may set provenance;
+    # arbitrary identity input and the development mint never promote it.
+    if authentication_source not in ("oidc", "development"):
+        raise ValueError("invalid authentication source")
     key, kid = _ensure_key(settings)
     now = int(time.time())
     ttl = settings.jwt_token_ttl_seconds if ttl_seconds is None else ttl_seconds
@@ -109,6 +115,7 @@ def issue_token(
 
     claims: dict[str, Any] = {
         "iss": settings.jwt_issuer,
+        "authentication_source": authentication_source,
         "sub": identity.get("sub", identity.get("subject", "")),
         "username": identity.get("username", ""),
         "email": identity.get("email"),

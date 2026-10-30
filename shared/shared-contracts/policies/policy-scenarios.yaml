@@ -219,6 +219,20 @@ tools:
     action: tools:invoke
     expect: allow
 
+  # allow-operators-targets-authorize (SPEC-070 OQ-7): the human-initiated
+  # outbound user-delegated enrollment workflow rides exactly the tools:invoke
+  # grant set, so a requester may only drive authorization for a target they may
+  # already invoke for. The administered-mapping and entitlement rechecks are
+  # route-level, not bundle outcomes, so the evaluation here is a plain allow.
+  - roles:
+      - platform-admin
+      - approver
+      - operator
+      - developer
+      - read-only-observer
+    action: targets:authorize
+    expect: allow
+
   # allow-operators-tools-mutate: this engine skips require_approval rules
   # at load (SPEC-030 R-2), so admission stays allow/deny for the holders.
   - roles: ["platform-admin", "approver", "operator"]
@@ -230,7 +244,7 @@ tools:
     action: tools:mutate
     expect: deny
   - role: auditor
-    actions: ["tools:list", "tools:invoke", "tools:mutate"]
+    actions: ["tools:list", "tools:invoke", "tools:mutate", "targets:authorize"]
     expect: deny
 
   # allow-operators-tools-list

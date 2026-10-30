@@ -1525,5 +1525,355 @@ class TokenUsageMiddlewareTests(unittest.TestCase):
         )
 
 
+class TargetAuthorizationRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """Run the installed AgentScope loop, not only stub middleware hooks.
+
+    Gateway responses here are contract fixtures, not enrollment acceptance.
+    """
+
+    async def _run_turn(self, *, structured=False, enabled=True, malformed=False,
+                        concurrent=True, with_sink=True, runtime=False,
+                        result_changes=None, resume=False, prefix=False, text_only=False,
+                        disconnect=False):
+        from agentscope.agent import Agent, ReActConfig
+        from agentscope.message import TextBlock, UserMsg
+        from agentscope.model import ChatModelBase, ChatResponse
+        from agentscope.tool import FunctionTool, ToolChunk, Toolkit
+        from agent_service.runtime_kernel import AgentKernel
+        from agent_service.runtime_settings import RuntimeSettings
+        from agent_service.services.kernel_middleware import authorization_turn
+
+        dispatches = []
+        correlation = []
+        challenge_id = "ae623dda-2255-4a5d-bc75-2a9d05fdc227"
+        result = {
+            "tool_name": "k8s.list_pods", "status": "error",
+            "error": {"code": "TARGET_AUTHORIZATION_REQUIRED", "message": "provider-canary"},
+            "authorization_required": {
+                "challenge_id": challenge_id, "target": "fixture-target",
+                "expires_at": "2099-01-01T00:00:00Z",
+            },
+        }
+        if malformed:
+            result["authorization_required"]["browser_secret"] = "private-canary"
+        result.update(result_changes or {})
+        permission_waiting = asyncio.Event()
+
+        async def first():
+            from agent_service.tools.gateway_tools import CURRENT_CALL_ID
+            dispatches.append("first")
+            correlation.append(CURRENT_CALL_ID.get())
+            if concurrent and not prefix and not resume:
+                await permission_waiting.wait()
+            return ToolChunk(content=[TextBlock(text=json.dumps(result))],
+                             metadata={} if text_only else {"gateway_result": result})
+
+        async def earlier():
+            dispatches.append("earlier")
+            return ToolChunk(content=[TextBlock(text="previous success")], metadata={
+                "gateway_result": {"tool_name": "k8s.get_pod", "status": "success", "data": {"kept": True}},
+            })
+
+        async def second():
+            dispatches.append("second")
+            return ToolChunk(content=[TextBlock(text="second executed")])
+
+        tools = [
+            FunctionTool(first, name="k8s_list_pods", is_read_only=True,
+                         is_concurrency_safe=concurrent),
+            FunctionTool(second, name="unvetted_probe", is_read_only=True,
+                         is_concurrency_safe=concurrent),
+        ]
+        tools[0].gateway_tool_name = "k8s.list_pods"
+        tools[1].gateway_tool_name = "unvetted.probe"
+        if prefix:
+            preceding = FunctionTool(earlier, name="k8s_get_pod", is_read_only=True,
+                                     is_concurrency_safe=False)
+            preceding.gateway_tool_name = "k8s.get_pod"
+            tools.insert(0, preceding)
+
+        class Model(ChatModelBase):
+            def __init__(self):
+                super().__init__(None, "fixture", self.Parameters(), stream=False)
+                self.formatter = SimpleNamespace(supported_input_media_types=[])
+                self.calls = 0
+
+            async def __call__(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return ChatResponse(content=([
+                        _tool_call_block("k8s_get_pod", {}, "earlier-call"),
+                    ] if prefix else []) + [
+                        _tool_call_block("k8s_list_pods", {}, "first-call"),
+                        _tool_call_block("unvetted_probe", {}, "second-call"),
+                    ], is_last=True)
+                return ChatResponse(content=[TextBlock(text="provider follow-up")], is_last=True)
+
+        model = Model()
+        kernel = AgentKernel(settings=RuntimeSettings(
+            api_key="fixture", target_authorization_enabled=enabled,
+            delegated_identity_issuer="https://issuer.test", delegated_identity_audience="agent-service",
+            delegated_identity_jwks_url="https://issuer.test/jwks", delegated_identity_actors=("platform-gateway",),
+        ))
+        from agentscope.middleware import MiddlewareBase
+
+        class PermissionBarrier(MiddlewareBase):
+            async def on_check_permission(self, agent, input_kwargs, next_handler):
+                if input_kwargs["tool_call"].id == "second-call":
+                    permission_waiting.set()
+                return await next_handler(**input_kwargs)
+
+        middlewares = kernel._build_middlewares()
+        if resume:
+            for middleware in middlewares:
+                if isinstance(middleware, GatewayPermissionMiddleware):
+                    middleware._allow_list = frozenset()
+        agent = Agent(name="fixture", system_prompt="fixture", model=model,
+                      toolkit=Toolkit(tools=tools), middlewares=[PermissionBarrier(), *middlewares],
+                      react_config=ReActConfig(max_iters=3))
+        if runtime:
+            from unittest.mock import AsyncMock
+            from agent_service.services.evidence_store import InMemoryEvidenceStore
+            from agent_service.api.v2.routes import _normalize_stream_event
+            store = InMemoryEvidenceStore()
+            with (
+                patch.object(kernel, "ensure_agent", AsyncMock(return_value=(agent, UserMsg, "fixture"))),
+                patch.object(kernel, "_requester_for_turn", return_value=None),
+                patch("agent_service.runtime_kernel.EVIDENCE_STORE", store),
+            ):
+                if disconnect:
+                    from contextlib import aclosing
+                    from agent_service.services.kernel_middleware import CURRENT_AUTHORIZATION_TURN
+                    async with aclosing(kernel.stream_events("probe", "req-auth", "ses-auth", "alice")) as stream:
+                        async for event in stream:
+                            if event.get("type") == "authorization_required":
+                                break
+                    self.assertIsNone(CURRENT_AUTHORIZATION_TURN.get())
+                    self.assertIsNone(TOOL_EVIDENCE_SINK.get())
+                    return store.load_turns("ses-auth"), model, dispatches
+                if structured:
+                    reply = await asyncio.wait_for(kernel.reply_text("probe", "ses-auth", "alice", response_schema={"type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"]}), 3)
+                    return reply, store.load_turns("ses-auth"), model, dispatches
+                events = [_normalize_stream_event(event, "ses-auth", "req-auth").model_dump(exclude_none=True)
+                          async for event in kernel.stream_events("probe", "req-auth", "ses-auth", "alice")]
+                if resume:
+                    from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+                    card = next(event for event in events if event["type"] == "confirmation_request")
+                    self.assertEqual(dispatches, [])
+                    pending = CONFIRMATION_REGISTRY.claim("ses-auth", card["confirm_id"], 300)
+                    with patch.object(kernel, "_resume_identities", return_value=(None, None)):
+                        events = [_normalize_stream_event(event, "ses-auth", "req-resume").model_dump(exclude_none=True)
+                                  async for event in kernel.resume_confirmation(
+                                      "ses-auth", pending, "approve", "alice", "req-resume")]
+                    self.assertIsNone(pending.requester_delegated_token)
+                    self.assertIsNone(pending.requester_identity)
+                return events, store.load_turns("ses-auth"), model, dispatches
+        queue = asyncio.Queue()
+        sink_token = TOOL_EVIDENCE_SINK.set(queue if with_sink else None)
+        try:
+            with authorization_turn(enabled) as turn:
+                if structured:
+                    reply = await asyncio.wait_for(agent.reply(
+                        UserMsg(name="alice", content="probe"),
+                        structured_schema={"type": "object", "properties": {"answer": {"type": "string"}},
+                                           "required": ["answer"]},
+                    ), timeout=3)
+                    events = []
+                    self.assertIsNone(reply.structured_output)
+                else:
+                    async def collect():
+                        return [event async for event in agent.reply_stream(UserMsg(name="alice", content="probe"))]
+                    events = await asyncio.wait_for(collect(), timeout=3)
+                frames = []
+                while not queue.empty():
+                    frames.append(queue.get_nowait())
+                return model, dispatches, correlation, events, frames, agent, turn
+        finally:
+            TOOL_EVIDENCE_SINK.reset(sink_token)
+
+    async def test_reserved_code_and_error_shape_required_for_promotion(self):
+        for error in ({"code": "OTHER", "message": "private-canary"}, "private-canary", None):
+            with self.subTest(error=error):
+                model, dispatches, _, _, frames, agent, turn = await self._run_turn(result_changes={"error": error})
+                self.assertEqual(dispatches, ["first"])
+                self.assertEqual(model.calls, 1)
+                self.assertIsNone(turn.challenge)
+                self.assertFalse(any(frame["type"] == "authorization_required" for frame in frames))
+                self.assertNotIn("private-canary", str(agent.state.context) + json.dumps(frames))
+
+    async def test_stopped_tool_has_error_state_in_sdk_context(self):
+        from agentscope.message import ToolResultBlock, ToolResultState
+        _, _, _, _, _, agent, _ = await self._run_turn()
+        results = [block for message in agent.state.context for block in message.content
+                   if isinstance(block, ToolResultBlock)]
+        self.assertEqual([block.state for block in results], [ToolResultState.ERROR, ToolResultState.ERROR])
+
+    async def test_earlier_success_is_preserved(self):
+        model, dispatches, _, _, frames, _, _ = await self._run_turn(prefix=True, concurrent=False)
+        self.assertEqual(dispatches, ["earlier", "first"])
+        self.assertEqual(model.calls, 1)
+        results = [frame for frame in frames if frame["type"] == "tool_result"]
+        self.assertEqual(results[0]["status"], "success")
+        self.assertEqual(results[0]["data"], {"kept": True})
+
+    async def test_feature_disabled_keeps_permission_behavior(self):
+        _, dispatches, _, events, frames, _, turn = await self._run_turn(enabled=False)
+        from agentscope.event import RequireUserConfirmEvent
+        self.assertIsNone(turn)
+        self.assertEqual(dispatches, ["first"])
+        self.assertTrue(any(isinstance(event, RequireUserConfirmEvent) for event in events))
+        self.assertFalse(any(frame["type"] == "authorization_required" for frame in frames))
+
+    async def test_tool_text_cannot_mint_a_challenge(self):
+        _, _, _, _, frames, _, turn = await self._run_turn(text_only=True)
+        self.assertFalse(turn.stopped)
+        self.assertIsNone(turn.challenge)
+        self.assertFalse(any(frame["type"] == "authorization_required" for frame in frames))
+
+    async def test_kernel_approved_resume_stops_without_reparking(self):
+        events, stored, model, dispatches = await self._run_turn(runtime=True, resume=True, concurrent=False)
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(sum(event["type"] == "message_end" for event in events), 1)
+        self.assertFalse(any(event["type"] in {"confirmation_request", "secret_delivery"} for event in events))
+        self.assertEqual(sum(frame["type"] == "authorization_required" for turn in stored for frame in turn["frames"]), 1)
+
+    async def test_closed_scope_fences_inherited_child_context(self):
+        from agent_service.services.kernel_middleware import authorization_turn, TargetAuthorizationMiddleware
+        from agentscope.permission import PermissionBehavior, PermissionDecision
+        from agentscope.tool import ToolChunk
+        gate = asyncio.Event()
+        dispatched = []
+        tool = SimpleNamespace(name="probe", gateway_tool_name="probe", is_external_tool=False)
+        agent = SimpleNamespace(toolkit=SimpleNamespace(tool_groups=[SimpleNamespace(tools=[tool])]))
+        middleware = TargetAuthorizationMiddleware()
+
+        async def allowed(**kwargs):
+            return PermissionDecision(behavior=PermissionBehavior.ALLOW, message="fixture")
+
+        async def invoke(**kwargs):
+            dispatched.append(True)
+            yield ToolChunk(content=[])
+
+        async def child():
+            await gate.wait()
+            call = _tool_call_block("probe", {}, "late-call")
+            await middleware.on_check_permission(agent, {"tool": tool, "tool_call": call}, allowed)
+            return [item async for item in middleware.on_acting(agent, {"tool_call": call}, invoke)]
+
+        with authorization_turn(True):
+            task = asyncio.create_task(child())
+        gate.set()
+        await asyncio.wait_for(task, 1)
+        self.assertEqual(dispatched, [])
+
+    async def test_disconnect_preserves_observed_authorization_evidence(self):
+        stored, model, dispatches = await self._run_turn(runtime=True, disconnect=True, concurrent=False)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(sum(frame["type"] == "authorization_required" for turn in stored for frame in turn["frames"]), 1)
+
+    async def test_kernel_stream_persists_challenge_and_one_terminal(self):
+        events, stored, model, dispatches = await self._run_turn(runtime=True)
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(sum(event["type"] == "message_end" for event in events), 1)
+        self.assertFalse(any(event["type"] == "confirmation_request" for event in events))
+        self.assertEqual(sum(event["type"] == "authorization_required" for event in events), 1)
+        self.assertEqual(sum(frame["type"] == "authorization_required" for turn in stored for frame in turn["frames"]), 1)
+
+    async def test_kernel_blocking_returns_typed_projection_and_evidence(self):
+        reply, stored, model, dispatches = await self._run_turn(runtime=True, structured=True)
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(dispatches, ["first"])
+        content, structured = reply
+        self.assertIsNone(structured)
+        self.assertIsNotNone(reply.authorization_required)
+        self.assertNotIn(reply.authorization_required.challenge_id, content)
+        self.assertEqual(sum(frame["type"] == "authorization_required" for turn in stored for frame in turn["frames"]), 1)
+
+    async def test_concurrent_permission_waits_for_authorization_stop(self):
+        model, dispatches, correlation, events, frames, agent, turn = await self._run_turn()
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(correlation, ["first-call"])
+        self.assertFalse(any(isinstance(event, __import__("agentscope.event", fromlist=["RequireUserConfirmEvent"]).RequireUserConfirmEvent) for event in events))
+        self.assertEqual(sum(str(event.type).lower() == "reply_end" for event in events), 1)
+        self.assertEqual(len([frame for frame in frames if frame["type"] == "authorization_required"]), 1)
+        self.assertEqual(len([frame for frame in frames if frame["type"] == "tool_result"]), 2)
+        self.assertTrue(turn.stopped)
+        self.assertNotIn("provider-canary", str(agent.state.context))
+        self.assertNotIn("ae623dda-2255-4a5d-bc75-2a9d05fdc227", str(agent.state.context))
+
+    async def test_structured_blocking_without_sink_stops_without_provider_retry(self):
+        model, dispatches, correlation, _, frames, _, turn = await self._run_turn(structured=True, with_sink=False)
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(correlation, ["first-call"])
+        self.assertEqual(frames, [])
+        self.assertIsNotNone(turn.challenge)
+
+    async def test_sequential_call_does_not_repark(self):
+        model, dispatches, _, events, _, _, _ = await self._run_turn(concurrent=False)
+        self.assertEqual(model.calls, 1)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(sum(str(event.type).lower() == "reply_end" for event in events), 1)
+
+    async def test_malformed_challenge_is_not_promoted_or_disclosed(self):
+        model, dispatches, _, _, frames, agent, turn = await self._run_turn(malformed=True)
+        self.assertEqual(dispatches, ["first"])
+        self.assertEqual(model.calls, 1)
+        self.assertIsNone(turn.challenge)
+        self.assertFalse(any(frame["type"] == "authorization_required" for frame in frames))
+        self.assertNotIn("private-canary", str(agent.state.context) + json.dumps(frames))
+
+    async def test_stopped_turn_still_flushes_completed_standalone_generation(self):
+        """SPEC-070 (plan line 146): the latch cannot relabel an already-dispatched
+        result as unexecuted.
+
+        ``STREAM_PENDING_DELIVERIES`` is written by exactly one path — a
+        ``secrets.generate_password`` result with ``status == "success"``. That
+        tool uses a dedicated generation bearer (never ``DELEGATED_TOKEN``) and
+        is auto-allowed, so it can never be the delegated target call that stops
+        a turn; once the latch is set, every remaining call returns a fixed safe
+        stopped result and cannot generate anything new. A delivery already in
+        the buffer is therefore a genuinely completed standalone generation, and
+        the turn-end flush must still surface it even though a LATER delegated
+        tool halted the turn. Suppressing it here would strand a real generated
+        credential — the opposite of the invariant this checkpoint enforces.
+        """
+        from agent_service.runtime_kernel import AgentKernel
+        from agent_service.runtime_settings import RuntimeSettings
+        from agent_service.services.kernel_middleware import (
+            AuthorizationTurn,
+            CURRENT_AUTHORIZATION_TURN,
+            STREAM_PENDING_DELIVERIES,
+        )
+
+        kernel = AgentKernel(settings=RuntimeSettings(api_key="fixture"))
+        delivery = {
+            "delivery_id": "51b1935c-60ed-4eec-926b-8bff529df501",
+            "channel": "portal_copy",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        queue: asyncio.Queue = asyncio.Queue()
+        turn = AuthorizationTurn()
+        turn.stopped = True  # a later delegated tool halted this turn
+        pending_token = STREAM_PENDING_DELIVERIES.set([dict(delivery)])
+        turn_token = CURRENT_AUTHORIZATION_TURN.set(turn)
+        try:
+            kernel._flush_pending_deliveries(queue)
+            remaining = list(STREAM_PENDING_DELIVERIES.get() or [])
+        finally:
+            STREAM_PENDING_DELIVERIES.reset(pending_token)
+            CURRENT_AUTHORIZATION_TURN.reset(turn_token)
+
+        frames = []
+        while not queue.empty():
+            frames.append(queue.get_nowait())
+        self.assertEqual(frames, [{"type": "secret_delivery", **delivery}])
+        self.assertEqual(remaining, [])
+
+
 if __name__ == "__main__":
     unittest.main()

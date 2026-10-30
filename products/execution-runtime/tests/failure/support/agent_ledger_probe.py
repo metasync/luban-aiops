@@ -143,6 +143,37 @@ def main(data):
     envelope = data.get("envelope")
     operation = data["operation"]
     attempt = data.get("attempt_id", "agent-original")
+    if operation == "session_identity":
+        import time
+        import jwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from agent_service.services.delegated_identity import DelegatedIdentityVerifier, session_requester
+        from agent_service.services.session_store import PostgresSessionStore
+
+        sessions = PostgresSessionStore(data["dsn"])
+        if data.get("initialize"):
+            sessions.initialize()
+            sessions.initialize()
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        verifier = DelegatedIdentityVerifier("trusted-issuer", "tool-gateway", ("platform-gateway",),
+            SimpleNamespace(get_signing_key_from_jwt=lambda _: SimpleNamespace(key=key.public_key())))
+        bearer = jwt.encode({"iss": "trusted-issuer", "aud": "tool-gateway", "sub": data["subject"],
+            "username": "alice", "iat": int(time.time()) - 1, "exp": int(time.time()) + 300,
+            "act": {"sub": "platform-gateway"}, "authentication_source": "oidc"}, key, algorithm="RS256")
+        human = verifier.verify(bearer)
+        if data.get("create"):
+            sessions.create_session("alice", session_id=data["session_id"],
+                                    requester=None if data.get("legacy") else human)
+        sessions.touch_session(data["session_id"])
+        sessions.set_session_model(data["session_id"], "fixture")
+        record = sessions.get_session(data["session_id"])
+        assert bearer not in record.model_dump_json()
+        listed = sessions.list_sessions_by_user("alice")
+        assert any(row.requester_sub == record.requester_sub for row in listed)
+        if record.requester_sub is None:
+            assert session_requester(record, human) is None
+        return {"namespace": record.requester_namespace, "subject": record.requester_sub,
+                "bearer_absent": True}
     if operation == "derived_facts":
         return derived_facts(data)
     if operation == "catalog":

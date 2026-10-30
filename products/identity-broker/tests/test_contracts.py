@@ -59,6 +59,31 @@ class IssuedTokenContractTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_key_state()
 
+    def test_synthetic_provenance_cannot_be_upgraded_by_identity_input(self) -> None:
+        settings = _settings()
+        token, _ = issue_token(settings, {**_IDENTITY, "authentication_source": "oidc"})
+        claims = exchange_service.verify_subject_token(settings, token)
+        self.assertEqual(claims["authentication_source"], "development")
+        delegated, _ = exchange_service.exchange_token(settings, "platform-gateway", "gw-secret", token, "tool-gateway")
+        from identity_service.services.token_service import _ensure_key
+        key, _ = _ensure_key(settings)
+        verified = pyjwt.decode(delegated, key.public_key(), algorithms=["RS256"],
+                                issuer=settings.jwt_issuer, audience="tool-gateway")
+        self.assertEqual(verified["authentication_source"], "development")
+
+    def test_oidc_provenance_survives_authenticated_exchange(self) -> None:
+        settings = _settings()
+        token, _ = issue_token(settings, _IDENTITY, authentication_source="oidc")
+        delegated, _ = exchange_service.exchange_token(settings, "platform-gateway", "gw-secret", token, "tool-gateway")
+        from identity_service.services.token_service import _ensure_key
+        key, _ = _ensure_key(settings)
+        verified = pyjwt.decode(delegated, key.public_key(), algorithms=["RS256"],
+                                issuer=settings.jwt_issuer, audience="tool-gateway")
+        self.assertEqual(verified["authentication_source"], "oidc")
+        self.assertEqual(verified["sub"], _IDENTITY["sub"])
+        self.assertEqual(verified["act"], {"sub": "platform-gateway"})
+        jsonschema.validate(verified, _load_schema("identity-token.schema.json"))
+
     def test_portal_token_conforms_to_schema(self) -> None:
         settings = _settings()
         token, _ = issue_token(settings, _IDENTITY)

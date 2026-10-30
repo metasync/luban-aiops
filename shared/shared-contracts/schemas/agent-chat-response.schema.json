@@ -22,6 +22,17 @@
       "enum": ["ok", "partial", "error"],
       "default": "ok"
     },
+    "authorization_required": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["challenge_id", "target"],
+      "properties": {
+        "challenge_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "target": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "expires_at": {"type": ["string", "null"], "format": "date-time"}
+      },
+      "description": "Validated opaque target-authorization challenge; never execution authority. The requester must explicitly start a new turn after authorization."
+    },
     "structured_output": {
       "type": ["object", "null"],
       "description": "Validated structured output when the request carried a response_schema (SPEC-017 R-2); null when the turn produced none."

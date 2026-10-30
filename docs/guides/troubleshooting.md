@@ -50,10 +50,16 @@ Stopping a worker does not cancel remote work or release its dispatch claim.
 
 ## Symptom: A delegated target set is configured but authorization is unavailable
 
-The SPEC-070 foundation is deliberately **not wired into OAuth routes or acquisition**.
-A valid `oauth2_authorization_code` entry still fails closed in HTTP/MCP consumers and cannot
-fill browser credentials. Do not substitute a PAT, shared bearer, machine grant, or impersonated
-account to bypass that boundary. It is separate from the inbound Luban delegation chain below.
+SPEC-070 has **unreleased, default-off acquisition and authorization workflow code**; the
+contract-only v0.50.0 deployment does not include it. The challenge producer, bounded kernel stop,
+durable evidence, authorization cards/Continue, and provisioning tooling are implemented, with
+[development acceptance recorded](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix).
+Real-browser screenshots remain environment-blocked, and **AAP compatibility unverified** under
+[DI-070](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070).
+Keep production gates off until the target is qualified and enablement is separately authorized.
+A configured `oauth2_authorization_code` set alone cannot enable delegation or fill browser credentials.
+Do not substitute a PAT, shared bearer, machine grant, or impersonated account. This is separate
+from the inbound Luban delegation chain below.
 
 For internal custody tests and later integration, use fixed failure classes and owner-scoped
 status, never raw DSNs, key files, token responses, or database dumps in diagnostics:
@@ -68,14 +74,46 @@ status, never raw DSNs, key files, token responses, or database dumps in diagnos
 | Lost response after committed publication | Database publication is authoritative (approved 2026-10-24). The uncertain caller releases no token; a fresh checked read may find an active grant/authorized status. Do not undo publication solely because its final response was lost. Revocation/configuration fences still apply. |
 | `publication_fenced`, `publication_expired` | Revocation, cancellation, newer authorization/configuration, or expiry won before publication. A late candidate cannot be installed. |
 | `store_unavailable` | Database access failed. No shared-to-memory fallback and no cached grant checkout. Restore availability without resetting consumed claims. |
-| `local_revoked_remote_unconfirmed` | Local tombstone committed; it does not assert provider revocation. Remote HTTP revocation remains unimplemented in this increment. |
+| `local_revoked_remote_unconfirmed` | The local tombstone **committed first** (advancing the credential epoch and invalidating the next cache check across replicas); it does not assert provider revocation. A single remote attempt is a **separate, explicit** operator action (`custody_cli remote-revoke`) using a fenced memory-only refresh credential: remote failure **never** rolls back the local revoke, a missing endpoint/token keeps this unconfirmed status, and an uncertain remote call is **never retried automatically**. |
 
 Run `make delegated-custody-test` for the isolated real-Postgres proof. Docker is required;
 its absence is a failure, not a skipped pass. The test creates its own loopback-bound temporary
 database and restricted role, accepts no external database input, and stops its container.
-See [key rotation and disabled backup recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation).
-Production provisioning, end-to-end workflow, and full disclosure checks remain pending.
-**AAP compatibility unverified.**
+See [key rotation and disabled backup recovery](tool-configuration.md#delegated-custody-lifecycle-spec-070-foundation)
+and the [operator CLI + provisioning scripts](tool-configuration.md#delegated-provisioning--operator-cli-spec-070-disabled-by-default).
+The additional `make delegated-runtime-test`, `make delegated-multiproc-test`, and
+`make delegated-edge-test` gates exercise fixture execution and the real HTTPS platform edge;
+all four are mandatory in root `make verify`. They do not replace the pending real-browser
+screenshot matrix, real nginx log inspection, or actual-target DI-070 qualification.
+**AAP compatibility unverified**.
+
+For the isolated browser-edge workflow, use only the fixed public errors and authenticated
+owner status; never copy callback URLs, cookie values, projected JWTs, or provider responses:
+
+| Browser-edge symptom | Check and safe response |
+|---|---|
+| Start/status unavailable | Check the default-off gates and dedicated workload mount described in the [configuration reference](configuration-reference.md#delegated-browser-handoff-spec-070-default-off). Start/status also require a genuinely authenticated human, an owned session, and matching durable challenge/target evidence. Missing kernel evidence is not permission to synthesize a challenge. |
+| Provider navigation fails or a repeated start returns to `/` | Start consumption and state/PKCE preparation are atomic. A committed start remains spent even if its acknowledgment or URL response was lost; do not reconstruct state, reset consumed flags, or automatically retry. Open the originating conversation for owner status; cancel the pending challenge or let it expire before a fresh authorization attempt. This does not revoke an existing grant. |
+| Callback returns to `/` without a message | Expected for unknown/ambiguous/expired input, missing browser proof, unsafe backend output, or handoff failure. The response is always an empty noncacheable 302. Open the originating conversation and retrieve owner status; do not replay a code or treat a lost acknowledgment as a revoked grant. |
+| Initiation refused with eight outstanding cookies | Cancel pending work from that browser or wait for transaction expiry; no other challenge is silently evicted. Same-browser tabs share bindings; a different browser cannot complete the handoff. |
+| Logout/reset fails or the login already expired | Logout still clears portal authentication after bounded best-effort cleanup. Remaining browser cookies/transactions expire; no human bearer is retained for later cleanup, and logout never asserts target-grant revocation. |
+| Status is `authorized` but no operation runs | Expected. Callback/clean return never dispatches or resumes tools. Status is informational, not a credential-use permit. The explicit Continue control starts a fresh requester turn only when current status/recovery checks permit it; policy, HITL, signed execution, and a fresh durable claim still apply. Nothing resumes automatically. |
+| Authorization request details absent from logs/traces | Intentional source exclusion. Use fixed failure classes and safe method/template/status metadata; do not enable raw HTTP, cookie, query, or Location diagnostics. Real nginx request-log canaries and complete provider-operation disclosure proof remain pending. |
+
+## Symptom: Delegated provisioning refuses, or a mounted-file change does not take effect
+
+Operator-side symptoms for the disabled-by-default delegated runtime (SPEC-070). Delegation stays
+off until an operator provisions the keyring, the administered config + mapping, and a real target,
+then flips a gate — see the
+[operator CLI + provisioning scripts](tool-configuration.md#delegated-provisioning--operator-cli-spec-070-disabled-by-default).
+
+| Symptom | Check and safe response |
+|---|---|
+| `sync-browser-credentials.sh` prints `REFUSED: … NO secret was created and NO rollout occurred` | Expected validate-before-mutation behavior: the read-only browser-file check or `custody_cli validate-config` rejected an input (e.g. `callback_mismatch` when the config's `redirect_uri` path is not exactly `/api/v1/targets/authorizations/callback`, or `ambiguous_linkage`/`invalid_linkage` for a bad mapping). Fix the administered file and re-run; nothing was mutated. Use `--validate-only` to check inputs with no cluster change. |
+| `custody_cli` rejects `--dsn` / `--refresh-token` | Intended: abbreviation is disabled so a secret **literal** is never accepted. Pass a **file path** (`--dsn-file`, `--keyring-file`, `--refresh-token-file`); the CLI has no enrollment or manual-user-token command. |
+| `sync-custody-db.sh` fails at migrate with a connection error | The migration runs out of cluster as `custody_operator` over `CUSTODY_PG_HOST` (default `localhost`); start `kubectl -n <ns> port-forward svc/postgres 5432:5432` first and confirm `CUSTODY_KEYRING_FILE` points at the versioned keyring. A re-run reuses the existing role passwords, so it never rotates a live password out from under the mounted runtime DSN. |
+| A rewritten config/keyring/mapping secret does not take effect immediately | Mounted-file propagation **precedes** gateway observation, with a deployment-dependent delay and **no numeric Kubernetes guarantee**; until the new bytes land the gateway keeps reading the previously mounted content. This is separate from the database guarantee: once an authoritative invalidation or a local revoke **commits**, every later credential check rejects immediately (no positive generation cache). Do not treat the propagation delay as a revoked grant, and do not lower a revision or clear a tombstone to force reuse. |
+| The pod starts but a delegated route fails closed after a gate flip | A gate on with a missing mount/DSN/trust set fails closed at startup or first use — it never dials a target with absent credentials. Confirm the `optional: true` secrets (`tool-gateway-custody-db`, `tool-gateway-delegated-config`, `tool-gateway-custody-keyring`) exist, the projected workload JWTs are mounted, and the verification trust sets (issuer/JWKS/audience/subjects) are complete. |
 
 ## Symptom: "Agent says access not granted" or "no tools available"
 

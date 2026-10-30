@@ -2,6 +2,7 @@
 // The Keycloak round-trip is unchanged: gateway /api/v1/auth/* endpoints
 // own PKCE and token exchange; the portal only stores and refreshes.
 import { currentGateway, requestJson } from "../api/client";
+import { resetAuthorizationBrowser } from "../api/authorizations";
 import {
   clearAuthSession,
   clearPendingAuthRequest,
@@ -114,6 +115,8 @@ export function clearAuthCallbackQuery(): boolean {
 /** Handle an OIDC callback in the URL if present. Returns the session on
  *  success, null when no callback is present; throws on state mismatch. */
 export async function completeLoginFromCallback(): Promise<AuthSession | null> {
+  // Target OAuth terminates at the backend. Its clean return is never an IdP callback.
+  if (window.location.pathname.startsWith("/authorizations/return/")) return null;
   const url = new URL(window.location.href);
   const authError = url.searchParams.get("error");
   if (authError) {
@@ -157,9 +160,10 @@ export async function completeLoginFromCallback(): Promise<AuthSession | null> {
 
 export async function logout(): Promise<void> {
   const session = loadAuthSession();
+  cancelRefreshTimer();
+  await resetAuthorizationBrowser();
   clearAuthSession();
   clearPendingAuthRequest();
-  cancelRefreshTimer();
   if (!session) return;
 
   try {

@@ -1,0 +1,41 @@
+# Strategic merge patch applied by the delegated-dev overlay (SPEC-070).
+#
+# Projects a SHORT-LIVED, audience-bound service-account JWT into the
+# execution-runtime pod. This is the workload token the gateway VERIFIES on the
+# private /api/v2/tools/invoke-delegated handoff (bearerless at the platform
+# edge): a dedicated audience means no public/inbound token can be replayed here,
+# and the tool-gateway never trusts a token minted for any other audience.
+#
+# Explicit token lifetime (plan line 165): expirationSeconds bounds every
+# projected token, so a leaked token self-expires and the kubelet rotates the
+# file well before then. 600s is short enough to bound replay yet long enough to
+# cover a single handoff with clock-skew headroom.
+#
+# execution-runtime has no volumes today, so these append cleanly (volumeMounts
+# merge key mountPath, volumes merge key name). It runs as the namespace default
+# SA, so the projected subject is system:serviceaccount:dev-luban-aiops:default —
+# pin exactly that in GATEWAY_EXECUTION_WORKLOAD_SUBJECTS (see delegated.env), or
+# migrate execution-runtime to a dedicated SA and pin the new subject. The token
+# needs no RBAC: it is only presented to and verified by the gateway, never used
+# against the Kubernetes API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-runtime
+spec:
+  template:
+    spec:
+      containers:
+        - name: execution-runtime
+          volumeMounts:
+            - name: execution-handoff-token
+              mountPath: /var/run/secrets/luban/execution-handoff
+              readOnly: true
+      volumes:
+        - name: execution-handoff-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: luban-target-execution-handoff
+                  expirationSeconds: 600
+                  path: token

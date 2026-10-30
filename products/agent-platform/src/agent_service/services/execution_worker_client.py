@@ -33,6 +33,14 @@ HANDOFF_PATH = "/api/v1/executions/handoff"
 # configuration) or cannot reach the worker (transport failure).
 REASON_WORKER_UNAVAILABLE = "worker_unavailable"
 
+# SPEC-070: the signed identity quartet. ``validate_request`` (via the
+# execution-request schema) enforces all-or-none, so once it passes the quartet
+# is either fully present or fully absent; this set detects which so the
+# requester bearer can be transported separately under the same all-or-none rule.
+IDENTITY_FIELDS = frozenset(
+    {"requester_namespace", "requester_sub", "decider_namespace", "decider_sub"}
+)
+
 
 class WorkerHandoffError(Exception):
     """Fail-closed handoff failure carrying a rejection reason."""
@@ -145,11 +153,19 @@ async def handoff(
     )
 
 
-async def handoff_original(request, arguments, delegated_token, settings, attempt_request_id):
+async def handoff_original(request, arguments, delegated_token, settings, attempt_request_id,
+                           *, requester_token=None):
     """v3 exchange: raw output leaves this boundary only as a verified original.
 
     The invocation coordinator must register first and durably accept afterward.
     Exceptions (including cancellation) never mean the target did not act.
+
+    SPEC-070: ``delegated_token`` is the approver's bearer; ``requester_token``
+    is the requester's own human bearer, transported separately and only for an
+    identity-bearing (quartet) envelope. Both ride in the request body over the
+    authenticated agent-to-worker channel (the Authorization header stays the
+    worker handoff secret) and neither is ever logged. The all-or-none binding
+    fails closed before any byte is sent.
     """
     from agent_service.services.execution_protocol import (
         ProtocolError, SAFE_REQUEST_ID, validate, validate_original, validate_request,
@@ -158,6 +174,12 @@ async def handoff_original(request, arguments, delegated_token, settings, attemp
 
     key = getattr(settings, "execution_signing_key", None)
     validate_request(request, key)
+    has_identity = IDENTITY_FIELDS.issubset(request)
+    if has_identity:
+        if not isinstance(requester_token, str) or not requester_token.strip():
+            raise ProtocolError("credential_missing")
+    elif requester_token is not None:
+        raise ProtocolError("bad_request")
     worker_url = getattr(settings, "execution_worker_url", None)
     token = getattr(settings, "execution_handoff_token", None)
     if not worker_url or not token:
@@ -171,6 +193,9 @@ async def handoff_original(request, arguments, delegated_token, settings, attemp
     timeout = getattr(settings, "execution_worker_timeout_seconds", 60.0)
     if not isinstance(timeout, (int, float)) or not 0 < timeout <= 120:
         raise ProtocolError("bad_request")
+    body = {"request": request, "arguments": arguments, "delegated_token": delegated_token}
+    if has_identity:
+        body["requester_token"] = requester_token
     try:
         async with asyncio.timeout(timeout):
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False,
@@ -178,7 +203,7 @@ async def handoff_original(request, arguments, delegated_token, settings, attemp
                 response = await client.post(
                     worker_url.rstrip("/") + HANDOFF_PATH,
                     headers={"Authorization": f"Bearer {token}", "x-request-id": attempt_request_id},
-                    json={"request": request, "arguments": arguments, "delegated_token": delegated_token},
+                    json=body,
                 )
         if response.headers.get("x-request-id") != attempt_request_id:
             raise ProtocolError("response_invalid")

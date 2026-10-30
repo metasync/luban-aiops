@@ -73,7 +73,7 @@ def _attach_log_bridge(resource) -> None:
     _log_bridge_attached = True
 
 
-def setup_telemetry(app: FastAPI, service_name: str) -> None:
+def setup_telemetry(app: FastAPI, service_name: str, *, excluded_urls: tuple[str, ...] = ()) -> None:
     """Initialize traces + metrics + logs push to the configured OTLP endpoint."""
     global _providers_initialized
     if not is_enabled():
@@ -112,7 +112,10 @@ def setup_telemetry(app: FastAPI, service_name: str) -> None:
             HTTPXClientInstrumentor().instrument()
             _providers_initialized = True
 
-        FastAPIInstrumentor.instrument_app(app)
+        # Caller-mandated secret-route exclusions cannot be removed by environment.
+        configured = os.getenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", os.getenv("OTEL_PYTHON_EXCLUDED_URLS", ""))
+        exclusions = ",".join((*excluded_urls, configured)).strip(",")
+        FastAPIInstrumentor.instrument_app(app, **({"excluded_urls": exclusions} if exclusions else {}))
         LOGGER.info(
             "otel telemetry enabled",
             extra={

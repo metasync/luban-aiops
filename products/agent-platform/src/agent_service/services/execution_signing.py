@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agent_service.services.delegated_identity import DelegatedIdentityError, VerifiedHuman, signed_identity_fields
 from agent_service.services.flow_approvals import FlowApproval
 from agent_service.services.hitl_confirmations import PendingConfirmation
 
@@ -75,6 +76,8 @@ def build_requests(
     run_id: str | None = None,
     admission_epoch: str | None = None,
     lifetime_seconds: int = 900,
+    requester: VerifiedHuman | None = None,
+    decider: VerifiedHuman | None = None,
 ) -> list[dict[str, Any]]:
     """One signed execution request per parked tool call (SPEC-037 R-2).
 
@@ -90,6 +93,9 @@ def build_requests(
     signed fact rather than an unsigned hint the gateway could be talked
     out of.
     """
+    identities = signed_identity_fields(requester, decider, pending.user_id, decider_user_id)
+    if identities and (not run_id or not admission_epoch):
+        raise DelegatedIdentityError()
     requests: list[dict[str, Any]] = []
     for call in pending.pending_calls_payload():
         envelope: dict[str, Any] = {
@@ -106,6 +112,7 @@ def build_requests(
         }
         if run_id is not None or admission_epoch is not None:
             envelope.update(_execution_window(envelope["requested_at"], run_id, admission_epoch, lifetime_seconds))
+        envelope.update(identities)
         envelope["signature"] = sign_envelope(envelope, key)
         requests.append(envelope)
     return requests
@@ -121,6 +128,8 @@ def build_flow_request(
     run_id: str | None = None,
     admission_epoch: str | None = None,
     lifetime_seconds: int = 900,
+    requester: VerifiedHuman | None = None,
+    decider: VerifiedHuman | None = None,
 ) -> dict[str, Any]:
     """Sign one auto-unlocked browser write under a flow authority (SPEC-051 R-3).
 
@@ -143,7 +152,11 @@ def build_flow_request(
     (``BROWSER_FLOW_AUTHORITY_STALE``) instead of reinterpreting it as a
     per-action approval.
     """
+    identities = signed_identity_fields(requester, decider, flow_approval.owner_user_id, flow_approval.decider_user_id)
+    if identities and (not run_id or not admission_epoch):
+        raise DelegatedIdentityError()
     envelope: dict[str, Any] = {
+        **identities,
         "execution_id": str(uuid.uuid4()),
         "confirm_id": flow_approval.confirm_id,
         "call_id": call_id,

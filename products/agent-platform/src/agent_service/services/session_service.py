@@ -10,6 +10,7 @@ from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
 from agent_service.services.evidence_store import EVIDENCE_STORE
+from agent_service.services.delegated_identity import DelegatedIdentityError, VerifiedHuman, session_requester
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.flow_approvals import FLOW_APPROVALS, FLOW_CONTEXTS
 from agent_service.services.prose_redaction import redact_user_text
@@ -49,8 +50,16 @@ def _assert_session_owner(session: SessionRecord, user_id: str | None) -> None:
         raise HTTPException(status_code=404, detail="session not found")
 
 
+def _assert_requester(session: SessionRecord, requester: VerifiedHuman | None) -> None:
+    if requester is not None:
+        try:
+            session_requester(session, requester)
+        except DelegatedIdentityError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+
+
 def create_session(
-    user_id: str | None, session_type: str = "operation"
+    user_id: str | None, session_type: str = "operation", *, requester: VerifiedHuman | None = None
 ) -> SessionRecord:
     """Create a session, writing its birth ``session_type`` exactly once.
 
@@ -60,11 +69,12 @@ def create_session(
     one-click path is unchanged.
     """
     record_session_created()
-    return SESSION_STORE.create_session(user_id, session_type=session_type)
+    return SESSION_STORE.create_session(user_id, session_type=session_type, **({"requester": requester} if requester is not None else {}))
 
 
 def create_named_session(
-    session_id: str, user_id: str | None, session_type: str = "operation"
+    session_id: str, user_id: str | None, session_type: str = "operation", *,
+    requester: VerifiedHuman | None = None,
 ) -> SessionRecord:
     """Get-or-create a caller-supplied dedicated session (SPEC-015 R-3).
 
@@ -82,20 +92,26 @@ def create_named_session(
     existing = SESSION_STORE.get_session(session_id)
     if existing is not None:
         _assert_session_owner(existing, user_id)
+        _assert_requester(existing, requester)
         return existing
     record_session_created()
     record = SESSION_STORE.create_session(
-        user_id, session_id=session_id, session_type=session_type
+        user_id, session_id=session_id, session_type=session_type,
+        **({"requester": requester} if requester is not None else {}),
     )
     stored = SESSION_STORE.get_session(session_id)
     if stored is None:
+        if requester is not None:
+            raise HTTPException(status_code=503, detail="session unavailable")
         return record
     _assert_session_owner(stored, user_id)
+    _assert_requester(stored, requester)
     return stored
 
 
 def ensure_session(
-    session_id: str | None, user_id: str | None, session_type: str = "operation"
+    session_id: str | None, user_id: str | None, session_type: str = "operation", *,
+    requester: VerifiedHuman | None = None,
 ) -> SessionRecord:
     """Resolve a session for a chat turn, creating one only when id is None.
 
@@ -105,11 +121,12 @@ def ensure_session(
     """
     if session_id is None:
         record_session_created()
-        return SESSION_STORE.create_session(user_id, session_type=session_type)
+        return SESSION_STORE.create_session(user_id, session_type=session_type, **({"requester": requester} if requester is not None else {}))
     session = SESSION_STORE.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="session not found")
     _assert_session_owner(session, user_id)
+    _assert_requester(session, requester)
     return session
 
 

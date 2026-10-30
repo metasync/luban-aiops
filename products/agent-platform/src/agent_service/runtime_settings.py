@@ -158,6 +158,12 @@ class RuntimeSettings:
     organization: str | None = None
     provider_options: RuntimeProviderOptions | None = None
     tool_gateway_url: str | None = None
+    # SPEC-070: opt-in trusted human identity; no development-auth fallback.
+    target_authorization_enabled: bool = False
+    delegated_identity_issuer: str | None = None
+    delegated_identity_jwks_url: str | None = None
+    delegated_identity_audience: str | None = None
+    delegated_identity_actors: tuple[str, ...] = ()
     tool_data_summary_max_chars: int = 2000
     tool_data_max_chars: int = 32000
     # Kernel tuning surfaces (SPEC-017 R-1). Defaults mirror the agentscope
@@ -375,6 +381,19 @@ class RuntimeSettings:
                 "AGENT_EXECUTION_ADMISSION_ENABLED requires both "
                 "AGENT_EXECUTION_STATE_DB_URL and AGENT_EXECUTION_ADMISSION_EPOCH."
             )
+        if self.target_authorization_enabled:
+            from urllib.parse import urlsplit
+            from agent_service.services.delegated_identity import DelegatedIdentityVerifier
+
+            try:
+                DelegatedIdentityVerifier(self.delegated_identity_issuer, self.delegated_identity_audience,
+                                          self.delegated_identity_actors, None)
+                url = urlsplit(self.delegated_identity_jwks_url or "")
+                if (url.scheme not in {"https", "http"} or not url.hostname
+                        or url.username is not None or url.password is not None or url.fragment or url.query):
+                    raise ValueError()
+            except (ValueError, TypeError):
+                raise ValueError("target authorization requires explicit delegated identity trust configuration") from None
         # Browser flow-unlock authority validation (SPEC-051 R-2).
         if self.browser_flow_approval_ttl < 0:
             raise ValueError("AGENT_BROWSER_FLOW_APPROVAL_TTL must be >= 0.")
@@ -503,6 +522,14 @@ class RuntimeSettings:
             organization=_optional_str("AGENTSCOPE_ORGANIZATION"),
             provider_options=cls._provider_options_from_env(provider),
             tool_gateway_url=_optional_str("TOOL_GATEWAY_URL"),
+            target_authorization_enabled=_optional_bool("AGENT_TARGET_AUTHORIZATION_ENABLED") or False,
+            delegated_identity_issuer=_optional_str("AGENT_DELEGATED_IDENTITY_ISSUER"),
+            delegated_identity_jwks_url=_optional_str("AGENT_DELEGATED_IDENTITY_JWKS_URL"),
+            delegated_identity_audience=_optional_str("AGENT_DELEGATED_IDENTITY_AUDIENCE"),
+            delegated_identity_actors=tuple(
+                actor.strip() for actor in os.getenv("AGENT_DELEGATED_IDENTITY_ACTORS", "").split(",")
+                if actor.strip()
+            ),
             tool_data_summary_max_chars=int(
                 os.getenv("AGENT_TOOL_DATA_SUMMARY_MAX_CHARS", "2000")
             ),

@@ -43,10 +43,11 @@ from tool_gateway.tools.base import (
 )
 from tool_gateway.tools.auth_resolution import resolve_outbound_auth
 from tool_gateway.tools.browser_connector import origin_of
-from tool_gateway.tools.credential_sets import CredentialSetStore
+from tool_gateway.tools.credential_sets import CredentialSetStore, scheme_of
 from tool_gateway.tools.oauth_client import OAuth2TokenClient
 from tool_gateway.tools.registry import ToolRegistry
 from tool_gateway.tools.url_redaction import is_secret_param, redact_secret_query
+from tool_gateway.tools.user_delegated_client import AcquisitionContext
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,12 +104,18 @@ def _validate_destination(
     url: object,
     allow_origins: frozenset[str],
     forbid_secret_query: bool = False,
+    resource_origins: frozenset[str] | None = None,
 ) -> tuple[str | None, tuple[str, str, str] | None]:
     """Validate a model-supplied URL before any socket is opened (R-2/R-3).
 
     Returns ``(origin, None)`` on success or ``(None, (code, message, status))``
     on refusal, where ``status`` is ``"denied"`` for an allowlist/destination
     refusal and ``"error"`` for a parameter problem. Never raises.
+
+    ``resource_origins`` is the selected delegated credential set's exact
+    resource-origin allowlist (SPEC-070). When present, the destination origin
+    must satisfy **both** it and the connector-wide ``allow_origins`` policy —
+    the set's own pinning is never widened by the general allowlist.
     """
     if not isinstance(url, str) or not url.strip():
         return None, (
@@ -168,6 +175,16 @@ def _validate_destination(
             "HTTP_ORIGIN_NOT_ALLOWED",
             f"Origin {origin if origin is not None else candidate!r} is not "
             "in GATEWAY_HTTP_ALLOW_ORIGINS (deny-by-default).",
+            "denied",
+        )
+    if resource_origins is not None and origin not in resource_origins:
+        # The selected delegated set pins its own exact resource origins; a
+        # destination outside them is refused even when the connector-wide
+        # policy would allow it (SPEC-070 §"HTTP and MCP enforcement").
+        return None, (
+            "HTTP_RESOURCE_ORIGIN_NOT_ALLOWED",
+            f"Origin {origin} is not in the delegated credential set's "
+            "resource-origin allowlist.",
             "denied",
         )
     if forbid_secret_query:
@@ -332,6 +349,8 @@ class HttpConnector:
         max_request_bytes: int = 4096,
         credential_sets_path: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
+        token_client: OAuth2TokenClient | None = None,
+        delegated_client: object | None = None,
     ) -> None:
         # Normalize each configured origin through ``origin_of`` so a trailing
         # slash or a stray uppercase host cannot make an entry unmatchable;
@@ -349,7 +368,15 @@ class HttpConnector:
         # in-memory token cache persists across calls. It shares the injected
         # transport, so a test's MockTransport can serve both the token endpoint
         # and the target API.
-        self._tokens = OAuth2TokenClient(transport=transport)
+        self._tokens = (
+            token_client if token_client is not None
+            else OAuth2TokenClient(transport=transport)
+        )
+        # SPEC-070: the dedicated user-delegated acquisition client. ``None``
+        # leaves delegated acquisition disabled, so a delegated set then fails
+        # closed. It is never the machine-grant client above and shares no code
+        # path, cache, or fallback with it.
+        self._delegated = delegated_client
         # Test seam: an injected transport (httpx.MockTransport) replaces the
         # real one at the single call site below. None uses httpx's default.
         self._transport = transport
@@ -365,22 +392,30 @@ class HttpConnector:
         registry.register(HttpGetTool(self))
         registry.register(HttpPostTool(self))
 
-    async def _resolve_auth(
-        self, credential_set: object
-    ) -> tuple[httpx.Auth | None, tuple[str, str, str] | None]:
-        """Resolve a named credential set into outbound auth (R-4).
+    def _prepare_credential(
+        self, credential_set: object, identity: dict | None
+    ) -> tuple[
+        dict[str, str] | None,
+        frozenset[str] | None,
+        AcquisitionContext | None,
+        tuple[str, str, str] | None,
+    ]:
+        """Load the named set and derive delegated enforcement facts (SPEC-070).
 
-        Delegates the scheme dispatch to the reusable SPEC-068 R-3 resolver
-        (``basic`` / ``bearer`` / ``oauth2_client_credentials``). Only the set
-        **name** ever surfaces; a credential value or acquired token flows
-        straight into the client and never into a result, evidence field or log
-        line.
+        Returns ``(entry, resource_origins, acquisition, err)``. For any
+        non-delegated set ``resource_origins`` and ``acquisition`` are ``None``
+        and behavior is unchanged. For a delegated set the exact resource-origin
+        allowlist is canonicalized for the destination check, and the verified
+        requester context — bound by the gateway's delegated invoke route, never
+        a caller-supplied override — becomes the acquisition owner. A delegated
+        set without that context (an ordinary or diagnostic invocation) fails
+        closed, and one with no wired acquisition client fails closed too.
         """
         if not credential_set:
-            return None, None
+            return None, None, None, None
         name = str(credential_set)
         if not self._credentials.configured:
-            return None, (
+            return None, None, None, (
                 "CREDENTIAL_SET_NOT_FOUND",
                 f"No credential-set store is configured "
                 f"(GATEWAY_HTTP_CREDENTIAL_SETS), so '{name}' cannot be "
@@ -389,13 +424,107 @@ class HttpConnector:
             )
         entry = self._credentials.get(name)
         if entry is None:
-            return None, (
+            return None, None, None, (
                 "CREDENTIAL_SET_NOT_FOUND",
                 f"Credential set '{name}' was not found.",
                 "error",
             )
+        if scheme_of(entry) != "oauth2_authorization_code":
+            return entry, None, None, None
+        # Canonicalize each pinned resource origin exactly as ``_allow_origins``
+        # is normalized, so the destination comparison is identical on both sides.
+        resource_origins = frozenset(
+            (origin_of(word) or word.strip().lower())
+            for word in (entry.get("resource_origins") or "").split(" ")
+            if word and word.strip()
+        )
+        ident = identity or {}
+        namespace = ident.get("delegated_requester_namespace")
+        sub = ident.get("delegated_requester_sub")
+        if not namespace or not sub:
+            return None, None, None, (
+                "DELEGATED_CONTEXT_REQUIRED",
+                "A user-delegated credential set requires the authenticated "
+                "worker requester context; an ordinary or diagnostic invocation "
+                "cannot supply one.",
+                "denied",
+            )
+        if self._delegated is None:
+            return None, None, None, (
+                "DELEGATED_ACQUISITION_DISABLED",
+                f"User-delegated acquisition is not enabled on this gateway, so "
+                f"credential set '{name}' cannot be used.",
+                "error",
+            )
+        acquisition = AcquisitionContext(
+            owner_namespace=str(namespace),
+            owner_sub=str(sub),
+            set_name=name,
+            target=entry.get("target", ""),
+            audience=entry.get("audience"),
+            resource=entry.get("resource"),
+        )
+        return entry, resource_origins, acquisition, None
+
+    async def _invalidate_delegated(self, acquisition: AcquisitionContext) -> None:
+        """Grant-fenced invalidation on a target ``401`` (SPEC-070).
+
+        A rejected access token means the grant is no longer valid for the
+        target, so it is revoked and evicted and the next send re-authorizes. A
+        ``403`` is a permission denial and never reaches here. Invalidation is a
+        side effect on an already-observed fact, so a failure to revoke is logged
+        (class name only) and never masks the reported ``401``.
+        """
+        try:
+            await self._delegated.invalidate_grant(acquisition)
+        except Exception as exc:  # noqa: BLE001 - must not mask the observed 401
+            LOGGER.warning(
+                "delegated grant invalidation failed: %s", exc.__class__.__name__
+            )
+
+    async def _resolve_auth(
+        self,
+        credential_set: object,
+        entry: dict[str, str] | None = None,
+        acquisition: AcquisitionContext | None = None,
+    ) -> tuple[httpx.Auth | None, tuple[str, str, str] | None]:
+        """Resolve a named credential set into outbound auth (R-4).
+
+        Delegates the scheme dispatch to the reusable SPEC-068 R-3 resolver
+        (``basic`` / ``bearer`` / ``oauth2_client_credentials``) and, for a
+        user-delegated set (SPEC-070), to the dedicated acquisition client via
+        the verified ``acquisition`` context. Only the set **name** ever surfaces;
+        a credential value or acquired token flows straight into the client and
+        never into a result, evidence field or log line.
+        """
+        if not credential_set:
+            return None, None
+        name = str(credential_set)
+        if entry is None:
+            # A direct caller may resolve without a pre-loaded entry. A delegated
+            # set resolved this way carries no verified requester context, so the
+            # resolver fails it closed rather than acquiring a token.
+            if not self._credentials.configured:
+                return None, (
+                    "CREDENTIAL_SET_NOT_FOUND",
+                    f"No credential-set store is configured "
+                    f"(GATEWAY_HTTP_CREDENTIAL_SETS), so '{name}' cannot be "
+                    f"resolved.",
+                    "error",
+                )
+            entry = self._credentials.get(name)
+            if entry is None:
+                return None, (
+                    "CREDENTIAL_SET_NOT_FOUND",
+                    f"Credential set '{name}' was not found.",
+                    "error",
+                )
         resolved, err = await resolve_outbound_auth(
-            set_name=name, entry=entry, token_client=self._tokens
+            set_name=name,
+            entry=entry,
+            token_client=self._tokens,
+            delegated_client=self._delegated,
+            acquisition=acquisition,
         )
         if err is not None:
             return None, err
@@ -408,6 +537,7 @@ class HttpConnector:
         timeout_ms: int,
         credential_set: object = None,
         json_body: object = None,
+        identity: dict | None = None,
     ) -> tuple[httpx.Response | None, str | None, tuple[str, str, str] | None]:
         """Issue the request with destination + redirect discipline.
 
@@ -416,12 +546,23 @@ class HttpConnector:
         This is the single transport call site both verbs share.
         """
         forbid_secret = method == "POST"
-        origin, err = _validate_destination(
-            url, self._allow_origins, forbid_secret_query=forbid_secret
+        # Load the set once so the destination check can also enforce a delegated
+        # set's exact resource-origin allowlist, and so the verified requester
+        # context is established before any token is acquired (SPEC-070).
+        entry, resource_origins, acquisition, err = self._prepare_credential(
+            credential_set, identity
         )
         if err is not None:
             return None, None, err
-        auth, err = await self._resolve_auth(credential_set)
+        origin, err = _validate_destination(
+            url, self._allow_origins, forbid_secret_query=forbid_secret,
+            resource_origins=resource_origins,
+        )
+        if err is not None:
+            return None, None, err
+        auth, err = await self._resolve_auth(
+            credential_set, entry=entry, acquisition=acquisition
+        )
         if err is not None:
             return None, None, err
 
@@ -458,6 +599,13 @@ class HttpConnector:
                                 "error",
                             )
                     if response.status_code not in _REDIRECT_STATUSES:
+                        # A delegated target 401 means the access token was
+                        # rejected: invalidate the grant (revoke + evict) so the
+                        # next send re-authorizes. The 401 is still reported as
+                        # the observed fact. A 403 is a permission denial and is
+                        # never treated as a grant failure (SPEC-070).
+                        if acquisition is not None and response.status_code == 401:
+                            await self._invalidate_delegated(acquisition)
                         return response, current, None
                     location = response.headers.get("location")
                     if not location:
@@ -468,6 +616,7 @@ class HttpConnector:
                         nxt,
                         self._allow_origins,
                         forbid_secret_query=forbid_secret,
+                        resource_origins=resource_origins,
                     )
                     if nxt_err is not None:
                         _code, message, status = nxt_err
@@ -591,6 +740,7 @@ class HttpGetTool(BaseTool):
             parameters.get("url"),
             timeout_ms,
             credential_set=parameters.get("credential_set"),
+            identity=identity,
         )
         duration_ms = int((time.perf_counter() - start) * 1000)
         if rerr is not None or response is None or final_url is None:
@@ -691,6 +841,7 @@ class HttpPostTool(BaseTool):
             timeout_ms,
             credential_set=parameters.get("credential_set"),
             json_body=body,
+            identity=identity,
         )
         duration_ms = int((time.perf_counter() - start) * 1000)
         if rerr is not None or response is None or final_url is None:

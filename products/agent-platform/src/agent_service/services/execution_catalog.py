@@ -50,7 +50,7 @@ def verify_schema(connection):
     row = connection.execute(
         "SELECT schema_version,admission_epoch,admission_enabled,schema_fingerprint "
         "FROM execution_protocol_state WHERE singleton=true").fetchone()
-    if not row or row[0] != 1 or fingerprint(connection) != row[3]:
+    if not row or row[0] != 2 or fingerprint(connection) != row[3]:
         raise ProtocolError("schema_invalid")
     for setting in ("fsync", "full_page_writes", "synchronous_commit"):
         if connection.execute(f"SHOW {setting}").fetchone()[0] != "on":

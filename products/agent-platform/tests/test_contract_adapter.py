@@ -32,6 +32,23 @@ def _client() -> TestClient:
     return TestClient(create_app())
 
 
+def test_blocking_authorization_projection_reaches_api_and_contract(monkeypatch) -> None:
+    from agent_service.api.v2 import routes
+    from agent_service.runtime_kernel import BlockingReply
+    from agent_service.schemas.v2 import AuthorizationRequired
+
+    challenge = AuthorizationRequired(challenge_id="11111111-1111-4111-8111-111111111111", target="fixture")
+
+    async def reply(**kwargs):
+        return BlockingReply("Authorize, then start a new turn.", authorization_required=challenge)
+
+    monkeypatch.setattr(routes.get_runtime_kernel(), "reply_text", reply)
+    response = _client().post("/api/v2/chat", json={"message": "probe"}, headers={"X-User-ID": "alice"})
+    assert response.status_code == 200
+    assert response.json()["authorization_required"] == challenge.model_dump(mode="json")
+    jsonschema.validate(response.json(), load_schema("agent-chat-response.schema.json"))
+
+
 def test_runtime_metadata_conforms_to_contract() -> None:
     response = _client().get("/api/v2/runtime")
     assert response.status_code == 200

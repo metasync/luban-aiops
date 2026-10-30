@@ -18,6 +18,8 @@ export interface EvidenceTruncated {
 
 export interface EvidenceFrame {
   type: "tool_call" | "tool_result" | (string & {});
+  auth_challenge_id?: string;
+  target?: string;
   call_id?: string;
   tool_name?: string;
   parameters?: Record<string, unknown>;

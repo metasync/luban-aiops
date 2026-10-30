@@ -19,7 +19,7 @@ from psycopg.rows import dict_row
 from pydantic import SecretStr
 
 from tool_gateway.services.custody_crypto import CustodyError, Keyring, capability_hash
-from tool_gateway.services.custody_schema import DDL, SCHEMA_VERSION, UPGRADE_V1_TO_V2
+from tool_gateway.services.custody_schema import DDL, SCHEMA_VERSION, UPGRADE_V1_TO_V2, UPGRADE_V2_TO_V3
 from tool_gateway.tools.delegated_configuration import ConfigurationError, load_snapshot
 
 
@@ -49,6 +49,12 @@ class RefreshClaim:
     attempt_id: str
     operation: SecretStr = field(repr=False)
     refresh_secret: SecretStr = field(repr=False)
+    # The absolute renewal deadline carried by the credential before this claim.
+    # A renewal may shorten it (a shorter provider refresh expiry) but can never
+    # extend it, so the acquisition client caps the replacement deadline against
+    # this value. ``None`` only for a credential published without a refresh
+    # lifetime, which ``begin_refresh`` never claims.
+    original_refresh_expires_at: datetime | None = None
 
 
 def credential_binding(row):
@@ -59,9 +65,9 @@ def credential_binding(row):
 async def migrate_custody(db_url: str, keyring: Keyring):
     """Explicit migration entry point, never called by runtime initialize().
 
-    Creates a fresh version-2 schema, or upgrades an existing version-1
-    prototype schema in place. Both paths are idempotent and never rewrite a
-    published active credential row.
+    Creates a fresh version-3 schema, or upgrades an existing version-1/version-2
+    schema in place through each explicit step. Both paths are idempotent and
+    never rewrite a published active credential row.
     """
     keys = keyring.snapshot()
     try:
@@ -69,8 +75,14 @@ async def migrate_custody(db_url: str, keyring: Keyring):
             await conn.execute(DDL)
             row = await (await conn.execute(
                 "SELECT version FROM gateway_custody.schema_version WHERE singleton")).fetchone()
-            if row and row["version"] < SCHEMA_VERSION:
+            # Apply each upgrade in sequence from the originally observed version:
+            # a version-1 database needs both steps, a version-2 database only the
+            # browser-binding step, and a fresh version-3 database needs neither.
+            observed = row["version"] if row else None
+            if observed is not None and observed < 2:
                 await conn.execute(UPGRADE_V1_TO_V2)
+            if observed is not None and observed < 3:
+                await conn.execute(UPGRADE_V2_TO_V3)
             await conn.execute("INSERT INTO gateway_custody.key_policy"
                 "(singleton,recovery_epoch,active_key_id,fingerprint_key_hash) VALUES(TRUE,%s,%s,%s)"
                 " ON CONFLICT DO NOTHING", (keys.recovery_epoch, keys.active_key_id,
@@ -316,6 +328,7 @@ class PostgresCustodyStore:
     async def begin_refresh(self, owner: Owner) -> RefreshClaim | None:
         epoch = None
         generation = None
+        original_deadline = None
         attempt_id = str(uuid4())
         try:
             async with self.guarded() as (conn, config, linkage, keys, generation):
@@ -331,6 +344,7 @@ class PostgresCustodyStore:
                 secret = keys.decrypt(bytes(row["refresh_cipher"]), "refresh", credential_binding(row))
                 operation = SecretStr(secrets.token_urlsafe(32))
                 epoch = row["epoch"] + 1
+                original_deadline = row["refresh_expires_at"]
                 # attempt_id is generated before this operation can suspend and is
                 # immutable through claim, staging, publication, and cleanup.
                 await conn.execute("UPDATE gateway_custody.credentials SET status='in_flight',epoch=%s,refresh_cipher=NULL,"
@@ -338,7 +352,7 @@ class PostgresCustodyStore:
                     " WHERE set_id=%s AND target=%s AND owner_namespace=%s AND owner_sub=%s",
                     (epoch, capability_hash(operation), attempt_id, self.set_id, row["target"], owner.namespace, owner.subject))
                 await self.commit(conn, "refresh_claim")
-            return RefreshClaim(owner, generation, epoch, attempt_id, operation, secret)
+            return RefreshClaim(owner, generation, epoch, attempt_id, operation, secret, original_deadline)
         except BaseException:
             if epoch is not None:
                 await asyncio.shield(self._uncertain(owner, generation, epoch, attempt_id))
@@ -457,7 +471,8 @@ class PostgresCustodyStore:
                     (cipher, keys.active_key_id, self.set_id, row["target"], row["owner_namespace"], row["owner_sub"]))
                 count += 1
             from tool_gateway.services.authorization_transaction_store import transaction_binding
-            transactions = await (await conn.execute("SELECT t.*,s.verifier_cipher FROM gateway_custody.transactions t"
+            transactions = await (await conn.execute("SELECT t.*,s.verifier_cipher,s.browser_secret_hash,s.start_attempt"
+                " FROM gateway_custody.transactions t"
                 " JOIN gateway_custody.transaction_secrets s USING(challenge_id) WHERE t.set_id=%s"
                 " AND t.config_generation=%s AND t.status='pending' AND NOT t.consumed AND t.expires_at>clock_timestamp()"
                 " AND s.verifier_cipher IS NOT NULL AND s.key_id<>%s LIMIT %s FOR UPDATE OF t,s SKIP LOCKED",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SessionRecord(BaseModel):
@@ -27,6 +27,15 @@ class SessionRecord(BaseModel):
     # turn; null when the session never selected a model. Lives on the
     # session record so affinity survives restarts (Q-4).
     model: str | None = None
+    # SPEC-070: backend-only birth metadata, never inferred for legacy sessions.
+    requester_namespace: str | None = Field(default=None, min_length=1, max_length=256, frozen=True)
+    requester_sub: str | None = Field(default=None, min_length=1, max_length=256, frozen=True)
+
+    @model_validator(mode="after")
+    def _requester_pair(self) -> "SessionRecord":
+        if (self.requester_namespace is None) != (self.requester_sub is None):
+            raise ValueError("incomplete session requester")
+        return self
 
 
 class CreateSessionRequest(BaseModel):

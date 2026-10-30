@@ -37,6 +37,8 @@ class PlatformGatewaySettings:
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
     require_auth: bool = True
+    target_authorization_enabled: bool = False
+    authorization_workload_token_path: str = ""
     audit_service_url: str = ""
     audit_client_id: str = "platform-gateway"
     audit_client_secret: str = ""
@@ -54,6 +56,8 @@ class PlatformGatewaySettings:
     @classmethod
     def from_env(cls) -> "PlatformGatewaySettings":
         return cls(
+            target_authorization_enabled=os.getenv("PLATFORM_GATEWAY_TARGET_AUTHORIZATION_ENABLED", "false").strip().lower() == "true",
+            authorization_workload_token_path=os.getenv("PLATFORM_GATEWAY_AUTHORIZATION_WORKLOAD_TOKEN_PATH", ""),
             agent_service_url=os.getenv(
                 "AGENT_SERVICE_URL",
                 DEFAULT_AGENT_SERVICE_URL,

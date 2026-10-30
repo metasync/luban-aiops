@@ -21,6 +21,32 @@ from test_admission import ledger, outcome
 from test_agent_storage import agent
 
 
+@pytest.mark.scenario("F-06", "constraint")
+def test_session_requester_persists_without_rebinding_across_processes(empty_database, services, evidence):
+    db = empty_database
+    first = agent(db, services.token, "session_identity", initialize=True, create=True,
+                  session_id="bound", subject="alice-original")
+    assert first["ok"] and first["subject"] == "alice-original"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        attempts = [pool.submit(agent, db, services.token, "session_identity", create=True,
+                               session_id="bound", subject="replacement", legacy=legacy)
+                    for legacy in (False, True)]
+        results = [attempt.result(timeout=30) for attempt in attempts]
+    assert all(row["subject"] == "alice-original" and row["bearer_absent"] for row in results)
+    legacy = agent(db, services.token, "session_identity", create=True, legacy=True,
+                   session_id="legacy", subject="alice-original")
+    unpromoted = agent(db, services.token, "session_identity", create=True,
+                       session_id="legacy", subject="alice-original")
+    assert legacy["subject"] is None and unpromoted["subject"] is None
+    for namespace, subject in (("issuer", None), (None, "sub"), ("", "sub"), ("issuer", "x" * 257)):
+        with pytest.raises(psycopg.errors.CheckViolation), db.connect() as conn:
+            conn.execute("UPDATE sessions SET requester_namespace=%s,requester_sub=%s WHERE session_id='bound'",
+                         (namespace, subject))
+    assert len({first["pid"], *[row["pid"] for row in results]}) == 3
+    evidence(observer_pid=results[-1]["pid"],
+             asserted="real session store birth binding across three processes, legacy nonpromotion, and SQL bounds")
+
+
 def initialize(db):
     migrate(db.dsn, db.epoch)
     with db.connect() as conn:
@@ -206,6 +232,61 @@ def test_sql_request_shape_constraints_reject_invalid_metadata(ledger_database, 
     with ledger_database.connect() as conn:
         assert conn.execute("SELECT count(*) FROM execution_intents WHERE execution_id=%s", (envelope["execution_id"],)).fetchone()[0] == 0
     evidence(claim_count=0, mode=field, asserted="direct SQL cannot bypass closed and bounded request metadata")
+
+
+@pytest.mark.scenario("F-06", "constraint")
+def test_delegated_identity_sql_bounds_and_group(ledger_database, services, evidence):
+    db, key = ledger_database, services.token
+    fields = {"requester_namespace": "https://issuer.test", "requester_sub": "alice-sub",
+              "decider_namespace": "https://issuer.test", "decider_sub": "bob-sub"}
+    envelope = signed_request(key, db.epoch, **fields)
+    validate_request(envelope, key)
+    register(db, envelope)
+    assert ledger(db, key).claim(envelope, "delegated-original").permit
+    for field in fields:
+        for value in (None, "", 17, "x" * 257):
+            invalid = signed_request(key, db.epoch, **{**fields, field: value})
+            with pytest.raises(psycopg.Error):
+                register(db, invalid)
+        invalid = signed_request(key, db.epoch, **fields)
+        invalid.pop(field)
+        invalid["signature"] = sign_envelope(invalid, key)
+        with pytest.raises(psycopg.Error):
+            register(db, invalid)
+    evidence(claim_count=1, asserted="SQL admits signed identity quartet and rejects partial, null, non-string, empty, oversized identities")
+
+
+@pytest.mark.scenario("F-31", "open")
+def test_v1_upgrade_requires_disabled_admission_and_new_epoch(empty_database, services, evidence):
+    db, key = empty_database, services.token
+    with connect(db.dsn) as conn:
+        conn.execute(files("execution_runtime").joinpath("contracts/execution-ledger-v1.sql").read_text())
+        conn.execute("INSERT INTO execution_protocol_state VALUES (true,1,%s,true,%s)", (db.epoch, fingerprint(conn)))
+    envelope = signed_request(key, db.epoch)
+    register(db, envelope)
+    with connect(db.dsn) as conn:
+        conn.execute("UPDATE execution_runs SET stopped_at=clock_timestamp(),stop_reason='shutdown'")
+        before = {table: conn.execute(sql.SQL("SELECT row_to_json(r)::text FROM {} r").format(sql.Identifier(table))).fetchall()
+                  for table in TABLES[1:]}
+        with pytest.raises(ProtocolError, match="schema_invalid"):
+            verify_schema(conn)
+    new_epoch = str(uuid4())
+    with pytest.raises(ProtocolError):
+        migrate(db.dsn, new_epoch)
+    with connect(db.dsn) as conn:
+        conn.execute("UPDATE execution_protocol_state SET admission_enabled=false")
+    with pytest.raises(ProtocolError):
+        migrate(db.dsn, db.epoch)
+    migrate(db.dsn, new_epoch)
+    migrate(db.dsn, new_epoch)
+    with connect(db.dsn) as conn:
+        state = verify_schema(conn)
+        assert state == {"schema_version": 2, "admission_epoch": new_epoch, "admission_enabled": False}
+        after = {table: conn.execute(sql.SQL("SELECT row_to_json(r)::text FROM {} r").format(sql.Identifier(table))).fetchall()
+                 for table in TABLES[1:]}
+        assert after == before
+        assert verify_envelope(envelope, envelope["signature"], key)
+    evidence(claim_count=0, asserted="v1 upgrade rejects enabled admission and reused epoch, preserves immutable rows and stops, repeats idempotently")
 
 
 def interrupted_migration(dsn, epoch, gate):

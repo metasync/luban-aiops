@@ -79,12 +79,16 @@ _ENVELOPE = {
 
 
 def _patch_handoff(monkeypatch, *, result=None, raises=None):
-    async def fake_handoff(envelope, arguments, token, settings, attempt_id):
+    calls = []
+
+    async def fake_handoff(envelope, arguments, token, settings, attempt_id, requester_token=None):
+        calls.append({"token": token, "requester_token": requester_token})
         if raises is not None:
             raise raises
         return FakeOriginal(result)
 
     monkeypatch.setattr(execution_invocation, "handoff_original", fake_handoff)
+    return calls
 
 
 def _run(coro):
@@ -284,3 +288,27 @@ def test_outcome_is_immutable():
     outcome = InvocationOutcome("original", {"status": "success"}, "P", None, False)
     with pytest.raises(Exception):
         outcome.status = "blocked"  # type: ignore[misc]
+
+
+def test_coordinate_forwards_requester_token_separately(monkeypatch):
+    """SPEC-070: the approver bearer and the requester bearer stay distinct."""
+    calls = _patch_handoff(monkeypatch, result={"status": "success"})
+    guard = FakeGuard()
+    outcome = _run(coordinate_v3_invocation(
+        guard=guard, envelope=_ENVELOPE, arguments={"name": "pod"},
+        delegated_token="approver-bearer", settings=_SETTINGS,
+        attempt_request_id="req-1", current_request_id="req-1",
+        requester_token="requester-bearer",
+    ))
+    assert outcome.status == "original"
+    assert calls[0]["token"] == "approver-bearer"
+    assert calls[0]["requester_token"] == "requester-bearer"
+
+
+def test_coordinate_defaults_requester_token_to_none(monkeypatch):
+    """A machine turn transports no requester bearer (all-or-none stays intact)."""
+    calls = _patch_handoff(monkeypatch, result={"status": "success"})
+    guard = FakeGuard()
+    outcome = _run(_coordinate(guard))
+    assert outcome.status == "original"
+    assert calls[0]["requester_token"] is None

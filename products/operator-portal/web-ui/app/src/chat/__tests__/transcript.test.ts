@@ -26,6 +26,18 @@ function turnOf(replyText: string, userMessage = "run it"): ChatTurn {
 }
 
 describe("transcriptToTurns", () => {
+  it("attaches a validated authorization challenge once without creating a confirmation", () => {
+    const frame = { type: "authorization_required", auth_challenge_id: "11111111-1111-4111-8111-111111111111",
+      target: "fixture", expires_at: "2099-01-01T00:00:00Z", browser_secret: "must-not-survive" };
+    const turns = transcriptToTurns([{ role: "user", content: "probe" }], [
+      { turn_index: 0, request_id: "r1", frames: [frame, frame, { ...frame, auth_challenge_id: "bad" }] },
+    ]);
+    expect(turns[0].authorizations).toEqual([{ kind: "authorization_required", authChallengeId: frame.auth_challenge_id,
+      target: "fixture", expiresAt: frame.expires_at }]);
+    expect(turns[0].confirmations).toEqual([]);
+    expect(turns[0].confirmationPending).toBe(false);
+    expect(JSON.stringify(turns)).not.toContain(frame.browser_secret);
+  });
   it("replays only validated delivery metadata and preserves email warnings", () => {
     const frame = { type: "secret_delivery", delivery_id: "11111111-1111-4111-8111-111111111111",
       channel: "portal_copy", expires_at: "2030-01-01T00:00:00Z", value: "must-not-survive" };

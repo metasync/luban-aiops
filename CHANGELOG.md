@@ -11,6 +11,52 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## Unreleased
+
+[SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md) runtime
+implementation following the v0.50.0 contract checkpoint. Development acceptance
+R-1a–R-6d is recorded in the [acceptance matrix](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix);
+this is not a release or deployment. VERSION remains 0.50.0 and the spec remains
+`in-progress` pending delivery bookkeeping.
+
+### Added
+
+- Gateway-owned user-delegated OAuth acquisition and renewal, immutable target-account
+  verification, bounded memory-only access-token caching, and encrypted Postgres refresh
+  and PKCE custody. Authoritative publication, generation/epoch fencing, local revocation,
+  and explicit migrations preserve fail-closed behavior across replicas and restarts.
+- Owner-scoped authorization routes, initiating-browser cookie binding, single-use state
+  and start handles, PKCE S256, and backend-only callbacks. The agent stops the turn on
+  authorization-required results; the portal provides Authorize, status, Cancel, and an
+  explicit fresh-turn Continue. Callback completion never dispatches or replays a tool.
+- Requester-owned target grants across cross-user approval, with separately verified
+  requester/approver identities in signed execution and a workload-authenticated handoff.
+  Existing policy, HITL gates, and durable single-use execution claims remain enforced.
+- Verified top-level audit delegation mode and target-authorization lifecycle events,
+  including durable query/filter coverage and attribution retained through redaction overflow.
+- Default-off delegated GitOps configuration, dedicated workload-token projections,
+  least-privilege custody roles, validate-before-mutation provisioning, and a file-path-only
+  custody operator CLI for migration, readiness, revocation, key rotation, and fenced recovery.
+- Mandatory delegated custody, runtime, multiprocess, and HTTPS edge verification gates
+  using disposable Postgres and generated-TLS OAuth/per-user target fixtures.
+
+### Verification and limitations
+
+- Root `make verify` passed on the runtime tree: product and portal suites/build, contract,
+  policy, secret-vocabulary, overlay, dashboard, and version checks; all four delegated
+  harnesses; execution-failure campaign **795 passed, 2 deselected**. The campaign alone
+  took 28:17. See the [verification record](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#delivery-gate).
+- **AAP compatibility unverified**. [DI-070](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+  remains pending and mandatory before production user-delegated AAP enablement. Fixture
+  HTTP execution and MCP fail-closed tests do not establish successful real-AAP MCP delegation.
+- Real-browser UI screenshots remain environment-blocked; HTTPS edge and rendered-DOM
+  tests are recorded separately, not represented as browser screenshot evidence. Actual
+  nginx request-log inspection remains outstanding; the edge harness inspects platform-gateway
+  process logs. No target is enabled, no live OAuth client is registered, and no production
+  migration is run here.
+- SPEC-069's delivered v0.48.0 read-only dev slice is unchanged. Its production dependency
+  now points to the verified, unreleased substrate plus the still-pending DI-070 qualification.
+
 ## 0.50.0 — 2026-10-23
 
 Feature checkpoint: additive OQ-7 contracts for

@@ -55,10 +55,14 @@ def fingerprint(connection):
 
 
 def verify_schema(connection):
+    return _verify_version(connection, 2)
+
+
+def _verify_version(connection, version):
     row = connection.execute(
         "SELECT schema_version,admission_epoch,admission_enabled,schema_fingerprint "
         "FROM execution_protocol_state WHERE singleton=true").fetchone()
-    if not row or row[0] != 1 or fingerprint(connection) != row[3]:
+    if not row or row[0] != version or fingerprint(connection) != row[3]:
         raise ProtocolError("schema_invalid")
     for setting in ("fsync", "full_page_writes", "synchronous_commit"):
         if connection.execute(f"SHOW {setting}").fetchone()[0] != "on":
@@ -72,17 +76,32 @@ def migrate(dsn, epoch, *, connection_factory=connect):
     try:
         connection.execute("SELECT pg_advisory_xact_lock(-630001)")
         exists = connection.execute("SELECT to_regclass('public.execution_protocol_state')").fetchone()[0]
+        upgrade = not exists
         if exists:
-            state = verify_schema(connection)
-            if state["admission_enabled"] or state["admission_epoch"] != epoch:
+            # Lock admission against an operator concurrently enabling it. The
+            # deployment runbook externally fences workers before this step.
+            row = connection.execute("SELECT schema_version FROM execution_protocol_state "
+                                     "WHERE singleton=true FOR UPDATE").fetchone()
+            if not row or row[0] not in (1, 2):
+                raise ProtocolError("schema_invalid")
+            state = _verify_version(connection, row[0])
+            upgrade = state["schema_version"] == 1
+            if (state["admission_enabled"]
+                    or (upgrade and state["admission_epoch"] == epoch)
+                    or (not upgrade and state["admission_epoch"] != epoch)):
                 raise ProtocolError("admission_disabled")
         else:
             connection.execute(files("execution_runtime").joinpath(
                 "contracts", "execution-ledger-v1.sql").read_text())
-            digest = fingerprint(connection)
             connection.execute("INSERT INTO execution_protocol_state "
                                "(schema_version,admission_epoch,admission_enabled,schema_fingerprint) "
-                               "VALUES (1,%s,false,%s)", (epoch, digest))
+                               "VALUES (1,%s,false,%s)", (epoch, fingerprint(connection)))
+        if upgrade:
+            connection.execute(files("execution_runtime").joinpath(
+                "contracts", "execution-ledger-v2.sql").read_text())
+            connection.execute("UPDATE execution_protocol_state SET admission_epoch=%s, "
+                               "schema_fingerprint=%s WHERE singleton=true", (epoch, fingerprint(connection)))
+        verify_schema(connection)
         connection.commit()
     finally:
         connection.close()

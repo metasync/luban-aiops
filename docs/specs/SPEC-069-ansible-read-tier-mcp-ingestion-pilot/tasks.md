@@ -36,6 +36,21 @@ Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement
 > outside CI. See `spec.md` Changelog 2026-10-17; the dated Stage-0 findings below are kept as
 > the historical record.
 
+## Production dependency status update — 2026-10-30
+
+SPEC-069 remains **delivered as v0.48.0**; its read-only dev evidence and the dated records
+below are preserved. R-1's production substrate is implemented under SPEC-070, not within
+this pilot: [R-1a–R-6d development acceptance](../SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix)
+is recorded with root `make verify` EXIT=0, and the runtime is **unreleased/default-off**.
+The earlier `approved`/implementation-pending references below describe the historical state.
+
+- [x] Reconcile the R-1 production dependency with SPEC-070's verified runtime implementation;
+  the delivered dev slice remains independent and continues using the self-hosted server's
+  own authentication. This closes dependency-record bookkeeping, not production qualification.
+- [ ] **AAP compatibility unverified**: complete [DI-070](../SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+  with the actual AAP/MCP security profile and two-user RBAC/lifecycle evidence before
+  production user-delegated enablement. Fixture/MCP failure tests are not real-AAP success proof.
+
 ## Stage 0 — Verify (read-only; pins the residual OQ facts; confirms the SPEC-068 dependency and the topology)
 
 - [x] Pin the exact **self-hosted** Ansible MCP-server artifact (AWX + community AWX MCP

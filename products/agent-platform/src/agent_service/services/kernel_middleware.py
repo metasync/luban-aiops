@@ -24,11 +24,15 @@ invocation; this module only shapes kernel-local decisions and evidence.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from collections.abc import AsyncGenerator, Callable
+from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from agentscope.message import ToolCallBlock, ToolCallState
@@ -266,6 +270,195 @@ def _portal_copy_delivery(gateway_result: dict) -> dict | None:
         "channel": "portal_copy",
         "expires_at": expires_at,
     }
+
+
+AUTHORIZATION_REQUIRED_CODE = "TARGET_AUTHORIZATION_REQUIRED"
+AUTHORIZATION_GUIDANCE = (
+    "Target authorization is required. Authorize using the portal control, then "
+    "explicitly start a new turn. This turn will not dispatch any remaining tools."
+)
+AUTHORIZATION_INVALID = "Target authorization could not be validated. Start a new turn."
+AUTHORIZATION_STOPPED = "This tool was not dispatched because the turn stopped for target authorization."
+
+
+@dataclass
+class AuthorizationTurn:
+    """One mutable task-shared latch; never attached to a cached tool or agent."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    lease: str | None = None
+    stopped: bool = False
+    closed: bool = False
+    challenge: Any = None
+
+    @property
+    def blocked(self) -> bool:
+        return self.stopped or self.closed
+
+    def close(self) -> None:
+        # Child tasks retain the mutable scope even after the parent resets its
+        # ContextVar. Fence them before waking any permission/acting waiter.
+        self.closed = True
+        self.release()
+
+    def release(self):
+        self.lease = None
+        if self.lock.locked():
+            self.lock.release()
+
+    def frame(self):
+        if self.challenge is None:
+            return None
+        data = self.challenge.model_dump(mode="json", exclude_none=True)
+        return {"type": "authorization_required", "auth_challenge_id": data.pop("challenge_id"), **data}
+
+
+CURRENT_AUTHORIZATION_TURN: ContextVar[AuthorizationTurn | None] = ContextVar(
+    "CURRENT_AUTHORIZATION_TURN", default=None,
+)
+
+
+@contextmanager
+def authorization_turn(enabled: bool):
+    turn = AuthorizationTurn() if enabled else None
+    token = CURRENT_AUTHORIZATION_TURN.set(turn)
+    try:
+        yield turn
+    finally:
+        if turn is not None:
+            turn.close()
+        CURRENT_AUTHORIZATION_TURN.reset(token)
+
+
+class TargetAuthorizationMiddleware(MiddlewareBase):
+    """Serialize permission plus invocation using the supported SDK hooks.
+
+    An ALLOW retains a turn-local lease until acting finishes. This closes the
+    permission/acting gap: a concurrent ASK cannot park while an earlier call
+    is discovering missing authorization. Non-ALLOW and external handoffs never
+    retain a lease. The runtime scope releases it on cancellation/early close.
+    """
+
+    async def on_check_permission(self, agent, input_kwargs, next_handler):
+        turn = CURRENT_AUTHORIZATION_TURN.get()
+        if turn is None:
+            return await next_handler(**input_kwargs)
+        await turn.lock.acquire()
+        try:
+            if turn.blocked:
+                # Route through acting for a coherent stopped ToolResponse and
+                # evidence. This ALLOW never delegates or invokes a tool.
+                decision = PermissionDecision(behavior=PermissionBehavior.ALLOW, message=AUTHORIZATION_STOPPED)
+            else:
+                decision = await next_handler(**input_kwargs)
+            tool = input_kwargs.get("tool")
+            if getattr(tool, "is_external_tool", False):
+                if turn.blocked:
+                    decision = PermissionDecision(behavior=PermissionBehavior.DENY, message=AUTHORIZATION_STOPPED)
+                turn.release()
+            elif decision.behavior == PermissionBehavior.ALLOW:
+                turn.lease = input_kwargs["tool_call"].id
+            else:
+                turn.release()
+            return decision
+        except BaseException:
+            turn.release()
+            raise
+
+    @staticmethod
+    def _stop(agent, turn, result, gateway_name):
+        from pydantic import ValidationError
+        from agent_service.schemas.v2 import AuthorizationRequired
+
+        if not turn.stopped:
+            turn.stopped = True
+            try:
+                error = result.get("error")
+                if (
+                    result.get("status") != "error"
+                    or result.get("tool_name") != gateway_name
+                    or not isinstance(error, dict)
+                    or error.get("code") != AUTHORIZATION_REQUIRED_CODE
+                ):
+                    raise ValueError("invalid authorization result")
+                challenge = AuthorizationRequired.model_validate(result.get("authorization_required"))
+                if challenge.expires_at is not None and challenge.expires_at <= datetime.now(timezone.utc):
+                    raise ValueError("expired authorization result")
+                turn.challenge = challenge
+            except (ValidationError, ValueError, TypeError):
+                # Fail closed without promoting malformed metadata or raw errors.
+                turn.challenge = None
+            frame = turn.frame()
+            sink = TOOL_EVIDENCE_SINK.get()
+            if frame is not None and sink is not None:
+                sink.put_nowait(frame)
+        # Cancel the structured requirement, not fabricate a schema result. The
+        # public reply state otherwise forces GenerateStructuredOutput forever.
+        reply_context = agent.state.reply_context
+        reply_context.structured_schema = None
+        reply_context.structured_output = None
+
+    async def on_acting(self, agent, input_kwargs, next_handler):
+        from agentscope.message import TextBlock
+        from agent_service.tools.gateway_tools import CURRENT_CALL_ID
+
+        turn = CURRENT_AUTHORIZATION_TURN.get()
+        if turn is None:
+            async for item in next_handler(**input_kwargs):
+                yield item
+            return
+        call = input_kwargs["tool_call"]
+        if turn.lease != call.id:
+            await turn.lock.acquire()
+            turn.lease = call.id
+        call_token = CURRENT_CALL_ID.set(call.id)
+        try:
+            tool = ToolEvidenceMiddleware._resolve_tool(agent, call.name)
+            gateway_name = getattr(tool, "gateway_tool_name", None)
+            if turn.blocked:
+                result = {"tool_name": gateway_name or call.name, "status": "error",
+                          "error": {"code": "TARGET_AUTHORIZATION_STOPPED", "message": AUTHORIZATION_STOPPED}}
+                from agentscope.message import ToolResultState
+
+                yield ToolResponse(content=[TextBlock(text=json.dumps(result))],
+                                   metadata={"gateway_result": result}, state=ToolResultState.ERROR)
+                return
+            async for item in next_handler(**input_kwargs):
+                result = (item.metadata or {}).get("gateway_result")
+                error = result.get("error") if isinstance(result, dict) else None
+                if gateway_name and isinstance(result, dict) and (
+                    "authorization_required" in result
+                    or isinstance(error, dict) and error.get("code") == AUTHORIZATION_REQUIRED_CODE
+                ):
+                    self._stop(agent, turn, result, gateway_name)
+                    safe = {"tool_name": gateway_name, "status": "error", "error": {
+                        "code": AUTHORIZATION_REQUIRED_CODE if turn.challenge else "TARGET_AUTHORIZATION_INVALID",
+                        "message": AUTHORIZATION_GUIDANCE if turn.challenge else AUTHORIZATION_INVALID,
+                    }}
+                    # Strip private metadata from persisted SDK tool blocks too.
+                    from agentscope.message import ToolResultState
+
+                    item = item.model_copy(update={"content": [TextBlock(text=json.dumps(safe))],
+                                                   "metadata": {"gateway_result": safe}, "state": ToolResultState.ERROR})
+                yield item
+        finally:
+            CURRENT_CALL_ID.reset(call_token)
+            turn.release()
+
+    async def on_model_call(self, agent, input_kwargs, next_handler):
+        turn = CURRENT_AUTHORIZATION_TURN.get()
+        if turn is not None and turn.blocked:
+            from agentscope.message import TextBlock
+            from agentscope.model import ChatResponse
+
+            return ChatResponse(content=[TextBlock(text=AUTHORIZATION_GUIDANCE if turn.challenge else AUTHORIZATION_INVALID)], is_last=True)
+        return await next_handler(**input_kwargs)
+
+    async def on_compress_context(self, agent, input_kwargs, next_handler):
+        turn = CURRENT_AUTHORIZATION_TURN.get()
+        if turn is not None and turn.blocked:
+            return None
+        return await next_handler(**input_kwargs)
 
 
 class GatewayPermissionMiddleware(MiddlewareBase):

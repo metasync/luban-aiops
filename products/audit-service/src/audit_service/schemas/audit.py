@@ -40,6 +40,13 @@ EventType = Literal[
     # redemption or SMTP accept). Carries delivery_id/channel/recipient, never
     # the value.
     "secret_delivered",
+    # SPEC-070 (plan line 155): an actual target-authorization lifecycle
+    # outcome — enrollment/renewal/cancel/expiry/revoke — with bounded
+    # operation/authorization_outcome/reason details plus normal correlation.
+    # Emitted only from acknowledged publication or authoritative observation,
+    # never fabricated for a callback and never carrying a browser proof,
+    # credential, or provider URL.
+    "target_authorization",
 ]
 
 Outcome = Literal["allow", "deny", "success", "error"]

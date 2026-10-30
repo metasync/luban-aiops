@@ -1,0 +1,86 @@
+# SPEC-070 delegated send-path Egress — least privilege (plan line 166).
+#
+# "Add only required database, internal gateway, JWKS, DNS, and configured target
+#  egress paths." This is the FIRST Egress policy in the repo (every other
+#  NetworkPolicy here leaves egress unrestricted on purpose), and it exists only
+#  in the disabled-by-default delegated-dev overlay.
+#
+# Kubernetes semantics: once ANY Egress policy selects a pod, that pod's egress
+# becomes default-deny except for the rules below. This policy selects
+# app:tool-gateway. Because delegated-dev layers on the MINIMAL stack
+# (dev-k8s/base + runtime-profiles/default) where every tool connector is
+# disabled, the gateway here has no other external egress to starve — the four
+# allow rules are exactly what the delegated send path and the gateway's internal
+# dependencies need. If an operator ever co-enables a connector in this pod, they
+# must extend this policy with that connector's egress (and the LLM/token
+# endpoints it uses) or it will be denied.
+#
+# The EXTERNAL OAuth target and any EXTERNAL JWKS are deliberately NOT allowed
+# out of the box: they are commented ipBlock placeholders the operator fills with
+# the real target's CIDR. So even if a gate were flipped without provisioning,
+# the network layer independently blocks reaching a real target — defense in
+# depth for "render every overlay without enabling a real target."
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tool-gateway-delegated-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: tool-gateway
+  policyTypes:
+    - Egress
+  egress:
+    # 1. DNS — required for every in-cluster service resolution below.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2. Database — the custody store (grant publication + authorization status
+    #    are atomic here). The gateway connects as custody_runtime, which holds
+    #    DML only on gateway_custody tables (see base/infra/custody-grants.sql).
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # 3. Internal gateway — platform-gateway presents the bearerless
+    #    authorization handoffs (provider-url + callback) to the tool-gateway.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: platform-gateway
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 4. JWKS — the in-cluster identity-service publishes the key set the gateway
+    #    verifies the delegated-human requester identity against.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: identity-service
+      ports:
+        - protocol: TCP
+          port: 8000
+    # 5. Configured target egress — OPERATOR SUPPLIED, denied until filled in.
+    #    Uncomment and set the exact CIDR of the OAuth authorization/token/
+    #    revocation endpoints for the administered target, on 443. Pin the
+    #    narrowest range you can; a broad 0.0.0.0/0 defeats this policy. Add a
+    #    second block for an EXTERNAL JWKS/identity endpoint if the delegated
+    #    human trust set does not resolve to the in-cluster identity-service.
+    # - to:
+    #     - ipBlock:
+    #         cidr: 203.0.113.10/32   # example: the target's TLS endpoint
+    #   ports:
+    #     - protocol: TCP
+    #       port: 443

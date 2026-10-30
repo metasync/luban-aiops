@@ -59,6 +59,19 @@ def generation_bearer_token() -> str | None:
     return owner[0] if owner is not None else DELEGATED_TOKEN.get()
 
 
+def generation_owner_token() -> str | None:
+    """The requester's own bearer during a delegated resume, else ``None``.
+
+    Unlike ``generation_bearer_token`` this never falls back to the approver's
+    ``DELEGATED_TOKEN``. SPEC-070 transports a requester human bearer only for
+    an identity-bearing envelope, so a machine turn — or an explicit missing
+    owner ``(None,)`` — must yield ``None`` and keep the worker's all-or-none
+    binding intact rather than handing the approver off as a requester.
+    """
+    owner = GENERATION_OWNER_TOKEN.get()
+    return owner[0] if owner is not None else None
+
+
 # Request-scoped chat session id (SPEC-049 R-1): set by the runtime kernel
 # around each turn so read-path gateway invocations forward the chat
 # session id beside the delegated token. A stateful gateway connector (the
@@ -135,6 +148,7 @@ async def invoke_gateway_tool(
     parameters: dict[str, Any],
     bearer_token: str | None = None,
     session_id: str | None = None,
+    call_id: str | None = None,
 ) -> dict:
     """Invoke a tool through the gateway and return the result dict.
 
@@ -162,6 +176,13 @@ async def invoke_gateway_tool(
     # session that owns the flow.
     if session_id:
         payload["session_id"] = session_id
+    # SPEC-070: forward the in-flight tool-call id alongside the session id so
+    # the gateway can correlate a produced authorization challenge to the exact
+    # call that needs it. Like session_id it is a trusted correlation handle
+    # injected by the kernel (never a model-supplied parameter) and carries no
+    # authority — identity and policy still ride ``bearer_token``.
+    if call_id:
+        payload["call_id"] = call_id
     async with httpx.AsyncClient(timeout=INVOKE_TIMEOUT_SECONDS) as client:
         response = await client.post(
             f"{gateway_url}/api/v2/tools/invoke",
@@ -433,6 +454,7 @@ async def _invoke_v3(
     from agent_service.services.execution_invocation import (
         coordinate_v3_invocation,
     )
+    from agent_service.services.execution_worker_client import IDENTITY_FIELDS
 
     context = EXECUTION_AUDIT_CONTEXT.get() or {}
     settings = context.get("settings")
@@ -444,6 +466,13 @@ async def _invoke_v3(
         # before any send. This is a positive pre-dispatch refusal.
         _audit_execution_rejected(tool_name, call_id, "request_missing")
         return _rejection_result(tool_name, "request_missing")
+    # SPEC-070: transport the requester's own bearer if and only if this
+    # envelope carries the signed identity quartet. A machine envelope never
+    # transports one, so a normal durable resume is unaffected and the worker's
+    # all-or-none binding cannot be tripped by an unrelated parked owner token.
+    requester_token = (
+        generation_owner_token() if IDENTITY_FIELDS.issubset(envelope) else None
+    )
     outcome = await coordinate_v3_invocation(
         guard=guard,
         envelope=envelope,
@@ -452,6 +481,7 @@ async def _invoke_v3(
         settings=settings,
         attempt_request_id=str(request_id),
         current_request_id=str(request_id),
+        requester_token=requester_token,
     )
     if outcome.status == "original":
         if outcome.permit is not None:
@@ -546,6 +576,7 @@ def _make_tool_fn(
                 parameters=kwargs,
                 bearer_token=(generation_bearer_token() if name == "secrets.generate_password" else DELEGATED_TOKEN.get()),
                 session_id=CHAT_SESSION_ID.get(),
+                call_id=CURRENT_CALL_ID.get(),
             )
         except httpx.TimeoutException:
             # Surface the timeout as a structured result so the evidence

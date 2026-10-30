@@ -25,11 +25,19 @@ configMapGenerator:
   # registered every document a second time under a different source-prefixed
   # skill_id. The `skills-samples` ConfigMap is created out-of-band by
   # `make deploy-samples`, and the base overlay never names a sample.
+  # create-custody-db.sql only creates the EMPTY `custody` database (no secret,
+  # no privilege). The gateway_custody schema/tables are created later by
+  # `custody_cli migrate` under the custody_operator role; the runtime role
+  # (custody_runtime) issues no DDL. The role/grant SQL (custody-roles.sql,
+  # custody-grants.sql) is deliberately NOT generated here: it is applied by
+  # sync-custody-db.sh after migrate, and role passwords are generated at deploy
+  # time, never committed. See SPEC-070 plan line 166 (least privilege).
   - name: postgres-initdb
     files:
       - infra/create-skills-db.sql
       - infra/create-incidents-db.sql
       - infra/create-sessions-db.sql
+      - infra/create-custody-db.sql
 resources:
   - shared/namespace.yaml
   - infra/redis-deployment.yaml

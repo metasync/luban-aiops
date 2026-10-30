@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 __all__ = [
     "AgentChatRequest",
@@ -73,7 +73,18 @@ class AgentChatRequest(BaseModel):
     )
 
 
+class AuthorizationRequired(BaseModel):
+    """Opaque gateway challenge, never model-authored execution authority."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+
+    challenge_id: str = Field(strict=True, pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    target: str = Field(strict=True, min_length=1, pattern=r"\S")
+    expires_at: AwareDatetime | None = None
+
+
 class AgentChatResponse(BaseModel):
+    authorization_required: AuthorizationRequired | None = None
     session_id: str
     request_id: str
     content: str

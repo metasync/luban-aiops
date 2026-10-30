@@ -135,6 +135,8 @@ class TestPostgresSessionStore:
             NOW,
             "deepseek",
             "development",
+            "trusted-issuer",
+            "alice-immutable",
         )
         store = PostgresSessionStore(
             "postgresql://fake", ttl_seconds=600,
@@ -175,8 +177,8 @@ class TestPostgresSessionStore:
     def test_list_sessions_by_user(self):
         calls: list[dict] = []
         rows = [
-            ("ses-2", "alice", NOW, "second", NOW, None, "development"),
-            ("ses-1", "alice", NOW, None, None, None, "operation"),
+            ("ses-2", "alice", NOW, "second", NOW, None, "development", "trusted-issuer", "alice-immutable"),
+            ("ses-1", "alice", NOW, None, None, None, "operation", None, None),
         ]
         store = PostgresSessionStore(
             "postgresql://fake", connect=_fake_connect(calls, rows=rows)

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuthorizationReturn } from "./sessions/useAuthorizationReturn";
 import {
   Alert,
   Avatar,
@@ -340,10 +341,16 @@ export default function App() {
     },
   );
 
-  const navigate = (view: ViewId) => {
+  const navigate = useCallback((view: ViewId) => {
     setActive(view);
     setDrawerOpen(false);
-  };
+  }, []);
+  const authorizationNotice = useAuthorizationReturn({
+    booting, username, studioAllowed: hasAnyRole(roles, STUDIO_ROLES),
+    selectOperation: operationWorkspace.setActiveSessionId,
+    selectDevelopment: developmentWorkspace.setActiveSessionId,
+    navigate,
+  });
 
   const openIncidentSession = (incident: {
     incident_id: string;
@@ -395,6 +402,7 @@ export default function App() {
         />
       </Layout.Sider>
       <Layout>
+        {authorizationNotice && <Alert type="info" showIcon title={authorizationNotice} closable />}
         <Layout.Content
           className={
             active === "chat" || active === "studio"

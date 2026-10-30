@@ -402,11 +402,19 @@ pilot (SPEC-067), not by this substrate.
 
 ### Delegated custody lifecycle (SPEC-070 foundation)
 
-`oauth2_authorization_code` is a **parser/custody foundation only**. It is not resolved by
-HTTP/MCP acquisition and cannot fill browser credentials. Valid configuration still opens no
-OAuth, target, or MCP session; there are no usable authorization routes or new portal controls.
-Existing Basic, bearer, and client-credentials behavior is unchanged. See the
-[complete delegated field/key contract](configuration-reference.md#delegated-custody-foundation-spec-070-not-enabled).
+`oauth2_authorization_code` now has **default-off acquisition and authorization routing in
+the working tree**. It still cannot fill browser credentials. A valid set alone does not enable
+HTTP/MCP acquisition: the custody, verified-human, and workload-trust gates must be satisfied.
+The challenge producer, bounded kernel stop, durable `authorization_required` evidence, portal
+clean return, authorization cards/Continue, and provisioning tooling are implemented. Development
+acceptance is recorded in the [SPEC-070 matrix](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix),
+including real-TLS runtime/edge and Postgres multiprocess proofs plus rendered-DOM portal tests.
+Real-browser screenshots and actual AAP qualification remain outstanding; this is unreleased,
+default-off code, not a deployed feature. Existing Basic, bearer, and client-credentials behavior
+is unchanged. See the
+[complete delegated field/key contract](configuration-reference.md#delegated-custody-foundation-spec-070-not-enabled)
+and [browser handoff configuration](configuration-reference.md#delegated-browser-handoff-spec-070-default-off).
+No deployed workflow or AAP compatibility is claimed.
 
 The internal Postgres primitives implement:
 
@@ -415,8 +423,12 @@ The internal Postgres primitives implement:
   scopes, and target account. Durable PKCE envelopes also bind challenge/routing/expiry.
   Refresh credentials and PKCE are encrypted; start/state/operation capabilities are hashed.
   Access tokens and authorization codes have no database columns or generic payload fields.
-- Insert-only challenges, one live start handle, single-use state claims committed before
-  any future provider exchange, and expiry enforced by database time on every transition.
+- Insert-only challenges, one live start handle, and atomic browser-verified start consumption
+  with hash-only state plus encrypted PKCE preparation. No provider URL is constructed until the
+  preparation commit is acknowledged. Encryption/pre-commit failure leaves the start unchanged;
+  a committed start stays spent after acknowledgment/response loss and cannot yield another URL.
+  This is not grant publication or revocation, and it needs no migration beyond custody v3.
+  Single-use callback claims commit before provider exchange; database time enforces expiry.
   The memory routing backend uses monotonic deadlines and is single-process development/test
   only; it cannot manufacture an authorized result. Terminal routing records are retained
   for owner-only reads and reclaimed in bounded batches after expiry plus 300 seconds.
@@ -438,12 +450,19 @@ The internal Postgres primitives implement:
 
 **Operator procedures (internal primitives, not production enablement):**
 
-1. Provision schema version 1 through `migrate_custody` using a separate migration identity.
-   Runtime has DML only on configurations, credentials, transactions, and transaction secrets;
+1. Use the explicit `migrate_custody` operation with a separate migration identity; runtime
+   now requires schema version **3** and never performs DDL. The v1→v2 upgrade fences legacy
+   unpublished credential attempts; v2→v3 burns pending prototype transactions whose verifier
+   lacks the new browser binding, while preserving published grants. No production migration
+   has been performed. Runtime has DML only on configurations, credentials, transactions,
+   and transaction secrets;
    SELECT on schema version/key policy; and `UPDATE(singleton)` on key policy solely for row
    locking. It cannot alter policy values, migrate tables, or read unrelated application data.
    Key rotation/recovery require an operator identity. The disposable proof exercises this
-   separation; production roles, mounts, network policy, and app wiring remain R-6 work.
+   separation, and the two least-privilege roles, mounts, and network policy now ship as the
+   disabled-by-default `delegated-dev` overlay plus `sync-custody-db.sh` (see
+   [Delegated provisioning + operator CLI](#delegated-provisioning--operator-cli-spec-070-disabled-by-default)
+   below); integrated runtime/browser acceptance remains pending.
 2. Replace/reactivate a configuration with a strictly higher revision, including when its
    administered mapping changes. Same-revision changed content invalidates the generation;
    restoration does not revive grants. Require fresh user authorization. Do not reset registry
@@ -469,6 +488,103 @@ process termination, and a commit-acknowledgment fault proxy. It accepts no exte
 input and does not skip when Docker is missing. This proves custody/state transitions, not
 provider identity verification, end-to-end OAuth, audit attribution, or production readiness.
 **AAP compatibility unverified.**
+
+### Delegated provisioning + operator CLI (SPEC-070; disabled by default)
+
+These are the operator entry points added for the delegated runtime. **None of them enables
+delegation**: every `GATEWAY_DELEGATED_*_ENABLED` gate stays `false` until an operator provisions
+the keyring, the administered config + mapping, and a real OAuth target, then flips a gate and
+redeploys the opt-in overlay. Nothing here has been run against a live target or a real AAP.
+
+**Backend operator CLI** — `python -m tool_gateway.services.custody_cli`. It accepts secret
+**file paths** (`--dsn-file`, `--keyring-file`, `--refresh-token-file`), never DSN/token literals;
+argparse abbreviation is disabled on every subcommand, so a `--dsn` or `--refresh-token` literal is
+**rejected**, not silently accepted as a prefix of the `*-file` option. There is **no enrollment and
+no manual-user-token command** — a durable credential is only ever produced by a real user
+authorization through the browser handoff. Subcommands:
+
+- `migrate --dsn-file --keyring-file` — explicit schema migration (custody **v3**) under the
+  operator role; the runtime never performs DDL.
+- `readiness` / `status` — bounded readiness probe (no mutation).
+- `revoke --owner-namespace --owner-sub` — **local revoke commits first**: it advances the
+  credential epoch, clears ciphertext, and burns pending claims without needing keys or a readable
+  configuration, and invalidates the next cache check across replicas (there is no positive
+  generation cache). Result: `local_revoked_remote_unconfirmed`.
+- `remote-revoke …` — at most **one** configured remote revocation attempt, using a separately
+  obtained, fenced **memory-only** refresh credential. Remote failure **never** rolls back the local
+  revocation. A missing revocation endpoint or token yields an explicit remote-unconfirmed status.
+  An uncertain remote operation is **never retried automatically**.
+- `rotate-key --expected-key-id` — advance the authoritative write policy (operator role), after
+  distributing a keyring that retains the old decryption versions.
+- `reencrypt --limit N` — bounded re-encryption in batches of 1–1000 (default 100); out-of-range
+  fails closed (`invalid_batch`).
+- `recover --expected-epoch` — externally fenced recovery; invalidates all old
+  generations/grants/pending secrets. A previous epoch cannot be reused.
+- `validate-config --config-file --set-id --callback` — the **same** validation authority the
+  runtime uses (`load_snapshot`); the provisioning scripts call it before any mutation, so shell
+  never re-implements validation.
+
+**Provisioning scripts** (`shared/platform-ops/gitops/`):
+
+- `sync-custody-db.sh [namespace]` — creates the `custody` database idempotently and the two
+  SEPARATE least-privilege roles, runs `custody_cli migrate` as `custody_operator` (out of cluster,
+  over `CUSTODY_PG_HOST`, default a `svc/postgres` port-forward), applies the runtime grants AFTER
+  migrate, then writes the runtime DSN, admin DSN, and keyring secrets. Requires
+  `CUSTODY_KEYRING_FILE`; `SKIP_CUSTODY_DB=true` skips it. Passwords are generated at deploy time
+  (or reused from the existing secret so a re-run never rotates a live password), handed to `psql`
+  through the environment, and delivered `--from-file` from 0600 temp files — never argv, never
+  committed, never logged.
+- `sync-browser-credentials.sh [--validate-only] [namespace]` — extends the existing browser/machine
+  provisioning with the administered delegated config + mapping. It **validates before any
+  mutation** (a read-only browser-file check plus `custody_cli validate-config`); a refusal prints
+  `REFUSED: … NO secret was created and NO rollout occurred` and exits non-zero with delegation left
+  disabled. `--validate-only` (or `VALIDATE_ONLY=true`) validates every supplied input and exits 0
+  with **no** cluster change. The live delegated-secret path (`tool-gateway-delegated-config`,
+  `--from-file` for both the config and the mapping) is a separate, deliberate operator action.
+
+**Least-privilege database roles** (plan line 166): the send path connects as `custody_runtime` —
+`USAGE` on `gateway_custody`; `SELECT` on `schema_version`/`key_policy`; `UPDATE (singleton)` on
+`key_policy` (row-lock only, no value authority); `SELECT/INSERT/UPDATE/DELETE` on `configurations`,
+`credentials`, `transactions`, `transaction_secrets` — and is **proven denied** DDL, cross-application
+reads, key-policy value changes/deletes, and version rewrites (`base/infra/custody-grants.sql`, the
+committed mirror of the disposable-Postgres proof). Migration, rotation, and recovery use the
+separate `custody_operator` role.
+
+**Disabled-by-default overlay** (`runtime-profiles/delegated-dev`): a **standalone, opt-in** overlay,
+deliberately NOT referenced by `dev-k8s` (so the default deploy is unchanged) and layered on the
+minimal `base + default` stack where every tool connector is disabled. It holds the three gates
+`false`; mounts the administered config/mapping at `/etc/luban/delegated` and the keyring at
+`/etc/luban/delegated-keyring` from `optional: true` secrets (so the pod starts before provisioning);
+injects the custody DSN via a `secretKeyRef` on `tool-gateway-custody-db` (never `envFrom`, never a
+committed value); projects the two audience-bound workload JWTs (`luban-target-execution-handoff`,
+`luban-target-authorization-handoff`, `expirationSeconds: 600`) the gateway **verifies**; and applies
+the least-privilege egress NetworkPolicy (DNS, database, internal gateway, JWKS — the external target
+CIDR is a commented operator placeholder, so no real target is reachable out of the box). `make
+overlays` renders it without enabling a real target.
+
+**Client-registration prerequisites** (before any of the above can authorize a real user): register a
+**confidential backend client** at the target's authorization server — never a public/SPA client, never
+the implicit flow, never an ID-token-only profile. Its registered redirect URI must be **exactly** the
+deployment-trusted callback (path `/api/v1/targets/authorizations/callback`, no query or fragment);
+enable **PKCE `S256`**; pick `client_secret_basic` or `client_secret_post` explicitly (there is no
+delegated default); and ensure the authorization/token/renewal/revocation endpoints all lie within the
+set's `oauth_origins` and the requested `scope` is a subset of `allowed_scopes`. The `client_secret`
+is backend-only configuration in the administered file — never a tool argument, never committed.
+
+**Offboarding** a requester is two independent operator actions, either of which suffices to stop use:
+(a) **local-revoke** the owner's grant (`custody_cli revoke --owner-namespace … --owner-sub …`) —
+this commits first and every later credential check across replicas rejects immediately, optionally
+followed by one explicit `remote-revoke` attempt; and/or (b) **remove the owner's mapping row** by
+publishing a strictly-higher `config_revision`. Removing a mapping row (or revoking) never revives a
+previously revoked grant and requires fresh user authorization for any future grant. Do not lower a
+registry revision or clear a tombstone to force reuse.
+
+**Group-synchronization limits:** the identity mapping is a **static, administrator-controlled JSON
+file** — there is **no** dynamic group/SCIM/directory synchronization. The gateway never polls an
+identity provider for membership; a mapping change is a manual edit delivered as a new config revision
+(with the propagation-delay caveat above). Consequently a user removed from an upstream group is **not**
+automatically offboarded — an operator must edit the mapping and/or local-revoke as above. Mapping
+equality is not production provider identity verification.
 
 ## Kubernetes Connector
 

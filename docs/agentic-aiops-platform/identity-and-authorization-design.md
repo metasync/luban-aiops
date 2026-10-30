@@ -405,6 +405,16 @@ Represents:
 > [SPEC-070](../specs/SPEC-070-outbound-user-delegated-identity/spec.md); it is a
 > dependency of the production path and does **not** block this read-only dev slice.
 
+> Current SPEC-070 checkpoint (2026-10-30): [ADR-0016](../adr/0016-just-in-time-outbound-oauth-authorization.md)
+> supersedes ADR-0015. The first-use workflow and encrypted Postgres custody are implemented,
+> **unreleased and default-off**, with [development acceptance recorded](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix).
+> Target grants belong to the verified requester; a different approver supplies Luban mutation
+> authority, not their target grant. Tokens remain target-issued, with no outbound broker mint.
+> This does not automatically convert the ServiceNow machine-grant connector. **AAP compatibility
+> unverified**: [DI-070](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+> still requires the actual target security profile and two-user RBAC/lifecycle proof before
+> production user-delegated enablement; real-browser UI screenshots remain environment-blocked.
+
 These identities should be logged separately so audit records can answer:
 
 - who requested the action

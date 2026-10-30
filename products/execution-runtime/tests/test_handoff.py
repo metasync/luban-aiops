@@ -466,5 +466,113 @@ class MetadataReplayHandoffTests(HandoffTestBase):
         self.assertEqual(self.ledger.facts[0]["receipt"]["status"], "timeout")
 
 
+class DelegatedHandoffTests(HandoffTestBase):
+    """Actual JWT signatures and route control flow; ledger remains a route double."""
+
+    ENV = {**HandoffTestBase.ENV,
+           "EXECUTION_TARGET_AUTHORIZATION_ENABLED": "true",
+           "EXECUTION_DELEGATED_IDENTITY_ISSUER": "trusted-broker",
+           "EXECUTION_DELEGATED_IDENTITY_JWKS_URL": "https://identity.test/jwks",
+           "EXECUTION_DELEGATED_IDENTITY_AUDIENCE": "tool-gateway",
+           "EXECUTION_DELEGATED_IDENTITY_ACTORS": "platform-gateway",
+           "EXECUTION_TARGET_EXECUTION_TOKEN_PATH": "/fixture/workload.jwt"}
+
+    def setUp(self):
+        super().setUp()
+        import time
+        import jwt
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.now = int(time.time())
+        self.jwt = jwt
+        patcher = mock.patch("jwt.PyJWKClient.get_signing_key_from_jwt",
+                             return_value=SimpleNamespace(key=self.key.public_key()))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.envelope = _envelope(self.arguments, requester_namespace="trusted-broker",
+                                  requester_sub="immutable-owner", decider_namespace="trusted-broker",
+                                  decider_sub="immutable-decider")
+        self.body = {"request": self.envelope, "arguments": self.arguments,
+                     "delegated_token": self.mint("decider"), "requester_token": self.mint("owner")}
+
+    def mint(self, user, **claims):
+        return self.jwt.encode({"iss": "trusted-broker", "aud": "tool-gateway",
+                                "sub": "immutable-" + user, "username": user,
+                                "iat": self.now - 1, "exp": self.now + 300,
+                                "authentication_source": "oidc", "act": {"sub": "platform-gateway"},
+                                **claims}, self.key, algorithm="RS256")
+
+    def test_identity_envelope_without_requester_cannot_claim_or_send(self):
+        client = self._start()
+        del self.body["requester_token"]
+        response = client.post(HANDOFF_PATH, json=self.body, headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ledger.claims, 0)
+        self.execute_tool_mock.assert_not_called()
+
+    def test_cross_user_handoff_preserves_primary_and_private_requester(self):
+        client = self._start()
+        response = client.post(HANDOFF_PATH, json=self.body, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        args, kwargs = self.execute_tool_mock.call_args
+        self.assertEqual(args[3], self.body["delegated_token"])
+        verified = kwargs["delegated_execution"]
+        self.assertEqual(verified.requester_token, self.body["requester_token"])
+        self.assertEqual(verified.projection["requester_sub"], "immutable-owner")
+        self.assertEqual(verified.projection["decider_sub"], "immutable-decider")
+        self.assertEqual(verified.projection["request_digest"], signing.canonical_digest(self.envelope))
+        self.assertNotIn("signature", verified.projection)
+        for token in (self.body["requester_token"], self.body["delegated_token"]):
+            self.assertNotIn(token, repr(verified))
+            self.assertNotIn(token, response.text)
+            self.assertNotIn(token, repr(self.ledger.envelope))
+            self.assertNotIn(token, repr(self.ledger.facts))
+
+    def test_invalid_humans_fail_before_claim_without_secret_echo(self):
+        client = self._start()
+        invalid = [None, "", "opaque-invalid-jwt", "x" * 16385,
+                   self.mint("owner", exp=self.now - 1, iat=self.now - 10),
+                   self.mint("owner", sub="another-owner"), self.mint("owner", username="other"),
+                   self.mint("owner", iss="other"), self.mint("owner", aud="other"),
+                   self.mint("owner", authentication_source="development"),
+                   self.mint("owner", act={"sub": "other"})]
+        for field in ("requester_token", "delegated_token"):
+            for token in invalid:
+                with self.subTest(field=field, token_case=invalid.index(token)):
+                    response = client.post(HANDOFF_PATH, json={**self.body, field: token}, headers=self.headers)
+                    self.assertIn(response.status_code, (400, 401))
+                    self.assertEqual(self.ledger.claims, 0)
+                    self.execute_tool_mock.assert_not_called()
+                    if isinstance(token, str) and len(token) > 10:
+                        self.assertNotIn(token, response.text)
+
+    def test_signed_binding_and_body_combinations_are_closed(self):
+        client = self._start()
+        for field in ("requester_namespace", "requester_sub", "decider_namespace", "decider_sub",
+                      "owner_user_id", "decider_user_id"):
+            changed = {**self.envelope, field: "wrong"}
+            changed["signature"] = signing.sign_envelope(changed, KEY)
+            response = client.post(HANDOFF_PATH, json={**self.body, "request": changed}, headers=self.headers)
+            self.assertIn(response.status_code, (400, 401))
+        legacy = _envelope(self.arguments)
+        for body in ({**self.body, "request": legacy}, {**self.body, "extra": "secret"},
+                     {**self.body, "request": {**self.envelope, "requester_sub": "forged"}},
+                     {**self.body, "arguments": {"replicas": 99}}):
+            response = client.post(HANDOFF_PATH, json=body, headers=self.headers)
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ledger.claims, 0)
+        self.execute_tool_mock.assert_not_called()
+
+    def test_disabled_worker_never_treats_identity_envelope_as_legacy(self):
+        client = self._start()
+        with mock.patch.dict(os.environ, {"EXECUTION_TARGET_AUTHORIZATION_ENABLED": "false"}):
+            get_settings.cache_clear()
+            for body in (self.body, {k: v for k, v in self.body.items() if k != "requester_token"}):
+                response = client.post(HANDOFF_PATH, json=body, headers=self.headers)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.ledger.claims, 0)
+        self.execute_tool_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

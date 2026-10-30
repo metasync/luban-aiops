@@ -123,6 +123,112 @@ class GeneratedPasswordOwnerTests(unittest.TestCase):
                 DELEGATED_TOKEN.reset(token_var)
 
 
+class GenerationOwnerTokenTests(unittest.TestCase):
+    """SPEC-070: the requester-owner accessor never falls back to the approver.
+
+    ``generation_bearer_token`` deliberately falls back to ``DELEGATED_TOKEN``
+    for the read/secret-ownership path; the requester-transport accessor must
+    NOT, or a machine turn would hand the approver bearer to the worker as a
+    requester identity and break the all-or-none binding.
+    """
+
+    def test_unset_returns_none_not_the_delegated_token(self):
+        from agent_service.tools.gateway_tools import generation_owner_token
+
+        token_var = DELEGATED_TOKEN.set("approver-token")
+        try:
+            self.assertIsNone(generation_owner_token())
+        finally:
+            DELEGATED_TOKEN.reset(token_var)
+
+    def test_explicit_missing_owner_returns_none(self):
+        from agent_service.tools.gateway_tools import (
+            GENERATION_OWNER_TOKEN,
+            generation_owner_token,
+        )
+
+        owner_var = GENERATION_OWNER_TOKEN.set((None,))
+        token_var = DELEGATED_TOKEN.set("approver-token")
+        try:
+            self.assertIsNone(generation_owner_token())
+        finally:
+            DELEGATED_TOKEN.reset(token_var)
+            GENERATION_OWNER_TOKEN.reset(owner_var)
+
+    def test_requester_owner_returns_its_token(self):
+        from agent_service.tools.gateway_tools import (
+            GENERATION_OWNER_TOKEN,
+            generation_owner_token,
+        )
+
+        owner_var = GENERATION_OWNER_TOKEN.set(("requester-token",))
+        try:
+            self.assertEqual(generation_owner_token(), "requester-token")
+        finally:
+            GENERATION_OWNER_TOKEN.reset(owner_var)
+
+
+class InvokeV3RequesterGatingTests(unittest.TestCase):
+    """_invoke_v3 transports a requester bearer only for an identity envelope."""
+
+    _QUARTET = {
+        "requester_namespace": "https://issuer.test",
+        "requester_sub": "alice-sub",
+        "decider_namespace": "https://issuer.test",
+        "decider_sub": "bob-sub",
+    }
+
+    def _coordinate_kwargs(self, envelope, *, owner_token):
+        from types import SimpleNamespace
+
+        from agent_service.services import execution_invocation
+        from agent_service.tools.gateway_tools import (
+            GENERATION_OWNER_TOKEN,
+            _invoke_v3,
+        )
+
+        captured = {}
+
+        async def fake_coordinate(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                status="original", result={"status": "success"}, permit=None, original=None
+            )
+
+        audit_var = EXECUTION_AUDIT_CONTEXT.set(
+            {"settings": SimpleNamespace(), "request_id": "req-1"}
+        )
+        requests_var = EXECUTION_REQUESTS.set({"call-1": envelope})
+        owner_var = GENERATION_OWNER_TOKEN.set((owner_token,))
+        try:
+            with patch.object(
+                execution_invocation, "coordinate_v3_invocation", fake_coordinate
+            ):
+                _run(_invoke_v3(
+                    "k8s.delete_pod", "call-1", {"name": "pod"}, "approver-token", SimpleNamespace()
+                ))
+        finally:
+            GENERATION_OWNER_TOKEN.reset(owner_var)
+            EXECUTION_REQUESTS.reset(requests_var)
+            EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+        return captured
+
+    def test_identity_envelope_transports_the_requester_bearer(self):
+        envelope = {"execution_id": "exec-1", **self._QUARTET}
+        captured = self._coordinate_kwargs(envelope, owner_token="requester-token")
+        self.assertEqual(captured["requester_token"], "requester-token")
+        self.assertEqual(captured["delegated_token"], "approver-token")
+
+    def test_machine_envelope_transports_no_requester_bearer(self):
+        # Even with a parked owner token bound, a machine (non-identity)
+        # envelope must never transport one — this is the SPEC-063 regression
+        # guard for a normal durable resume.
+        envelope = {"execution_id": "exec-2"}
+        captured = self._coordinate_kwargs(envelope, owner_token="requester-token")
+        self.assertIsNone(captured["requester_token"])
+        self.assertEqual(captured["delegated_token"], "approver-token")
+
+
 class InvokeGatewayToolTests(unittest.TestCase):
     def test_invoke_sends_bearer_header_and_no_identity_in_body(self) -> None:
         mock_response = MagicMock()
@@ -174,6 +280,45 @@ class InvokeGatewayToolTests(unittest.TestCase):
         payload = mock_client.post.call_args[1]["json"]
         self.assertEqual(payload["session_id"], "ses-flow-1")
         self.assertNotIn("session_id", payload["parameters"])
+
+    def test_invoke_forwards_call_id_in_body(self) -> None:
+        # SPEC-070: a read forwards its tool-call id alongside the session id so
+        # the gateway can correlate a produced authorization challenge to the
+        # exact call that needs it. Like session_id it is a top-level correlation
+        # handle (never inside parameters) and carries no authority.
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "success", "data": {}}
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            mock_client = _mock_client(response=mock_response)
+            mock_client_cls.return_value = mock_client
+            _run(invoke_gateway_tool(
+                gateway_url="http://gateway:8080",
+                tool_name="web.navigate",
+                parameters={"url": "https://app.internal/login"},
+                bearer_token="delegated-token",
+                session_id="ses-flow-1",
+                call_id="tool_call_01AA",
+            ))
+        payload = mock_client.post.call_args[1]["json"]
+        self.assertEqual(payload["call_id"], "tool_call_01AA")
+        self.assertNotIn("call_id", payload["parameters"])
+
+    def test_invoke_omits_call_id_by_default(self) -> None:
+        # No call id forwarded unless one is supplied: the field is omitted,
+        # never sent empty (mirrors the session_id default).
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"status": "success", "data": {}}
+        with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
+            mock_client = _mock_client(response=mock_response)
+            mock_client_cls.return_value = mock_client
+            _run(invoke_gateway_tool(
+                gateway_url="http://gateway:8080",
+                tool_name="k8s.list_pods",
+                parameters={"namespace": "prod"},
+                bearer_token="delegated-token",
+            ))
+        payload = mock_client.post.call_args[1]["json"]
+        self.assertNotIn("call_id", payload)
 
     def test_invoke_without_token_returns_structured_error(self) -> None:
         with patch("agent_service.tools.gateway_tools.httpx.AsyncClient") as mock_client_cls:
@@ -292,6 +437,7 @@ class MakeToolFnTests(unittest.TestCase):
             parameters={"namespace": "test"},
             bearer_token="user-token",
             session_id=None,
+            call_id=None,
         )
         # The ToolChunk carries the gateway result on its metadata for the
         # evidence middleware, and the model-visible text is the JSON result.
@@ -329,6 +475,26 @@ class MakeToolFnTests(unittest.TestCase):
                 CHAT_SESSION_ID.reset(session_var)
         self.assertEqual(
             mock_invoke.call_args[1]["session_id"], "ses-flow-1"
+        )
+
+    def test_closure_reads_current_call_id_contextvar(self) -> None:
+        """SPEC-070: the read path forwards the in-flight tool-call id from
+        CURRENT_CALL_ID (set per dispatch by ToolEvidenceMiddleware) so the
+        gateway can correlate a produced authorization challenge to this exact
+        call. It is a correlation handle only — never authority."""
+        fn = _make_tool_fn("http://gw:8080", "web.snapshot", "d")
+        with patch(
+            "agent_service.tools.gateway_tools.invoke_gateway_tool",
+            new_callable=AsyncMock,
+        ) as mock_invoke:
+            mock_invoke.return_value = {"status": "success"}
+            call_var = CURRENT_CALL_ID.set("tool_call_01AA")
+            try:
+                _run(fn())
+            finally:
+                CURRENT_CALL_ID.reset(call_var)
+        self.assertEqual(
+            mock_invoke.call_args[1]["call_id"], "tool_call_01AA"
         )
 
 

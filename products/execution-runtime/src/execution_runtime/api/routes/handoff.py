@@ -152,11 +152,20 @@ async def handoff(request: Request):
         return refused(request_id, "unauthorized")
     try:
         body = await request.json()
-        if (not isinstance(body, dict) or set(body) != {"request", "arguments", "delegated_token"}
-                or not isinstance(body["arguments"], dict)):
+        required = {"request", "arguments", "delegated_token"}
+        if (not isinstance(body, dict) or not required.issubset(body)
+                or set(body) - required - {"requester_token"} or not isinstance(body["arguments"], dict)):
             raise ProtocolError("bad_request")
         envelope, arguments, delegated = body["request"], body["arguments"], body["delegated_token"]
         validate_request(envelope, settings.execution_signing_key)
+        from execution_runtime.services.delegated_execution import IDENTITY_FIELDS, verify_handoff
+        has_identity = bool(IDENTITY_FIELDS.intersection(envelope))
+        if has_identity != ("requester_token" in body):
+            raise ProtocolError("bad_request")
+        delegated_execution = None
+        if has_identity:
+            delegated_execution = await asyncio.to_thread(
+                verify_handoff, settings, envelope, arguments, delegated, body["requester_token"])
         if canonical_digest(arguments) != envelope["args_digest"]:
             raise ProtocolError("args_digest_mismatch")
         if not isinstance(delegated, str) or not delegated.strip():
@@ -197,9 +206,10 @@ async def handoff(request: Request):
     try:
         conn = await owned_thread(ledger.open_send, decision.permit, envelope,
                                   dispose=lambda connection: connection.close())
+        private = {"delegated_execution": delegated_execution} if delegated_execution is not None else {}
         result = await execute_tool(settings, envelope["tool_name"], arguments, delegated, attempt_id,
                                     session_id=envelope["session_id"], approval_kind=envelope["approval_kind"],
-                                    execution_id=envelope["execution_id"])
+                                    execution_id=envelope["execution_id"], **private)
         receipt = build_receipt(envelope, map_result_status(result), result, attempt_id, settings.execution_signing_key)
         fact = observation(envelope, source="worker", kind="worker_result", attempt_request_id=attempt_id,
                            current_request_id=request_id, key=settings.execution_signing_key,

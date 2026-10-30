@@ -184,6 +184,30 @@ class AuditEventContractTests(unittest.TestCase):
             _load_schema(self.schema_name),
         )
 
+    def test_target_authorization_event_validates(self) -> None:
+        # SPEC-070 (plan line 155): the narrowly scoped authorization-lifecycle
+        # event. It records an actual enrollment/renewal/cancel/expiry/revoke
+        # outcome with bounded operation/outcome/reason fields plus normal
+        # correlation — never a browser proof, credential, or provider URL, and
+        # never a fabricated tool_invoked success standing in for a callback.
+        event = _event(
+            event_type="target_authorization",
+            service="tool-gateway",
+            session_id="ses-1",
+            outcome="success",
+            delegation_mode="user_delegated",
+            details={
+                "operation": "enroll",
+                "authorization_outcome": "authorized",
+                "challenge_id": "11111111-1111-4111-8111-111111111111",
+                "target": "Automation",
+            },
+        )
+        jsonschema.validate(
+            event.model_dump(mode="json", exclude_none=True),
+            _load_schema(self.schema_name),
+        )
+
     def test_document_events_validate(self) -> None:
         # SPEC-039 R-5: agent-service emits document_created /
         # document_published / cross-owner document_read; the model must

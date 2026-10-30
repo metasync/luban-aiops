@@ -180,6 +180,7 @@ async def exchange_authorization_code(
             "roles": identity.roles,
             "groups": identity.groups,
         },
+        authentication_source="oidc",
     )
 
     return AuthenticatedSession(
@@ -265,6 +266,7 @@ async def refresh_session(
             "roles": identity.roles,
             "groups": identity.groups,
         },
+        authentication_source="oidc",
     )
 
     return AuthenticatedSession(

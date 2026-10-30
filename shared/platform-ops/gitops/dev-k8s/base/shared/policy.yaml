@@ -4,12 +4,14 @@
 # strict subset of the Tier-1 policy specification
 # (docs/agentic-aiops-platform/policy-specification.md).
 #
-# Version discipline (SPEC-048 R-1): bump ``version`` on every rule change.
-# Enforcement is review discipline — Git history is the authority; there is
-# no cross-commit monotonicity machinery. The running gateways additionally
-# expose a SHA-256 fingerprint of the exact loaded bundle text on the
-# matrix/readiness surfaces, so a deploy can be confirmed against the
-# canonical file without shelling into the pod.
+# Version discipline (SPEC-048 R-1): ``version`` is the bundle *format* version
+# — the schema revision ``validate_policy.py`` accepts (pinned to 1) — not a
+# rule-revision counter, so it does not bump on rule edits. Rule changes are
+# governed by review discipline: Git history is the authority and there is no
+# cross-commit monotonicity machinery. The running gateways additionally expose
+# a SHA-256 fingerprint of the exact loaded bundle text on the matrix/readiness
+# surfaces, so a deploy can be confirmed against the canonical file without
+# shelling into the pod.
 #
 # Semantics (enforced by the gateway policy engine):
 #   - deny by default: no matching rule => deny
@@ -105,6 +107,29 @@ rules:
     match:
       roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
       actions_any: ["tools:invoke"]
+    decision:
+      outcome: allow
+
+  # targets:authorize (SPEC-070 OQ-7): gates the human-initiated outbound
+  # user-delegated authorization workflow (start/status/cancel/browser-reset on
+  # the tool-gateway's /api/v2/targets/authorizations routes). Granted to exactly
+  # the tools:invoke holders above — a requester may only drive enrollment for a
+  # target they may already invoke on behalf of — so no target role is
+  # synthesized and observer keeps its read-invocation posture. This grant is
+  # necessary but not sufficient: the route additionally rechecks the
+  # administered owner->account mapping and the current invocation entitlement
+  # and scopes every operation to the verified owner, so holding targets:authorize
+  # alone enrolls nothing. auditor is denied by default (governance-only, no
+  # invocation surface). The bearerless provider-url/callback handoffs are not
+  # policy-gated here — they authenticate the platform-gateway workload identity.
+  - id: allow-operators-targets-authorize
+    domain: action_authz
+    description: Operational, developer, approver, and observer roles may drive outbound user-delegated target authorization for targets they may invoke.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
+      actions_any: ["targets:authorize"]
     decision:
       outcome: allow
 

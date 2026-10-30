@@ -35,6 +35,7 @@ export const EVENT_TYPES = [
   "incident_skill_draft_generated",
   "skill_graduated",
   "secret_delivered",
+  "target_authorization",
 ] as const;
 
 export const EMITTER_SERVICES = [

@@ -707,7 +707,12 @@ class CredentialTests(unittest.TestCase):
         router = _Router({})
         connector = _connector(router, credential_sets_path=str(self.cred_path))
         result = _call(connector, "http.get", {"url": ALLOWED + "/health", "credential_set": "user"})
-        self.assertEqual(result.status, "error")
+        # SPEC-070 acquisition: an ordinary invocation carries no verified worker
+        # requester context, so a delegated set fails closed as a denial before
+        # any target or token connection is opened. The machine-grant client is
+        # never reached either (a token fetch would show up as a router call).
+        self.assertEqual(result.status, "denied")
+        self.assertEqual(result.error["code"], "DELEGATED_CONTEXT_REQUIRED")
         self.assertEqual(router.call_count, 0)
         self.assertNotIn("opaque-client-value", json.dumps(result.to_dict()))
 

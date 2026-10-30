@@ -38,11 +38,15 @@ def build_audit_event(
     actor: str | None = None,
     roles: list[str] | None = None,
     session_id: str | None = None,
+    delegation_mode: str | None = None,
 ) -> dict:
     """Build an envelope matching shared-contracts audit-event.schema.json.
 
     Optional identity fields are omitted (not nulled) when absent, keeping
-    the payload valid against the contract schema.
+    the payload valid against the contract schema. ``delegation_mode`` (SPEC-070
+    R-4a/R-4c) is the already-ratified top-level field; it is omitted when
+    ``None`` so an event from a path that acquired no outbound credential audits
+    byte-identically to before, and absence is never an assertion of ``none``.
     """
     event: dict = {
         "event_id": str(uuid.uuid4()),
@@ -59,6 +63,7 @@ def build_audit_event(
         ("actor", actor),
         ("roles", roles),
         ("session_id", session_id),
+        ("delegation_mode", delegation_mode),
     ):
         if value is not None:
             event[key] = value

@@ -58,12 +58,26 @@ def fixture(root):
         client_id="client", client_secret="opaque-client-fixture", client_auth="client_secret_basic", redirect_uri=CALLBACK,
         scope="read", allowed_scopes="read write", oauth_origins="https://oauth.test", resource_origins="https://resource.test",
         pkce_method="S256", store="postgres", config_revision="1", identity_profile="json_immutable_id", identity_claim="id",
-        identity_mapping_path=str(linkage))
+        identity_mapping_path=str(linkage), access_cache_ttl_seconds="300", refresh_max_lifetime_seconds="2592000")
     config_path.write_text(json.dumps({"user": entry, "other": {**entry, "target": "Other"}}))
     return dict(keys=str(key_path), config=str(config_path)), entry
 
 
-async def pending(custody, owner=ALICE, *, ttl=600):
+def browser_secret_value(record):
+    """Deterministic per-challenge browser secret fixture for the proof.
+
+    The store only ever persists its hash, so deriving it from the challenge id
+    lets every claim site reconstruct the same cookie jar without threading a new
+    value through ``pending``'s return tuple.
+    """
+    return f"browser-secret-{record.challenge_id}"
+
+
+def browser_jar(record):
+    return {record.challenge_id: browser_secret_value(record)}
+
+
+async def started(custody, owner=ALICE, *, ttl=600):
     config, linkage, keys, generation, fingerprint = await custody.sync_configuration()
     now = datetime.now(timezone.utc)
     record = AuthorizationTransaction(challenge_id=str(uuid4()), owner_namespace=owner.namespace, owner_sub=owner.subject,
@@ -72,22 +86,29 @@ async def pending(custody, owner=ALICE, *, ttl=600):
         expires_at=now + timedelta(seconds=ttl))
     tx = PostgresAuthorizationTransactionStore(custody)
     await tx.create(record)
-    start = await tx.issue_start(record.challenge_id, owner.namespace, owner.subject, now=now)
+    jar, secret = browser_jar(record), SecretStr(browser_secret_value(record))
+    start = await tx.issue_start(record.challenge_id, owner.namespace, owner.subject, browser_secret=secret, now=now)
     check(start is not None, "start issuance")
-    replacement = await tx.issue_start(record.challenge_id, owner.namespace, owner.subject, now=now)
-    check(await tx.consume_start(start, now=now) is None, "superseded start burned")
-    check(await tx.consume_start(replacement, now=now) is not None, "start consumed")
-    check(await tx.consume_start(replacement, now=now) is None, "duplicate start refused")
-    state, verifier = await tx.prepare_state(record.challenge_id, owner.namespace, owner.subject, now=now)
-    check(await tx.prepare_state(record.challenge_id, owner.namespace, owner.subject, now=now) is None, "duplicate preparation")
-    return tx, record, state, verifier
+    replacement = await tx.issue_start(record.challenge_id, owner.namespace, owner.subject, browser_secret=secret, now=now)
+    check(await tx.consume_start(start, browser_bindings=jar, now=now) is None, "superseded start burned")
+    return tx, record, replacement
+
+
+async def pending(custody, owner=ALICE, *, ttl=600):
+    tx, record, replacement = await started(custody, owner, ttl=ttl)
+    now, jar = datetime.now(timezone.utc), browser_jar(record)
+    prepared = await tx.consume_start(replacement, browser_bindings=jar, now=now)
+    check(prepared is not None, "start consumed and state prepared atomically")
+    check(await tx.consume_start(replacement, browser_bindings=jar, now=now) is None, "duplicate start refused")
+    return tx, record, prepared.state, prepared.verifier
 
 
 async def enroll(custody, owner=ALICE):
     tx, record, state, verifier = await pending(custody, owner)
-    claim = await tx.claim_state(state, now=datetime.now(timezone.utc))
+    jar = browser_jar(record)
+    claim = await tx.claim_state(state, browser_bindings=jar, now=datetime.now(timezone.utc))
     check(claim is not None, "callback claim")
-    check(await tx.claim_state(state, now=datetime.now(timezone.utc)) is None, "callback replay")
+    check(await tx.claim_state(state, browser_bindings=jar, now=datetime.now(timezone.utc)) is None, "callback replay")
     account = "42" if owner == ALICE else "43"
     result = await tx.complete_authorization(claim, target_account=account, scopes="read",
         refresh_secret=SecretStr("opaque-refresh-fixture"), refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
@@ -103,9 +124,14 @@ def worker(args, action, barrier, release, output):
     async def run():
         custody = store(args)
         barrier.wait(timeout=30)
-        if action == "callback":
+        if action == "start":
             tx = PostgresAuthorizationTransactionStore(custody)
-            claim = await tx.claim_state(SecretStr(args["state"]), now=datetime.now(timezone.utc))
+            claim = await tx.consume_start(SecretStr(args["start"]), browser_bindings=args["browser_bindings"],
+                                           now=datetime.now(timezone.utc))
+        elif action == "callback":
+            tx = PostgresAuthorizationTransactionStore(custody)
+            claim = await tx.claim_state(SecretStr(args["state"]), browser_bindings=args["browser_bindings"],
+                                         now=datetime.now(timezone.utc))
         else:
             claim = await custody.begin_refresh(ALICE)
         output.put(("claimed", claim is not None))
@@ -113,7 +139,12 @@ def worker(args, action, barrier, release, output):
             if not release.poll(30):
                 raise AssertionError("parent release timeout")
             release.recv()
-            if action == "callback":
+            if action == "start":
+                result = await tx.claim_state(claim.state, browser_bindings=args["browser_bindings"],
+                                              now=datetime.now(timezone.utc))
+                if result:
+                    check(result.verifier == claim.verifier, "atomic start ciphertext matches its released verifier")
+            elif action == "callback":
                 result = await tx.complete_authorization(claim, target_account="42", scopes="read",
                     refresh_secret=SecretStr("opaque-refresh-worker"), refresh_expires_at=datetime.now(timezone.utc)+timedelta(hours=1),
                     now=datetime.now(timezone.utc))
@@ -176,13 +207,19 @@ def completion_boundary_worker(args, action, release, output):
 
     async def run():
         custody = store(args, commit_hook=stop_after_commit)
+        if action == "start":
+            from tool_gateway.schemas.authorization import ProviderUrlRequest
+            service, _client = navigation_service(custody)
+            await service.provider_url(ProviderUrlRequest(start_token=args["start"],
+                                                         browser_bindings=args["browser_bindings"]))
+            raise AssertionError("unacknowledged start returned a provider URL")
         if action == "refresh":
             claim = await custody.begin_refresh(ALICE)
             await custody.complete_refresh(claim, SecretStr("opaque-unacknowledged-refresh"),
                 refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
         else:
             tx, record, state, verifier = await pending(custody)
-            claim = await tx.claim_state(state, now=datetime.now(timezone.utc))
+            claim = await tx.claim_state(state, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc))
             await tx.complete_authorization(claim, target_account="42", scopes="read",
                 refresh_secret=SecretStr("opaque-unacknowledged-authorization"),
                 refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1), now=datetime.now(timezone.utc))
@@ -202,6 +239,20 @@ async def completion_visibility(args, action):
         child.start()
         check(await asyncio.to_thread(output_reader.poll, 30), "completion boundary reached")
         check(output_reader.recv() == "committed", "completion boundary signal")
+        if action == "start":
+            custody = store(args)
+            tx = PostgresAuthorizationTransactionStore(custody)
+            record = await tx.get(args["challenge"], ALICE.namespace, ALICE.subject, now=datetime.now(timezone.utc))
+            row = await navigation_secret_row(custody, record)
+            check(row["start_consumed"] and row["state_hash"] and row["verifier_cipher"],
+                  "unacknowledged navigation is atomically visible across processes")
+            child.terminate()
+            await asyncio.to_thread(child.join, 10)
+            check(not child.is_alive(), "navigation process terminated before releasing a URL")
+            check(await tx.consume_start(SecretStr(args["start"]), browser_bindings=args["browser_bindings"],
+                                         now=datetime.now(timezone.utc)) is None,
+                  "process death never reconstructs a provider URL")
+            return True
         candidate = await store(args).metadata(ALICE)
         child.terminate()
         await asyncio.to_thread(child.join, 10)
@@ -285,13 +336,27 @@ async def lost_commit_ack(args, action, operation):
             proxy.armed = True
     faulted = store({**args, "db": proxied}, commit_hook=arm)
     try:
+        if action == "start":
+            tx, record, token = await started(faulted)
+            service, client = navigation_service(faulted)
+            request = navigation_request(record, token)
+            await expect_failure(service.provider_url(request), "wire-lost navigation must fail its caller")
+            check(proxy.dropped, "real start COMMIT acknowledgment was dropped")
+            check(client.build_calls == client.provider_calls == 0, "wire loss releases no URL or exchange")
+            row = await navigation_secret_row(store(args), record)
+            check(row["start_consumed"] and row["start_hash"] is None
+                  and row["state_hash"] and row["verifier_cipher"], "wire loss leaves atomic spent state")
+            check(await PostgresAuthorizationTransactionStore(store(args)).consume_start(
+                token, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc)) is None,
+                "wire loss cannot recreate navigation authority on another connection")
+            return
         if action == "refresh":
             claim = await faulted.begin_refresh(ALICE)
             result = faulted.complete_refresh(claim, SecretStr("opaque-wire-loss"),
                 refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
         else:
             tx, record, state, verifier = await pending(faulted)
-            claim = await tx.claim_state(state, now=datetime.now(timezone.utc))
+            claim = await tx.claim_state(state, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc))
             result = tx.complete_authorization(claim, target_account="42", scopes="read",
                 refresh_secret=SecretStr("opaque-wire-loss"),
                 refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1), now=datetime.now(timezone.utc))
@@ -307,6 +372,168 @@ async def lost_commit_ack(args, action, operation):
         server.close()
         await server.wait_closed()
         await proxy.close()
+
+
+async def navigation_secret_row(custody, record):
+    async with custody.connection() as conn:
+        return await (await conn.execute(
+            "SELECT * FROM gateway_custody.transaction_secrets WHERE challenge_id=%s",
+            (record.challenge_id,))).fetchone()
+
+
+def navigation_service(custody):
+    from tool_gateway.services.authorization_service import AuthorizationService
+    from tool_gateway.tools.user_delegated_client import UserDelegatedClient
+
+    class CountingClient(UserDelegatedClient):
+        build_calls = 0
+        provider_calls = 0
+
+        def build_authorization_url(self, config, **kwargs):
+            self.build_calls += 1
+            return super().build_authorization_url(config, **kwargs)
+
+        async def _provider_request(self, *args, **kwargs):
+            self.provider_calls += 1
+            raise AssertionError("navigation must not contact a provider")
+
+    client = CountingClient(custody=custody)
+    return AuthorizationService(store=PostgresAuthorizationTransactionStore(custody),
+                                custody=custody, client=client), client
+
+
+def navigation_request(record, token):
+    from tool_gateway.schemas.authorization import ProviderUrlRequest
+    return ProviderUrlRequest(start_token=token, browser_bindings=browser_jar(record))
+
+
+async def atomic_navigation_boundaries(args):
+    from tool_gateway.services.authorization_service import AuthorizationError
+    for boundary, failure_type in (("before", CustodyError), ("after", CustodyError),
+                                   ("before", asyncio.CancelledError), ("after", asyncio.CancelledError)):
+        custody = store(args)
+        tx, record, token = await started(custody)
+        before = await navigation_secret_row(custody, record)
+
+        async def failure(phase, when):
+            if phase == "start_prepare" and when == boundary:
+                raise failure_type("injected_start_uncertainty")
+
+        service, client = navigation_service(store(args, commit_hook=failure))
+        request = navigation_request(record, token)
+        try:
+            await service.provider_url(request)
+        except failure_type:
+            pass
+        else:
+            raise AssertionError("atomic start must acknowledge its commit")
+        check(client.build_calls == client.provider_calls == 0, "no URL or provider call before acknowledgment")
+        after = await navigation_secret_row(custody, record)
+        if boundary == "before":
+            check(after == before, "rollback preserves the complete original start binding")
+            # A separate request may prepare after proven rollback; no URL escaped.
+            successor, _ = navigation_service(store(args))
+            check(await successor.provider_url(request) is not None, "rolled-back navigation can prepare once")
+        else:
+            check(after["start_consumed"] and after["start_hash"] is None
+                  and after["state_hash"] and after["verifier_cipher"], "committed preparation is all-or-none")
+            successor, successor_client = navigation_service(store(args))
+            try:
+                await successor.provider_url(request)
+            except AuthorizationError as exc:
+                check(exc.status_code == 404, "spent navigation is no-oracle")
+            else:
+                raise AssertionError("unacknowledged navigation cannot replay")
+            check(successor_client.build_calls == 0, "restart releases no replacement URL")
+            check(await tx.issue_start(record.challenge_id, ALICE.namespace, ALICE.subject,
+                  browser_secret=SecretStr(browser_secret_value(record)), now=datetime.now(timezone.utc)) is None,
+                  "committed navigation cannot be reissued")
+        await tx.cancel(record.challenge_id, ALICE.namespace, ALICE.subject, now=datetime.now(timezone.utc))
+
+
+async def atomic_navigation_guards(args, root, entry):
+    from unittest.mock import patch
+    from tool_gateway.services.custody_crypto import KeySnapshot
+
+    custody = probe_store(args, root, entry, "navigation-guards")
+    tx, record, token = await started(custody)
+    before = await navigation_secret_row(custody, record)
+    jars = ({}, {record.challenge_id: "wrong"}, {"malformed": "x"},
+            {str(uuid4()): "x" for _ in range(9)})
+    for jar in jars:
+        check(await tx.consume_start(token, browser_bindings=jar, now=datetime.now(timezone.utc)) is None,
+              "invalid browser proof does not prepare state")
+        check(await navigation_secret_row(custody, record) == before, "browser refusal leaves start untouched")
+    service, client = navigation_service(custody)
+    with patch.object(KeySnapshot, "encrypt", side_effect=CustodyError("injected_cipher_failure")):
+        await expect_failure(service.provider_url(navigation_request(record, token)), "cipher failure refuses URL")
+    check(await navigation_secret_row(custody, record) == before, "cipher failure does not consume start")
+    check(client.build_calls == client.provider_calls == 0, "cipher failure never reaches provider")
+    # Database time, not a fast/slow application clock, controls consumption.
+    prepared = await tx.consume_start(token, browser_bindings=browser_jar(record),
+                                      now=datetime.now(timezone.utc) + timedelta(days=1))
+    check(prepared is not None, "database clock permits a live start despite application skew")
+    row = await navigation_secret_row(custody, record)
+    for secret in (token, prepared.state, prepared.verifier, SecretStr(browser_secret_value(record))):
+        check(secret.get_secret_value() not in repr(row), "navigation persists only hash/ciphertext")
+        check(secret.get_secret_value() not in repr(prepared), "private preparation repr omits secrets")
+    await tx.cancel(record.challenge_id, ALICE.namespace, ALICE.subject, now=datetime.now(timezone.utc))
+
+    for boundary in ("start", "browser", "transaction"):
+        tx, record, token = await started(custody)
+        async with await psycopg.AsyncConnection.connect(args["admin_db"]) as conn:
+            if boundary == "transaction":
+                await conn.execute("UPDATE gateway_custody.transactions SET expires_at=clock_timestamp()"
+                                   " WHERE challenge_id=%s", (record.challenge_id,))
+            else:
+                column = "start_expires_at" if boundary == "start" else "browser_expires_at"
+                await conn.execute(sql.SQL("UPDATE gateway_custody.transaction_secrets SET {}=clock_timestamp()"
+                    " WHERE challenge_id=%s").format(sql.Identifier(column)), (record.challenge_id,))
+        before = await navigation_secret_row(custody, record)
+        check(await tx.consume_start(token, browser_bindings=browser_jar(record), now=record.created_at) is None,
+              "database expiry refuses start without sweeping or trusting application time")
+        check(await navigation_secret_row(custody, record) == before, "expiry never partially prepares state")
+
+    tx, record, token = await started(custody)
+    current = tx._credential_current
+
+    async def expire_during_preparation(conn, row):
+        valid = await current(conn, row)
+        await conn.execute("UPDATE gateway_custody.transaction_secrets SET start_expires_at=clock_timestamp()"
+                           " WHERE challenge_id=%s", (row["challenge_id"],))
+        return valid
+
+    with patch.object(tx, "_credential_current", side_effect=expire_during_preparation):
+        check(await tx.consume_start(token, browser_bindings=browser_jar(record), now=record.created_at) is None,
+              "expiry is rechecked at the preparation write, after the initial lookup")
+    row = await navigation_secret_row(custody, record)
+    check(not row["start_consumed"] and row["state_hash"] is None and row["verifier_cipher"] is None,
+          "late expiry leaves no half-prepared state")
+
+    for fence in ("cancel", "revoke", "replacement"):
+        tx, record, token = await started(custody)
+        if fence == "cancel":
+            await tx.cancel(record.challenge_id, ALICE.namespace, ALICE.subject, now=datetime.now(timezone.utc))
+        elif fence == "revoke":
+            await custody.revoke(ALICE)
+        else:
+            await enroll(custody)
+        check(await tx.consume_start(token, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc)) is None,
+              "cancellation, revocation, and a newer grant fence navigation")
+
+    for owner in (Owner("foreign-issuer", "alice"), Owner("issuer", "unmapped")):
+        tx, record, token = await started(custody, owner)
+        before = await navigation_secret_row(custody, record)
+        check(await tx.consume_start(token, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc)) is None,
+              "stored owner must still have exact namespace/subject entitlement")
+        check(await navigation_secret_row(custody, record) == before, "mapping refusal precedes consumption")
+
+    isolated = probe_store(args, root, entry, "navigation-config")
+    tx, record, token = await started(isolated)
+    probe_config(root, entry, "navigation-config", revision="2")
+    check(await tx.consume_start(token, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc)) is None,
+          "configuration replacement fences the old navigation")
+    check(await navigation_secret_row(isolated, record) is None, "configuration invalidation burns old secrets")
 
 
 async def publication_fences(args, admin_db):
@@ -339,7 +566,7 @@ async def publication_fences(args, admin_db):
                     refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
             else:
                 tx, record, state, verifier = await pending(faulted)
-                claim = await tx.claim_state(state, now=datetime.now(timezone.utc))
+                claim = await tx.claim_state(state, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc))
                 completion = tx.complete_authorization(claim, target_account="42", scopes="read",
                     refresh_secret=SecretStr("opaque-fenced-candidate"),
                     refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1), now=datetime.now(timezone.utc))
@@ -466,8 +693,8 @@ async def authorization_successor_survives_stale_cleanup(args, root, entry):
     tx_a, rec_a, state_a, _ = await pending(custody)
     tx_b, rec_b, state_b, _ = await pending(custody)
     now = datetime.now(timezone.utc)
-    claim_a = await tx_a.claim_state(state_a, now=now)
-    claim_b = await tx_b.claim_state(state_b, now=now)
+    claim_a = await tx_a.claim_state(state_a, browser_bindings=browser_jar(rec_a), now=now)
+    claim_b = await tx_b.claim_state(state_b, browser_bindings=browser_jar(rec_b), now=now)
     check(claim_a is not None and claim_b is not None, "both challenges claimed at the same epoch")
 
     async def rollback_stage(phase, when):
@@ -498,7 +725,7 @@ async def callback_claim_cleanup_is_attempt_scoped(args, root, entry):
     await custody.initialize()
     tx, record, state, verifier = await pending(custody)
     now = datetime.now(timezone.utc)
-    claim = await tx.claim_state(state, now=now)
+    claim = await tx.claim_state(state, browser_bindings=browser_jar(record), now=now)
     check(claim is not None, "callback claim committed")
     stale = CallbackClaim(claim.transaction, SecretStr("stale-callback-operation"), claim.verifier)
     await tx._cancel_uncertain_claim(stale, now=now)
@@ -544,8 +771,9 @@ async def observed_generation_snapshot_is_immutable(args, root, entry):
 
 
 async def migration_upgrades_v1_and_fences_legacy(args):
-    """The explicit v1->v2 upgrade fences legacy unpublished rows, preserves
-    published active rows, and is safe to run repeatedly."""
+    """The explicit v1->v2->v3 upgrade fences legacy unpublished credentials and
+    pending prototype transactions, preserves published/terminal rows, adds the
+    v3 browser-binding fields, and is safe to run repeatedly."""
     from urllib.parse import urlsplit, urlunsplit
     parts = urlsplit(args["admin_db"])
     probe_db = "custody_migrate_probe"
@@ -566,11 +794,21 @@ async def migration_upgrades_v1_and_fences_legacy(args):
                 "config_generation,epoch,status,recovery_epoch,operation_hash,operation_deadline)"
                 " VALUES('user','Automation','issuer','bob','g1',3,'in_flight','epoch1','legacy-hash',"
                 "clock_timestamp()+interval '60 seconds')")
+            # A pending prototype transaction (no browser binding, verifier sealed
+            # under the v2 AAD) alongside a terminal one, both against alice's grant.
+            for challenge_id, status in (("pending-challenge", "pending"), ("authorized-challenge", "authorized")):
+                await conn.execute("INSERT INTO gateway_custody.transactions(challenge_id,set_id,target,"
+                    "owner_namespace,owner_sub,config_generation,credential_epoch,session_id,call_id,return_url,"
+                    "status,created_at,updated_at,expires_at) VALUES(%s,'user','Automation','issuer','alice','g1',5,"
+                    "'session','call','/',%s,clock_timestamp(),clock_timestamp(),clock_timestamp()+interval '600 seconds')",
+                    (challenge_id, status))
+                await conn.execute("INSERT INTO gateway_custody.transaction_secrets(challenge_id,state_hash,key_id)"
+                    " VALUES(%s,%s,'k1')", (challenge_id, f"state-{status}"))
         await migrate_custody(probe_url, keyring)
         async with await psycopg.AsyncConnection.connect(probe_url, row_factory=dict_row) as conn:
             version = (await (await conn.execute(
                 "SELECT version FROM gateway_custody.schema_version WHERE singleton")).fetchone())["version"]
-            check(version == 2, "migration records schema version 2")
+            check(version == 3, "migration records schema version 3")
             alice = await (await conn.execute(
                 "SELECT status,epoch,attempt_id FROM gateway_custody.credentials WHERE owner_sub='alice'")).fetchone()
             bob = await (await conn.execute(
@@ -579,11 +817,34 @@ async def migration_upgrades_v1_and_fences_legacy(args):
                   "published active row is preserved by the upgrade")
             check(bob["status"] == "revoked" and bob["epoch"] == 4 and bob["attempt_id"] is None,
                   "legacy unpublished row is fenced by the upgrade")
+            # The v2->v3 step fences the pending prototype transaction and burns its
+            # secret state, but preserves a terminal transaction and its secrets.
+            pending_tx = await (await conn.execute(
+                "SELECT status FROM gateway_custody.transactions WHERE challenge_id='pending-challenge'")).fetchone()
+            check(pending_tx["status"] == "failed", "v2->v3 fences a pending prototype transaction")
+            check(await (await conn.execute(
+                "SELECT 1 FROM gateway_custody.transaction_secrets WHERE challenge_id='pending-challenge'")).fetchone() is None,
+                "v2->v3 burns the fenced transaction's secret state")
+            authorized_tx = await (await conn.execute(
+                "SELECT status FROM gateway_custody.transactions WHERE challenge_id='authorized-challenge'")).fetchone()
+            check(authorized_tx["status"] == "authorized", "v2->v3 preserves a terminal transaction")
+            authorized_secret = await (await conn.execute(
+                "SELECT browser_secret_hash,browser_expires_at,start_attempt FROM gateway_custody.transaction_secrets"
+                " WHERE challenge_id='authorized-challenge'")).fetchone()
+            check(authorized_secret is not None and authorized_secret["browser_secret_hash"] is None
+                  and authorized_secret["browser_expires_at"] is None and authorized_secret["start_attempt"] == 0,
+                  "v3 adds browser-binding fields, defaulted on a preserved terminal transaction")
         await migrate_custody(probe_url, keyring)
         async with await psycopg.AsyncConnection.connect(probe_url, row_factory=dict_row) as conn:
             alice = await (await conn.execute(
                 "SELECT status,epoch FROM gateway_custody.credentials WHERE owner_sub='alice'")).fetchone()
             check(alice["status"] == "active" and alice["epoch"] == 5, "repeat migration is idempotent")
+            authorized_tx = await (await conn.execute(
+                "SELECT status FROM gateway_custody.transactions WHERE challenge_id='authorized-challenge'")).fetchone()
+            authorized_secret = await (await conn.execute(
+                "SELECT 1 FROM gateway_custody.transaction_secrets WHERE challenge_id='authorized-challenge'")).fetchone()
+            check(authorized_tx["status"] == "authorized" and authorized_secret is not None,
+                  "repeat migration preserves the terminal transaction and its secret state")
     finally:
         async with await psycopg.AsyncConnection.connect(args["admin_db"], autocommit=True) as conn:
             await conn.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(probe_db)))
@@ -627,6 +888,18 @@ async def prove(admin_db, args, root, entry):
         else:
             raise AssertionError("dedicated role boundary")
     print("custody proof: isolated role and migration passed")
+    await atomic_navigation_boundaries(args)
+    await atomic_navigation_guards(args, root, entry)
+    await lost_commit_ack(args, "start", "prepare")
+    for revoked in (False, True):
+        tx, record, token = await started(store(args))
+        await race({**args, "start": token.get_secret_value(), "browser_bindings": browser_jar(record)},
+                   "start", revoke=revoked)
+    tx, record, token = await started(store(args))
+    check(await completion_visibility({**args, "boundary": "prepare", "challenge": record.challenge_id,
+          "start": token.get_secret_value(), "browser_bindings": browser_jar(record)}, "start"),
+          "navigation crash boundary")
+    print("custody proof: atomic navigation guards, rollback, wire-ack loss, process races and crash passed")
     metadata = await enroll(custody)
     check(await store(args).cache_valid(ALICE, metadata), "fresh process-equivalent committed read")
     check(await custody.metadata(BOB) is None, "owner isolation")
@@ -658,12 +931,13 @@ async def prove(admin_db, args, root, entry):
     check(await tx.get(record.challenge_id, "issuer", "bob", now=now) is None, "wrong owner no oracle")
     check(not await tx.finish(record.challenge_id, "issuer", "alice", record.config_generation, "authorized", now=now), "no naked success")
     await tx.cancel(record.challenge_id, "issuer", "alice", now=now)
-    check(await tx.claim_state(state, now=now) is None, "canceled state")
+    check(await tx.claim_state(state, browser_bindings=browser_jar(record), now=now) is None, "canceled state")
     check(await custody.cache_valid(ALICE, metadata), "cancel preserves grant")
     # Repeated cross-process success and revocation races.
     for iteration in range(3):
         tx, record, state, verifier = await pending(store(args))
-        await race({**args, "state": state.get_secret_value()}, "callback", revoke=bool(iteration % 2))
+        await race({**args, "state": state.get_secret_value(), "browser_bindings": browser_jar(record)},
+                   "callback", revoke=bool(iteration % 2))
         await enroll(store(args))
         await race(args, "refresh", revoke=bool(iteration % 2))
         await enroll(store(args))
@@ -672,7 +946,7 @@ async def prove(admin_db, args, root, entry):
     await enroll(store(args))
     stale_tx, stale_record, stale_state, stale_verifier = await pending(store(args))
     await enroll(store(args))
-    check(await stale_tx.claim_state(stale_state, now=datetime.now(timezone.utc)) is None,
+    check(await stale_tx.claim_state(stale_state, browser_bindings=browser_jar(stale_record), now=datetime.now(timezone.utc)) is None,
           "superseded credential fence rejects callback before provider use")
     await race(args, "refresh", terminate=True)
     check(await store(args).begin_refresh(ALICE) is None, "crashed claimant never retried")
@@ -701,7 +975,7 @@ async def prove(admin_db, args, root, entry):
     # Expiry is checked at consumption even without sweeping.
     tx, record, state, verifier = await pending(store(args), ttl=1)
     await asyncio.sleep(1.05)
-    check(await tx.claim_state(state, now=now) is None, "expired state rejected before sweep")
+    check(await tx.claim_state(state, browser_bindings=browser_jar(record), now=now) is None, "expired state rejected before sweep")
     check((await tx.get(record.challenge_id, "issuer", "alice", now=now)).status == "expired", "database time is authoritative")
     # Configuration changes/removal, stale replica, and anti-rollback tombstones.
     await enroll(store(args))
@@ -745,7 +1019,7 @@ async def prove(admin_db, args, root, entry):
         key_id = (await (await conn.execute("SELECT key_id FROM gateway_custody.transaction_secrets WHERE challenge_id=%s",
                                            (rotation_record.challenge_id,))).fetchone())[0]
         check(key_id == "k2", "pending verifier reencrypted with current key")
-    rotated_claim = await rotation_tx.claim_state(rotation_state, now=datetime.now(timezone.utc))
+    rotated_claim = await rotation_tx.claim_state(rotation_state, browser_bindings=browser_jar(rotation_record), now=datetime.now(timezone.utc))
     check(rotated_claim.verifier == rotation_verifier, "rotated verifier remains bound and decryptable")
     await rotation_tx.cancel(rotation_record.challenge_id, ALICE.namespace, ALICE.subject, now=datetime.now(timezone.utc))
     await expect_failure(store({**args, "keys": str(old_keys)}).initialize(), "stale key writer")
@@ -786,7 +1060,7 @@ async def prove(admin_db, args, root, entry):
     check(await no_renew.revoke(ALICE) == "local_revoked_remote_unconfirmed", "absent remote revocation stays unconfirmed")
     no_identity = store({**args, "set_id": "no-identity"})
     tx, record, state, verifier = await pending(no_identity)
-    claim = await tx.claim_state(state, now=datetime.now(timezone.utc))
+    claim = await tx.claim_state(state, browser_bindings=browser_jar(record), now=datetime.now(timezone.utc))
     await expect_failure(tx.complete_authorization(claim, target_account="42", scopes="read",
         refresh_secret=SecretStr("opaque-unverified-account"),
         refresh_expires_at=datetime.now(timezone.utc) + timedelta(hours=1), now=datetime.now(timezone.utc)),
@@ -809,7 +1083,7 @@ async def prove(admin_db, args, root, entry):
     await callback_claim_cleanup_is_attempt_scoped(args, root, entry)
     await observed_generation_snapshot_is_immutable(args, root, entry)
     await migration_upgrades_v1_and_fences_legacy(args)
-    print("custody proof: attempt fencing, callback CAS, observed snapshot, and v1->v2 migration passed")
+    print("custody proof: attempt fencing, callback CAS, observed snapshot, and v1->v3 migration passed")
     for action in ("refresh", "authorization"):
         for boundary in ("stage", "complete"):
             await enroll(store(args))

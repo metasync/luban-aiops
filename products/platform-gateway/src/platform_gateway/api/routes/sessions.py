@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
@@ -12,6 +12,7 @@ from platform_gateway.schemas.api import (
     SkillTargetDeclareRequest,
 )
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
+from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
     create_session,
     create_skill_draft,
@@ -62,12 +63,22 @@ async def create_session_route(
             settings, identity, ACTION_SESSION_SKILL_GRADUATE, request_id
         )
     user_id = identity.username  # type: ignore[union-attr]
+    delegated_args = {}
+    if settings.target_authorization_enabled:
+        scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not bearer or identity.subject == "dev":
+            raise HTTPException(status_code=401, detail="verified human identity required")
+        delegated = await obtain_delegated_token(settings, identity.subject, bearer)
+        if not delegated:
+            raise HTTPException(status_code=503, detail="human delegation unavailable")
+        delegated_args["delegated_token"] = delegated
     response = await create_session(
         settings,
         request_id,
         user_id,
         body.skill_target,
         body.session_type,
+        **delegated_args,
     )
     log_event(
         LOGGER,

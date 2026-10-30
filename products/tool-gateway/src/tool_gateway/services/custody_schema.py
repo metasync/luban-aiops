@@ -1,14 +1,21 @@
 """Migration-only SQL. Runtime roles are granted DML, never schema ownership.
 
-The shipped baseline is schema version 2. ``DDL`` creates a fresh version-2
-schema directly; ``UPGRADE_V1_TO_V2`` is an explicit, idempotent migration for a
-database that still carries the version-1 prototype schema. Runtime never issues
-DDL: ``migrate_custody`` applies these statements and ``initialize`` rejects any
-schema whose version is not exactly 2.
+The shipped baseline is schema version 3. ``DDL`` creates a fresh version-3
+schema directly; ``UPGRADE_V1_TO_V2`` and ``UPGRADE_V2_TO_V3`` are explicit,
+idempotent migrations for a database that still carries an older schema. Runtime
+never issues DDL: ``migrate_custody`` applies these statements and ``initialize``
+rejects any schema whose version is not exactly 3.
+
+Version 3 (SPEC-070 browser handoff) adds the per-challenge browser-binding
+fields to ``transaction_secrets`` and extends the authenticated verifier binding
+to cover them, so a version-2 verifier ciphertext can no longer decrypt. The
+v2->v3 upgrade therefore fences every pending prototype transaction (it carries
+no browser binding and its verifier was bound under the v2 AAD) instead of
+decrypting under a guessed binding; published grants are never touched.
 """
 
 # Current schema version created for a fresh database and required at runtime.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DDL = """
 SELECT pg_advisory_xact_lock(700016);
@@ -17,7 +24,7 @@ REVOKE ALL ON SCHEMA gateway_custody FROM PUBLIC;
 CREATE TABLE IF NOT EXISTS gateway_custody.schema_version (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), version INTEGER NOT NULL
 );
-INSERT INTO gateway_custody.schema_version VALUES (TRUE, 2) ON CONFLICT DO NOTHING;
+INSERT INTO gateway_custody.schema_version VALUES (TRUE, 3) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS gateway_custody.key_policy (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
     recovery_epoch TEXT NOT NULL, active_key_id TEXT NOT NULL,
@@ -62,7 +69,9 @@ CREATE TABLE IF NOT EXISTS gateway_custody.transaction_secrets (
     challenge_id TEXT PRIMARY KEY REFERENCES gateway_custody.transactions(challenge_id) ON DELETE CASCADE,
     start_hash TEXT UNIQUE, start_expires_at TIMESTAMPTZ, start_consumed BOOLEAN NOT NULL DEFAULT FALSE,
     state_hash TEXT UNIQUE, verifier_cipher BYTEA, key_id TEXT,
-    callback_hash TEXT UNIQUE
+    callback_hash TEXT UNIQUE,
+    browser_secret_hash TEXT, browser_expires_at TIMESTAMPTZ,
+    start_attempt INTEGER NOT NULL DEFAULT 0
 );
 REVOKE ALL ON ALL TABLES IN SCHEMA gateway_custody FROM PUBLIC;
 """
@@ -95,4 +104,26 @@ BEGIN
     END IF;
 END $$;
 UPDATE gateway_custody.schema_version SET version=2 WHERE singleton AND version < 2;
+"""
+
+# Explicit, idempotent upgrade from version 2 to version 3 (SPEC-070 browser
+# handoff). It adds the per-challenge browser-binding fields and then fences every
+# pending prototype transaction: a version-2 transaction carries no browser
+# binding and its encrypted verifier was authenticated under the version-2
+# binding, so it can neither satisfy the version-3 browser proof nor decrypt under
+# the extended binding. Fencing (fail + burn the secret state) is the safe choice;
+# decrypting under a guessed binding is forbidden. Published grants and terminal
+# transactions are never touched, and the statement is safe to run repeatedly.
+UPGRADE_V2_TO_V3 = """
+SELECT pg_advisory_xact_lock(700016);
+ALTER TABLE gateway_custody.transaction_secrets ADD COLUMN IF NOT EXISTS browser_secret_hash TEXT;
+ALTER TABLE gateway_custody.transaction_secrets ADD COLUMN IF NOT EXISTS browser_expires_at TIMESTAMPTZ;
+ALTER TABLE gateway_custody.transaction_secrets ADD COLUMN IF NOT EXISTS start_attempt INTEGER NOT NULL DEFAULT 0;
+WITH fenced AS (
+    UPDATE gateway_custody.transactions SET status='failed', updated_at=clock_timestamp()
+     WHERE status='pending' RETURNING challenge_id
+)
+DELETE FROM gateway_custody.transaction_secrets
+ WHERE challenge_id IN (SELECT challenge_id FROM fenced);
+UPDATE gateway_custody.schema_version SET version=3 WHERE singleton AND version < 3;
 """

@@ -39,6 +39,7 @@ def _load_agent_signing():
         "agent_service.services",
         "agent_service.services.hitl_confirmations",
         "agent_service.services.flow_approvals",
+        "agent_service.services.delegated_identity",
     ]
     saved = {name: sys.modules.get(name) for name in stubbed}
     package = types.ModuleType("agent_service")
@@ -58,6 +59,15 @@ def _load_agent_signing():
     sys.modules["agent_service.services.hitl_confirmations"] = hitl
     sys.modules["agent_service.services.flow_approvals"] = flow_approvals
     try:
+        # Load the real identity guard: signing depends on its runtime checks,
+        # not just annotations. Restore its module entry with the kernel stubs.
+        identity_name = "agent_service.services.delegated_identity"
+        identity_spec = importlib.util.spec_from_file_location(
+            identity_name, AGENT_SIGNING_PATH.with_name("delegated_identity.py")
+        )
+        identity_module = importlib.util.module_from_spec(identity_spec)
+        sys.modules[identity_name] = identity_module
+        identity_spec.loader.exec_module(identity_module)
         spec = importlib.util.spec_from_file_location(
             "agent_execution_signing_under_test", AGENT_SIGNING_PATH
         )

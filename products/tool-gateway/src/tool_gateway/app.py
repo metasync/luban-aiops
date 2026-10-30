@@ -16,6 +16,117 @@ from tool_gateway.tools.registry import ToolRegistry
 LOGGER = logging.getLogger(__name__)
 
 
+def _build_delegated_client(settings) -> object | None:
+    """Compose the send-path user-delegated client, or ``None`` when disabled.
+
+    SPEC-070 (plan §"Runtime composition and bounds", line 73): a *separate*
+    client from the machine-grant token client, wired into the HTTP/MCP
+    authentication seam. It is composed only when
+    ``GATEWAY_DELEGATED_ACQUISITION_ENABLED`` is on — the settings gate already
+    fail-closes on missing custody infrastructure — so delegated mode stays off,
+    and a delegated credential set fails closed at the connector, until Postgres
+    custody and the versioned key mount are provisioned. Construction is
+    side-effect free: the Postgres custody store connects lazily per acquisition
+    and the keyring reads its mount lazily, so composing the client opens no
+    database, keyring, or provider connection at startup.
+    """
+    if not settings.delegated_acquisition_enabled:
+        return None
+    from tool_gateway.services.custody_crypto import Keyring
+    from tool_gateway.services.delegated_custody import PostgresCustodyStore
+    from tool_gateway.tools.user_delegated_client import UserDelegatedClient
+
+    custody = PostgresCustodyStore(
+        settings.delegated_custody_db_url,
+        Keyring(settings.delegated_custody_keyring_path),
+        settings.delegated_custody_config_path,
+        settings.delegated_custody_set_id,
+        settings.delegated_custody_trusted_callback,
+    )
+    return UserDelegatedClient(custody=custody)
+
+
+def _target_authorization_emitter(settings):
+    """Build the ``target_authorization`` lifecycle emitter (SPEC-070 R-4a/c).
+
+    Returns a callable the :class:`AuthorizationService` invokes ONLY at an actual
+    stored transition it just finalized. It maps the bounded lifecycle outcome onto
+    the canonical audit envelope: ``event_type`` is the narrowly scoped
+    ``target_authorization``; top-level ``outcome`` is ``success`` only for an
+    ``authorized`` enrollment and ``error`` for every cancel/fail (an authorization
+    failure is never overstated as a delegated success); the bounded operation,
+    authorization outcome, an optional reason class, and the challenge/target
+    correlation ride ``details``; and the requester subject, session correlation, and
+    top-level ``delegation_mode`` stay separate. Fire-and-forget and inert until
+    ``GATEWAY_AUDIT_SERVICE_URL`` is set: it never persists a bearer, code, state,
+    PKCE verifier, browser secret, provider URL, or owner namespace, and a delivery
+    failure can never degrade the authorization path.
+    """
+    from tool_gateway.services.audit_emitter import build_audit_event, emit_audit_event
+
+    def _emit(*, operation, authorization_outcome, challenge_id, target,
+              session_id, owner_sub, reason, delegation_mode):
+        details = {
+            "operation": operation,
+            "authorization_outcome": authorization_outcome,
+            "challenge_id": challenge_id,
+            "target": target,
+        }
+        if reason is not None:
+            details["reason"] = reason
+        emit_audit_event(
+            settings,
+            build_audit_event(
+                "target_authorization",
+                None,
+                "success" if authorization_outcome == "authorized" else "error",
+                subject=owner_sub,
+                session_id=session_id,
+                delegation_mode=delegation_mode,
+                details=details,
+            ),
+        )
+
+    return _emit
+
+
+def _build_authorization_service(settings) -> object | None:
+    """Compose the target-authorization runtime, or ``None`` when disabled.
+
+    SPEC-070 OQ-7: the human-initiated ``/api/v2/targets/authorizations`` routes.
+    Gated on ``GATEWAY_DELEGATED_AUTHORIZATION_ENABLED`` and *independent* of the
+    send-path acquisition gate, but composed over the same Postgres custody
+    runtime. One custody store is shared by the transaction store (routing state,
+    single-use handles, and browser proofs) and the acquisition client (provider
+    URL construction and code exchange). Construction is side-effect free:
+    Postgres connects lazily per operation and the keyring reads its mount lazily,
+    so composing the service opens no database, keyring, or provider connection at
+    startup. The settings gate already fail-closes on missing infrastructure, so
+    when disabled the routes stay registered but answer 403.
+    """
+    if not settings.delegated_authorization_enabled:
+        return None
+    from tool_gateway.services.authorization_service import AuthorizationService
+    from tool_gateway.services.authorization_transaction_store import build_transaction_store
+    from tool_gateway.services.custody_crypto import Keyring
+    from tool_gateway.services.delegated_custody import PostgresCustodyStore
+    from tool_gateway.tools.user_delegated_client import UserDelegatedClient
+
+    custody = PostgresCustodyStore(
+        settings.delegated_custody_db_url,
+        Keyring(settings.delegated_custody_keyring_path),
+        settings.delegated_custody_config_path,
+        settings.delegated_custody_set_id,
+        settings.delegated_custody_trusted_callback,
+    )
+    return AuthorizationService(
+        store=build_transaction_store(backend="postgres", custody=custody),
+        custody=custody,
+        client=UserDelegatedClient(custody=custody),
+        audit=_target_authorization_emitter(settings),
+    )
+
+
 def _build_tool_registry(
     secret_delivery_buffer: object | None = None,
 ) -> tuple[ToolRegistry, object | None]:
@@ -33,6 +144,10 @@ def _build_tool_registry(
     # only admitted when GATEWAY_MUTATING_TOOLS_ENABLED is true; otherwise
     # the registry refuses their registration entirely.
     registry = ToolRegistry(allow_mutating=settings.mutating_tools_enabled)
+    # SPEC-070: one user-delegated acquisition client (or ``None`` when the
+    # gate is off) shared by the HTTP and MCP seams below. The machine-grant
+    # token client each connector builds internally is left unchanged.
+    delegated_client = _build_delegated_client(settings)
 
     if settings.k8s_enabled:
         from tool_gateway.tools.k8s_connector import KubernetesConnector
@@ -112,6 +227,7 @@ def _build_tool_registry(
             max_response_bytes=settings.http_max_response_bytes,
             max_request_bytes=settings.http_max_request_bytes,
             credential_sets_path=settings.http_credential_sets_path,
+            delegated_client=delegated_client,
         )
         http_connector.register_tools(registry)
         LOGGER.info("http connector registered")
@@ -175,7 +291,9 @@ def _build_tool_registry(
             build_ansible_mcp_connector,
         )
 
-        ansible_connector = build_ansible_mcp_connector(settings)
+        ansible_connector = build_ansible_mcp_connector(
+            settings, delegated_client=delegated_client
+        )
         ansible_connector.register_tools(registry)
         LOGGER.info("ansible MCP-ingestion connector registered")
     elif settings.ansible_native_enabled:
@@ -233,6 +351,9 @@ def create_app() -> FastAPI:
             redis_db=settings.secret_delivery_redis_db,
         )
     registry, browser_connector = _build_tool_registry(secret_delivery_buffer)
+    # SPEC-070 OQ-7: the target-authorization runtime (or ``None`` when the gate
+    # is off), held on ``app.state`` for the six internal authorization routes.
+    authorization_service = _build_authorization_service(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -252,6 +373,8 @@ def create_app() -> FastAPI:
         app.state.browser_connector = browser_connector
     if secret_delivery_buffer is not None:
         app.state.secret_delivery_buffer = secret_delivery_buffer
+    if authorization_service is not None:
+        app.state.authorization_service = authorization_service
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
@@ -276,7 +399,7 @@ def create_app() -> FastAPI:
 
     app.include_router(router)
     setup_metrics(app)
-    setup_telemetry(app, SERVICE_NAME)
+    setup_telemetry(app, SERVICE_NAME, excluded_urls=(r"/api/v2/targets/authorizations",))
     return app
 
 

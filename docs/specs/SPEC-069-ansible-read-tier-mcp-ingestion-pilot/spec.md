@@ -456,6 +456,14 @@ Stage-0 tasks rather than blocking Open Questions.
 
 ## Changelog
 
+- 2026-10-30: **Production dependency status reconciled; delivered v0.48.0 dev record unchanged.**
+  SPEC-070's R-1a–R-6d development acceptance is recorded with root `make verify` EXIT=0;
+  its runtime is implemented, unreleased, and default-off. The
+  [dependency-status update](tasks.md#production-dependency-status-update--2026-10-30)
+  supersedes historical implementation-pending descriptions without changing this pilot's
+  requirements or dev evidence. **AAP compatibility unverified**: actual-target qualification
+  remains under [DI-070](../SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+  before production user-delegated enablement. No release or deployment is authorized here.
 - 2026-10-23: **R-6's live-check instrument is parameterised, mirroring the same
   change to SPEC-067's `servicenow-check.sh`.**
   `shared/platform-ops/e2e/ansible-mcp-check.sh` now takes its expected topology

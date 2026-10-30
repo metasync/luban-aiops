@@ -49,7 +49,11 @@ class TokenVerificationError(Exception):
         super().__init__(detail)
 
 
-def verify_token(settings: GatewaySettings, token: str) -> IdentityContext:
+class HumanIdentityRequired(TokenVerificationError):
+    """A valid token lacks genuine interactive-human provenance."""
+
+
+def verify_token(settings: GatewaySettings, token: str, *, require_human: bool = False) -> IdentityContext:
     """Verify a JWT locally and return the identity context.
 
     Raises TokenVerificationError on any verification failure.
@@ -77,7 +81,26 @@ def verify_token(settings: GatewaySettings, token: str) -> IdentityContext:
     except jwt.InvalidAudienceError as exc:
         raise TokenVerificationError("invalid token audience") from exc
     except jwt.InvalidTokenError as exc:
-        raise TokenVerificationError(f"invalid token: {exc}") from exc
+        raise TokenVerificationError("invalid token") from exc
+
+    if require_human:
+        if (
+            claims.get("authentication_source") != "oidc"
+            or claims.get("act") is not None
+            or claims.get("sub") == "dev"
+        ):
+            raise HumanIdentityRequired("verified human identity required")
+        for name in ("sub", "username"):
+            value = claims.get(name)
+            if not isinstance(value, str) or not value.strip() or len(value) > 512:
+                raise HumanIdentityRequired("verified human identity required")
+        for name in ("roles", "groups"):
+            values = claims.get(name, [])
+            if not isinstance(values, list) or len(values) > 256 or any(
+                not isinstance(value, str) or not value.strip() or len(value) > 256
+                for value in values
+            ):
+                raise HumanIdentityRequired("verified human identity required")
 
     return IdentityContext(
         subject=str(claims.get("sub", "")),

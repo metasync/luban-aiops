@@ -35,6 +35,8 @@ async def create_session(
     user_id: str,
     skill_target: str | None = None,
     session_type: str = "operation",
+    *,
+    delegated_token: str | None = None,
 ) -> dict:
     """Create a session, optionally declaring its skill target (SPEC-055 R-4).
 
@@ -53,7 +55,7 @@ async def create_session(
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/sessions",
-            headers=_headers(request_id, user_id),
+            headers=_headers(request_id, user_id, delegated_token),
             json=payload or None,
         )
     response.raise_for_status()

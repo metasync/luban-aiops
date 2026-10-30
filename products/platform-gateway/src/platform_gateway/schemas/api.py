@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from platform_gateway.schemas.authorization import AuthorizationRequired
+
 # SPEC-056 R-1: the session's birth entry, mirrored verbatim from
 # ``agent-session.schema.json``. A named alias so the contract enum-parity
 # drift guard reads the vocabulary off one symbol on each side (the
@@ -48,6 +50,7 @@ class ChatResponse(BaseModel):
     session_id: str
     request_id: str
     content: str
+    authorization_required: AuthorizationRequired | None = None
     status: Literal["ok", "partial", "error"] = "ok"
     # Kernel-validated structured output (SPEC-017 R-2); null when the turn
     # requested no response schema. Relayed verbatim from agent-service.

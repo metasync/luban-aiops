@@ -42,12 +42,22 @@ ACTION_TOOLS_MUTATE = "tools:mutate"
 # ``extra_required_actions`` admission hook. Deny-by-default; joined to
 # PROTECTED_ACTIONS so the policy matrix surfaces it.
 ACTION_SECRETS_DELIVER = "secrets:deliver"
+# Outbound user-delegated target authorization (SPEC-070 OQ-7): gates the
+# human-initiated enrollment workflow (start/status/cancel/browser-reset on the
+# ``/api/v2/targets/authorizations`` routes). Granted to exactly the
+# ``tools:invoke`` holders so a requester may only drive enrollment for a target
+# they may already invoke on behalf of; the route additionally rechecks the
+# administered owner->account mapping and current entitlement, so this grant
+# alone enrolls nothing. Deny-by-default; joined to PROTECTED_ACTIONS so the
+# policy matrix and scenario coverage surface it.
+ACTION_TARGETS_AUTHORIZE = "targets:authorize"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_TOOLS_LIST,
         ACTION_TOOLS_INVOKE,
         ACTION_TOOLS_MUTATE,
         ACTION_SECRETS_DELIVER,
+        ACTION_TARGETS_AUTHORIZE,
     }
 )
 

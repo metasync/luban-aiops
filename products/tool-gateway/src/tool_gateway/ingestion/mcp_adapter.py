@@ -42,9 +42,10 @@ from tool_gateway.tools.base import (
     build_evidence,
     make_error_result,
 )
-from tool_gateway.tools.credential_sets import CredentialSetStore
+from tool_gateway.tools.credential_sets import CredentialSetStore, scheme_of
 from tool_gateway.tools.oauth_client import OAuth2TokenClient
 from tool_gateway.tools.registry import ToolRegistry
+from tool_gateway.tools.user_delegated_client import AcquisitionContext
 
 LOGGER = logging.getLogger(__name__)
 
@@ -214,8 +215,16 @@ async def _open_mcp_session(
     if bearer_token:
         import httpx2
 
+        # SPEC-070: an authenticated MCP channel never follows a redirect and the
+        # adapter is single-shot (one session, one call, no auth/reconnect retry),
+        # so a delegated user token is never replayed to another origin. A fresh
+        # client is built per invocation and closed below — authenticated sessions
+        # are never pooled across users. ``follow_redirects`` already defaults to
+        # False; it is pinned explicitly so an SDK default change cannot reopen it.
         http_client = httpx2.AsyncClient(
-            headers={"Authorization": f"Bearer {bearer_token}"}, timeout=timeout_s
+            headers={"Authorization": f"Bearer {bearer_token}"},
+            timeout=timeout_s,
+            follow_redirects=False,
         )
     try:
         async with streamable_http_client(
@@ -251,6 +260,7 @@ class McpIngestionConnector:
         credential_set: str = "",
         credential_sets_path: str = "",
         token_client: OAuth2TokenClient | None = None,
+        delegated_client: object | None = None,
         session_opener: SessionOpener | None = None,
     ) -> None:
         self._transport = transport
@@ -261,6 +271,11 @@ class McpIngestionConnector:
         self._credentials = CredentialSetStore(credential_sets_path)
         # SPEC-068 R-2/R-3: one token client so its cache persists across calls.
         self._tokens = token_client or OAuth2TokenClient()
+        # SPEC-070: the dedicated user-delegated acquisition client. ``None``
+        # leaves delegated acquisition disabled, so a delegated set then fails
+        # closed. It is never the machine-grant client above and shares no code
+        # path, cache, or fallback with it.
+        self._delegated = delegated_client
         self._session_opener = session_opener or _open_mcp_session
 
     @property
@@ -282,13 +297,28 @@ class McpIngestionConnector:
         for spec in self._admitted:
             registry.register(McpTool(self, spec))
 
-    async def _resolve_bearer(self) -> tuple[str | None, tuple[str, str, str] | None]:
-        """Resolve the configured credential set into a bearer token (SPEC-068).
+    async def _resolve_bearer(
+        self, identity: dict | None = None, *, diagnostic: bool = False
+    ) -> tuple[str | None, tuple[str, str, str] | None]:
+        """Resolve the configured credential set into a bearer token (SPEC-068/070).
 
         Returns ``(token|None, err|None)``. No configured set means an
         unauthenticated loopback session (``None, None``). The MCP transport
         needs a bearer form, so a ``basic`` set — which has none — fails closed
         rather than silently downgrading to no auth.
+
+        A user-delegated set (SPEC-070) is resolved through the dedicated
+        acquisition client, never the machine-grant client, and only after the
+        gateway-verified requester context is present. Enforcement happens here —
+        before any subprocess or session is created:
+
+        * delegated MCP supports only the bearer-capable ``streamable_http``
+          transport; ``stdio``/non-bearer is refused up front;
+        * an ordinary invocation without the verified requester context fails
+          closed (``DELEGATED_CONTEXT_REQUIRED``);
+        * a diagnostic with no verified user must not open an authenticated
+          target connection, so it fails closed too (``DELEGATED_DIAGNOSTIC_NO_USER``)
+          — it may still report configuration, but never connects.
         """
         if not self._credential_set:
             return None, None
@@ -307,8 +337,53 @@ class McpIngestionConnector:
                 f"Credential set '{name}' was not found.",
                 "error",
             )
+        acquisition = None
+        if scheme_of(entry) == "oauth2_authorization_code":
+            # Refuse a non-bearer transport before any subprocess/session exists.
+            if self._transport.kind != "streamable_http":
+                return None, (
+                    "DELEGATED_TRANSPORT_UNSUPPORTED",
+                    f"User-delegated credential set '{name}' requires the "
+                    f"bearer-capable streamable-HTTP MCP transport; "
+                    f"'{self._transport.kind}' is refused.",
+                    "denied",
+                )
+            if self._delegated is None:
+                return None, (
+                    "DELEGATED_ACQUISITION_DISABLED",
+                    f"User-delegated acquisition is not enabled on this gateway, "
+                    f"so credential set '{name}' cannot be used.",
+                    "error",
+                )
+            ident = identity or {}
+            namespace = ident.get("delegated_requester_namespace")
+            sub = ident.get("delegated_requester_sub")
+            if not namespace or not sub:
+                code = (
+                    "DELEGATED_DIAGNOSTIC_NO_USER" if diagnostic
+                    else "DELEGATED_CONTEXT_REQUIRED"
+                )
+                return None, (
+                    code,
+                    f"User-delegated credential set '{name}' requires the "
+                    f"authenticated worker requester context; none was verified, "
+                    f"so no authenticated target connection was opened.",
+                    "denied",
+                )
+            acquisition = AcquisitionContext(
+                owner_namespace=str(namespace),
+                owner_sub=str(sub),
+                set_name=name,
+                target=entry.get("target", ""),
+                audience=entry.get("audience"),
+                resource=entry.get("resource"),
+            )
         resolved, err = await resolve_outbound_auth(
-            set_name=name, entry=entry, token_client=self._tokens
+            set_name=name,
+            entry=entry,
+            token_client=self._tokens,
+            delegated_client=self._delegated,
+            acquisition=acquisition,
         )
         if err is not None:
             return None, err
@@ -323,10 +398,10 @@ class McpIngestionConnector:
         return token, None
 
     async def _call(
-        self, server_name: str, arguments: dict
+        self, server_name: str, arguments: dict, identity: dict | None = None
     ) -> tuple[Any | None, tuple[str, str, str] | None]:
         """Dispatch one call to the server; fail closed on any transport fault."""
-        token, err = await self._resolve_bearer()
+        token, err = await self._resolve_bearer(identity)
         if err is not None:
             return None, err
         try:
@@ -350,14 +425,20 @@ class McpIngestionConnector:
             )
         return result, None
 
-    async def list_server_tools(self) -> tuple[list[str] | None, tuple[str, str, str] | None]:
+    async def list_server_tools(
+        self, identity: dict | None = None
+    ) -> tuple[list[str] | None, tuple[str, str, str] | None]:
         """Diagnostic: the tool names the server advertises.
 
         Deliberately **not** used to decide registration or tier (server metadata
         is untrusted); it exists for an operator health check and for tests that
         assert an unlisted/advertised-read-only server tool is still not exposed.
+
+        SPEC-070: a delegated set is resolved with ``diagnostic=True``, so with no
+        verified user it fails closed *without* opening an authenticated target
+        connection (it may report configuration, but never connects).
         """
-        token, err = await self._resolve_bearer()
+        token, err = await self._resolve_bearer(identity, diagnostic=True)
         if err is not None:
             return None, err
         try:
@@ -417,14 +498,21 @@ class McpTool(BaseTool):
             )
 
         arguments = map_arguments(spec, parameters)
-        result, err = await self._connector._call(spec.server_name, arguments)
+        result, err = await self._connector._call(spec.server_name, arguments, identity)
         duration_ms = int((time.perf_counter() - start) * 1000)
         if err is not None:
-            code, message, _status = err
-            return make_error_result(
-                spec.name, code, message,
-                risk_level=spec.risk_level, source_system=source,
-                duration_ms=duration_ms,
+            code, message, status = err
+            # Preserve the acquisition seam's posture (SPEC-070): a delegated
+            # re-authorization denial is ``denied`` — never a terminal ``error`` —
+            # so the producer seam can promote it to a durable authorization
+            # challenge exactly as the HTTP connector's ``_refusal`` does.
+            # Flattening it to ``error`` would strand an MCP target's delegated
+            # read with no enrollment path. Every other severity stays ``error``.
+            return ToolResult(
+                tool_name=spec.name,
+                status="denied" if status == "denied" else "error",
+                evidence=build_evidence(spec.risk_level, source, duration_ms),
+                error={"code": code, "message": message},
             )
         return self._normalize(result, duration_ms)
 

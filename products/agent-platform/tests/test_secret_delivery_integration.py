@@ -413,7 +413,8 @@ def _run_reset_flow(monkeypatch, decision, gated_status="success", repark=False)
     monkeypatch.setattr(kernel, "_snapshot_state",
                         lambda session_id, agent, turn_literals=(): None)
 
-    def fake_prepare_executions(pending, decider_user_id, confirmed, request_id, session_id):
+    def fake_prepare_executions(pending, decider_user_id, confirmed, request_id, session_id, *, requester=None, decider=None):
+        assert requester is None and decider is None
         if not confirmed:
             return {}, None
         return {GATED_CALL_ID: {"call_id": GATED_CALL_ID,

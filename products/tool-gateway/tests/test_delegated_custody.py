@@ -91,13 +91,16 @@ def test_memory_transactions_and_fail_closed_factory():
         assert (await store.get(record.challenge_id, "issuer", "alice", now=now)).status == "canceled"
         other = record.model_copy(update={"challenge_id": "22222222-2222-4222-8222-222222222222"})
         await store.create(other)
-        start = await store.issue_start(other.challenge_id, "issuer", "alice", now=now)
-        assert await store.consume_start(start, now=now) is not None
-        assert await store.consume_start(start, now=now) is None
-        state, verifier = await store.prepare_state(other.challenge_id, "issuer", "alice", now=now)
-        claim = await store.claim_state(state, now=now)
+        browser = SecretStr("opaque-browser-secret")
+        jar = {other.challenge_id: browser.get_secret_value()}
+        start = await store.issue_start(other.challenge_id, "issuer", "alice", browser_secret=browser, now=now)
+        prepared = await store.consume_start(start, browser_bindings=jar, now=now)
+        assert prepared is not None
+        assert await store.consume_start(start, browser_bindings=jar, now=now) is None
+        state, verifier = prepared.state, prepared.verifier
+        claim = await store.claim_state(state, browser_bindings=jar, now=now)
         assert claim.verifier.get_secret_value() == verifier.get_secret_value()
-        assert await store.claim_state(state, now=now) is None
+        assert await store.claim_state(state, browser_bindings=jar, now=now) is None
         assert state.get_secret_value() not in repr(claim)
         ticks[0] = 600.0
         assert await store.claim_callback(other.challenge_id, "issuer", "alice", "g1", now=now) is None
@@ -123,12 +126,14 @@ def test_memory_start_exact_boundary(elapsed, usable):
             config_generation="g1", session_id="ses", call_id="call", return_url="/",
             created_at=now, updated_at=now, expires_at=now + timedelta(seconds=600))
         await store.create(record)
-        old = await store.issue_start(record.challenge_id, "issuer", "alice", now=now)
-        start = await store.issue_start(record.challenge_id, "issuer", "alice", now=now)
-        assert await store.consume_start(old, now=now) is None
+        browser = SecretStr("opaque-browser-secret")
+        jar = {record.challenge_id: browser.get_secret_value()}
+        old = await store.issue_start(record.challenge_id, "issuer", "alice", browser_secret=browser, now=now)
+        start = await store.issue_start(record.challenge_id, "issuer", "alice", browser_secret=browser, now=now)
+        assert await store.consume_start(old, browser_bindings=jar, now=now) is None
         ticks[0] = elapsed
-        assert (await store.consume_start(start, now=now) is not None) == usable
-        assert await store.consume_start(start, now=now) is None
+        assert (await store.consume_start(start, browser_bindings=jar, now=now) is not None) == usable
+        assert await store.consume_start(start, browser_bindings=jar, now=now) is None
     asyncio.run(prove())
 
 
@@ -138,6 +143,7 @@ def test_transaction_envelope_binds_every_routing_dimension(tmp_path):
     ring = Keyring(key_file(tmp_path / "keys.json"))
     row = dict(challenge_id="challenge", set_id="set", target="target", owner_namespace="issuer", owner_sub="alice",
                config_generation="g1", credential_epoch=1, session_id="session", call_id="call", return_url="/",
+               browser_secret_hash="browser-hash", start_attempt=1,
                expires_at=datetime.now(timezone.utc) + timedelta(seconds=600))
     binding = transaction_binding(row)
     ciphertext = ring.encrypt(SecretStr("opaque-verifier"), "verifier", binding)
@@ -169,14 +175,36 @@ def test_attempt_scoped_local_blocks_are_independent(tmp_path):
 def test_custody_schema_is_explicitly_versioned_with_attempt_invariants():
     """Attempt fencing ships as an explicit versioned migration, never runtime DDL."""
     from tool_gateway.services import custody_schema as schema
-    assert schema.SCHEMA_VERSION == 2
+    assert schema.SCHEMA_VERSION == 3
     assert "attempt_id TEXT" in schema.DDL
     assert "credentials_attempt_fenced" in schema.DDL
     assert "credentials_attempt_cleared" in schema.DDL
-    # The upgrade path adds the column, fences legacy unpublished rows, and bumps the version.
+    # The v1->v2 upgrade adds the column, fences legacy unpublished rows, and bumps the version.
     assert "ADD COLUMN IF NOT EXISTS attempt_id" in schema.UPGRADE_V1_TO_V2
     assert "status IN ('in_flight','staged')" in schema.UPGRADE_V1_TO_V2
     assert "SET version=2" in schema.UPGRADE_V1_TO_V2
+
+
+def test_custody_schema_v3_adds_browser_binding_fields():
+    """SPEC-070 browser handoff: the v3 migration adds the per-challenge browser
+    binding fields and fences incompatible pending prototype transactions rather
+    than decrypting a v2-bound verifier under a guessed binding."""
+    from tool_gateway.services import custody_schema as schema
+    # A fresh database is created at version 3 with the browser-binding columns.
+    assert "VALUES (TRUE, 3)" in schema.DDL
+    assert "browser_secret_hash TEXT" in schema.DDL
+    assert "browser_expires_at TIMESTAMPTZ" in schema.DDL
+    assert "start_attempt INTEGER NOT NULL DEFAULT 0" in schema.DDL
+    # The explicit v2->v3 upgrade adds the same columns, fences every pending
+    # prototype transaction (no browser binding; v2 verifier AAD), and bumps the
+    # recorded version. Published credentials are never touched.
+    upgrade = schema.UPGRADE_V2_TO_V3
+    assert "ADD COLUMN IF NOT EXISTS browser_secret_hash" in upgrade
+    assert "ADD COLUMN IF NOT EXISTS browser_expires_at" in upgrade
+    assert "ADD COLUMN IF NOT EXISTS start_attempt" in upgrade
+    assert "status='failed'" in upgrade and "status='pending'" in upgrade
+    assert "SET version=3" in upgrade
+    assert "credentials" not in upgrade
 
 
 def test_refresh_claim_carries_immutable_attempt_identity():

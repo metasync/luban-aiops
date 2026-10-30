@@ -46,6 +46,18 @@
 #   BROWSER_CREDENTIAL_SETS_FILE=./cred-sets.json \
 #     shared/platform-ops/gitops/sync-browser-credentials.sh
 #
+# Provision a SPEC-070 delegated config + administered mapping (default OFF;
+# delegation stays disabled until the overlay enables it). The config is
+# validated through the SAME versioned guard the runtime uses, BEFORE any
+# secret is created:
+#   DELEGATED_CONFIG_FILE=./delegated-sets.json \
+#   DELEGATED_SET_ID=user \
+#   DELEGATED_TRUSTED_CALLBACK=https://portal.example/api/v1/targets/authorizations/callback \
+#     shared/platform-ops/gitops/sync-browser-credentials.sh
+#
+# Validate every input and exit WITHOUT creating any secret or rolling out:
+#   ... shared/platform-ops/gitops/sync-browser-credentials.sh --validate-only
+#
 # Skip in CI when secrets are injected externally:
 #   SKIP_BROWSER_CREDENTIALS=true make deploy
 #
@@ -55,7 +67,44 @@
 
 set -eu
 
-NAMESPACE="${1:-dev-luban-aiops}"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)
+
+# --- arguments ------------------------------------------------------------
+# Preserves the historical `[namespace]` positional and SKIP_BROWSER_CREDENTIALS
+# behavior, and adds a validation-only mode (SPEC-070 R-6 provisioning): with
+# --validate-only (or VALIDATE_ONLY=true) the script validates every input and
+# exits BEFORE any `kubectl` mutation or rollout.
+NAMESPACE="dev-luban-aiops"
+VALIDATE_ONLY="${VALIDATE_ONLY:-false}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --validate-only) VALIDATE_ONLY=true; shift ;;
+    -*) echo "Unknown option: $1" >&2; exit 2 ;;
+    *) NAMESPACE="$1"; shift ;;
+  esac
+done
+
+# --- delegated (SPEC-070) inputs ------------------------------------------
+# All optional. When DELEGATED_CONFIG_FILE is unset the script provisions ONLY
+# the existing browser/machine credential sets, exactly as before.
+#   DELEGATED_CONFIG_FILE      local administered delegated config JSON (sets.json)
+#   DELEGATED_MAPPING_FILE     local administered mapping JSON; defaults to the
+#                              config's own absolute identity_mapping_path, so
+#                              validation and provisioning read ONE source
+#   DELEGATED_SET_ID           administered credential-set id (default: user)
+#   DELEGATED_TRUSTED_CALLBACK exact deployment-trusted HTTPS callback; must equal
+#                              the set's redirect_uri (guard: callback_mismatch)
+#   DELEGATED_SECRET_NAME      target Secret (default: tool-gateway-delegated-config)
+# identity_mapping_path is an absolute, administrator-controlled path (see
+# docs/guides/configuration-reference.md). It must resolve where validation runs
+# AND be the path the overlay mounts the mapping at, so the validated bytes are
+# exactly the mounted bytes — the configuration fingerprint covers that path.
+DELEGATED_CONFIG_FILE="${DELEGATED_CONFIG_FILE:-}"
+DELEGATED_MAPPING_FILE="${DELEGATED_MAPPING_FILE:-}"
+DELEGATED_SET_ID="${DELEGATED_SET_ID:-user}"
+DELEGATED_TRUSTED_CALLBACK="${DELEGATED_TRUSTED_CALLBACK:-}"
+DELEGATED_SECRET_NAME="${DELEGATED_SECRET_NAME:-tool-gateway-delegated-config}"
 
 if [ "${SKIP_BROWSER_CREDENTIALS:-}" = "true" ]; then
   echo "SKIP_BROWSER_CREDENTIALS=true; skipping browser credential and acme-admin secret provisioning."
@@ -87,6 +136,86 @@ else
   }
 }
 EOF
+fi
+
+# --- validate BEFORE any mutation (SPEC-070 R-6) --------------------------
+# Read-only checks; NEITHER calls kubectl, so a refusal aborts with zero cluster
+# mutation. python3 is the repository's JSON parser for these helpers (jq is not
+# a `make deploy` precondition).
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 not found; cannot validate credential inputs before mutation." >&2
+  exit 1
+fi
+
+# 1. The browser credential-set file must parse and still carry the acme-admin
+#    password the app-side secret is derived from. This mirrors the live
+#    derivation's precondition but runs BEFORE the first secret is created, so a
+#    bad file no longer leaves a half-applied browser secret behind.
+python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    sets = json.load(handle)
+entry = sets.get("acme-admin")
+if not isinstance(entry, dict) or not entry.get("password"):
+    sys.stderr.write("credential-set file carries no non-empty \"acme-admin\" password.\n")
+    raise SystemExit(1)
+' "$CRED_FILE"
+
+# 2. If delegated inputs were supplied, validate the administered config +
+#    mapping through the versioned guard (the SAME authority the runtime uses:
+#    tool_gateway.services.custody_cli validate-config → load_snapshot), never
+#    re-implemented in shell. Any refusal exits non-zero BEFORE mutation, and
+#    delegation stays disabled until this passes.
+if [ -n "$DELEGATED_CONFIG_FILE" ]; then
+  if [ ! -f "$DELEGATED_CONFIG_FILE" ]; then
+    echo "DELEGATED_CONFIG_FILE not found: $DELEGATED_CONFIG_FILE" >&2
+    exit 1
+  fi
+  if [ -z "$DELEGATED_TRUSTED_CALLBACK" ]; then
+    echo "DELEGATED_TRUSTED_CALLBACK is required to validate a delegated config." >&2
+    exit 1
+  fi
+  # Resolve the mapping source for provisioning: an explicit override, else the
+  # config's own absolute identity_mapping_path (single source of truth, so the
+  # validated bytes and the provisioned bytes are the same bytes).
+  if [ -z "$DELEGATED_MAPPING_FILE" ]; then
+    DELEGATED_MAPPING_FILE=$(python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    raw = json.load(handle)
+entry = raw.get(sys.argv[2])
+sys.stdout.write(entry.get("identity_mapping_path", "") if isinstance(entry, dict) else "")
+' "$DELEGATED_CONFIG_FILE" "$DELEGATED_SET_ID")
+  fi
+  if [ -z "$DELEGATED_MAPPING_FILE" ] || [ ! -f "$DELEGATED_MAPPING_FILE" ]; then
+    echo "Delegated mapping not resolvable/readable: '${DELEGATED_MAPPING_FILE:-<empty>}'." >&2
+    echo "The config's identity_mapping_path must be an absolute path that exists where validation runs." >&2
+    exit 1
+  fi
+  set +e
+  VALIDATE_RESULT=$(cd "$REPO_ROOT" && OTEL_SDK_DISABLED=true \
+    uv run --offline --frozen --project products/tool-gateway \
+    python -m tool_gateway.services.custody_cli validate-config \
+    --config-file "$DELEGATED_CONFIG_FILE" --set-id "$DELEGATED_SET_ID" \
+    --callback "$DELEGATED_TRUSTED_CALLBACK" 2>&1)
+  VALIDATE_STATUS=$?
+  set -e
+  printf '%s\n' "$VALIDATE_RESULT"
+  if [ "$VALIDATE_STATUS" -ne 0 ]; then
+    echo "" >&2
+    echo "REFUSED: delegated configuration failed validation; NO secret was created and NO rollout occurred." >&2
+    echo "Fix the administered config/mapping and re-run. Delegation stays disabled until this passes." >&2
+    exit 1
+  fi
+fi
+
+# --- validation-only mode: stop here, before any cluster mutation ----------
+if [ "$VALIDATE_ONLY" = "true" ]; then
+  for path in $CLEANUP; do
+    rm -f "$path"
+  done
+  echo "validation-only: all supplied inputs are valid; no secret created, no rollout."
+  exit 0
 fi
 
 kubectl -n "$NAMESPACE" create secret generic tool-gateway-browser-credentials \
@@ -136,6 +265,21 @@ with open(sys.argv[2], "w", encoding="utf-8") as out:
 kubectl -n "$NAMESPACE" create secret generic acme-admin-credentials \
   --from-file=ACME_ADMIN_PASSWORD="$ACME_SECRET_FILE" \
   --dry-run=client -o yaml | kubectl apply -f -
+
+# --- delegated config + administered mapping secret (SPEC-070, live path) ---
+# Reached only after the guard validation above passed. Both files are mounted
+# read-only by the overlay: the config at GATEWAY_DELEGATED_CUSTODY_CONFIG_PATH
+# and the mapping at the config's absolute identity_mapping_path. Values are
+# written from files (never --from-literal), so no secret enters this process's
+# argv. This never enables delegation — the feature flags stay off until the
+# overlay turns them on.
+if [ -n "$DELEGATED_CONFIG_FILE" ]; then
+  kubectl -n "$NAMESPACE" create secret generic "$DELEGATED_SECRET_NAME" \
+    --from-file=delegated-sets.json="$DELEGATED_CONFIG_FILE" \
+    --from-file=linkage.json="$DELEGATED_MAPPING_FILE" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  echo "Delegated configuration synced (secret: $DELEGATED_SECRET_NAME)."
+fi
 
 for path in $CLEANUP; do
   rm -f "$path"

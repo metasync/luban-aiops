@@ -71,6 +71,37 @@ def _two_calls():
     ]
 
 
+class DelegatedIdentityContractTests(unittest.TestCase):
+    def envelope(self):
+        return build_requests(_parked(), "bob", KEY, run_id=str(uuid4()), admission_epoch=str(uuid4()))[0]
+
+    def test_all_four_identities_are_signed_and_validated(self):
+        envelope = self.envelope()
+        fields = {"requester_namespace": "https://issuer.test", "requester_sub": "alice-sub",
+                  "decider_namespace": "https://issuer.test", "decider_sub": "bob-sub"}
+        envelope.update(fields)
+        envelope["signature"] = sign_envelope(envelope, KEY)
+        validate_request(envelope, KEY)
+        for field in fields:
+            with self.subTest(field=field):
+                with self.assertRaises(ProtocolError):
+                    validate_request({**envelope, field: "altered"}, KEY)
+                incomplete = {k: v for k, v in envelope.items() if k != field}
+                incomplete["signature"] = sign_envelope(incomplete, KEY)
+                with self.assertRaises(ProtocolError):
+                    validate_request(incomplete, KEY)
+                for value in (None, "", 1, "x" * 257):
+                    invalid = {**envelope, field: value}
+                    invalid["signature"] = sign_envelope(invalid, KEY)
+                    with self.assertRaises(ProtocolError):
+                        validate_request(invalid, KEY)
+
+    def test_machine_envelope_remains_unchanged(self):
+        envelope = self.envelope()
+        validate_request(envelope, KEY)
+        self.assertNotIn("requester_sub", envelope)
+
+
 class CanonicalizationTests(unittest.TestCase):
     def test_same_input_same_digest(self) -> None:
         args = {"namespace": "ops", "force": True}

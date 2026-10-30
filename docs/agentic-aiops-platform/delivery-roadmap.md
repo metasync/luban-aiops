@@ -478,9 +478,10 @@ is **accepted**; ADR-0015 is `superseded by ADR-0016` (accepted body unchanged).
 confirms the documented grant family but leaves actual AAP/MCP versions, client security, and
 renewal/account/RBAC lifecycle (OQ-3, pre-live) open. The detailed cross-product contract
 (OQ-7) was **ratified 2026-10-19**, closing the pre-runtime gate, so R-1–R-6 implementation
-may proceed against it. The additive contract checkpoint below is implemented; OAuth
-workflow and custody remain open. SPEC-070 remains SPEC-069's production identity
-dependency; its delivered read-only **dev** slice is unaffected.
+could proceed against it. The additive contract checkpoint was released as v0.50.0;
+the subsequent runtime checkpoint below records implemented, unreleased workflow and custody.
+SPEC-070 remains SPEC-069's production identity dependency; its delivered read-only **dev**
+slice is unaffected.
 
 **SPEC-070 delivery-boundary amendment approved 2026-10-23.** AAP availability no longer
 blocks development delivery or separately authorized releases. R-1–R-6d still need
@@ -496,11 +497,20 @@ passed full root verification and code/documentation review: closed error-only t
 stream v13 with packaged/portal consumer parity, durable audit delegation-mode filtering, and
 inert authorization models/transaction Protocol. The operator approved this checkpoint's
 version bump, commit/tag/push, and local Kubernetes rebuild/deployment. It enables no OAuth
-flow, custody backend, authorization UI, or verified delegation emission. SPEC-070 is
-`in-progress`, not delivered; full development acceptance targets a later, unselected release.
-This supersedes the earlier full-feature v0.50.0 planning slot. **AAP compatibility unverified**;
-DI-070 remains mandatory before production target enablement. Current release details remain
-in [VERSION](../../VERSION) and [CHANGELOG](../../CHANGELOG.md).
+flow, custody backend, authorization UI, or verified delegation emission. This superseded
+the earlier full-feature v0.50.0 planning slot. Current release details remain in
+[VERSION](../../VERSION) and [CHANGELOG](../../CHANGELOG.md).
+
+**SPEC-070 runtime checkpoint — 2026-10-30: implemented, unreleased, default-off.**
+[R-1a–R-6d development acceptance](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix)
+is recorded with root `make verify` EXIT=0, including deterministic OAuth/target fixtures,
+real TLS/Postgres processes, portal rendered-DOM tests, attribution, and provisioning.
+Real-browser UI screenshots remain environment-blocked; actual nginx request-log inspection
+is still outstanding as documented in the troubleshooting guide. SPEC-070 stays `in-progress`;
+a runtime release is not yet selected. The Unreleased entry and
+[SPEC-069 dependency update](../specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/tasks.md#production-dependency-status-update--2026-10-30)
+do not authorize a version bump or deployment. **AAP compatibility unverified**;
+DI-070 remains mandatory before production target enablement.
 
 | Deployment-integration follow-up | Owner / trigger | Closure and release boundary |
 | --- | --- | --- |

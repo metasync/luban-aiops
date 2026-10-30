@@ -37,7 +37,8 @@ OVERLAYS := dev-k8s \
 	runtime-profiles/mutating-dev \
 	runtime-profiles/browser-dev \
 	runtime-profiles/ansible-dev \
-	runtime-profiles/servicenow-dev
+	runtime-profiles/servicenow-dev \
+	runtime-profiles/delegated-dev
 
 # Coordinated deploy build state (written by `make build`, read by `make deploy`).
 IMAGE_STATE := $(GITOPS_DIR)/dev-k8s/.images.env
@@ -222,6 +223,18 @@ audit-contract-test: ## Prove audit delegation filtering and legacy migration wi
 delegated-custody-test: ## Prove delegated custody and publication fencing with disposable Postgres
 	@uv run --frozen --project products/tool-gateway python products/tool-gateway/tests/integration/delegated_custody.py
 
+.PHONY: delegated-runtime-test
+delegated-runtime-test: ## Prove the real delegated runtime (routes + HTTP/MCP adapters + cross-user approval matrix) against fixture OAuth/TLS and disposable Postgres
+	@uv run --frozen --project products/tool-gateway python products/tool-gateway/tests/integration/delegated_runtime.py
+
+.PHONY: delegated-multiproc-test
+delegated-multiproc-test: ## Prove independently started gateway processes against shared custody (cross-replica callback/refresh, restart, revocation, configuration removal)
+	@uv run --frozen --project products/tool-gateway python products/tool-gateway/tests/integration/delegated_multiproc.py
+
+.PHONY: delegated-edge-test
+delegated-edge-test: ## Prove the real platform-gateway browser edge over generated TLS (cookie-bound navigation, authorized return, different-browser/expiry fail-closed, canceled/failed states, secret-safe edge logs)
+	@uv run --frozen --project products/tool-gateway python products/tool-gateway/tests/integration/delegated_edge.py
+
 .PHONY: execution-failure-test
 execution-failure-test: ## Prove crash safety with disposable Postgres and independent processes
 	@sh $(E2E_DIR)/execution-failure-test.sh
@@ -240,7 +253,7 @@ portal-test: ## Run the operator-portal SPA unit suite and production build (vit
 	@$(MAKE) -C products/operator-portal web-build || exit 1
 
 .PHONY: verify
-verify: test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test audit-contract-test delegated-custody-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, portal, secret-delivery, and execution failure proofs
+verify: test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test audit-contract-test delegated-custody-test delegated-runtime-test delegated-multiproc-test delegated-edge-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, portal, secret-delivery, delegated custody/runtime/multi-process/edge, and execution failure proofs
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

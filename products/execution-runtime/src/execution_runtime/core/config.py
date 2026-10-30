@@ -33,8 +33,17 @@ class ExecutionSettings:
     flight_retention_seconds: int = 900
     admission_enabled: bool = False
     admission_epoch: str = ""
+    target_authorization_enabled: bool = False
+    delegated_identity_issuer: str = ""
+    delegated_identity_jwks_url: str = ""
+    delegated_identity_audience: str = ""
+    delegated_identity_actors: tuple[str, ...] = ()
+    target_execution_token_path: str = ""
 
     def __post_init__(self) -> None:
+        if self.target_authorization_enabled:
+            from execution_runtime.services.delegated_execution import validate_trust
+            validate_trust(self)
         if not 0 < self.gateway_timeout_seconds <= 30:
             raise ValueError("EXECUTION_GATEWAY_TIMEOUT_SECONDS must be > 0 and <= 30.")
         if self.state_store_backend not in _SUPPORTED_STORE_BACKENDS:
@@ -52,6 +61,13 @@ class ExecutionSettings:
             return value or None
 
         return cls(
+            target_authorization_enabled=os.getenv("EXECUTION_TARGET_AUTHORIZATION_ENABLED", "false").lower() == "true",
+            delegated_identity_issuer=_secret("EXECUTION_DELEGATED_IDENTITY_ISSUER") or "",
+            delegated_identity_jwks_url=_secret("EXECUTION_DELEGATED_IDENTITY_JWKS_URL") or "",
+            delegated_identity_audience=_secret("EXECUTION_DELEGATED_IDENTITY_AUDIENCE") or "",
+            delegated_identity_actors=tuple(actor.strip() for actor in
+                os.getenv("EXECUTION_DELEGATED_IDENTITY_ACTORS", "").split(",") if actor.strip()),
+            target_execution_token_path=_secret("EXECUTION_TARGET_EXECUTION_TOKEN_PATH") or "",
             admission_enabled=os.getenv("EXECUTION_ADMISSION_ENABLED", "false").lower() == "true",
             admission_epoch=os.getenv("EXECUTION_ADMISSION_EPOCH", "").strip(),
             execution_signing_key=_secret("EXECUTION_SIGNING_KEY"),

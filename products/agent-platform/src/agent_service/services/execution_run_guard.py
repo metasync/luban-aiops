@@ -225,7 +225,7 @@ class RunGuard:
             # Keep the latch set; the durable stop is unconfirmed, not undone.
             return False
 
-    def release_permit(self, envelope, original, current_request_id) -> SecretReleasePermit:
+    def release_permit(self, envelope, original, current_request_id) -> SecretReleasePermit | None:
         """Mint the single-use secret-release permit from a verified original success.
 
         Fails closed unless every one of these holds:
@@ -236,7 +236,10 @@ class RunGuard:
         3. ``original`` is a same-process :class:`VerifiedOriginal`, never a dict,
            recovery page, or ``status: success`` frame;
         4. durable agent acceptance of the exact recorded worker result succeeds
-           on a non-stopped, non-conflicting run.
+           on a non-stopped, non-conflicting run;
+        5. the accepted result status is ``success`` — a failed acquisition is
+           durably accepted as evidence but returns ``None`` (no permit) rather
+           than raising, so a reveal is never minted for a failure.
 
         The returned permit authorizes revealing an already-held handle only. It
         is not proof of a business effect and carries no output.
@@ -246,10 +249,16 @@ class RunGuard:
             raise ProtocolError("receipt_unconfirmed")
         if not isinstance(original, VerifiedOriginal):
             raise ProtocolError("response_invalid")
-        # accept() revalidates the original, binds the exact receipt digest, and
-        # re-checks the durable run stop and integrity; it raises before we mint
-        # anything if the result is not a durably accepted original success.
+        # accept() revalidates the original's authenticity, binds the exact
+        # receipt digest, and re-checks the durable run stop and integrity; it
+        # raises if the record is not a durably acceptable original. Acceptance
+        # records a failed result too (durable evidence), so the success gate for
+        # minting is the separate status check below — not accept().
         self._recovery.accept(envelope, original, current_request_id)
+        # SPEC-070: an acquisition failure is still durable original evidence,
+        # but must never mint a reveal capability, even one later discarded.
+        if original.result.get("status") != "success":
+            return None
         receipt_digest = original.observation["receipt_digest"]
         return SecretReleasePermit(
             _PERMIT_AUTHORITY,

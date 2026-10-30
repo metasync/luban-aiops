@@ -20,6 +20,7 @@ an acquired token never does.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 import httpx
@@ -29,6 +30,17 @@ from tool_gateway.tools.oauth_client import (
     CREDENTIAL_ACQUISITION_FAILED,
     OAuth2TokenClient,
 )
+
+# SPEC-070 R-4a/R-4c: the top-level audit ``delegation_mode``, derived from the
+# *verified acquisition outcome* at this single seam rather than from a connector
+# configuration label. A ``ContextVar`` (per-task) — never an attribute on a
+# reusable connector singleton — so concurrent invocations cannot cross-
+# contaminate. ``None`` (omitted from the audit event) until a resolution runs;
+# the gateway reads it back inside the same request task, before redaction, so a
+# REDACTION_OVERFLOW result replacement cannot drop it. Values: ``user_delegated``
+# only after a verified user-delegated grant, ``acting_service`` for an actual
+# machine credential, ``none`` when an acquisition was attempted but failed.
+DELEGATION_MODE: ContextVar[str | None] = ContextVar("delegation_mode", default=None)
 
 
 class BearerAuth(httpx.Auth):
@@ -55,6 +67,11 @@ class ResolvedAuth:
     scheme: str
     auth: httpx.Auth | None
     bearer_token: str | None = None
+    # Private verified acquisition metadata for a user-delegated result
+    # (SPEC-070): the target-account identity/generation/epoch the acquisition
+    # client proved. ``None`` for every other scheme. An internal attribution
+    # fact, never a connector configuration label and never surfaced in a result.
+    acquisition: object | None = None
 
 
 def _error(set_name: str, detail: str) -> tuple[str, str, str]:
@@ -66,11 +83,36 @@ def _error(set_name: str, detail: str) -> tuple[str, str, str]:
     )
 
 
+def _delegated_error(set_name: str, exc: Exception) -> tuple[str, str, str]:
+    """Map a ``DelegatedAcquisitionError`` kind to a structured gateway error.
+
+    Only the set name and the failure *kind* surface — never a token, secret, or
+    provider detail. ``authorization_required`` is a ``denied`` posture (the
+    requester must re-authorize); a bounded concurrent acquisition is a safe
+    ``error``, not an enrollment challenge; every other kind fails closed as a
+    credential-acquisition error.
+    """
+    kind = getattr(exc, "kind", "acquisition_failed")
+    if kind == "authorization_required":
+        code, status = "DELEGATED_REAUTHORIZATION_REQUIRED", "denied"
+    elif kind == "acquisition_in_progress":
+        code, status = "DELEGATED_ACQUISITION_IN_PROGRESS", "error"
+    else:
+        code, status = CREDENTIAL_ACQUISITION_FAILED, "error"
+    return (
+        code,
+        f"User-delegated acquisition for credential set '{set_name}' failed: {kind}.",
+        status,
+    )
+
+
 async def resolve_outbound_auth(
     *,
     set_name: str,
     entry: dict[str, str],
-    token_client: OAuth2TokenClient,
+    token_client: "OAuth2TokenClient",
+    delegated_client: object | None = None,
+    acquisition: object | None = None,
 ) -> tuple[ResolvedAuth | None, tuple[str, str, str] | None]:
     """Resolve one credential entry into outbound auth for its scheme.
 
@@ -78,7 +120,42 @@ async def resolve_outbound_auth(
     ``(None, (code, message, status))`` on a credential/config failure. Fails
     closed on every scheme: a missing field or a failed token acquisition is a
     gateway error, never an unauthenticated fallback.
+
+    SPEC-070 R-4a/R-4c: as a side effect this derives the top-level audit
+    ``delegation_mode`` from the *verified* outcome into :data:`DELEGATION_MODE`
+    for the calling task to read back. The derivation rides the outcome, never a
+    connector config label: a verified user-delegated grant (the only path that
+    populates ``ResolvedAuth.acquisition``) is ``user_delegated``; any other
+    successful machine credential is ``acting_service``; a failed acquisition
+    acquired no credential and is ``none`` — authorization failure is never
+    delegated success.
     """
+    resolved, err = await _resolve_outbound_auth(
+        set_name=set_name,
+        entry=entry,
+        token_client=token_client,
+        delegated_client=delegated_client,
+        acquisition=acquisition,
+    )
+    if err is not None or resolved is None:
+        DELEGATION_MODE.set("none")
+    elif resolved.acquisition is not None:
+        DELEGATION_MODE.set("user_delegated")
+    else:
+        DELEGATION_MODE.set("acting_service")
+    return resolved, err
+
+
+async def _resolve_outbound_auth(
+    *,
+    set_name: str,
+    entry: dict[str, str],
+    token_client: "OAuth2TokenClient",
+    delegated_client: object | None = None,
+    acquisition: object | None = None,
+) -> tuple[ResolvedAuth | None, tuple[str, str, str] | None]:
+    """The scheme dispatch behind :func:`resolve_outbound_auth` (no side effect)."""
+
     scheme = scheme_of(entry)
     if scheme == "basic":
         username = entry.get("username")
@@ -107,6 +184,31 @@ async def resolve_outbound_auth(
             ResolvedAuth(scheme=scheme, auth=BearerAuth(token), bearer_token=token),
             None,
         )
+    if scheme == "oauth2_authorization_code":
+        # SPEC-070: a user-delegated set acquires a per-user target token through
+        # the dedicated acquisition client — never the machine-grant client. The
+        # verified requester/acquisition context is supplied by the connector from
+        # the gateway-verified identity; without it (or without a wired delegated
+        # client) the resolution fails closed and no token is attached.
+        from tool_gateway.tools.user_delegated_client import DelegatedAcquisitionError
+
+        if delegated_client is None or acquisition is None:
+            return None, _error(set_name, "delegated acquisition is not enabled")
+        try:
+            token = await delegated_client.access_token_for_send(acquisition)
+        except DelegatedAcquisitionError as exc:
+            return None, _delegated_error(set_name, exc)
+        bearer = token.token.get_secret_value()
+        return (
+            ResolvedAuth(
+                scheme=scheme,
+                auth=BearerAuth(bearer),
+                bearer_token=bearer,
+                acquisition=token.metadata,
+            ),
+            None,
+        )
+
     # ``CredentialSetStore`` already rejects unknown schemes at parse time; this
     # is the belt-and-braces fail-closed for a hand-built entry.
     return None, _error(set_name, f"unsupported scheme '{scheme}'")

@@ -44,6 +44,7 @@ class _EchoTool(BaseTool):
                 "caller": identity.get("username"),
                 "request_id": identity.get("request_id"),
                 "chat_session_id": identity.get("chat_session_id"),
+                "chat_call_id": identity.get("chat_call_id"),
                 "approval_kind": identity.get("approval_kind"),
             },
             evidence=build_evidence("read", "test", 5),
@@ -338,6 +339,80 @@ class ToolInvokeEndpointTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["data"]["chat_session_id"])
+
+    def test_invoke_forwards_call_id_to_identity(self) -> None:
+        # SPEC-070: the top-level call_id body field (a trusted correlation
+        # handle the kernel forwards from the in-flight tool call, never a model
+        # parameter) reaches connectors as identity["chat_call_id"] so a produced
+        # authorization challenge can be correlated to the exact call.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-call",
+                    "session_id": "ses-flow-1",
+                    "call_id": "tool_call_01AA",
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-call",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["data"]["chat_call_id"], "tool_call_01AA"
+        )
+
+    def test_invoke_without_call_id_leaves_chat_call_absent(self) -> None:
+        # A caller that forwards no call id leaves identity["chat_call_id"]
+        # absent (None), never an empty string.
+        with _patch_jwks():
+            response = self._invoke(
+                _mint_delegated("operator"), "test.echo", {}, "req-no-call"
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["chat_call_id"])
+
+    def test_invoke_ignores_non_string_call_id(self) -> None:
+        # Defensive: a non-string call_id is dropped, never coerced.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-bad-call",
+                    "call_id": {"$gt": ""},
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-bad-call",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["chat_call_id"])
+
+    def test_invoke_ignores_oversized_call_id(self) -> None:
+        # Defensive: the tool-call id is provider-generated, so it is bounded;
+        # an oversized value is dropped rather than threaded into a challenge.
+        with _patch_jwks():
+            response = self.client.post(
+                "/api/v2/tools/invoke",
+                json={
+                    "tool_name": "test.echo",
+                    "parameters": {},
+                    "request_id": "req-long-call",
+                    "call_id": "c" * 300,
+                },
+                headers={
+                    "Authorization": f"Bearer {_mint_delegated('operator')}",
+                    "x-request-id": "req-long-call",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"]["chat_call_id"])
 
     def test_invoke_forwards_approval_kind_to_identity(self) -> None:
         # SPEC-054 R-2 / ADR-0010: the top-level approval_kind body field (a

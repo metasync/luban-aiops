@@ -19,7 +19,8 @@ def sync(*, write=False):
     for product, package in PRODUCTS.items():
         destination = ROOT / "products" / product / "src" / package / "contracts"
         sources = [ROOT / "shared/shared-contracts/schemas" / f"{name}.schema.json" for name in SCHEMAS]
-        sources.append(ROOT / "shared/shared-contracts/sql/execution-ledger-v1.sql")
+        sources.extend(ROOT / "shared/shared-contracts/sql" / f"execution-ledger-v{version}.sql"
+                       for version in (1, 2))
         for source in sources:
             target = destination / source.name
             content = source.read_bytes()

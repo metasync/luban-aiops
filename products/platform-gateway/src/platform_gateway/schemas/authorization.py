@@ -1,4 +1,4 @@
-"""SPEC-070 OQ-7 portal wire shapes; no authorization routes are registered.
+"""SPEC-070 OQ-7 public portal wire shapes; no provider credentials.
 
 Initiation POST and cancel POST have no request body. Browser start GET uses
 an opaque path capability; callback GET contains provider query material and
@@ -13,6 +13,15 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 UUID4_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 AuthorizationStatus = Literal["pending", "authorized", "canceled", "expired", "failed"]
+
+
+class AuthorizationRequired(BaseModel):
+    """Opaque blocking-chat challenge; not an execution or navigation permit."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    challenge_id: str = Field(strict=True, pattern=UUID4_PATTERN)
+    target: str = Field(strict=True, min_length=1, pattern=r"\S")
+    expires_at: AwareDatetime | None = None
 
 
 class AuthorizationStartResponse(BaseModel):

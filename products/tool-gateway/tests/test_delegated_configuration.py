@@ -5,6 +5,11 @@ import json
 import pytest
 
 from tool_gateway.tools.credential_sets import CredentialSetStore, _parse_set
+from tool_gateway.tools.delegated_configuration import (
+    ACCESS_CACHE_TTL_MAX_SECONDS,
+    REFRESH_MAX_LIFETIME_MAX_SECONDS,
+    DelegatedConfiguration,
+)
 
 
 def entry():
@@ -15,7 +20,8 @@ def entry():
                 scope="read", allowed_scopes="read write", oauth_origins="https://oauth.test",
                 resource_origins="https://resource.test", pkce_method="S256", store="postgres",
                 config_revision="1", identity_profile="json_immutable_id", identity_claim="id",
-                identity_mapping_path="/run/mapping.json")
+                identity_mapping_path="/run/mapping.json",
+                access_cache_ttl_seconds="300", refresh_max_lifetime_seconds="2592000")
 
 
 def test_valid_projection_and_optional_absence():
@@ -57,6 +63,46 @@ def test_optional_present_is_not_optional_validation(key, bad):
 ])
 def test_unsupported_profiles_and_trust(override):
     assert _parse_set("automation", {**entry(), **override}) is None
+
+
+@pytest.mark.parametrize("key,bad", [
+    ("access_cache_ttl_seconds", "0"), ("access_cache_ttl_seconds", "301"),
+    ("access_cache_ttl_seconds", "-1"), ("access_cache_ttl_seconds", "1.5"),
+    ("access_cache_ttl_seconds", "abc"), ("access_cache_ttl_seconds", "1e3"),
+    ("access_cache_ttl_seconds", " 300"), ("access_cache_ttl_seconds", "300 "),
+    ("access_cache_ttl_seconds", "0300"),
+    ("refresh_max_lifetime_seconds", "0"), ("refresh_max_lifetime_seconds", "2592001"),
+    ("refresh_max_lifetime_seconds", "-1"), ("refresh_max_lifetime_seconds", "1.5"),
+    ("refresh_max_lifetime_seconds", "abc"), ("refresh_max_lifetime_seconds", "02592000"),
+])
+def test_delegated_policy_ttl_bounds_rejected(key, bad):
+    assert _parse_set("automation", {**entry(), key: bad}) is None
+
+
+@pytest.mark.parametrize("key,good", [
+    ("access_cache_ttl_seconds", "1"), ("access_cache_ttl_seconds", "300"),
+    ("refresh_max_lifetime_seconds", "1"), ("refresh_max_lifetime_seconds", "2592000"),
+])
+def test_delegated_policy_ttl_bounds_accepted(key, good):
+    assert _parse_set("automation", {**entry(), key: good}) is not None
+
+
+def test_delegated_policy_ttl_in_fingerprint():
+    linkage = {("issuer", "alice"): "42"}
+    base = DelegatedConfiguration.parse(entry())
+    shorter = DelegatedConfiguration.parse({**entry(), "access_cache_ttl_seconds": "60"})
+    longer = DelegatedConfiguration.parse({**entry(), "refresh_max_lifetime_seconds": "60"})
+    key = b"f" * 32
+    assert base.fingerprint(key, linkage) != shorter.fingerprint(key, linkage)
+    assert base.fingerprint(key, linkage) != longer.fingerprint(key, linkage)
+
+
+def test_delegated_policy_ttl_accessors_and_maxima():
+    config = DelegatedConfiguration.parse(entry())
+    assert config.access_cache_ttl_seconds == 300
+    assert config.refresh_max_lifetime_seconds == 2592000
+    assert ACCESS_CACHE_TTL_MAX_SECONDS == 300
+    assert REFRESH_MAX_LIFETIME_MAX_SECONDS == 2_592_000
 
 
 @pytest.mark.parametrize("damage", ["{", "[]", "missing", "{}", "invalid"])

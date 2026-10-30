@@ -16,9 +16,21 @@ SCHEME = "oauth2_authorization_code"
 REQUIRED = frozenset(("scheme", "target", "authorization_url", "token_url", "client_id",
     "client_secret", "client_auth", "redirect_uri", "scope", "allowed_scopes", "oauth_origins",
     "resource_origins", "pkce_method", "store", "config_revision", "identity_profile",
-    "identity_claim", "identity_mapping_path"))
+    "identity_claim", "identity_mapping_path", "access_cache_ttl_seconds",
+    "refresh_max_lifetime_seconds"))
 OPTIONAL = frozenset(("renewal_url", "revocation_url", "identity_url", "audience", "resource"))
 CALLBACK_PATH = "/api/v1/targets/authorizations/callback"
+
+# Runtime delegated-policy bounds (plan §"Runtime composition and bounds"). Both
+# are explicit string-valued per-set fields, validated as positive integers with
+# hard maxima and folded into the configuration fingerprint so a policy change
+# fences cached access tokens and in-flight claims across replicas.
+ACCESS_CACHE_TTL_MAX_SECONDS = 300
+REFRESH_MAX_LIFETIME_MAX_SECONDS = 2_592_000
+_POLICY_BOUNDS = {
+    "access_cache_ttl_seconds": ACCESS_CACHE_TTL_MAX_SECONDS,
+    "refresh_max_lifetime_seconds": REFRESH_MAX_LIFETIME_MAX_SECONDS,
+}
 
 
 class ConfigurationError(ValueError):
@@ -102,6 +114,9 @@ class DelegatedConfiguration:
                 raise ConfigurationError("unsupported_profile")
         if not re.fullmatch(r"[1-9][0-9]{0,17}", value["config_revision"]):
             raise ConfigurationError("invalid_revision")
+        for key, maximum in _POLICY_BOUNDS.items():
+            if not re.fullmatch(r"[1-9][0-9]*", value[key]) or int(value[key]) > maximum:
+                raise ConfigurationError("invalid_policy_bound")
         if (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", value["identity_claim"])
                 or value["identity_claim"].lower() in {"email", "username", "name", "preferred_username"}):
             raise ConfigurationError("unsupported_identity_claim")
@@ -133,6 +148,16 @@ class DelegatedConfiguration:
     @property
     def revision(self) -> int:
         return int(self._values["config_revision"])
+
+    @property
+    def access_cache_ttl_seconds(self) -> int:
+        """Local cap on how long a verified access token may be cached."""
+        return int(self._values["access_cache_ttl_seconds"])
+
+    @property
+    def refresh_max_lifetime_seconds(self) -> int:
+        """Absolute authorization renewal deadline cap (local, not a provider guarantee)."""
+        return int(self._values["refresh_max_lifetime_seconds"])
 
     @property
     def renewal(self) -> Literal["supported", "unsupported"]:

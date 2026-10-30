@@ -58,7 +58,11 @@ import type {
   SessionMode,
   SessionWorkspace,
 } from "../sessions/useSessionWorkspace";
-import type { ExecutionReceipt, ToolResultFrame } from "../stream/models";
+import type {
+  AuthorizationRequiredFrame,
+  ExecutionReceipt,
+  ToolResultFrame,
+} from "../stream/models";
 import {
   useChatStream,
   type ChatTurn,
@@ -72,7 +76,13 @@ import { ComposerSelectionBar } from "./ComposerSelectionBar";
 import { SkillDraftPreviewModal } from "./SkillDraftPreview";
 import { detectArrivalSpan, transcriptToTurns, type ArrivalSpan } from "./transcript";
 import { usePendingDecisionPoll } from "./usePendingDecisionPoll";
-import { useRecoveryPoll } from "./useRecoveryPoll";
+import { hasUnsettledExecution, useRecoveryPoll } from "./useRecoveryPoll";
+import { useAuthorizationStatusPoll } from "./useAuthorizationStatusPoll";
+import {
+  cancelAuthorization,
+  startAuthorization,
+  type AuthorizationState,
+} from "../api/authorizations";
 import {
   VOICE_LANGUAGES,
   loadVoiceLanguage,
@@ -973,6 +983,159 @@ export function CopyPasswordControl({ delivery }: {
   );
 }
 
+// --- Target authorization (SPEC-070) -------------------------------------
+
+// Badge vocabulary for the inline Authorize/status/Cancel control. The five
+// states are exactly what the owner-scoped status surface guarantees
+// (api/authorizations.AuthorizationState); anything unrecognised falls back to
+// the pending posture so the control never invents an "authorized" affordance.
+const AUTHORIZATION_STATE: Record<string, { color: string; label: string }> = {
+  pending: { color: "processing", label: "pending" },
+  authorized: { color: "success", label: "authorized" },
+  canceled: { color: "default", label: "canceled" },
+  expired: { color: "warning", label: "expired" },
+  failed: { color: "error", label: "failed" },
+};
+
+// Exported for tests: the inline control that lets the original requester
+// approve the named target from inside the conversation. It owns no
+// credentials and performs no dispatch — Authorize hands off to the backend
+// start URL (same browser, cookie-bound) and Cancel only retires the
+// challenge. "Continue" is a fresh, explicit user turn, never an auto-resume.
+export function AuthorizationCardView({
+  authorization,
+  busy,
+  onContinue,
+}: {
+  authorization: AuthorizationRequiredFrame;
+  busy?: boolean;
+  onContinue?: () => void;
+}) {
+  const challengeId = authorization.authChallengeId;
+  const { status, polling, refresh } = useAuthorizationStatusPoll(challengeId);
+  const [acting, setActing] = useState<"authorize" | "cancel" | null>(null);
+
+  // A lapsed expiry is terminal even while the backend row still reads
+  // "pending": the poll hook stops on it, so the card must agree and stop
+  // offering Authorize/Cancel rather than spinning on a challenge that can
+  // never complete.
+  const expiresAt = status?.expires_at ?? authorization.expiresAt;
+  const lapsed = expiresAt ? Date.parse(expiresAt) <= Date.now() : false;
+  const rawState: AuthorizationState = status?.status ?? "pending";
+  const state: AuthorizationState =
+    rawState === "pending" && lapsed ? "expired" : rawState;
+  const badge = AUTHORIZATION_STATE[state] ?? AUTHORIZATION_STATE.pending;
+  const target = status?.target ?? authorization.target;
+  const pending = state === "pending";
+  const authorized = state === "authorized";
+
+  const authorize = async () => {
+    if (acting !== null || !pending) return;
+    setActing("authorize");
+    try {
+      // start_url is same-origin and cookie-bound; assigning it navigates this
+      // browser into the provider consent flow. The return path
+      // (useAuthorizationReturn) brings the operator back to this owned
+      // session — there is no auto-redirect and no credential handoff here.
+      const { start_url } = await startAuthorization(challengeId);
+      window.location.assign(start_url);
+    } catch {
+      setActing(null);
+      message.error("Target authorization unavailable. Try again.");
+      refresh();
+    }
+  };
+
+  const cancel = async () => {
+    if (acting !== null || !pending) return;
+    setActing("cancel");
+    try {
+      await cancelAuthorization(challengeId);
+      message.info("Target authorization canceled.");
+    } catch {
+      message.error("Could not cancel the target authorization.");
+    } finally {
+      setActing(null);
+      refresh();
+    }
+  };
+
+  return (
+    <div
+      className="authorization-card"
+      data-testid="authorization-card"
+      style={{
+        margin: "8px 0",
+        padding: "10px 12px",
+        borderRadius: 8,
+        border: "1px solid rgba(127,127,127,0.3)",
+        borderLeft: "3px solid var(--accent, #1677ff)",
+        background: "rgba(127,127,127,0.06)",
+      }}
+    >
+      <div
+        className="authorization-card-title"
+        style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+      >
+        <AimOutlined />
+        <span style={{ fontWeight: 600 }}>Target authorization</span>
+        <Tag color={badge.color}>{badge.label}</Tag>
+        {polling ? <Spin size="small" /> : null}
+      </div>
+      <div style={{ marginTop: 6, fontSize: 13 }}>
+        Approve <strong>{target}</strong> to let the agent act on your behalf.
+        The agent never sees your credentials, and nothing runs until you
+        continue.
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        {pending ? (
+          <>
+            <Button
+              type="primary"
+              icon={<SafetyCertificateOutlined />}
+              loading={acting === "authorize"}
+              disabled={acting !== null}
+              onClick={() => void authorize()}
+            >
+              Authorize
+            </Button>
+            <Button
+              danger
+              icon={<CloseOutlined />}
+              loading={acting === "cancel"}
+              disabled={acting !== null}
+              onClick={() => void cancel()}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : null}
+        {authorized && onContinue ? (
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            disabled={busy}
+            onClick={onContinue}
+          >
+            Continue
+          </Button>
+        ) : null}
+      </div>
+      <div role="status" style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+        {pending
+          ? "Waiting for you to approve this target. Status refreshes while this card is visible."
+          : authorized
+            ? "Approved. Continue re-runs your request as a new turn — policy and approval checks still apply."
+            : state === "canceled"
+              ? "Canceled. Send a new request to start over."
+              : state === "expired"
+                ? "Expired. Send a new request to start over."
+                : "Authorization failed. Send a new request to try again."}
+      </div>
+    </div>
+  );
+}
+
 export function TurnGroup({
   turn,
   canDecide,
@@ -981,6 +1144,7 @@ export function TurnGroup({
   justArrived,
   revealFromChars,
   agentWorking,
+  onContinue,
 }: {
   turn: ChatTurn;
   canDecide: boolean;
@@ -994,6 +1158,11 @@ export function TurnGroup({
   // Post-approval activity indicator: the decision was applied and the
   // agent is executing the resumed stream in the background.
   agentWorking?: boolean;
+  // SPEC-070: when a target-authorization challenge in this turn reaches
+  // "authorized", Continue re-runs the request as a fresh explicit user turn
+  // in the same owned session (plan line 149). Absent for read-only replay or
+  // an observer, which hides the affordance entirely.
+  onContinue?: (text: string) => void;
 }) {
   // v0.27.4 (broadened v0.27.5): every rendered surface shows the
   // registry's dotted canonical tool names (see toolNames.ts).
@@ -1108,6 +1277,25 @@ export function TurnGroup({
       ) : null}
       {turn.secretDeliveries?.map((delivery) => (
         <CopyPasswordControl key={delivery.deliveryId} delivery={delivery} />
+      ))}
+      {/* SPEC-070: the inline Authorize/status/Cancel control for each
+          target-authorization challenge raised by this turn. Continue is a
+          fresh explicit turn (onContinue), never an auto-resume. */}
+      {turn.authorizations?.map((auth) => (
+        <AuthorizationCardView
+          key={auth.authChallengeId}
+          authorization={auth}
+          busy={busy}
+          onContinue={
+            onContinue
+              ? () =>
+                  onContinue(
+                    turn.userMessage ||
+                      "Continue now that the target is authorized.",
+                  )
+              : undefined
+          }
+        />
       ))}
       {turn.confirmations.map((card) => (
         <ConfirmationCardView
@@ -1999,6 +2187,22 @@ export default function ChatView({
     });
   };
 
+  // SPEC-070 (plan line 149): Continue after a target authorization is a
+  // fresh, explicit user turn in the same owned session — never an auto-resume
+  // of the parked call. It re-checks the live stream and the recovery state so
+  // a Continue can't double-dispatch while the agent is still settling; the
+  // server re-runs policy and approval checks against the new turn regardless.
+  const continueAfterAuthorization = (text: string) => {
+    if (!authenticated || chat.streaming) return;
+    if (hasUnsettledExecution(chat.turns)) {
+      message.warning(
+        "The agent is still finishing the current step. Continue becomes available once it settles.",
+      );
+      return;
+    }
+    submitMessage(text);
+  };
+
   return (
     <div className="chat-view">
       <SessionPanel
@@ -2113,6 +2317,7 @@ export default function ChatView({
                 onDecide={(confirmId, decision, acknowledged) =>
                   void chat.decide(confirmId, decision, acknowledged)
                 }
+                onContinue={continueAfterAuthorization}
               />
             ))
           )}

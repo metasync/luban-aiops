@@ -8,19 +8,21 @@
   R-6e and OQ-3 move to a separately tracked deployment-integration task, not a release gate.
   The amendment was committed separately for operator review before code; push, live tests,
   deployment, and version changes remain separate authorization boundaries.
-- implementation checkpoint (2026-10-23): the separately reviewable additive OQ-7 contract
-  increment is implemented and root `make verify` passes. Signal/stream/audit shapes,
-  packaged consumer parity, audit persistence/filtering, and inert route/store models have
-  asserting tests; see [scoped evidence and exclusions](tasks.md#additive-oq-7-contract-increment).
-  No usable OAuth flow or custody backend is enabled. R-1–R-6d acceptance remains open;
-  **AAP compatibility unverified**.
+- implementation checkpoint (status reconciled 2026-10-30): R-1a–R-6d development acceptance
+  is [recorded as passed](tasks.md#acceptance-to-test-matrix) with root `make verify` EXIT=0.
+  Runtime workflow, encrypted custody, requester/approver separation, attribution, and
+  provisioning tooling are implemented and default-off. The foundation is committed as
+  `83e0f94`; runtime work remains uncommitted and unreleased. Real-browser UI screenshots
+  remain environment-blocked; **AAP compatibility unverified**. The earlier
+  [contract-only checkpoint](tasks.md#additive-oq-7-contract-increment) remains historical.
 - owner: luban-platform-team
 - created: 2026-10-12
 - current decision: first-use target OAuth authorization redirects are allowed; no manual
   credential entry, enrollment command, or credential-settings UI. Later acquisition uses
   server-to-server renewal; revoked/expired grants may require another authorization.
-- remaining gates: development requires the asserting tests and root verification listed
-  in [tasks.md](tasks.md#delivery-gate). **OQ-3** (actual AAP/MCP profile, PKCE enforcement,
+- remaining gates: the [delivery gate](tasks.md#delivery-gate) retains the explicit
+  `delivered`/release step; this documentation update does not authorize it or production
+  enablement. **OQ-3** (actual AAP/MCP profile, PKCE enforcement,
   renewal, identity linkage, and RBAC lifecycle) remains open under
   [DI-070](tasks.md#post-delivery-deployment-integration-di-070), owned by the workspace
   operator with the AAP administrator. Its evidence is mandatory before production
@@ -42,10 +44,10 @@
   it (see the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md#r6-external-system-integration-via-mcp-ingestion)).
 - release checkpoint: **v0.50.0 — additive OQ-7 contracts only**, explicitly approved by
   the operator on 2026-10-23 after code/documentation review and full verification.
-  This supersedes the earlier full-feature planning target for v0.50.0; the remaining
-  SPEC-070 development targets a **later release, not yet selected**. This checkpoint
-  does not satisfy R-1–R-6d or enable OAuth. Full development delivery remains gated on
-  its acceptance tests, independently of DI-070. **AAP compatibility unverified**;
+  This supersedes the earlier full-feature planning target for v0.50.0; the verified
+  SPEC-070 runtime targets a **later release, not yet selected**. The contract checkpoint
+  alone did not satisfy R-1–R-6d or enable OAuth; subsequent runtime acceptance is recorded
+  above, independently of DI-070. **AAP compatibility unverified**;
   production user-delegated target enablement still requires DI-070 evidence.
 - related ADRs: [ADR-0016](../../adr/0016-just-in-time-outbound-oauth-authorization.md)
   (**accepted** 2026-10-18, supersedes [ADR-0015](../../adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)).

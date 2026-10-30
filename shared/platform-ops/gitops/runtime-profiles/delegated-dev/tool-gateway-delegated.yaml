@@ -1,0 +1,58 @@
+# Strategic merge patch applied by the delegated-dev overlay (SPEC-070).
+#
+# Mounts the two file-based custody inputs the gateway reads directly and injects
+# the custody DSN from a secret key — never a committed value:
+#
+#   env  GATEWAY_DELEGATED_CUSTODY_DB_URL <- secret tool-gateway-custody-db
+#                                          (written by sync-custody-db.sh; the
+#                                           custody_runtime least-privilege DSN)
+#   vol  /etc/luban/delegated            <- secret tool-gateway-delegated-config
+#                                          (delegated-sets.json + linkage.json,
+#                                           written by sync-browser-credentials.sh)
+#   vol  /etc/luban/delegated-keyring    <- secret tool-gateway-custody-keyring
+#                                          (keyring.json, written by
+#                                           sync-custody-db.sh)
+#
+# Everything is optional:true so the pod still schedules and serves its normal
+# (non-delegated) routes before any of these secrets exist. The delegated gates
+# stay false (delegated.env), so the mounted material is inert until an operator
+# both provisions it and flips a gate. If a gate is on but a mount is missing,
+# the gateway fails closed at startup / first use — it never dials a target with
+# absent credentials.
+#
+# envFrom is deliberately NOT patched: it has no strategic-merge key, so patching
+# it would REPLACE the list and drop platform-runtime-config. env has merge key
+# `name`, and volumes/volumeMounts have merge keys `name`/`mountPath`, so these
+# three append cleanly alongside the existing platform-policy mount.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-gateway
+spec:
+  template:
+    spec:
+      containers:
+        - name: tool-gateway
+          env:
+            - name: GATEWAY_DELEGATED_CUSTODY_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tool-gateway-custody-db
+                  key: GATEWAY_DELEGATED_CUSTODY_DB_URL
+                  optional: true
+          volumeMounts:
+            - name: delegated-config
+              mountPath: /etc/luban/delegated
+              readOnly: true
+            - name: delegated-keyring
+              mountPath: /etc/luban/delegated-keyring
+              readOnly: true
+      volumes:
+        - name: delegated-config
+          secret:
+            secretName: tool-gateway-delegated-config
+            optional: true
+        - name: delegated-keyring
+          secret:
+            secretName: tool-gateway-custody-keyring
+            optional: true

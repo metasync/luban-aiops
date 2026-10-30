@@ -3,7 +3,7 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from agent_service.core.metrics import (
@@ -36,6 +36,10 @@ from agent_service.services.execution_records import (
     make_execution_record,
 )
 from agent_service.services.execution_recovery import ExecutionRecovery
+from agent_service.services.delegated_identity import (
+    DECIDER_IDENTITY, REQUESTER_IDENTITY, DelegatedIdentityError, VerifiedHuman,
+    session_requester, verify_delegated_human,
+)
 from agent_service.services.execution_signing import (
     REASON_ARGS_DIGEST_MISMATCH,
     REASON_REQUEST_MISSING,
@@ -57,6 +61,10 @@ from agent_service.services.hitl_confirmations import (
     curated_effect_sentence,
     redact_pending_calls,
 )
+from agent_service.schemas.v2 import AuthorizationRequired
+from agent_service.services.kernel_middleware import (
+    AuthorizationTurn, CURRENT_AUTHORIZATION_TURN, authorization_turn,
+)
 from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.prose_redaction import (
     CURRENT_PROSE_REDACTOR,
@@ -71,6 +79,18 @@ from agent_service.services.secret_params import parameterize_for_trace
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
+
+
+@dataclass(frozen=True)
+class BlockingReply:
+    content: str
+    structured_output: dict | None = None
+    authorization_required: AuthorizationRequired | None = None
+
+    def __iter__(self):
+        """Preserve the existing two-value internal unpacking contract."""
+        yield self.content
+        yield self.structured_output
 
 
 class UnknownModelError(ValueError):
@@ -553,6 +573,12 @@ class AgentKernel:
             # ``agent_llm_tokens_total``. Streaming-aware; records no cost.
             TokenUsageMiddleware(),
         ]
+        if settings.target_authorization_enabled:
+            from agent_service.services.kernel_middleware import TargetAuthorizationMiddleware
+
+            # Evidence observes sanitized and stopped results; authorization owns
+            # permission before the existing gate and model calls before budgets.
+            middlewares = [middlewares[1], TargetAuthorizationMiddleware(), middlewares[0], *middlewares[2:]]
         if settings.kernel_tracing:
             from agentscope.middleware import TracingMiddleware
 
@@ -942,6 +968,32 @@ class AgentKernel:
             "message": "complete",
         }
 
+    def _requester_for_turn(self, session_id: str, user_id: str, bearer: str | None):
+        if not self.settings.target_authorization_enabled:
+            return None
+        from agent_service.services.session_service import get_session
+
+        human = verify_delegated_human(self.settings, bearer, user_id=user_id)
+        return session_requester(get_session(session_id, user_id), human)
+
+    def _resume_identities(self, pending, session_id, user_id, bearer):
+        if not self.settings.target_authorization_enabled:
+            return None, None
+        from agent_service.services.session_service import get_session
+
+        session = get_session(session_id, pending.user_id)
+        if session.session_id != pending.session_id:
+            raise DelegatedIdentityError()
+        if session.requester_sub is None and pending.requester_identity is None:
+            return None, None  # Legacy sessions never gain a requester binding.
+        requester = verify_delegated_human(self.settings, pending.requester_delegated_token, user_id=pending.user_id)
+        session_requester(session, requester)
+        saved = pending.requester_identity
+        if not isinstance(saved, VerifiedHuman) or not requester.matches(saved.namespace, saved.subject):
+            raise DelegatedIdentityError()
+        decider = verify_delegated_human(self.settings, bearer, user_id=user_id)
+        return requester, decider
+
     async def reply_text(
         self,
         message: str,
@@ -951,7 +1003,7 @@ class AgentKernel:
         response_schema: dict | None = None,
         model_id: str | None = None,
         read_only: bool = False,
-    ) -> tuple[str, dict | None]:
+    ) -> BlockingReply:
         """Run one blocking turn.
 
         Returns the reply text and, when ``response_schema`` was supplied,
@@ -966,7 +1018,7 @@ class AgentKernel:
         (automated diagnostic turns such as incident triage).
         """
         if not self.is_configured():
-            return self.build_unconfigured_message(message, session_id), None
+            return BlockingReply(self.build_unconfigured_message(message, session_id))
 
         from agent_service.tools.gateway_tools import (
             CHAT_SESSION_ID,
@@ -976,6 +1028,7 @@ class AgentKernel:
         serving_model: str | None = None
         prose: StreamingProseRedactor | None = None
         try:
+            requester = await asyncio.to_thread(self._requester_for_turn, session_id, user_name, bearer_token)
             agent, user_msg_cls, serving_model = await self.ensure_agent(
                 session_id, bearer_token, model_id, read_only
             )
@@ -987,36 +1040,51 @@ class AgentKernel:
             # no trace frames.
             prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
+            requester_var = REQUESTER_IDENTITY.set(requester)
+            decider_var = DECIDER_IDENTITY.set(requester)
             session_var = CHAT_SESSION_ID.set(session_id)
+            from agent_service.services.kernel_middleware import TOOL_EVIDENCE_SINK
+
+            turn_index = self._count_user_turns(agent)
+            trace_queue = asyncio.Queue() if self.settings.target_authorization_enabled else None
+            sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
             try:
-                reply_msg = await agent.reply(
-                    user_msg_cls(name=user_name, content=message),
-                    structured_schema=response_schema,
-                )
+                with authorization_turn(self.settings.target_authorization_enabled) as auth_turn:
+                    reply_msg = await agent.reply(
+                        user_msg_cls(name=user_name, content=message),
+                        structured_schema=response_schema,
+                    )
             finally:
+                TOOL_EVIDENCE_SINK.reset(sink_var)
                 CURRENT_PROSE_REDACTOR.reset(prose_var)
                 DELEGATED_TOKEN.reset(token_var)
+                REQUESTER_IDENTITY.reset(requester_var)
+                DECIDER_IDENTITY.reset(decider_var)
                 CHAT_SESSION_ID.reset(session_var)
             self.clear_error()
             structured = getattr(reply_msg, "structured_output", None)
             if not isinstance(structured, dict):
                 structured = None
             self._snapshot_state(session_id, agent, prose.literals)
-            return (
+            if trace_queue is not None:
+                evidence_frames = []
+                self._drain_trace_queue(trace_queue, "blocking", session_id, evidence_frames, {})
+                self._persist_evidence(session_id, "blocking", turn_index, evidence_frames)
+            return BlockingReply(
                 redact_assistant_text(
                     extract_text(getattr(reply_msg, "content", reply_msg)),
                     prose.literals,
                 ),
                 redact_structure(structured, prose.literals),
+                auth_turn.challenge if auth_turn is not None else None,
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc, prose.literals if prose is not None else ())
             LOGGER.error("AgentScope reply failed; falling back to runtime error response: %s", self._last_error)
-            return (
+            return BlockingReply(
                 self.build_provider_error_message(
                     message, session_id, serving_model or model_id
                 ),
-                None,
             )
 
     def normalize_event(
@@ -1042,6 +1110,14 @@ class AgentKernel:
             raw_type = getattr(event, "type", None)
             if raw_type is not None:
                 event_type = str(getattr(raw_type, "name", raw_type)).lower()
+
+        if self.settings.target_authorization_enabled:
+            # An SDK model message can end before its tools execute. Only the
+            # reply end closes an authorization-enabled turn on the wire.
+            if event_type == "message_end":
+                event_type = "model_message_end"
+            elif event_type == "reply_end":
+                event_type = "message_end"
 
         data: dict[str, object] = {
             "event": event_type,
@@ -1126,6 +1202,7 @@ class AgentKernel:
         bound_model_id: str | None = None
         prose: StreamingProseRedactor | None = None
         try:
+            requester = await asyncio.to_thread(self._requester_for_turn, session_id, user_name, bearer_token)
             # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls, bound_model_id = await self.ensure_agent(
                 session_id, bearer_token, model_id
@@ -1199,6 +1276,8 @@ class AgentKernel:
                 if flow_approval is not None
                 else None
             )
+            auth_turn = AuthorizationTurn() if self.settings.target_authorization_enabled else None
+            auth_var = CURRENT_AUTHORIZATION_TURN.set(auth_turn)
             sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
             # SPEC-062 R-3 reveal-on-commit: arm the per-stream delivery buffers.
             # A fresh turn generates into STREAM_PENDING (flushed at a normal end
@@ -1214,6 +1293,8 @@ class AgentKernel:
             permits_var = RELEASE_PERMITS.set({})
             prose_var = CURRENT_PROSE_REDACTOR.set(prose)
             token_var = DELEGATED_TOKEN.set(bearer_token)
+            requester_var = REQUESTER_IDENTITY.set(requester)
+            decider_var = DECIDER_IDENTITY.set(requester)
             session_var = CHAT_SESSION_ID.set(session_id)
             requests_var = EXECUTION_REQUESTS.set(execution_requests)
             audit_var = EXECUTION_AUDIT_CONTEXT.set(flow_audit_context)
@@ -1224,10 +1305,11 @@ class AgentKernel:
                 if recovery is not None and run_id is not None
                 else None
             )
+            reply_stream = agent.reply_stream(
+                user_msg_cls(name=user_name, content=effective_message)
+            )
             try:
-                async for event in agent.reply_stream(
-                    user_msg_cls(name=user_name, content=effective_message)
-                ):
+                async for event in reply_stream:
                     self.clear_error()
                     # Drain any accumulated trace events before yielding text.
                     drained = list(
@@ -1321,8 +1403,15 @@ class AgentKernel:
                 ):
                     yield decorated
             finally:
+                if auth_turn is not None:
+                    await self._finish_authorization_stream(auth_turn, reply_stream)
+                    self._drain_trace_queue(trace_queue, request_id, session_id, evidence_frames, execution_requests)
+                    self._persist_evidence(session_id, request_id, turn_index, evidence_frames)
+                    self._snapshot_state(session_id, agent, prose.literals)
                 CURRENT_PROSE_REDACTOR.reset(prose_var)
                 DELEGATED_TOKEN.reset(token_var)
+                REQUESTER_IDENTITY.reset(requester_var)
+                DECIDER_IDENTITY.reset(decider_var)
                 CHAT_SESSION_ID.reset(session_var)
                 EXECUTION_REQUESTS.reset(requests_var)
                 EXECUTION_AUDIT_CONTEXT.reset(audit_var)
@@ -1332,17 +1421,21 @@ class AgentKernel:
                 PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
                 RELEASE_PERMITS.reset(permits_var)
                 TOOL_EVIDENCE_SINK.reset(sink_var)
+                if auth_turn is not None:
+                    auth_turn.close()
+                CURRENT_AUTHORIZATION_TURN.reset(auth_var)
 
             # Persist the turn's evidence frames best-effort (SPEC-025 R-1)
             # alongside the conversation snapshot; also covers the park
             # path, which breaks out of the loop above.
-            self._persist_evidence(
-                session_id, request_id, turn_index, evidence_frames
-            )
+            if auth_turn is None:
+                self._persist_evidence(
+                    session_id, request_id, turn_index, evidence_frames
+                )
 
             # Persist conversation state after the completed turn so it
             # survives restarts (SPEC-017 R-3). Fail-open by design.
-            self._snapshot_state(session_id, agent, prose.literals)
+                self._snapshot_state(session_id, agent, prose.literals)
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc, prose.literals if prose is not None else ())
             LOGGER.error("AgentScope streaming failed; falling back to runtime error response: %s", self._last_error)
@@ -1354,6 +1447,24 @@ class AgentKernel:
                 ),
             ):
                 yield event
+
+    @staticmethod
+    async def _finish_authorization_stream(turn: AuthorizationTurn, stream) -> None:
+        """Finish a latched SDK reply in its owning task even after disconnect.
+
+        No provider or tool may run after the latch. Draining that bounded tail
+        lets the SDK persist final tool blocks and unwind its nested generators;
+        closing only the outer iterator leaves ContextVar resets to another task.
+        """
+        turn.close()
+        if not turn.stopped or stream is None:
+            return
+        try:
+            async with asyncio.timeout(5):
+                async for _ in stream:
+                    pass
+        except (Exception, asyncio.CancelledError):
+            LOGGER.warning("authorization-stopped reply cleanup incomplete")
 
     # --- HITL confirmation bridging (SPEC-020 R-2) ---
 
@@ -1516,6 +1627,7 @@ class AgentKernel:
         from agent_service.tools.gateway_tools import generation_bearer_token
 
         pending.requester_delegated_token = generation_bearer_token()
+        pending.requester_identity = REQUESTER_IDENTITY.get()
         pending.email_recipient_allowlist = self.settings.email_recipient_allowlist
         # SPEC-062 R-3 reveal-on-commit: attach this stream's held portal_copy
         # deliveries so they ride the park across resume and are released only
@@ -1661,6 +1773,9 @@ class AgentKernel:
         confirmed: bool,
         request_id: str,
         session_id: str,
+        *,
+        requester: VerifiedHuman | None = None,
+        decider: VerifiedHuman | None = None,
     ) -> tuple[dict[str, dict], str | None]:
         """Build, persist, and audit the signed requests (SPEC-037 R-2).
 
@@ -1739,13 +1854,16 @@ class AgentKernel:
                 return {}, REASON_REQUEST_MISSING
             sign_run_id = pending.run_id
             sign_epoch = self.settings.execution_admission_epoch
-        for request in build_requests(
-            pending,
-            decider_user_id,
-            key,
-            run_id=sign_run_id,
-            admission_epoch=sign_epoch,
-        ):
+        try:
+            if self.settings.target_authorization_enabled and pending.requester_identity is not None and requester is None:
+                raise DelegatedIdentityError()
+            requests = build_requests(
+                pending, decider_user_id, key, run_id=sign_run_id,
+                admission_epoch=sign_epoch, requester=requester, decider=decider,
+            )
+        except DelegatedIdentityError:
+            return {}, REASON_REQUEST_MISSING
+        for request in requests:
             requests_by_call[request["call_id"]] = request
             self._persist_execution_request(request)
             call = calls_by_id.get(str(request["call_id"])) or {}
@@ -1965,15 +2083,22 @@ class AgentKernel:
                 return None
             sign_run_id = approval.run_id
             sign_epoch = self.settings.execution_admission_epoch
-        envelope = build_flow_request(
-            call_id=call_id,
-            tool_name=gateway_tool_name,
-            parameters=parameters,
-            flow_approval=approval,
-            key=key,
-            run_id=sign_run_id,
-            admission_epoch=sign_epoch,
-        )
+        requester = REQUESTER_IDENTITY.get() if self.settings.target_authorization_enabled else None
+        decider = DECIDER_IDENTITY.get() if requester is not None else None
+        try:
+            envelope = build_flow_request(
+                call_id=call_id,
+                tool_name=gateway_tool_name,
+                parameters=parameters,
+                flow_approval=approval,
+                key=key,
+                run_id=sign_run_id,
+                admission_epoch=sign_epoch,
+                requester=requester,
+                decider=decider,
+            )
+        except DelegatedIdentityError:
+            return None  # A new turn cannot impersonate a previous approver.
         # Inject BEFORE the tool closure runs (the permission check precedes
         # acting), so _verify_execution_request finds it by call_id and
         # _handoff_execution presents it to the worker.
@@ -2525,6 +2650,43 @@ class AgentKernel:
         model_id: str | None = None,
         owner_user_name: str | None = None,
     ) -> AsyncIterator[dict[str, object]]:
+        """Own the claimed park's cleanup, including setup failure and disconnect."""
+        from contextlib import aclosing
+
+        try:
+            async with aclosing(self._resume_confirmation(
+                session_id, pending, decision, user_name, request_id,
+                bearer_token, model_id, owner_user_name,
+            )) as stream:
+                async for frame in stream:
+                    yield frame
+        except Exception:
+            LOGGER.warning("confirmation resume unavailable")
+            yield {"type": "error", "message": "The resumed turn failed. Start a new turn.",
+                   "request_id": request_id, "session_id": pending.session_id}
+        finally:
+            try:
+                if pending.pending_deliveries:
+                    await self._discard_burned_deliveries(
+                        list(pending.pending_deliveries), pending.requester_delegated_token
+                    )
+            finally:
+                pending.requester_delegated_token = None
+                pending.requester_identity = None
+                pending.pending_deliveries = ()
+                CONFIRMATION_REGISTRY.resolve(pending.session_id, pending.confirm_id)
+
+    async def _resume_confirmation(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        decision: str,
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+        owner_user_name: str | None = None,
+    ) -> AsyncIterator[dict[str, object]]:
         """Resume a parked reply with the operator's decision (SPEC-020 R-2).
 
         The caller must pass the entry as returned by
@@ -2568,10 +2730,25 @@ class AgentKernel:
             GENERATION_OWNER_TOKEN,
         )
 
+        requester = decider = None
+        identity_failed = session_id != pending.session_id
+        if self.settings.target_authorization_enabled:
+            identity_failed = identity_failed or owner_user_name not in (None, pending.user_id)
+            owner_user_name = pending.user_id
+        # A rejected caller binding can close only the original parked reply.
+        session_id = pending.session_id
+        if not identity_failed:
+            try:
+                requester, decider = await asyncio.to_thread(
+                    self._resume_identities, pending, session_id, user_name, bearer_token
+                )
+            except Exception:
+                identity_failed = True
+
         # Pass the session's pinned model (SPEC-024 R-3) so the resumed
         # stream rebuilds against the same model that parked it.
         agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
-            session_id, bearer_token, model_id
+            session_id, None if identity_failed else bearer_token, model_id
         )
         # SPEC-025 R-1: resumed frames belong to the same assistant turn as
         # the pre-park frames — no user message was added by the park, so
@@ -2602,9 +2779,13 @@ class AgentKernel:
         # per approved parked call, persisted and audited before any
         # invocation. Denials construct nothing; a missing key rejects
         # the whole batch fail-closed.
-        execution_requests, execution_rejection = self._prepare_executions(
-            pending, user_name, confirmed, request_id, session_id
-        )
+        if identity_failed:
+            execution_requests, execution_rejection = {}, REASON_REQUEST_MISSING
+        else:
+            execution_requests, execution_rejection = self._prepare_executions(
+                pending, user_name, confirmed, request_id, session_id,
+                requester=requester, decider=decider,
+            )
 
         # SPEC-051 R-1: approving a card whose batch contains a browser write
         # records a session+identity-scoped flow authority BEFORE the resumed
@@ -2616,7 +2797,15 @@ class AgentKernel:
         if confirmed and execution_rejection is None:
             self._record_flow_approval(pending, user_name, session_id)
 
+        # Resolve fallible guard dependencies before binding any task context.
+        resume_recovery = self._execution_recovery()
+        resume_guard = (
+            self._bind_guard(resume_recovery, pending.run_id, session_id, pending.user_id)
+            if resume_recovery is not None and pending.run_id is not None else None
+        )
         trace_queue: asyncio.Queue = asyncio.Queue()
+        auth_turn = AuthorizationTurn() if self.settings.target_authorization_enabled else None
+        auth_var = CURRENT_AUTHORIZATION_TURN.set(auth_turn)
         sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
         # SPEC-062 R-3 reveal-on-commit: carry the parked card's held deliveries
         # into PENDING_RELEASE so the middleware emits them the instant an
@@ -2634,7 +2823,9 @@ class AgentKernel:
         # durably commits here can reveal its held portal_copy delivery.
         permits_var = RELEASE_PERMITS.set({})
         prose_var = CURRENT_PROSE_REDACTOR.set(prose)
-        token_var = DELEGATED_TOKEN.set(bearer_token)
+        token_var = DELEGATED_TOKEN.set(None if identity_failed else bearer_token)
+        requester_var = REQUESTER_IDENTITY.set(requester)
+        decider_var = DECIDER_IDENTITY.set(decider)
         session_var = CHAT_SESSION_ID.set(session_id)
         owner_token_var = GENERATION_OWNER_TOKEN.set((pending.requester_delegated_token,))
         requests_var = EXECUTION_REQUESTS.set(execution_requests or None)
@@ -2657,16 +2848,8 @@ class AgentKernel:
         # missing, no guard is bound here and the mutation lane fails closed at
         # registration rather than proceeding under a fresh run. Inert when
         # admission is disabled (recovery is None).
-        resume_recovery = self._execution_recovery()
-        guard_var = (
-            CURRENT_RUN_GUARD.set(
-                self._bind_guard(
-                    resume_recovery, pending.run_id, session_id, pending.user_id
-                )
-            )
-            if resume_recovery is not None and pending.run_id is not None
-            else None
-        )
+        guard_var = CURRENT_RUN_GUARD.set(resume_guard) if resume_guard is not None else None
+        reply_stream = None
         try:
             yield {
                 "type": "confirmation_result",
@@ -2683,7 +2866,22 @@ class AgentKernel:
                 "request_id": request_id,
                 "session_id": session_id,
             }
-            async for event in agent.reply_stream(confirm_event):
+            if identity_failed:
+                from agentscope.event import UserInterruptEvent
+
+                try:
+                    async for _event in agent.reply_stream(UserInterruptEvent(reply_id=pending.reply_id)):
+                        pass
+                except Exception:
+                    LOGGER.warning("requester identity rejection could not close parked reply")
+                if pending.pending_deliveries:
+                    await self._discard_burned_deliveries(list(pending.pending_deliveries), pending.requester_delegated_token)
+                async for frame in self.fallback_stream(request_id, session_id,
+                        "The requester identity is unavailable or expired. Start a fresh requester turn; no pending tool was dispatched."):
+                    yield frame
+                return
+            reply_stream = agent.reply_stream(confirm_event)
+            async for event in reply_stream:
                 self.clear_error()
                 drained = list(
                     self._drain_trace_queue(
@@ -2787,6 +2985,9 @@ class AgentKernel:
             yield {"type": "error", "message": "The resumed turn failed. Start a new turn.",
                    "request_id": request_id, "session_id": session_id}
         finally:
+            if auth_turn is not None:
+                await self._finish_authorization_stream(auth_turn, reply_stream)
+                self._drain_trace_queue(trace_queue, request_id, session_id, evidence_frames, execution_requests)
             # Covers both completion and re-park (the early return above):
             # either way the frames drained so far belong to this turn.
             self._persist_evidence(
@@ -2794,11 +2995,14 @@ class AgentKernel:
             )
             CURRENT_PROSE_REDACTOR.reset(prose_var)
             DELEGATED_TOKEN.reset(token_var)
+            REQUESTER_IDENTITY.reset(requester_var)
+            DECIDER_IDENTITY.reset(decider_var)
             CHAT_SESSION_ID.reset(session_var)
             EXECUTION_REQUESTS.reset(requests_var)
             EXECUTION_REJECTION.reset(rejection_var)
             GENERATION_OWNER_TOKEN.reset(owner_token_var)
             pending.requester_delegated_token = None
+            pending.requester_identity = None
             # SPEC-062 R-3: drop the held deliveries after resume — released on a
             # gated commit, burned on a deny/failure, or re-attached to a re-parked
             # card by _drain_held_deliveries — so a resolved entry never retains a
@@ -2811,6 +3015,9 @@ class AgentKernel:
             if guard_var is not None:
                 CURRENT_RUN_GUARD.reset(guard_var)
             TOOL_EVIDENCE_SINK.reset(sink_var)
+            if auth_turn is not None:
+                auth_turn.close()
+            CURRENT_AUTHORIZATION_TURN.reset(auth_var)
             CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
             # SPEC-031 R-1: idempotent safety net — the confirm route
             # already wrote the outcome at claim time (R-4), so this only
@@ -2882,6 +3089,9 @@ class AgentKernel:
                     list(pending.pending_deliveries),
                     pending.requester_delegated_token,
                 )
+            pending.requester_delegated_token = None
+            pending.requester_identity = None
+            pending.pending_deliveries = ()
             CONFIRMATION_REGISTRY.resolve(session_id, confirm_id)
             # SPEC-031 R-1: surface expiry as an outcome, not a
             # disappearance — the record stays visible as expired.

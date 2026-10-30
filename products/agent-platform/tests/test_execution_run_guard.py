@@ -64,7 +64,7 @@ def _verified_original(receipt_digest="r" * 64):
     # observation["receipt_digest"] and hands the object to recovery.accept.
     return VerifiedOriginal(
         _ORIGINAL_AUTHORITY,
-        {"observation": {"receipt_digest": receipt_digest}},
+        {"observation": {"receipt_digest": receipt_digest}, "result": {"status": "success"}},
         "attempt-1",
         "current-1",
     )
@@ -168,6 +168,23 @@ def test_permit_refused_when_durable_acceptance_fails():
     with pytest.raises(ProtocolError):
         guard.release_permit(_envelope(), _verified_original(), "current-1")
     assert len(recovery.accept_calls) == 1  # acceptance was attempted and failed
+
+
+@pytest.mark.parametrize("status", ["error", "denied"])
+def test_authorization_failure_is_accepted_without_minting_any_permit(status, monkeypatch):
+    from agent_service.services import execution_run_guard
+
+    recovery = FakeRecovery()
+    guard = RunGuard(_identity(), recovery=recovery, latch=RunStopLatch())
+    original = VerifiedOriginal(_ORIGINAL_AUTHORITY, {
+        "observation": {"receipt_digest": "a" * 64},
+        "result": {"status": status, "error": {"code": "TARGET_AUTHORIZATION_REQUIRED"}},
+    }, "attempt-1", "current-1")
+    minted = []
+    monkeypatch.setattr(execution_run_guard, "SecretReleasePermit", lambda *args: minted.append(args))
+    assert guard.release_permit(_envelope(), original, "current-1") is None
+    assert len(recovery.accept_calls) == 1
+    assert minted == []
 
 
 def test_permit_minted_from_durable_original_success_is_single_use():

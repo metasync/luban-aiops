@@ -24,6 +24,7 @@ from agent_service.core.metrics import (
     record_session_store_fallback,
 )
 from agent_service.schemas.api import SessionRecord
+from agent_service.services.delegated_identity import VerifiedHuman, session_birth_fields
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ class SessionStore(Protocol):
         user_id: str | None,
         session_id: str | None = None,
         session_type: str = "operation",
+        *,
+        requester: VerifiedHuman | None = None,
     ) -> SessionRecord: ...
 
     def get_session(self, session_id: str) -> SessionRecord | None: ...
@@ -165,6 +168,8 @@ class InMemorySessionStore:
         user_id: str | None,
         session_id: str | None = None,
         session_type: str = "operation",
+        *,
+        requester: VerifiedHuman | None = None,
     ) -> SessionRecord:
         now = time.monotonic()
         self._purge_expired(now)
@@ -174,8 +179,9 @@ class InMemorySessionStore:
             created_at=datetime.now(timezone.utc),
             last_active_at=datetime.now(timezone.utc),
             session_type=session_type,
+            **session_birth_fields(requester, user_id),
         )
-        self._sessions[record.session_id] = record
+        record = self._sessions.setdefault(record.session_id, record)
         self._last_accessed[record.session_id] = now
         self._evict_oldest()
         return record
@@ -287,6 +293,8 @@ class RedisSessionStore:
         user_id: str | None,
         session_id: str | None = None,
         session_type: str = "operation",
+        *,
+        requester: VerifiedHuman | None = None,
     ) -> SessionRecord:
         record = SessionRecord(
             session_id=session_id or f"ses-{uuid4()}",
@@ -294,10 +302,15 @@ class RedisSessionStore:
             created_at=datetime.now(timezone.utc),
             last_active_at=datetime.now(timezone.utc),
             session_type=session_type,
+            **session_birth_fields(requester, user_id),
         )
         key = self._session_key(record.session_id)
         try:
-            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+            if not self._client.set(key, self._serialize(record), nx=True, ex=self.ttl_seconds):
+                existing = self.get_session(record.session_id)
+                if existing is None:
+                    raise RuntimeError("session create conflict unavailable")
+                return existing
             if user_id:
                 self._client.zadd(
                     self._user_key(user_id),
@@ -379,20 +392,32 @@ class RedisSessionStore:
             record_session_store_error("delete")
             raise
 
+    def _update_blob(self, session_id: str, field: str, value: Any) -> None:
+        # SPEC-070: a delayed bookkeeping writer must not resurrect or rebind
+        # a session that expired or was recreated after its read.
+        from redis.exceptions import WatchError
+
+        key = self._session_key(session_id)
+        try:
+            with self._client.pipeline() as pipe:
+                pipe.watch(key)
+                raw = pipe.get(key)
+                record = self._deserialize(raw) if raw is not None else None
+                if record is None:
+                    return
+                setattr(record, field, value)
+                pipe.multi()
+                pipe.set(key, self._serialize(record), ex=self.ttl_seconds)
+                pipe.execute()
+        except WatchError:
+            return  # Best-effort bookkeeping, never retry against a new birth.
+
     def touch_session(self, session_id: str) -> None:
         # The blob never carries the title (it lives in the NX-minted
         # title key), so this read-modify-write can only race on
         # last_active_at, where a lost update is harmless.
-        key = self._session_key(session_id)
         try:
-            raw = self._client.get(key)
-            if raw is None:
-                return
-            record = self._deserialize(raw)
-            if record is None:
-                return
-            record.last_active_at = datetime.now(timezone.utc)
-            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+            self._update_blob(session_id, "last_active_at", datetime.now(timezone.utc))
         except Exception:
             record_session_store_error("touch")
             raise
@@ -431,16 +456,8 @@ class RedisSessionStore:
     def set_session_model(self, session_id: str, model: str) -> None:
         # The pinned model rides the serialized blob (pydantic default
         # keeps legacy blobs readable); newest resolved selection wins.
-        key = self._session_key(session_id)
         try:
-            raw = self._client.get(key)
-            if raw is None:
-                return
-            record = self._deserialize(raw)
-            if record is None:
-                return
-            record.model = model
-            self._client.setex(key, self.ttl_seconds, self._serialize(record))
+            self._update_blob(session_id, "model", model)
         except Exception:
             record_session_store_error("set_model")
             raise
@@ -540,6 +557,22 @@ BEGIN
 END
 $$;
 UPDATE sessions SET session_type = 'operation' WHERE session_type IS NULL;
+-- SPEC-070: no identity backfill; legacy rows remain unbound.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS requester_namespace TEXT;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS requester_sub TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conrelid='sessions'::regclass AND conname='sessions_requester_pair') THEN
+        ALTER TABLE sessions ADD CONSTRAINT sessions_requester_pair CHECK (
+            (requester_namespace IS NULL AND requester_sub IS NULL) OR
+            (requester_namespace IS NOT NULL AND requester_sub IS NOT NULL
+             AND length(requester_namespace) BETWEEN 1 AND 256
+             AND length(requester_sub) BETWEEN 1 AND 256)
+        );
+    END IF;
+END
+$$;
 """
 
 _NOT_EXPIRED = (
@@ -560,14 +593,16 @@ _NOT_EXPIRED = (
 # of a session that still exists.
 _INSERT_SESSION = """
 INSERT INTO sessions (session_id, user_id, created_at, last_accessed_at,
-                      session_type)
+                      session_type, requester_namespace, requester_sub)
 VALUES (%(session_id)s, %(user_id)s, %(created_at)s, %(created_at)s,
-        %(session_type)s)
+        %(session_type)s, %(requester_namespace)s, %(requester_sub)s)
 ON CONFLICT (session_id) DO UPDATE
    SET user_id = EXCLUDED.user_id,
        created_at = EXCLUDED.created_at,
        last_accessed_at = EXCLUDED.last_accessed_at,
-       session_type = EXCLUDED.session_type
+       session_type = EXCLUDED.session_type,
+       requester_namespace = EXCLUDED.requester_namespace,
+       requester_sub = EXCLUDED.requester_sub
  WHERE sessions.last_accessed_at <= now() - make_interval(secs => %(ttl_seconds)s)
 """
 
@@ -577,7 +612,7 @@ UPDATE sessions
    SET last_accessed_at = now()
  WHERE session_id = %(session_id)s AND {_NOT_EXPIRED}
 RETURNING session_id, user_id, created_at, title, last_active_at, model,
-          session_type
+          session_type, requester_namespace, requester_sub
 """
 
 # SPEC-056 R-2/R-4: the optional ``session_type`` scope rides the same query as
@@ -589,7 +624,7 @@ RETURNING session_id, user_id, created_at, title, last_active_at, model,
 # never falsely excluded from operational listings.
 _LIST_USER_SESSIONS = f"""
 SELECT session_id, user_id, created_at, title, last_active_at, model,
-       session_type
+       session_type, requester_namespace, requester_sub
   FROM sessions
  WHERE user_id = %(user_id)s AND {_NOT_EXPIRED}
    AND (%(session_type)s::text IS NULL
@@ -699,12 +734,15 @@ class PostgresSessionStore:
         user_id: str | None,
         session_id: str | None = None,
         session_type: str = "operation",
+        *,
+        requester: VerifiedHuman | None = None,
     ) -> SessionRecord:
         record = SessionRecord(
             session_id=session_id or f"ses-{uuid4()}",
             user_id=user_id,
             created_at=datetime.now(timezone.utc),
             session_type=session_type,
+            **session_birth_fields(requester, user_id),
         )
         try:
             with self._connect() as conn:
@@ -716,6 +754,8 @@ class PostgresSessionStore:
                             "user_id": record.user_id,
                             "created_at": record.created_at,
                             "session_type": record.session_type,
+                            "requester_namespace": record.requester_namespace,
+                            "requester_sub": record.requester_sub,
                             **self._ttl_params(),
                         },
                     )
@@ -761,6 +801,8 @@ class PostgresSessionStore:
             # the OQ-2 backfill has run, but harmless if one ever appeared —
             # degrades to ``operation`` rather than erroring.
             session_type=row[6] or "operation",
+            requester_namespace=row[7],
+            requester_sub=row[8],
         )
 
     def list_sessions_by_user(
@@ -793,6 +835,8 @@ class PostgresSessionStore:
                 model=row[5],
                 # Same defensive default as the single-row mapper above.
                 session_type=row[6] or "operation",
+                requester_namespace=row[7],
+                requester_sub=row[8],
             )
             for row in rows
         ]

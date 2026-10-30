@@ -1,9 +1,12 @@
-"""Executor result/timeout mapping and token redaction (SPEC-038 R-3)."""
+"""Executor result/timeout mapping and token redaction (SPEC-038 R-3, SPEC-070 delegated send)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -11,6 +14,17 @@ import httpx
 
 from execution_runtime.core.config import ExecutionSettings
 from execution_runtime.services import executor
+from execution_runtime.services.delegated_execution import (
+    _AUTHORITY,
+    VerifiedDelegatedExecution,
+)
+from execution_runtime.services.execution_protocol import ProtocolError
+from execution_runtime.services.execution_signing import canonical_digest
+
+# Distinct fixture bearers so a leak or a wrong-header assertion is unambiguous.
+WORKLOAD_TOKEN = "workload-aaa.workload-bbb.workload-ccc"
+REQUESTER_JWT = "requester-aaa.requester-bbb.requester-ccc"
+DECIDER_JWT = "decider-aaa.decider-bbb.decider-ccc"
 
 
 def _settings(**overrides) -> ExecutionSettings:
@@ -216,6 +230,135 @@ class ExecutorTests(unittest.TestCase):
                 _run(executor.execute_tool(_settings(), "t.x", {}, "tok-secret", "req-6"))
         self.assertNotIn("tok-secret", str(captured.exception))
         self.assertNotIn("tok-secret", str(logged.call_args_list))
+
+
+def _projection(*, tool="k8s.scale_deployment", args=None, session="ses-1",
+                kind="action", execution_id="exec-1"):
+    args = {"replicas": 3} if args is None else args
+    return {
+        "execution_id": execution_id, "confirm_id": "conf-1", "call_id": "call-1",
+        "session_id": session, "owner_user_id": "alice", "decider_user_id": "bob",
+        "approval_kind": kind, "tool_name": tool, "args_digest": canonical_digest(args),
+        "requested_at": "2026-10-25T00:00:00Z", "protocol_version": 3,
+        "requester_namespace": "trusted-broker", "requester_sub": "alice-sub",
+        "decider_namespace": "trusted-broker", "decider_sub": "bob-sub",
+        "request_digest": "d" * 64,
+    }
+
+
+def _verified(projection, *, requester=REQUESTER_JWT, decider=DECIDER_JWT, ttl=300):
+    return VerifiedDelegatedExecution(
+        _AUTHORITY, projection, requester, decider, int(time.time()) + ttl
+    )
+
+
+class DelegatedExecutorTests(unittest.TestCase):
+    """SPEC-070: a verified delegated execution forwards through the private
+    ``invoke-delegated`` route under the workload identity, sending the verified
+    projection and both human bearers in the body — and re-checks the binding at
+    the send boundary so any mismatch or expiry fails closed before any byte goes
+    out (never flattened to a transport uncertainty)."""
+
+    def setUp(self):
+        self.captured: list[dict] = []
+        self.outcomes: list = []
+        patcher = mock.patch.object(
+            executor.httpx, "AsyncClient",
+            lambda **kwargs: _FakeAsyncClient(self.outcomes, self.captured),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        handle = tempfile.NamedTemporaryFile("w", suffix=".jwt", delete=False)
+        handle.write(WORKLOAD_TOKEN)
+        handle.close()
+        self.token_path = handle.name
+        self.addCleanup(os.unlink, self.token_path)
+
+    def _settings(self, **overrides) -> ExecutionSettings:
+        kwargs = {
+            "tool_gateway_url": "http://tool-gateway:8000",
+            "target_authorization_enabled": True,
+            "delegated_identity_issuer": "trusted-broker",
+            "delegated_identity_audience": "tool-gateway",
+            "delegated_identity_actors": ("platform-gateway",),
+            "delegated_identity_jwks_url": "https://broker.test/.well-known/jwks.json",
+            "target_execution_token_path": self.token_path,
+        }
+        kwargs.update(overrides)
+        return ExecutionSettings(**kwargs)
+
+    def _send(self, settings, verified, *, tool="k8s.scale_deployment",
+              args=None, decider=DECIDER_JWT, request_id="req-1"):
+        args = {"replicas": 3} if args is None else args
+        return executor.execute_tool(
+            settings, tool, args, decider, request_id,
+            session_id="ses-1", approval_kind="action", execution_id="exec-1",
+            delegated_execution=verified,
+        )
+
+    def test_delegated_send_uses_private_route_and_workload_auth(self) -> None:
+        self.outcomes.append(_JsonResponse(_result()))
+        result = _run(self._send(self._settings(), _verified(_projection())))
+        self.assertEqual(result["status"], "success")
+        call = self.captured[0]
+        self.assertEqual(call["url"], "http://tool-gateway:8000/api/v2/tools/invoke-delegated")
+        # Channel auth is the workload identity, never a human bearer.
+        self.assertEqual(call["headers"]["Authorization"], f"Bearer {WORKLOAD_TOKEN}")
+        self.assertEqual(call["headers"]["x-request-id"], "req-1")
+        body = call["json"]
+        self.assertEqual(body["requester_token"], REQUESTER_JWT)
+        self.assertEqual(body["decider_token"], DECIDER_JWT)
+        self.assertEqual(body["parameters"], {"replicas": 3})
+        self.assertEqual(body["request_id"], "req-1")
+        self.assertEqual(body["projection"]["tool_name"], "k8s.scale_deployment")
+        self.assertEqual(body["projection"]["requester_sub"], "alice-sub")
+        self.assertEqual(body["projection"]["request_digest"], "d" * 64)
+
+    def test_projection_mismatch_refuses_before_any_send(self) -> None:
+        # The envelope verified a different tool; the reason must survive as
+        # identity_conflict (proof check_send runs before the flattening try).
+        verified = _verified(_projection(tool="k8s.scale_deployment"))
+        with self.assertRaises(ProtocolError) as ctx:
+            _run(self._send(self._settings(), verified, tool="k8s.delete_pod", args={"name": "web"}))
+        self.assertEqual(ctx.exception.reason, "identity_conflict")
+        self.assertEqual(self.captured, [])
+
+    def test_approver_bearer_mismatch_refuses_before_any_send(self) -> None:
+        verified = _verified(_projection(), decider="expected-decider")
+        with self.assertRaises(ProtocolError) as ctx:
+            _run(self._send(self._settings(), verified, decider="wrong-decider"))
+        self.assertEqual(ctx.exception.reason, "identity_conflict")
+        self.assertEqual(self.captured, [])
+
+    def test_expired_delegated_execution_refuses_before_any_send(self) -> None:
+        verified = _verified(_projection(), ttl=-10)
+        with self.assertRaises(ProtocolError) as ctx:
+            _run(self._send(self._settings(), verified))
+        self.assertEqual(ctx.exception.reason, "unauthorized")
+        self.assertEqual(self.captured, [])
+
+    def test_missing_workload_token_refuses_before_any_send(self) -> None:
+        settings = self._settings(target_execution_token_path="/nonexistent/workload.jwt")
+        with self.assertRaises(ProtocolError) as ctx:
+            _run(self._send(settings, _verified(_projection())))
+        self.assertEqual(ctx.exception.reason, "credential_missing")
+        self.assertEqual(self.captured, [])
+
+    def test_delegated_transport_error_is_uncertainty(self) -> None:
+        self.outcomes.append(httpx.ConnectError("refused"))
+        with self.assertRaisesRegex(executor.GatewayUncertain, "transport_error"):
+            _run(self._send(self._settings(), _verified(_projection())))
+        self.assertEqual(len(self.captured), 1)
+
+    def test_delegated_bearers_never_reach_logs(self) -> None:
+        self.outcomes.append(httpx.ConnectError("leaked " + REQUESTER_JWT + " " + DECIDER_JWT))
+        with mock.patch.object(logging.Logger, "_log") as logged:
+            with self.assertRaises(executor.GatewayUncertain):
+                _run(self._send(self._settings(), _verified(_projection())))
+        blob = str(logged.call_args_list)
+        self.assertNotIn(REQUESTER_JWT, blob)
+        self.assertNotIn(DECIDER_JWT, blob)
+        self.assertNotIn(WORKLOAD_TOKEN, blob)
 
 
 class ResultStatusMappingTests(unittest.TestCase):

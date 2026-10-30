@@ -465,7 +465,17 @@ class CredentialResolutionTests(unittest.TestCase):
                 connector.register_tools(registry)
                 result = _run(registry.invoke("ansible.list_inventories", {}, {}))
                 names, error = _run(connector.list_server_tools())
-                self.assertEqual(result.status, "error")
+                # Fail-closed on both transports, keeping the posture the shared
+                # acquisition seam dictates (SPEC-070): a non-bearer ``stdio``
+                # transport is a ``denied`` refusal (DELEGATED_TRANSPORT_UNSUPPORTED),
+                # while the bearer-capable transport with no acquisition client
+                # wired is a terminal ``error`` (DELEGATED_ACQUISITION_DISABLED).
+                # Neither flattens the delegated re-auth denial, and neither opens
+                # a session, dispatches a call, or leaks the client secret.
+                self.assertIn(result.status, ("error", "denied"))
+                self.assertIn(result.error["code"],
+                              {"DELEGATED_TRANSPORT_UNSUPPORTED",
+                               "DELEGATED_ACQUISITION_DISABLED"})
                 self.assertIsNone(names)
                 self.assertIsNotNone(error)
                 self.assertEqual(server.calls, [])

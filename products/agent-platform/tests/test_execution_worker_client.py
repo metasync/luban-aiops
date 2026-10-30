@@ -1,18 +1,34 @@
-"""Execution worker handoff client tests (SPEC-038 R-4)."""
+"""Execution worker handoff client tests (SPEC-038 R-4, SPEC-070 requester transport)."""
 
 import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import httpx
+from agentscope.message import ToolCallBlock
 
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services.execution_protocol import ProtocolError
+from agent_service.services.execution_signing import build_requests, sign_envelope
 from agent_service.services.execution_worker_client import (
     REASON_WORKER_UNAVAILABLE,
     WorkerHandoffError,
     WorkerHandoffTimeout,
     handoff,
+    handoff_original,
 )
+from agent_service.services.hitl_confirmations import ConfirmationRegistry
+
+SIGNING_KEY = "unit-worker-client-key"
+# The parked call's arguments; ``build_requests`` binds ``args_digest`` to them.
+PARKED_ARGUMENTS = {"namespace": "ops"}
+QUARTET = {
+    "requester_namespace": "https://issuer.test",
+    "requester_sub": "alice-sub",
+    "decider_namespace": "https://issuer.test",
+    "decider_sub": "bob-sub",
+}
 
 
 def _run(coro):
@@ -269,6 +285,147 @@ class HandoffLogRedactionTests(unittest.TestCase):
         joined = "\n".join(captured.output)
         self.assertNotIn("handoff-super-secret", joined)
         self.assertNotIn("delegated-super-secret", joined)
+
+
+def _signed_envelope(*, identity: bool) -> dict:
+    """A schema-valid, HMAC-signed v3 envelope, optionally identity-bearing."""
+    registry = ConfirmationRegistry()
+    parked = registry.register(
+        "ses-1", "alice", "reply-1",
+        [ToolCallBlock(id="call-1", name="k8s.restart_service", input='{"namespace": "ops"}')],
+        600,
+    )
+    envelope = build_requests(
+        parked, "bob", SIGNING_KEY, run_id=str(uuid4()), admission_epoch=str(uuid4())
+    )[0]
+    if identity:
+        envelope.update(QUARTET)
+        envelope["signature"] = sign_envelope(envelope, SIGNING_KEY)
+    return envelope
+
+
+def _v3_settings(**overrides) -> RuntimeSettings:
+    kwargs = {
+        "execution_signing_key": SIGNING_KEY,
+        "execution_worker_url": "http://execution-runtime:8000",
+        "execution_handoff_token": "handoff-secret",
+        "execution_worker_timeout_seconds": 60.0,
+    }
+    kwargs.update(overrides)
+    return RuntimeSettings(**kwargs)
+
+
+class HandoffOriginalRequesterTransportTests(unittest.TestCase):
+    """SPEC-070: the requester bearer rides separately from the signed envelope.
+
+    The all-or-none binding is enforced before any byte reaches the worker: an
+    identity-bearing envelope must carry a requester bearer, and a machine
+    envelope must never carry one. The human bearers travel only in the body —
+    the Authorization header stays the worker handoff secret.
+    """
+
+    def _capture_post(self, response=None):
+        """Patch AsyncClient so ``post`` records its body; return (cls, captured)."""
+        captured = {}
+        reply = response if response is not None else MagicMock()
+
+        async def _post(url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return reply
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=_post)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        return mock_client, captured
+
+    def test_identity_envelope_transports_requester_bearer_in_body_only(self) -> None:
+        envelope = _signed_envelope(identity=True)
+        mock_client, captured = self._capture_post()
+        with patch(
+            "agent_service.services.execution_worker_client.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            # A MagicMock response fails x-request-id correlation, so the call
+            # raises response_invalid AFTER the body was posted — proving the
+            # body was built and sent with the requester bearer.
+            with self.assertRaises(ProtocolError) as ctx:
+                _run(handoff_original(
+                    envelope, PARKED_ARGUMENTS, "approver-bearer", _v3_settings(),
+                    "req-1", requester_token="requester-bearer",
+                ))
+        self.assertEqual(ctx.exception.reason, "response_invalid")
+        self.assertEqual(captured["json"]["requester_token"], "requester-bearer")
+        self.assertEqual(captured["json"]["delegated_token"], "approver-bearer")
+        self.assertEqual(captured["json"]["request"], envelope)
+        # The channel auth is the worker handoff secret, never a human bearer.
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer handoff-secret")
+        self.assertNotIn("requester-bearer", captured["headers"]["Authorization"])
+        self.assertNotIn("requester-bearer", captured["url"])
+
+    def test_identity_envelope_without_requester_bearer_fails_closed_before_send(self) -> None:
+        envelope = _signed_envelope(identity=True)
+        mock_client, captured = self._capture_post()
+        with patch(
+            "agent_service.services.execution_worker_client.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with self.assertRaises(ProtocolError) as ctx:
+                _run(handoff_original(
+                    envelope, PARKED_ARGUMENTS, "approver-bearer", _v3_settings(), "req-1",
+                ))
+        self.assertEqual(ctx.exception.reason, "credential_missing")
+        self.assertEqual(captured, {})
+        mock_client.post.assert_not_called()
+
+    def test_blank_requester_bearer_fails_closed(self) -> None:
+        envelope = _signed_envelope(identity=True)
+        for blank in ("", "   ", None):
+            with self.subTest(blank=repr(blank)):
+                mock_client, captured = self._capture_post()
+                with patch(
+                    "agent_service.services.execution_worker_client.httpx.AsyncClient",
+                    return_value=mock_client,
+                ):
+                    with self.assertRaises(ProtocolError) as ctx:
+                        _run(handoff_original(
+                            envelope, PARKED_ARGUMENTS, "approver-bearer", _v3_settings(),
+                            "req-1", requester_token=blank,
+                        ))
+                self.assertEqual(ctx.exception.reason, "credential_missing")
+                mock_client.post.assert_not_called()
+
+    def test_machine_envelope_rejects_a_requester_bearer(self) -> None:
+        envelope = _signed_envelope(identity=False)
+        mock_client, captured = self._capture_post()
+        with patch(
+            "agent_service.services.execution_worker_client.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with self.assertRaises(ProtocolError) as ctx:
+                _run(handoff_original(
+                    envelope, PARKED_ARGUMENTS, "approver-bearer", _v3_settings(),
+                    "req-1", requester_token="requester-bearer",
+                ))
+        self.assertEqual(ctx.exception.reason, "bad_request")
+        self.assertEqual(captured, {})
+        mock_client.post.assert_not_called()
+
+    def test_machine_envelope_omits_the_requester_key(self) -> None:
+        envelope = _signed_envelope(identity=False)
+        mock_client, captured = self._capture_post()
+        with patch(
+            "agent_service.services.execution_worker_client.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with self.assertRaises(ProtocolError) as ctx:
+                _run(handoff_original(
+                    envelope, PARKED_ARGUMENTS, "approver-bearer", _v3_settings(), "req-1",
+                ))
+        self.assertEqual(ctx.exception.reason, "response_invalid")
+        self.assertEqual(set(captured["json"]), {"request", "arguments", "delegated_token"})
 
 
 if __name__ == "__main__":

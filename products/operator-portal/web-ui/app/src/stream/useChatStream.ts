@@ -5,6 +5,7 @@
 import { useCallback, useReducer, useRef, useState } from "react";
 import { currentAuthenticatedUser } from "../api/client";
 import type {
+  AuthorizationRequiredFrame,
   ConfirmationStatus,
   DecodedEvent,
   ExecutionReceipt,
@@ -63,6 +64,7 @@ export interface ChatTurn {
   toolCalls: ToolCallFrame[];
   toolResults: ToolResultFrame[];
   secretDeliveries?: SecretDeliveryFrame[];
+  authorizations?: AuthorizationRequiredFrame[];
   confirmations: ConfirmationCard[];
   // Transcript-seeded turns carry chat text only unless persisted tool
   // evidence is attached (SPEC-025 R-3); the request id correlates the
@@ -196,8 +198,18 @@ export function useChatStream(): ChatStreamApi {
           turn.toolResults.push(frame);
           break;
         case "authorization_required":
-          // Contract-only increment: no control, navigation, or confirmation.
-          // The workflow consumer is enabled only with trusted custody/routes.
+          // SPEC-070: attach the decoded challenge so a live turn matches its
+          // replayed twin (transcript.ts). The decoder already reduced it to
+          // routing metadata — {kind, authChallengeId, target, expiresAt?} —
+          // dropping provider_url/code/state/confirm_id, so nothing sensitive
+          // rides into portal state. Deliberately inert: this neither
+          // navigates nor issues a follow-up request. The Authorize/status/
+          // Cancel control that acts on it is a separate consumer, enabled
+          // only with trusted custody/routes.
+          turn.authorizations ??= [];
+          if (!turn.authorizations.some((item) => item.authChallengeId === frame.authChallengeId)) {
+            turn.authorizations.push(frame);
+          }
           break;
         case "secret_delivery":
           turn.secretDeliveries ??= [];

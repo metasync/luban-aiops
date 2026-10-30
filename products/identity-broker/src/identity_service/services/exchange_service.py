@@ -183,6 +183,7 @@ def exchange_token(
         audience=audience,
         actor={"sub": client.client_id},
         ttl_seconds=settings.delegated_token_ttl_seconds,
+        authentication_source="oidc" if claims.get("authentication_source") == "oidc" else "development",
     )
     record_token_exchange("success")
     LOGGER.info(

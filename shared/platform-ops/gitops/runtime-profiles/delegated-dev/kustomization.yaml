@@ -1,0 +1,79 @@
+# SPEC-070 delegated outbound user-identity posture — DISABLED BY DEFAULT.
+#
+# This is an opt-in, STANDALONE overlay. It is deliberately NOT referenced by
+# dev-k8s/kustomization.yaml, so the default dev deploy is byte-for-byte
+# unchanged and delegation can never be turned on by accident. An operator
+# selects this posture explicitly (build/deploy this directory instead of
+# dev-k8s) only after provisioning the keyring, the administered config +
+# identity mapping, and a real OAuth target.
+#
+# It layers on the MINIMAL stack (dev-k8s/base + runtime-profiles/default)
+# rather than the full dev-k8s accumulation on purpose: base keeps every tool
+# connector disabled (GATEWAY_BROWSER_ENABLED=false, GATEWAY_HTTP_ENABLED=false,
+# and the mutating/ansible/servicenow profiles are absent), so the tool-gateway
+# pod here has no other external egress. That makes the least-privilege Egress
+# policy in delegated-network-policy.yaml coherent — it is the first (and only)
+# Egress policy selecting the gateway, and it does not silently starve an
+# inherited connector. (Every other repo NetworkPolicy leaves egress
+# unrestricted on purpose; see ansible-dev/servicenow-dev.)
+#
+# What this overlay adds, all INERT until an operator flips a gate:
+#   1. delegated.env         — the three GATEWAY_DELEGATED_*_ENABLED gates held
+#                              explicitly false, plus commented examples for the
+#                              custody paths, exact callback, and the workload /
+#                              delegated-human verification trust sets.
+#   2. tool-gateway-delegated.yaml — mounts the administered config + keyring
+#                              secrets and injects the custody DSN from a secret
+#                              key (all optional:true, so the pod still starts
+#                              before provisioning).
+#   3. execution-runtime-handoff-token.yaml /
+#      platform-gateway-handoff-token.yaml — the projected service-account JWTs
+#                              (dedicated audiences + explicit expirationSeconds)
+#                              the gateway VERIFIES on the bearerless handoffs.
+#   4. delegated-network-policy.yaml — least-privilege egress (DNS, database,
+#                              internal gateway, JWKS) with the external target
+#                              and external JWKS left as commented operator CIDRs.
+#
+# Secrets discipline (plan line 165): no credential appears in this overlay. The
+# custody DSN, keyring, and administered config/mapping arrive as mounted secret
+# FILES (sync-custody-db.sh, sync-browser-credentials.sh); the DSN reaches the
+# container through a secretKeyRef, never a committed env value or command arg.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dev-luban-aiops
+resources:
+  - ../../dev-k8s/base
+  - ../default
+  - delegated-network-policy.yaml
+configMapGenerator:
+  # Merged into the base-generated platform-runtime-config exactly as dev-k8s
+  # merges the other profiles. delegated.env only holds non-secret flags/paths;
+  # every gate stays false, so merging it changes nothing at runtime until an
+  # operator edits the file AND provisions the secrets it points at.
+  - name: platform-runtime-config
+    behavior: merge
+    envs:
+      - delegated.env
+patches:
+  # Custody DSN (secretKeyRef) + administered-config and keyring secret mounts on
+  # the tool-gateway pod. env (merge key: name) and volumes/volumeMounts (merge
+  # keys: name/mountPath) append safely; envFrom is deliberately NOT patched —
+  # it has no merge key and a patch would replace the whole list, dropping
+  # platform-runtime-config.
+  - path: tool-gateway-delegated.yaml
+    target:
+      kind: Deployment
+      name: tool-gateway
+  # Projected workload JWT the gateway verifies on /api/v2/tools/invoke-delegated
+  # (audience luban-target-execution-handoff).
+  - path: execution-runtime-handoff-token.yaml
+    target:
+      kind: Deployment
+      name: execution-runtime
+  # Projected workload JWT the gateway verifies on the bearerless
+  # /api/v2/targets/authorizations handoffs (audience
+  # luban-target-authorization-handoff).
+  - path: platform-gateway-handoff-token.yaml
+    target:
+      kind: Deployment
+      name: platform-gateway

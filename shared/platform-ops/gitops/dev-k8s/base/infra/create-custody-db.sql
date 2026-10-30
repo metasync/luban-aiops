@@ -1,0 +1,15 @@
+-- Delegated-custody database for the tool-gateway SPEC-070 outbound
+-- user-delegated runtime (grant publication and authorization status are
+-- atomic in this store).
+--
+-- Runs only on fresh clusters via /docker-entrypoint-initdb.d. Existing
+-- clusters are covered by sync-custody-db.sh, which creates the database
+-- idempotently through kubectl exec, creates the two SEPARATE least-privilege
+-- roles (custody_runtime DML-only, custody_operator administration), runs the
+-- operator migration, and applies custody-grants.sql.
+--
+-- The `gateway_custody` schema and its tables are created LATER by
+-- `custody_cli migrate` under the custody_operator role (never here, and never
+-- by the runtime role): the runtime issues no DDL. This file only creates the
+-- empty database, so it carries no secret and grants no privilege.
+CREATE DATABASE custody;
