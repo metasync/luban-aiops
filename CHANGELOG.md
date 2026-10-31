@@ -11,6 +11,37 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.51.1 — 2026-10-31
+
+Dependency-refresh patch: a routine re-lock of the agent-platform inside its
+declared ranges at latest stable, prompted by the AgentScope 2.0.11 release,
+plus a PyJWT harmonization across all eight backend products. No manifest range
+changed — every bump lands inside an existing caret-capped range — so this is a
+lockfile refresh, not a contract change. No new routes, actions, event types,
+contracts, schemas, audit changes, or execution paths. See the
+[release note](docs/agentic-aiops-platform/release-notes/2026-10-31-dependency-refresh-agentscope-2-0-11.md).
+
+### Changed
+
+- **agentscope 2.0.8 → 2.0.11** (agent-platform; the runtime kernel per
+  ADR-0002, so the bump carries the full kernel-verification leg). Adopts
+  **none** of the 2.0.9–2.0.11 agent surfaces — SOP, `TeamPipeline`, `AskUser`,
+  `ModelRouterMiddleware`/classifier, realtime voice, ASR, and TUI are deferred
+  under the four-point adoption gate. 2.0.11 moves its MCP dependency to
+  `mcp>=2.0.0`, so the transitive `mcp` bumps **1.29.1 → 2.3.0** (adding
+  `mcp-types` 2.3.0), converging on the version tool-gateway already pins;
+  agent-platform imports `mcp` nowhere directly, so the bump is transparent to
+  platform code. `agentscope-runtime` stays at **1.1.6.post2** (still the latest
+  published runtime) and co-resolves cleanly with agentscope 2.0.11 (its
+  `mcp>=1.13` and `agentscope>=1.0.14` requirements carry no upper bound).
+- **PyJWT 2.13.0 → 2.15.1** harmonized across all eight products —
+  execution-runtime was already at 2.15.1; the other seven re-locked to match,
+  removing the intra-repo drift.
+- `certifi` refreshed transitively (2026.7.22 → 2026.10.23) in agent-platform.
+- Redis client `<7.0`, Elasticsearch client `<9.0`, and tool-gateway Kubernetes
+  client `<33.0` caps stay parked (deployed server majors); `cryptography` stays
+  `<51.0` (50.0.1 is current stable; 51.0.0 is unreleased).
+
 ## 0.51.0 — 2026-10-31
 
 [SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md) runtime
