@@ -506,11 +506,19 @@ the earlier full-feature v0.50.0 planning slot. Current release details remain i
 is recorded with root `make verify` EXIT=0, including deterministic OAuth/target fixtures,
 real TLS/Postgres processes, portal rendered-DOM tests, attribution, and provisioning.
 Real-browser UI screenshots remain environment-blocked; actual nginx request-log inspection
-is still outstanding as documented in the troubleshooting guide. SPEC-070 stays `in-progress`;
-a runtime release is not yet selected. The Unreleased entry and
-[SPEC-069 dependency update](../specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/tasks.md#production-dependency-status-update--2026-10-30)
-do not authorize a version bump or deployment. **AAP compatibility unverified**;
-DI-070 remains mandatory before production target enablement.
+is still outstanding as documented in the troubleshooting guide. At that checkpoint SPEC-070
+stayed `in-progress` and no runtime release was selected; the release is recorded below.
+**AAP compatibility unverified**; DI-070 remains mandatory before production target enablement.
+
+**SPEC-070 runtime released as v0.51.0 — 2026-10-31.** The default-off runtime substrate
+(gateway-owned OAuth acquisition/renewal, encrypted Postgres custody, browser-bound authorization,
+requester-owned cross-user grants, verified delegation-mode attribution, and provisioning tooling)
+is delivered and SPEC-070 is marked `delivered`; R-1a–R-6d acceptance and root `make verify`
+EXIT=0 are recorded in the
+[delivery gate](../specs/SPEC-070-outbound-user-delegated-identity/tasks.md#delivery-gate).
+Release details are in [VERSION](../../VERSION) and [CHANGELOG](../../CHANGELOG.md).
+**AAP compatibility remains unverified**; DI-070 stays mandatory before production user-delegated
+target enablement, and no target is enabled by this release.
 
 | Deployment-integration follow-up | Owner / trigger | Closure and release boundary |
 | --- | --- | --- |

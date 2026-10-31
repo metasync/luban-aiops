@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `in-progress` — redirect-based direction ratified 2026-10-18; OQ-7 handoff contract
+- status: `delivered` (v0.51.0, 2026-10-31) — redirect-based direction ratified 2026-10-18; OQ-7 handoff contract
   ratified 2026-10-19. **Delivery-boundary amendment approved 2026-10-23:** development
   acceptance is independent of AAP availability. R-1–R-6d remain development obligations;
   R-6e and OQ-3 move to a separately tracked deployment-integration task, not a release gate.
@@ -12,17 +12,17 @@
   is [recorded as passed](tasks.md#acceptance-to-test-matrix) with root `make verify` EXIT=0.
   Runtime workflow, encrypted custody, requester/approver separation, attribution, and
   provisioning tooling are implemented and default-off. The foundation is committed as
-  `83e0f94`; runtime work remains uncommitted and unreleased. Real-browser UI screenshots
-  remain environment-blocked; **AAP compatibility unverified**. The earlier
+  `83e0f94`, the runtime as `e41007f`, released as v0.51.0 (2026-10-31). Real-browser UI
+  screenshots remain environment-blocked; **AAP compatibility unverified**. The earlier
   [contract-only checkpoint](tasks.md#additive-oq-7-contract-increment) remains historical.
 - owner: luban-platform-team
 - created: 2026-10-12
 - current decision: first-use target OAuth authorization redirects are allowed; no manual
   credential entry, enrollment command, or credential-settings UI. Later acquisition uses
   server-to-server renewal; revoked/expired grants may require another authorization.
-- remaining gates: the [delivery gate](tasks.md#delivery-gate) retains the explicit
-  `delivered`/release step; this documentation update does not authorize it or production
-  enablement. **OQ-3** (actual AAP/MCP profile, PKCE enforcement,
+- remaining gates: the [delivery gate](tasks.md#delivery-gate) `delivered`/release step is
+  closed by the v0.51.0 release (2026-10-31); production enablement remains unauthorized.
+  **OQ-3** (actual AAP/MCP profile, PKCE enforcement,
   renewal, identity linkage, and RBAC lifecycle) remains open under
   [DI-070](tasks.md#post-delivery-deployment-integration-di-070), owned by the workspace
   operator with the AAP administrator. Its evidence is mandatory before production

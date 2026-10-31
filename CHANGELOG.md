@@ -11,13 +11,15 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## Unreleased
+## 0.51.0 — 2026-10-31
 
 [SPEC-070](docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md) runtime
 implementation following the v0.50.0 contract checkpoint. Development acceptance
-R-1a–R-6d is recorded in the [acceptance matrix](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix);
-this is not a release or deployment. VERSION remains 0.50.0 and the spec remains
-`in-progress` pending delivery bookkeeping.
+R-1a–R-6d is recorded in the [acceptance matrix](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#acceptance-to-test-matrix).
+This release delivers the provider-independent runtime substrate and marks SPEC-070
+`delivered`; **AAP compatibility remains unverified** and
+[DI-070](docs/specs/SPEC-070-outbound-user-delegated-identity/tasks.md#post-delivery-deployment-integration-di-070)
+stays mandatory before production user-delegated AAP enablement.
 
 ### Added
 

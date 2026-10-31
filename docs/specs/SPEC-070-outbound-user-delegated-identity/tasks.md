@@ -2,16 +2,15 @@
 
 Task states: `[ ]` pending, `[x]` done. Keep tasks small and tied to requirement IDs.
 
-> **Development acceptance recorded; runtime unreleased (status update 2026-10-30).**
-> ADR-0016 remains accepted and OQ-7 ratified. R-1a–R-6d are checked in the
-> [acceptance matrix](#acceptance-to-test-matrix), with root `make verify` EXIT=0.
-> The foundation is committed as `83e0f94`; subsequent runtime changes remain uncommitted.
-> The workflow, custody, attribution, and provisioning implementation is default-off,
-> not part of the deployed contract-only v0.50.0 checkpoint. The operator authorized staging
-> and the Unreleased/living-doc update, not a version bump, release, or deployment.
-> **AAP compatibility unverified**: OQ-3/R-6e remain under [DI-070](#post-delivery-deployment-integration-di-070).
-> Real-browser UI screenshots remain environment-blocked as recorded in p6. Plans and
-> accepted ADR bodies are unchanged; the `delivered` gate remains open.
+> **Delivered as v0.51.0 (2026-10-31).** ADR-0016 remains accepted and OQ-7 ratified.
+> R-1a–R-6d are checked in the [acceptance matrix](#acceptance-to-test-matrix), with root
+> `make verify` EXIT=0. The foundation is committed as `83e0f94` and the runtime as `e41007f`;
+> the v0.51.0 release commit bumps `VERSION` in lockstep and promotes the CHANGELOG entry.
+> The workflow, custody, attribution, and provisioning implementation ships default-off and is
+> not enabled by the release. **AAP compatibility unverified**: OQ-3/R-6e remain under
+> [DI-070](#post-delivery-deployment-integration-di-070), mandatory before production
+> user-delegated AAP enablement. Real-browser UI screenshots remain environment-blocked as
+> recorded in p6. Plans and accepted ADR bodies are unchanged.
 
 ## Historical Stage 0 — 2026-10-12
 
@@ -1456,13 +1455,20 @@ does not close runtime acceptance or replace verification after the remaining im
       troubleshooting guides now distinguish implemented runtime from contract-only v0.50.0.
       SPEC-069's [dated dependency update](../SPEC-069-ansible-read-tier-mcp-ingestion-pilot/tasks.md#production-dependency-status-update--2026-10-30)
       and spec changelog reconcile its production dependency without rewriting delivered v0.48.0 requirements
-      or dev evidence. Runtime remains unreleased/default-off; `VERSION` stays `0.50.0` and status stays
-      `in-progress`. DI-070/AAP, browser screenshots, and actual nginx log-inspection limits remain disclosed.
-      No commit, release, or deployment is authorized by this documentation gate._
-- [ ] Mark `delivered` only after R-1a–R-6d development acceptance passes. Release bookkeeping
+      or dev evidence. At that gate the runtime remained unreleased/default-off (`VERSION` `0.50.0`, status
+      `in-progress`); the subsequent v0.51.0 release is recorded in the `delivered` box below. DI-070/AAP,
+      browser screenshots, and actual nginx log-inspection limits remain disclosed.
+      No commit, release, or deployment was authorized by this documentation gate._
+- [x] Mark `delivered` only after R-1a–R-6d development acceptance passes. Release bookkeeping
       and `VERSION` changes still need separate authorization; pending DI-070 does not block
       either. Release notes and living guides explicitly say **AAP compatibility unverified**
       and link the integration task until its actual evidence is recorded.
+      _Delivered as v0.51.0 (2026-10-31) under separate operator authorization: R-1a–R-6d
+      acceptance is recorded above with root `make verify` EXIT=0. `VERSION` and every lockstep
+      product/portal reference bump `0.50.0`→`0.51.0` (`make validate-version` green), the
+      CHANGELOG `Unreleased` entry is promoted to `0.51.0 — 2026-10-31`, and the spec/index/roadmap
+      status flips to `delivered`. Release notes and living guides keep **AAP compatibility unverified**
+      and link [DI-070](#post-delivery-deployment-integration-di-070) until its actual evidence is recorded._
 
 ## Post-Delivery Deployment Integration (DI-070)
 
