@@ -1,0 +1,1 @@
+Python runtime over AgentScope (`agentscope.model`, `agentscope.credential`, `agentscope.app`) and AgentScope Runtime (`agentscope_runtime.engine`). Native HTTP uses uvicorn; optional `agentscope-runtime` dependency is imported lazily inside `build_runtime_message`/`build_agent_app` so the package can be imported without it installed.

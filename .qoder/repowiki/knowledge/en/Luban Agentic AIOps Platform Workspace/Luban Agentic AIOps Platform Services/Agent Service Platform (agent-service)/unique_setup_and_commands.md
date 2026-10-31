@@ -1,0 +1,1 @@
+`make` targets in the package root drive the standard dev workflow (install deps via `uv`, run tests via pytest, lint); the service itself is started with `python -m agent_service.main` or `uvicorn agent_service.app:app` using `AGENT_SERVICE_HOST`/`AGENT_SERVICE_PORT` env vars.

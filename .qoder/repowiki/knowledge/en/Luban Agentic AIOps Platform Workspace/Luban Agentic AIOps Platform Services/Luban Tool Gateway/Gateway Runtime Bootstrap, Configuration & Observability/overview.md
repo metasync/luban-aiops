@@ -1,0 +1,1 @@
+Bootstraps the FastAPI tool-gateway process: parses environment settings, wires connectors into a ToolRegistry, installs logging/metrics/telemetry middleware, and exposes the uvicorn entry point.

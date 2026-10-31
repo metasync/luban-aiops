@@ -1,0 +1,7 @@
+The module is a single Python package (`src/agent_service`) bootstrapped by `main.py` → `app.create_app()`, which installs an HTTP logging middleware, includes the `api.v2.routes` router, and starts a background model-discovery task in FastAPI's lifespan. Cross-child wiring follows a layered contract:
+- `api_layer` (FastAPI routers + Pydantic schemas) is the only public boundary; it delegates to services rather than implementing logic.
+- `services/` is the application layer: `session_service` owns lifecycle/identity, `execution_invocation` + `execution_recovery` implement the durable handoff pipeline, `skill_draft`/`skill_graduation`/`operation_documents` handle authoring, and `model_catalog`/`model_discovery` drive provider discovery.
+- `providers/` implements the AgentScope adapter interface used by the `runtime_kernel_providers` child, keeping LLM backends pluggable.
+- `contracts_schemas` JSON-Schema files and SQL migrations are consumed by both the execution pipeline and the Postgres-backed session store for the signed request/receipt/observation protocol.
+- `entrypoints/native.py` and `entrypoints/runtime.py` expose two run modes (HTTP uvicorn vs AgentScope runtime app) sharing the same `create_app` and settings.
+All children converge on shared infrastructure in `core/`: `config.py`/`env.py` for settings, `metrics.py`/`telemetry.py`/`observability.py` for OpenTelemetry/Prometheus, and `request_context.py` for per-request correlation IDs propagated through every child.

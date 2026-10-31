@@ -1,0 +1,1 @@
+pytest with `fastapi.testclient.TestClient` for HTTP smoke tests, `fakeredis` for Redis-backed session store tests, and a custom fake psycopg2-style cursor/connection pair for Postgres DDL/SQL shape assertions.

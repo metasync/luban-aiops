@@ -1,0 +1,1 @@
+PostgreSQL via `psycopg` with `dict_row` and `Jsonb`; advisory locks (`pg_try_advisory_lock`) for per-run serialization; `httpx.AsyncClient` with `follow_redirects=False`, `trust_env=False`, zero retries, and an outer `asyncio.timeout` budget for worker handoffs; HMAC-SHA256 cursors for owner-scoped pagination.

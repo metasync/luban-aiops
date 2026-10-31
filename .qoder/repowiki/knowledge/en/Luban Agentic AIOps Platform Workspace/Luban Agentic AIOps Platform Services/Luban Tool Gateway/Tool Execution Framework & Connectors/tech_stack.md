@@ -1,0 +1,1 @@
+Python async tools built on `httpx.AsyncClient` for all outbound HTTP (token endpoints, target APIs, browser CDP sidecar). Pydantic `SecretStr` is used for in-memory secret values. Browser automation drives Chromium headless-shell over CDP via Playwright-style sessions managed by `browser_sessions.BrowserSessionPool`.

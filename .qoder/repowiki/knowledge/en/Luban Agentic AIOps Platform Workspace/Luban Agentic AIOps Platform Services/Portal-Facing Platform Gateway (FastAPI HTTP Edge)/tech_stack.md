@@ -1,0 +1,1 @@
+Python ≥3.11, FastAPI + Uvicorn as the HTTP server, httpx for async downstream calls, PyJWT for local JWT verification against a JWKS endpoint, PyYAML for policy bundles, Prometheus client for metrics, and OpenTelemetry (OTLP HTTP exporter) with FastAPI/httpx/logging instrumentation. Built and packaged via uv_build; tests run under pytest with jsonschema.

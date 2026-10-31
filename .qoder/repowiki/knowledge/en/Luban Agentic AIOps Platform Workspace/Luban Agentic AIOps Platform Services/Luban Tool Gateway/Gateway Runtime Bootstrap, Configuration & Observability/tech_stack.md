@@ -1,0 +1,1 @@
+FastAPI + Uvicorn ASGI server; prometheus_client for the always-on `/metrics` surface; OpenTelemetry SDK with OTLP HTTP/protobuf exporters (traces, metrics, logs) gated by `OTEL_ENABLED`; optional Redis-backed secret delivery buffer.

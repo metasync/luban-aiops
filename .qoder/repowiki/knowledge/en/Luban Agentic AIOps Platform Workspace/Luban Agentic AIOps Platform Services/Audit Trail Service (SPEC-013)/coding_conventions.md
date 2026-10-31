@@ -1,0 +1,6 @@
+- Configuration is modelled as frozen `dataclass` instances loaded from `AUDIT_*` environment variables via a `from_env()` classmethod and cached through `@lru_cache(maxsize=1)`.
+- Persistence backends implement the `AuditStore` Protocol and are selected at startup by `build_audit_store(settings)` based on `AUDIT_STORE_BACKEND`, keeping query/summarize logic identical across in-memory and PostgreSQL implementations.
+- Cursor-based pagination uses a shared `encode_cursor`/`decode_cursor` pair that base64-encodes `occurred_at|event_id`, applied consistently in both store backends and the query route.
+- SQL filters are built centrally by `_filter_clause(filters)` returning `(where_clauses, params)` tuples so the in-memory `_matches` predicate and Postgres WHERE builder stay in sync.
+- Background tasks (retention eviction) wrap their loops in try/except that record errors via `record_store_error` and log exceptions without re-raising, ensuring a single failure cannot crash the task.
+- Structured logging goes through `core.observability.log_event` with a `request_id` extracted from `x-request-id` headers, rather than direct `LOGGER.info` calls.

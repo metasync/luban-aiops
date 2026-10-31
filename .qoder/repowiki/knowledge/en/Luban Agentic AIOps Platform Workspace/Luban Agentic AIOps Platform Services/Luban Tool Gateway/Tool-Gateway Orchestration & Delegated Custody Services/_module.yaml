@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: products/tool_gateway/delegated_custody_services
+title: Tool-Gateway Orchestration & Delegated Custody Services
+scope:
+    - products/tool-gateway/src/tool_gateway/services/
+source_files: []
+depends_on: []
+related_to:
+    - path: products/identity_broker

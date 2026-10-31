@@ -1,0 +1,1 @@
+Python + FastAPI + uvicorn as the process boundary; Pydantic models validated against JSON Schema files under `contracts/`; SQLAlchemy-style Postgres for the ledger with versioned migration scripts (`execution-ledger-v1.sql`, `v2.sql`).

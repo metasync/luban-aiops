@@ -1,0 +1,1 @@
+Execution-runtime services that POST tool invocations to the gateway over HTTP, deduplicate concurrent calls by execution_id, and verify/replay signed delegated handoffs under workload identity.

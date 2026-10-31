@@ -1,0 +1,1 @@
+FastAPI edge service that authenticates portal requests, enforces policy against a YAML bundle, and proxies calls to the agent, identity, audit, incident, skills-hub, and tool-gateway services.

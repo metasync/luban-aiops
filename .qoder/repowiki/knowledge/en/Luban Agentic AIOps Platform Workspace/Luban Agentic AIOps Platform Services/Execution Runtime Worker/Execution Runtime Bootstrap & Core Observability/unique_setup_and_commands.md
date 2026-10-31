@@ -1,0 +1,1 @@
+Process is started via `execution_runtime.main.run()` which binds uvicorn's `timeout_graceful_shutdown` to 35s to fit inside the 45s pod grace period; `EXECUTION_HOST`/`EXECUTION_PORT` control binding, `EXECUTION_*` env vars configure runtime settings, `LOG_LEVEL` controls root logger verbosity, and `OTEL_ENABLED` toggles the OTLP push pipeline.

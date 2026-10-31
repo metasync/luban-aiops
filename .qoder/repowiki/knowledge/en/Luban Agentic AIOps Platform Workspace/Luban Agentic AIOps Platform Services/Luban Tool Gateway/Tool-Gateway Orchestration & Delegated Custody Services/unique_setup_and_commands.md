@@ -1,0 +1,1 @@
+Operator CLI invoked as `uv run --frozen --project products/tool-gateway python -m tool_gateway.services.custody_cli <command>`; every command takes secrets as file paths (`--dsn-file`, `--keyring-file`, `--refresh-token-file`) rather than literals, and `allow_abbrev=False` is enforced on every argparse subparser to prevent abbreviated secret-path arguments.

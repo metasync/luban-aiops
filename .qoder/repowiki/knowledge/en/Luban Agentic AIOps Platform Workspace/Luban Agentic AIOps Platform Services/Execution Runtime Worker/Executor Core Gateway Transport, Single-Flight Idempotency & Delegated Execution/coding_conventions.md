@@ -1,0 +1,5 @@
+- External failures are normalized into typed `ProtocolError` subclasses (`GatewayUncertain`, `unauthorized`, `credential_missing`, etc.) rather than raising raw `ValueError`/`httpx.HTTPError` to callers.
+- Human tokens are never treated as target credentials — they supply identity only, while the outbound request uses either the caller's Bearer token or a freshly read projected workload JWT from disk.
+- Sensitive values (projection dict, decider token, expires_at) are stored as private attributes on frozen `@dataclass(slots=True)` objects constructed through a sentinel authority marker so instances cannot be forged outside the verifier.
+- Bounded string validation goes through the shared `_bounded` helper (length ≤ 256, printable ASCII, no leading/trailing whitespace) for every user-supplied configuration field and claim.
+- Per-send secrets are reread from disk (`read_workload_token`) instead of cached, and oversized reads are rejected at `MAX_TOKEN_BYTES` to avoid pinning memory.

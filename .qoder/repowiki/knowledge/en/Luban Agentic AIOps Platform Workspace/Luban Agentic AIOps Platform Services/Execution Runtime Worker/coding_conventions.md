@@ -1,0 +1,3 @@
+- Cross-cutting state (ledger instance, draining flag, lifecycle hook) is attached to `app.state` rather than passed through constructors or globals.
+- Request correlation flows through an `x-request-id` header resolved by `safe_request_id` and logged by the HTTP middleware before any route handler runs.
+- Shutdown behavior flips `app.state.draining = True` and calls `record_drain_state(True)` before uvicorn's timeout-graceful-shutdown budget expires, so new handoffs are refused while in-flight work drains.

@@ -3,12 +3,343 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-10-22T06:45:35Z"
+exported_at: "2026-10-31T00:34:39Z"
 modules:
     "":
         dir_name: Luban Agentic AIOps Platform Workspace
         title: Luban Agentic AIOps Platform Workspace
         scope: []
+        source_files: []
+        children:
+            - products
+        depends_on: []
+        related_to: []
+    products:
+        dir_name: Luban Agentic AIOps Platform Services
+        title: Luban Agentic AIOps Platform Services
+        scope:
+            - products/
+        source_files: []
+        children:
+            - products/agent_platform
+            - products/audit_service
+            - products/execution_runtime
+            - products/identity_broker
+            - products/incident_service
+            - products/operator_portal
+            - products/platform_gateway
+            - products/skills_hub
+            - products/tool_gateway
+        depends_on: []
+        related_to: []
+    products/agent_platform:
+        dir_name: Agent Service Platform (agent-service)
+        title: Agent Service Platform (agent-service)
+        scope:
+            - products/agent-platform/
+        source_files: []
+        children:
+            - products/agent_platform/api_layer
+            - products/agent_platform/contracts_schemas
+            - products/agent_platform/execution_pipeline
+            - products/agent_platform/runtime_kernel_providers
+            - products/agent_platform/session_state_store
+            - products/agent_platform/skills_documents_audit
+            - products/agent_platform/tests
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+    products/agent_platform/api_layer:
+        dir_name: Agent Service HTTP Boundary (FastAPI v2)
+        title: Agent Service HTTP Boundary (FastAPI v2)
+        scope:
+            - products/agent-platform/src/agent_service/api/
+            - products/agent-platform/src/agent_service/schemas/
+            - products/agent-platform/src/agent_service/tools/
+        source_files: []
+        children:
+            - products/agent_platform/api_layer/schemas
+        depends_on: []
+        related_to:
+            - path: products/tool_gateway/api_routes_schemas
+    products/agent_platform/api_layer/schemas:
+        dir_name: Agent Service API Schemas (Pydantic Contracts)
+        title: Agent Service API Schemas (Pydantic Contracts)
+        scope:
+            - products/agent-platform/src/agent_service/schemas/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/agent_platform/contracts_schemas:
+        dir_name: Execution Protocol Contracts & Ledger Schema
+        title: Execution Protocol Contracts & Ledger Schema
+        scope:
+            - products/agent-platform/src/agent_service/contracts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/agent_platform/execution_pipeline:
+        dir_name: Execution Invocation, Recovery Ledger & Worker Handoff
+        title: Execution Invocation, Recovery Ledger & Worker Handoff
+        scope:
+            - products/agent-platform/src/agent_service/services/execution_invocation.py
+            - products/agent-platform/src/agent_service/services/execution_recovery.py
+            - products/agent-platform/src/agent_service/services/execution_worker_client.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/execution_runtime/handoff_protocol
+    products/agent_platform/runtime_kernel_providers:
+        dir_name: Agent Service Runtime Kernel & Provider Adapters
+        title: Agent Service Runtime Kernel & Provider Adapters
+        scope:
+            - products/agent-platform/src/agent_service/core/
+            - products/agent-platform/src/agent_service/providers/
+            - products/agent-platform/src/agent_service/entrypoints/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/execution_runtime/execution_support
+    products/agent_platform/session_state_store:
+        dir_name: Session Lifecycle & Pluggable Store
+        title: Session Lifecycle & Pluggable Store
+        scope:
+            - products/agent-platform/src/agent_service/services/session_service.py
+            - products/agent-platform/src/agent_service/services/session_store.py
+            - products/agent-platform/src/agent_service/services/session_transcript.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/agent_platform/skills_documents_audit:
+        dir_name: Skill Drafts, Executable-Flow Graduation & Operations Documents
+        title: Skill Drafts, Executable-Flow Graduation & Operations Documents
+        scope:
+            - products/agent-platform/src/agent_service/services/skill_draft.py
+            - products/agent-platform/src/agent_service/services/skill_graduation.py
+            - products/agent-platform/src/agent_service/services/operation_documents.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/agent_platform/tests:
+        dir_name: Agent Platform Unit & Integration Tests
+        title: Agent Platform Unit & Integration Tests
+        scope:
+            - products/agent-platform/tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/audit_service:
+        dir_name: Audit Trail Service (SPEC-013)
+        title: Audit Trail Service (SPEC-013)
+        scope:
+            - products/audit-service/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+    products/execution_runtime:
+        dir_name: Execution Runtime Worker
+        title: Execution Runtime Worker
+        scope:
+            - products/execution-runtime/
+        source_files: []
+        children:
+            - products/execution_runtime/execution_support
+            - products/execution_runtime/executor_core
+            - products/execution_runtime/handoff_protocol
+            - products/execution_runtime/integration_failure_harness
+            - products/execution_runtime/ledger_persistence
+        depends_on: []
+        related_to: []
+    products/execution_runtime/execution_support:
+        dir_name: Execution Runtime Bootstrap & Core Observability
+        title: Execution Runtime Bootstrap & Core Observability
+        scope:
+            - products/execution-runtime/src/execution_runtime/core/
+            - products/execution-runtime/src/execution_runtime/app.py
+            - products/execution-runtime/src/execution_runtime/main.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/agent_platform/runtime_kernel_providers
+    products/execution_runtime/executor_core:
+        dir_name: Executor Core Gateway Transport, Single-Flight Idempotency & Delegated Execution
+        title: 'Executor Core: Gateway Transport, Single-Flight Idempotency & Delegated Execution'
+        scope:
+            - products/execution-runtime/src/execution_runtime/services/executor.py
+            - products/execution-runtime/src/execution_runtime/services/single_flight.py
+            - products/execution-runtime/src/execution_runtime/services/delegated_execution.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/tool_gateway/api_routes_schemas
+    products/execution_runtime/handoff_protocol:
+        dir_name: Execution Handoff HTTP API
+        title: Execution Handoff HTTP API
+        scope:
+            - products/execution-runtime/src/execution_runtime/api/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/agent_platform/execution_pipeline
+    products/execution_runtime/integration_failure_harness:
+        dir_name: Execution Runtime Failure-Proof Integration Harness (SPEC-063)
+        title: Execution Runtime Failure-Proof Integration Harness (SPEC-063)
+        scope:
+            - products/execution-runtime/tests/failure/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/execution_runtime/ledger_persistence:
+        dir_name: Execution Ledger Persistence & Migration
+        title: Execution Ledger Persistence & Migration
+        scope:
+            - products/execution-runtime/src/execution_runtime/services/execution_ledger.py
+            - products/execution-runtime/src/execution_runtime/services/execution_migration.py
+            - products/execution-runtime/src/execution_runtime/contracts/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/identity_broker:
+        dir_name: Identity Broker Service (SPEC-070)
+        title: Identity Broker Service (SPEC-070)
+        scope:
+            - products/identity-broker/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+            - path: products/tool_gateway/delegated_custody_services
+    products/incident_service:
+        dir_name: Incident Intake & Triage Service (SPEC-015)
+        title: Incident Intake & Triage Service (SPEC-015)
+        scope:
+            - products/incident-service/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+    products/operator_portal:
+        dir_name: Operator Portal Web UI
+        title: Operator Portal Web UI
+        scope:
+            - products/operator-portal/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/platform_gateway:
+        dir_name: Portal-Facing Platform Gateway (FastAPI HTTP Edge)
+        title: Portal-Facing Platform Gateway (FastAPI HTTP Edge)
+        scope:
+            - products/platform-gateway/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/agent_platform
+            - path: products/audit_service
+            - path: products/identity_broker
+            - path: products/incident_service
+            - path: products/skills_hub
+            - path: products/tool_gateway
+    products/skills_hub:
+        dir_name: Skills Hub — Federated Skill Ingestion & Retrieval Service
+        title: Skills Hub — Federated Skill Ingestion & Retrieval Service
+        scope:
+            - products/skills-hub/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+    products/tool_gateway:
+        dir_name: Luban Tool Gateway
+        title: Luban Tool Gateway
+        scope:
+            - products/tool-gateway/
+        source_files: []
+        children:
+            - products/tool_gateway/api_routes_schemas
+            - products/tool_gateway/core_runtime
+            - products/tool_gateway/delegated_custody_services
+            - products/tool_gateway/ingestion_adapters
+            - products/tool_gateway/policies
+            - products/tool_gateway/tools_connectors_registry
+        depends_on: []
+        related_to:
+            - path: products/platform_gateway
+    products/tool_gateway/api_routes_schemas:
+        dir_name: Tool Gateway API Routes & Wire Schemas
+        title: Tool Gateway API Routes & Wire Schemas
+        scope:
+            - products/tool-gateway/src/tool_gateway/api/
+            - products/tool-gateway/src/tool_gateway/schemas/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/agent_platform/api_layer
+            - path: products/execution_runtime/executor_core
+    products/tool_gateway/core_runtime:
+        dir_name: Gateway Runtime Bootstrap, Configuration & Observability
+        title: Gateway Runtime Bootstrap, Configuration & Observability
+        scope:
+            - products/tool-gateway/src/tool_gateway/core/
+            - products/tool-gateway/src/tool_gateway/app.py
+            - products/tool-gateway/src/tool_gateway/main.py
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/tool_gateway/delegated_custody_services:
+        dir_name: Tool-Gateway Orchestration & Delegated Custody Services
+        title: Tool-Gateway Orchestration & Delegated Custody Services
+        scope:
+            - products/tool-gateway/src/tool_gateway/services/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: products/identity_broker
+    products/tool_gateway/ingestion_adapters:
+        dir_name: Tool Ingestion Adapters (MCP & ServiceNow)
+        title: Tool Ingestion Adapters (MCP & ServiceNow)
+        scope:
+            - products/tool-gateway/src/tool_gateway/ingestion/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/tool_gateway/policies:
+        dir_name: Gateway Policy Bundles (Authorization & Password Strength)
+        title: Gateway Policy Bundles (Authorization & Password Strength)
+        scope:
+            - products/tool-gateway/src/tool_gateway/policies/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    products/tool_gateway/tools_connectors_registry:
+        dir_name: Tool Execution Framework & Connectors
+        title: Tool Execution Framework & Connectors
+        scope:
+            - products/tool-gateway/src/tool_gateway/tools/
         source_files: []
         children: []
         depends_on: []

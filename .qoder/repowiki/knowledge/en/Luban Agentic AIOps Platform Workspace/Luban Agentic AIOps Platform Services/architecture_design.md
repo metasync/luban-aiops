@@ -1,0 +1,9 @@
+Each child under `products/` is an independently built Python package (uv + pyproject.toml + Dockerfile) exposing a FastAPI app via `app.py`/`main.py`, with a uniform layout: `api/routes` for HTTP endpoints, `core/config|metrics|observability|request_context|telemetry` for shared infrastructure, `schemas` for request/response models, `services` for domain logic, and an `audit_emitter` service used by every child to publish events to the standalone audit-service.
+
+Cross-child wiring:
+- `platform_gateway` is the single portal-facing edge; it authenticates via `identity_broker`, enforces YAML policy (`policies/policy-default.yaml`) against each call, then proxies to `agent_platform`, `tool_gateway`, `skills_hub`, `incident_service`, and `audit_service`.
+- `execution_runtime` and `agent_platform` share the JSON schemas in their respective `contracts/` directories (`execution-handoff-response.schema.json`, `execution-ledger-v*.sql`, `execution-observation.schema.json`, `execution-receipt.schema.json`, `execution-recovery.schema.json`, `execution-request.schema.json`, `tool-result.schema.json`) so handoff/ledger payloads stay in sync between the worker and the agent orchestrator.
+- `operator_portal` is a React SPA served by nginx that calls back into `platform_gateway` using OIDC tokens issued by `identity_broker`.
+- `tool_gateway` provides the provider-independent delegated custody workflow that both `agent_platform` (via its tools/gateway_tools) and the execution runtime ultimately route through for tool invocations.
+
+There is no parent-level build or entrypoint — each service is deployed as its own container image.

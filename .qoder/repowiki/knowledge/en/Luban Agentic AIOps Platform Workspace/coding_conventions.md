@@ -1,5 +1,5 @@
-- Every product follows the same layout: `src/<service_name>/` with `app.py`, `main.py`, `metadata.py`, plus `api/`, `core/`, `services/`, `schemas/` subpackages, and a sibling `tests/` directory mirroring source modules.
-- Cross-service data contracts are defined once in `shared/shared-contracts/schemas/` as Pydantic models and imported by all consuming products rather than redefined locally.
-- Feature work is governed by numbered artifacts under `docs/specs/SPEC-NNN-<slug>/` containing plan.md, spec.md, and tasks.md, with corresponding release notes dated under `docs/agentic-aiops-platform/release-notes/`.
-- Container images for each product are built from per-product `Dockerfile`s that layer on the shared `shared/base-images/base-uv/Dockerfile` base image.
-- Build and image recipes are centralized in `mk/defaults.mk`, `mk/python.mk`, and `mk/image.mk` and included by each product's `Makefile` instead of being duplicated.
+- Each product under `products/` is self-contained with its own `pyproject.toml`, `uv.lock`, `Dockerfile`, `Makefile`, `src/<package>/`, and `tests/`, built and tested independently via `make -C products/<name>`.
+- Cross-product contracts live in `shared/shared-contracts/` (schemas, policies, SQL) and are consumed as read-only fixtures or scripts rather than imported as packages.
+- Policy bundles are authored once in `shared/shared-contracts/policies/` and copied to consumers via `make sync-policy` instead of being edited in place at call sites.
+- Product versions stay locked to the root `VERSION` file, enforced by `make validate-version` which checks every product's declared version.
+- Container images are built with a coordinated tag computed from `PLATFORM_VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, and pushed together via the root `make push`.

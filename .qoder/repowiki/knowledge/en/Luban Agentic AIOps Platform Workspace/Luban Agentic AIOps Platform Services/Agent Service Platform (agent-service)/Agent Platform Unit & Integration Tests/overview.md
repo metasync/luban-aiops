@@ -1,0 +1,1 @@
+Pytest suite exercising the agent-service HTTP API, runtime kernel, session stores (in-memory/Redis/Postgres), execution pipeline, secrets, skills, and observability against fakes and in-process clients.

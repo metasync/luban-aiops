@@ -1,0 +1,1 @@
+FastAPI router exposing the authenticated v3 execution handoff endpoint and liveness/readiness probes for the execution runtime.

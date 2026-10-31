@@ -7,26 +7,28 @@
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
+- [execution_run_guard.py](file://products/agent-platform/src/agent_service/services/execution_run_guard.py)
+- [flow_approvals.py](file://products/agent-platform/src/agent_service/services/flow_approvals.py)
+- [delegated_identity.py](file://products/agent-platform/src/agent_service/services/delegated_identity.py)
 - [providers/__init__.py](file://products/agent-platform/src/agent_service/providers/__init__.py)
 - [services/model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [services/agent_state_store.py](file://products/agent-platform/src/agent_service/services/agent_state_store.py)
 - [services/evidence_store.py](file://products/agent-platform/src/agent_service/services/evidence_store.py)
 - [services/operation_documents.py](file://products/agent-platform/src/agent_service/services/operation_documents.py)
 - [api/v2/routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
-- [tests/test_operation_documents.py](file://products/agent-platform/tests/test_operation_documents.py)
-- [tests/test_documents.py](file://products/agent-platform/tests/test_documents.py)
-- [tests/test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
-- [tests/test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
+- [tests/test_delegated_identity.py](file://products/agent-platform/tests/test_delegated_identity.py)
 - [tests/test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated Stream Schema References section to reflect v5 to v6 transition with risk_level support
-- Enhanced Human-in-the-Loop Approvals section with risk_level details for pending calls
-- Updated Contract Stability section to document the additive nature of schema evolution
-- Added specific references to SPEC-021 bounded mutating actions and risk tier handling
+- Added comprehensive documentation for bounded kernel stop functionality with durable authorization-required evidence tracking
+- Documented the new execution run guard system with process-local latches and persistent run identity
+- Added detailed coverage of delegated identity service for user-delegated credential lifecycle management
+- Enhanced evidence tracking section to cover authorization-required flows and secret release permits
+- Updated security model documentation to reflect the two-part backstop approach (kernel-side + gateway enforcement)
+- Added new sections covering flow approvals, browser flow authority, and session-scoped context management
 
 ## Table of Contents
 1. Introduction
@@ -42,7 +44,7 @@
 ## Introduction
 The Agent Platform is the orchestration engine of the Luban AIOps platform. It owns agent sessions, coordinates LLM model switching at runtime, drives tool execution via the Tool Gateway, and persists evidence for replay and audit. It exposes a FastAPI-based v2 contract that streams chat events, manages human-in-the-loop approvals, and integrates with session persistence backends (in-memory or PostgreSQL). The service also supports live model discovery and a credential-gated multi-model catalog so operators can switch models mid-conversation without losing conversation history.
 
-**Updated** The platform includes an optional context compression feature through the CompressContext tool (SPEC-064), which allows agents to proactively compress their working context between tasks while maintaining full backward compatibility when disabled. This feature was delivered in v0.44.0 as an opt-in, default-off capability that preserves all existing security and governance boundaries.
+**Updated** The platform now implements a robust bounded kernel stop mechanism with durable authorization-required evidence tracking and a delegated identity service for user-delegated credential lifecycle management. These enhancements provide fail-closed safety guarantees through process-local latches while maintaining durability across restarts via Postgres-backed execution records. The system enforces a two-part backstop approach where kernel-side checks complement gateway-level authorization enforcement.
 
 ## Project Structure
 The Agent Platform service lives under products/agent-platform/src/agent_service and is organized into:
@@ -52,6 +54,9 @@ The Agent Platform service lives under products/agent-platform/src/agent_service
 - Provider registry and multi-model catalog
 - Session state and evidence stores with pluggable backends
 - Operation document repository with retention policies
+- Execution run guard with bounded stop functionality and persistent run identity
+- Delegated identity service for user-delegated credential lifecycle management
+- Flow approvals system for browser flow authority and context management
 - Configuration and environment-driven settings
 
 ```mermaid
@@ -68,6 +73,9 @@ SS["services/agent_state_store.py<br/>Session state store"]
 ES["services/evidence_store.py<br/>Evidence store"]
 OD["services/operation_documents.py<br/>Operation document store"]
 KM["services/kernel_middleware.py<br/>Kernel middleware"]
+ERG["services/execution_run_guard.py<br/>Execution Run Guard"]
+DI["services/delegated_identity.py<br/>Delegated Identity"]
+FA["services/flow_approvals.py<br/>Flow Approvals"]
 end
 M --> A --> R --> K
 K --> S
@@ -76,6 +84,9 @@ K --> C
 K --> SS
 K --> ES
 K --> KM
+K --> ERG
+K --> DI
+K --> FA
 R --> OD
 ```
 
@@ -91,6 +102,9 @@ R --> OD
 - [services/evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 - [services/operation_documents.py:530-572](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L572)
 - [kernel_middleware.py:105-117](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L105-L117)
+- [execution_run_guard.py:1-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L1-L284)
+- [delegated_identity.py:1-131](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L1-L131)
+- [flow_approvals.py:1-281](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L281)
 
 **Section sources**
 - [main.py:1-22](file://products/agent-platform/src/agent_service/main.py#L1-L22)
@@ -104,6 +118,9 @@ R --> OD
 - Evidence store: Captures tool_call/tool_result frames per turn with size caps and budget eviction; persisted to memory or PostgreSQL.
 - Operation document repository: Manages typed operational documents (shift summaries, incident reports) with owner-scoped visibility, one-way publish lifecycle, and 30-day retention sweep.
 - Kernel middleware: Permission gates, evidence capture, and local tool management including the optional CompressContext tool.
+- Execution run guard: Provides bounded kernel stop functionality with process-local monotonic latches, persistent run identity binding, and single-use secret-release permits.
+- Delegated identity service: Validates user-delegated credentials with strict JWT verification, context-scoped requester/decider identities, and session birth field management.
+- Flow approvals system: Manages session-scoped browser flow authority and context with TTL-bounded auto-signing and flow-killing error handling.
 - API v2 routes: Chat, streaming chat, confirmation bridge, session management, model catalog exposure, evidence retrieval, and operation document CRUD.
 
 **Section sources**
@@ -113,30 +130,38 @@ R --> OD
 - [services/evidence_store.py:1-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L1-L551)
 - [services/operation_documents.py:1-573](file://products/agent-platform/src/agent_service/services/operation_documents.py#L1-L573)
 - [kernel_middleware.py:105-117](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L105-L117)
+- [execution_run_guard.py:1-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L1-L284)
+- [delegated_identity.py:1-131](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L1-L131)
+- [flow_approvals.py:1-281](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L281)
 - [api/v2/routes.py:276-800](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L800)
 
 ## Architecture Overview
 The request flow starts at the Uvicorn entrypoint, which boots the FastAPI app. The app configures logging, metrics, telemetry, and includes the v2 router. Routes validate identity headers, resolve sessions and models, then delegate to the runtime kernel. The kernel constructs or reuses an AgentScope agent bound to a session, optionally restoring persisted state, and executes turns with middleware for permissions, evidence capture, tracing, and token budgets. Streaming responses are normalized to the shared v2 schema and emitted as Server-Sent Events. Operation documents follow a separate lifecycle through the operation document repository with owner-scoped visibility and retention policies.
 
-**Updated** The kernel now supports optional context compression through the CompressContext tool, which can be enabled via the AGENTSCOPE_COMPRESS_CONTEXT_ENABLED environment variable. When enabled, agents can proactively compress their working context between tasks using the same underlying mechanism as threshold-based compression, providing better control over long-running sessions.
+**Updated** The enhanced architecture now includes bounded kernel stop functionality through the execution run guard, which provides process-local monotonic latches for synchronous fail-closed checks before any mutation occurs. The delegated identity service validates user-delegated credentials and establishes context-scoped requester/decider identities throughout the execution path. Flow approvals manage session-scoped browser flow authority with TTL-bounded auto-signing capabilities.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
 participant API as "FastAPI /api/v2"
 participant Kernel as "AgentKernel"
+participant ERG as "ExecutionRunGuard"
+participant DI as "DelegatedIdentity"
 participant DocStore as "OperationDocumentStore"
 participant Catalog as "ModelCatalog"
 participant Store as "State/Evidence Stores"
 Client->>API : POST /chat or GET /chat/stream
 API->>API : Validate headers, ensure session
+API->>DI : Verify delegated identity (if enabled)
+DI-->>API : VerifiedHuman context
 API->>Catalog : Resolve model (request > pinned > default)
 Catalog-->>API : Model id
 API->>Kernel : reply_text / stream_events
+Kernel->>ERG : Bind run identity (new or restored)
 Kernel->>Store : Restore agent state (if any)
 Kernel->>Kernel : Build toolkit (gateway tools if configured)
 Kernel->>Kernel : Execute turn with middlewares
-Note over Kernel : Optional CompressContext tool (SPEC-064)
+Note over Kernel : Bounded stop checks via ERG before mutations
 Kernel-->>API : Text or stream frames
 API-->>Client : Response or SSE frames
 Note over Client,DocStore : Operation documents follow separate lifecycle
@@ -149,12 +174,132 @@ DocStore-->>API : Draft document (subject to 30-day sweep)
 - [app.py:19-79](file://products/agent-platform/src/agent_service/app.py#L19-L79)
 - [api/v2/routes.py:276-365](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L365)
 - [runtime_kernel.py:662-774](file://products/agent-platform/src/agent_service/runtime_kernel.py#L662-L774)
+- [execution_run_guard.py:271-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L271-L284)
+- [delegated_identity.py:96-98](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L96-L98)
 - [services/model_catalog.py:236-331](file://products/agent-platform/src/agent_service/services/model_catalog.py#L236-L331)
 - [services/agent_state_store.py:276-324](file://products/agent-platform/src/agent_service/services/agent_state_store.py#L276-L324)
 - [services/evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 - [services/operation_documents.py:139-142](file://products/agent-platform/src/agent_service/services/operation_documents.py#L139-L142)
 
 ## Detailed Component Analysis
+
+### Bounded Kernel Stop and Execution Run Guard
+**New** The execution run guard provides bounded kernel stop functionality with durable authorization-required evidence tracking. This system ensures fail-closed safety through process-local monotonic latches while maintaining durability across restarts via Postgres-backed execution records.
+
+Key components include:
+- **Process-local monotonic latch**: Never evicting, deliberately unbounded storage keyed by run_id that prevents later synchronous checks from wrongly passing after a stop
+- **Persistent root-run identity**: Binds run/session/owner relationships that survive park/resume and restore operations without reminting
+- **Single-use secret-release permits**: PID-bound, non-serializable permits minted only from verified original durable success on non-stopped runs
+- **Durable stop coordination**: Sets local latch first (fail closed), then attempts durable stop write; returns True only when acknowledged
+
+```mermaid
+flowchart TD
+Start(["Execute Turn"]) --> BindRun["Bind RunGuard with persistent identity"]
+BindRun --> CheckStop{"Check process-local latch"}
+CheckStop --> |Stopped| FailClosed["Raise ProtocolError('run_stopped')"]
+CheckStop --> |Not Stopped| Execute["Execute tool call"]
+Execute --> DurableCheck{"Attempt durable stop write"}
+DurableCheck --> |Success| Continue["Continue execution"]
+DurableCheck --> |Failure| LocalStop["Local latch stays set"]
+LocalStop --> FailClosed
+Continue --> SecretPermit{"Secret release permit needed?"}
+SecretPermit --> |Yes| MintPermit["Mint single-use permit from verified original"]
+SecretPermit --> |No| Complete["Complete turn"]
+MintPermit --> PermitCheck{"Permit valid and not stopped?"}
+PermitCheck --> |Yes| Reveal["Reveal already-held delivery handle"]
+PermitCheck --> |No| BurnPermit["Burn permit silently"]
+Reveal --> Complete
+BurnPermit --> Complete
+```
+
+**Diagram sources**
+- [execution_run_guard.py:154-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L154-L284)
+- [execution_run_guard.py:46-84](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L46-L84)
+- [execution_run_guard.py:89-143](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L89-L143)
+
+**Security Properties**
+- **Fail-closed synchronization**: Process-local latch prevents race conditions between durable stop writes and mutation checks
+- **Two-part backstop**: Kernel-side checks complement gateway-level authorization enforcement (ADR-0010)
+- **Audit trail preservation**: Failed acquisition results are still durably accepted as evidence without minting reveal capabilities
+- **Process isolation**: Secret-release permits cannot cross process boundaries or be serialized
+
+**Section sources**
+- [execution_run_guard.py:1-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L1-L284)
+
+### Delegated Identity Service
+**New** The delegated identity service provides strict, non-model human identity validation for requester-owned target grants. It validates user-delegated credentials with context-scoped requester/decider identities and manages session birth fields for secure credential lifecycle management.
+
+Core functionality includes:
+- **JWT Verification**: Strict validation of RS256-signed tokens with required claims (exp, iat, iss, sub, aud, authentication_source, act)
+- **Context-scoped identities**: REQUESTER_IDENTITY and DECIDER_IDENTITY ContextVars maintain verified human identities throughout execution
+- **Session birth field management**: Securely captures requester namespace and subject during session creation
+- **Live identity validation**: Requires identities to be current (not expired) for all sensitive operations
+
+```mermaid
+flowchart TD
+Token["User-delegated JWT Token"] --> Verify["DelegatedIdentityVerifier.verify()"]
+Verify --> Claims["Validate required claims"]
+Claims --> ActorCheck{"Actor in allowed actors?"}
+ActorCheck --> |No| Error["Raise DelegatedIdentityError"]
+ActorCheck --> |Yes| LiveCheck{"Identity not expired?"}
+LiveCheck --> |No| Error
+LiveCheck --> |Yes| Context["Set REQUESTER_IDENTITY/DECIDER_IDENTITY"]
+Context --> SessionBirth["Manage session birth fields"]
+SessionBirth --> ExecPath["Execute with verified identity context"]
+ExecPath --> Cleanup["Clear context on completion/error"]
+```
+
+**Diagram sources**
+- [delegated_identity.py:58-98](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L58-L98)
+- [delegated_identity.py:101-131](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L101-L131)
+
+**Security Guarantees**
+- **Strict claim validation**: Rejects malformed tokens, expired identities, and unauthorized actors
+- **Context isolation**: Verified identities are process-local and cannot be serialized or copied
+- **Session scoping**: Only sessions created with matching requester identity can authorize delegated acquisition
+- **Live requirement**: All sensitive operations require current (non-expired) identities
+
+**Section sources**
+- [delegated_identity.py:1-131](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L1-L131)
+
+### Flow Approvals and Browser Flow Authority
+**New** The flow approvals system manages session-scoped browser flow authority and context, providing a two-part backstop for mutating browser flows. It maintains both flow context reflection and operator approval state with TTL-bounded auto-signing capabilities.
+
+Key features include:
+- **Flow context reflection**: Tracks gateway-owned flow bindings including skill_id, origin, title, description, risk_class, and step budgets
+- **Operator approval management**: Records approved flow authorities with TTL expiration and run_id inheritance
+- **Flow-killing error handling**: Automatically clears both context and approval stores on gateway refusal codes
+- **TTL-bounded auto-signing**: Allows subsequent writes in the same flow without re-parking while maintaining security boundaries
+
+```mermaid
+flowchart TD
+Navigate["web.navigate with flow"] --> RecordContext["Record FlowContext in FLOW_CONTEXTS"]
+RecordContext --> ApprovalCheck{"Existing approval for flow?"}
+ApprovalCheck --> |Yes| AutoSign["Auto-sign under existing authority"]
+ApprovalCheck --> |No| Park["Park for operator approval"]
+Park --> Decision{"Operator decision"}
+Decision --> |Approve| RecordApproval["Record FlowApproval with TTL"]
+Decision --> |Deny| Refuse["Refuse operation"]
+RecordApproval --> AutoSign
+AutoSign --> Execute["Execute mutated browser action"]
+Execute --> ErrorCheck{"Gateway refusal code?"}
+ErrorCheck --> |Flow-killing| ClearStores["Clear FLOW_CONTEXTS and FLOW_APPROVALS"]
+ErrorCheck --> |Normal| Continue["Continue normal flow"]
+ClearStores --> Repark["Next write re-parks for fresh approval"]
+```
+
+**Diagram sources**
+- [flow_approvals.py:78-165](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L78-L165)
+- [flow_approvals.py:167-267](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L167-L267)
+
+**Security Boundaries**
+- **Dual-store consistency**: Both FLOW_CONTEXTS and FLOW_APPROVALS cleared together on flow-killing errors
+- **Identity scoping**: Auto-signing authority scoped to specific flow identity (skill_id, origin)
+- **TTL enforcement**: Authorities expire after configured timeout, requiring fresh operator approval
+- **Gateway enforcement**: Tool-gateway deviation guard bounds every unlocked invocation
+
+**Section sources**
+- [flow_approvals.py:1-281](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L281)
 
 ### Runtime Kernel
 The kernel is the central coordinator:
@@ -165,6 +310,7 @@ The kernel is the central coordinator:
 - Integrates with Tool Gateway by discovering tools per bearer token and filtering mutating tools when HITL bridging is disabled.
 - Streams prose redaction safely, flushing held-back tails before terminal events.
 - Persists evidence best-effort with size caps and session budgets.
+- **Enhanced** Now coordinates with execution run guard for bounded stop functionality and delegated identity service for context-scoped identity management.
 
 **Updated** The kernel now supports optional context compression through ContextConfig.compression_tool_enabled, which is controlled by the AGENTSCOPE_COMPRESS_CONTEXT_ENABLED setting. When enabled, the CompressContext tool becomes available to agents for proactive context compression between tasks, operating exclusively on internal agent state without external system access.
 
@@ -178,7 +324,10 @@ ToolkitCheck --> |Yes| Rebuild
 ToolkitCheck --> |No| ReturnCached["Return cached agent"]
 CheckCache --> |No| Lock["Acquire agent lock"]
 Lock --> Build["Build agent: restore state, build toolkit, compose middlewares"]
-Build --> Cache["Insert into LRU cache"]
+Build --> ERG["Bind execution run guard"]
+Build --> DI["Setup delegated identity context"]
+ERG --> Cache["Insert into LRU cache"]
+DI --> Cache
 Cache --> ReturnCached
 ```
 
@@ -360,11 +509,15 @@ This pattern preserves intended ordering while staying well inside the retention
 ### Session Persistence and Evidence
 - Agent state: Persisted per session as JSON snapshots; restored on agent creation. Backends: in-memory (dev/CI) and PostgreSQL (deployed). TTL-aware reads keep rows alive during active sessions; opportunistic sweep reclaims expired rows.
 - Evidence: Captures tool_call and tool_result frames per turn with per-entry char caps and per-session byte budgets. Eviction nulls oldest result payloads while preserving metadata. Backends mirror the state store selection via AGENT_STATE_STORE_BACKEND and share AGENT_STATE_DB_URL.
+- **Enhanced** Now includes authorization-required evidence tracking through the execution run guard system, capturing durable evidence for secret release permits and bounded stop operations.
 
 ```mermaid
 flowchart TD
 TurnStart["Turn begins"] --> Capture["Capture tool_call/tool_result frames"]
-Capture --> Cap["Apply per-entry cap (truncated marker if needed)"]
+Capture --> ERGCheck{"Execution run guard bound?"}
+ERGCheck --> |Yes| DurableEvidence["Record durable evidence for authorization"]
+ERGCheck --> |No| Cap["Apply per-entry cap (truncated marker if needed)"]
+DurableEvidence --> Cap
 Cap --> Insert["Insert rows (memory or postgres)"]
 Insert --> Budget{"Exceeds session budget?"}
 Budget --> |Yes| Evict["Evict oldest result payload(s)"]
@@ -376,6 +529,7 @@ Evict --> Budget
 - [services/evidence_store.py:46-70](file://products/agent-platform/src/agent_service/services/evidence_store.py#L46-L70)
 - [services/evidence_store.py:118-164](file://products/agent-platform/src/agent_service/services/evidence_store.py#L118-L164)
 - [services/agent_state_store.py:152-260](file://products/agent-platform/src/agent_service/services/agent_state_store.py#L152-L260)
+- [execution_run_guard.py:228-268](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L228-L268)
 
 **Section sources**
 - [services/agent_state_store.py:1-324](file://products/agent-platform/src/agent_service/services/agent_state_store.py#L1-L324)
@@ -385,6 +539,7 @@ Evict --> Budget
 - Parking: When a tool call requires approval, the kernel emits a confirmation_request event with pending_calls and halts until resolved.
 - Bridge: The confirm endpoint claims the parked confirmation, persists outcome at claim time, and resumes the turn with the decision. Expired parks are interrupted to avoid wedging sessions.
 - Read-only mode: Automated diagnostic turns restrict toolkits to read-level tools to prevent accidental mutations.
+- **Enhanced** Now includes bounded stop coordination through execution run guard and delegated identity context for authorized resume operations.
 
 **Updated** The confirmation system now includes risk_level metadata for each pending call, enabling the portal to display mutating badges and provide enhanced visibility into the risk tier of operations requiring approval. This enhancement was introduced in SPEC-021 and corresponds to stream schema v6.
 
@@ -393,9 +548,11 @@ sequenceDiagram
 participant Client as "Client"
 participant API as "v2 routes"
 participant Kernel as "AgentKernel"
+participant ERG as "ExecutionRunGuard"
 participant Reg as "Confirmation Registry"
 Client->>API : GET /chat/stream
 API->>Kernel : stream_events(...)
+Kernel->>ERG : Ensure not stopped before mutation
 Kernel-->>API : ... tool_call ...
 Kernel-->>API : confirmation_request {pending_calls, risk_level}
 Note over Kernel,API : Turn parked awaiting decision with risk awareness
@@ -403,6 +560,7 @@ Client->>API : POST /chat/confirm {decision}
 API->>Reg : claim(confirm_id, ttl)
 Reg-->>API : PendingConfirmation
 API->>Kernel : resume_confirmation(pending, decision)
+Kernel->>ERG : Resume with bounded stop protection
 Kernel-->>API : Stream resumes with tool_result
 API-->>Client : SSE frames continue
 ```
@@ -411,6 +569,7 @@ API-->>Client : SSE frames continue
 - [api/v2/routes.py:368-464](file://products/agent-platform/src/agent_service/api/v2/routes.py#L368-L464)
 - [api/v2/routes.py:202-243](file://products/agent-platform/src/agent_service/api/v2/routes.py#L202-L243)
 - [runtime_kernel.py:340-450](file://products/agent-platform/src/agent_service/runtime_kernel.py#L340-L450)
+- [execution_run_guard.py:187-198](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L187-L198)
 
 **Section sources**
 - [api/v2/routes.py:202-464](file://products/agent-platform/src/agent_service/api/v2/routes.py#L202-L464)
@@ -420,6 +579,7 @@ API-->>Client : SSE frames continue
 - Discovery: On toolkit build, the kernel discovers available tools from the Tool Gateway using the delegated bearer token. Results are filtered for mutating tools when HITL bridging is disabled and restricted to read-only for automated diagnostic turns.
 - No-tools guard: If no operational tools are reachable, a deterministic system notice is injected to prevent fabrication.
 - Toolkit caching: Per bearer token to avoid repeated discovery; empty results are not cached so subsequent turns retry discovery.
+- **Enhanced** Now includes bounded stop coordination and authorization-required evidence tracking for tool execution.
 
 **Section sources**
 - [runtime_kernel.py:340-450](file://products/agent-platform/src/agent_service/runtime_kernel.py#L340-L450)
@@ -429,6 +589,7 @@ API-->>Client : SSE frames continue
 - Normalization: Kernel stream chunks are translated into the v2 schema, preserving tool_call/tool_result frames for evidence panels and ensuring only known event types pass through.
 - Prose redaction: Streaming text is redacted for credentials; terminal events flush any held-back tail to avoid missing content in the UI.
 - SSE: The streaming endpoint yields data lines with normalized events.
+- **Enhanced** Now includes secret_delivery frame support with bounded stop protection and authorization-required evidence tracking.
 
 **Updated** The streaming schema has evolved from v5 to v6, adding optional risk_level support for pending calls in confirmation_request frames. This enables enhanced risk visualization in the portal while maintaining backward compatibility with older clients.
 
@@ -468,6 +629,7 @@ V11 --> V12["Schema v12<br/>secret_delivery event type"]
 - Kernel dependencies: Uses provider registry, model catalog, runtime settings, state/evidence stores, and middleware services.
 - Route dependencies: Depends on runtime kernel, session services, model catalog, stores, and schemas.
 - Operation document dependencies: Routes depend on the operation document store singleton for document lifecycle management.
+- **Enhanced** New dependencies include execution run guard for bounded stop functionality, delegated identity service for credential validation, and flow approvals for browser flow authority management.
 
 ```mermaid
 graph LR
@@ -481,6 +643,9 @@ Kernel --> Catalog["services/model_catalog.py"]
 Kernel --> StateStore["services/agent_state_store.py"]
 Kernel --> Evidence["services/evidence_store.py"]
 Kernel --> Middleware["services/kernel_middleware.py"]
+Kernel --> ERG["services/execution_run_guard.py"]
+Kernel --> DI["services/delegated_identity.py"]
+Kernel --> FA["services/flow_approvals.py"]
 ```
 
 **Diagram sources**
@@ -495,6 +660,9 @@ Kernel --> Middleware["services/kernel_middleware.py"]
 - [services/evidence_store.py:504-551](file://products/agent-platform/src/agent_service/services/evidence_store.py#L504-L551)
 - [services/operation_documents.py:530-572](file://products/agent-platform/src/agent_service/services/operation_documents.py#L530-L572)
 - [kernel_middleware.py:105-117](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L105-L117)
+- [execution_run_guard.py:1-284](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L1-L284)
+- [delegated_identity.py:1-131](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L1-L131)
+- [flow_approvals.py:1-281](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L1-L281)
 
 **Section sources**
 - [app.py:19-79](file://products/agent-platform/src/agent_service/app.py#L19-L79)
@@ -511,6 +679,9 @@ Kernel --> Middleware["services/kernel_middleware.py"]
 - **Context Compression Benefits**: When enabled, CompressContext provides proactive context management that can improve long-running session performance by reducing context size before reaching threshold limits, potentially reducing LLM processing costs and improving response times for extended conversations.
 - **Compression Overhead**: The compression tool itself has minimal overhead since it reuses the existing `_compress_context_impl` mechanism and operates only on in-memory state.
 - **Risk Level Processing**: The addition of risk_level metadata in stream schema v6 adds negligible overhead as it's derived from existing tool metadata and processed only during confirmation frame generation.
+- **Bounded Stop Performance**: Process-local latches provide O(1) synchronous stop checks with minimal overhead, while durable stop writes are asynchronous and retried idempotently.
+- **Delegated Identity Caching**: JWKS client caching with 300-second lifespan reduces cryptographic overhead for identity verification.
+- **Flow Approval Memory Management**: In-memory flow context and approval stores are bounded per-process and cleared on flow-killing errors to prevent memory leaks.
 
 ## Troubleshooting Guide
 - Unknown model id: Requests specifying an unrecognized model id fail closed with 422; verify the model exists in the catalog or remove the field to use pinned/default.
@@ -526,6 +697,10 @@ Kernel --> Middleware["services/kernel_middleware.py"]
 - **Compression Configuration Conflicts**: Ensure that AGENTSCOPE_CONTEXT_TRIGGER_RATIO is greater than 0.2 when enabling compression. The startup validation enforces this constraint to maintain proper ordering between agent-driven and threshold-based compression.
 - **Performance Impact Assessment**: Monitor session duration and context size when enabling compression to assess its effectiveness. The feature should reduce context growth and improve long-running session performance.
 - **Stream Schema Compatibility**: If clients experience issues with stream events, verify they handle optional fields correctly. The schema evolution from v5 to v6 added optional risk_level fields that older clients should ignore gracefully.
+- **Bounded Stop Issues**: If mutations are failing with "run_stopped" errors, check if a durable stop was issued. The process-local latch provides immediate fail-closed behavior while durable writes are retried asynchronously.
+- **Delegated Identity Validation**: If requests are rejected with "verified human identity required", verify that the delegated identity service is properly configured with correct issuer, audience, and actor settings.
+- **Flow Approval Problems**: If browser flows are repeatedly parking for approval, check for flow-killing error codes or TTL expiration. The flow context and approval stores are cleared together on gateway refusals.
+- **Secret Release Failures**: If secret deliveries are not being revealed, verify that the execution run guard permit is valid, not expired, and that the run is not stopped. The permit is single-use and process-bound.
 
 **Section sources**
 - [api/v2/routes.py:202-243](file://products/agent-platform/src/agent_service/api/v2/routes.py#L202-L243)
@@ -537,10 +712,17 @@ Kernel --> Middleware["services/kernel_middleware.py"]
 - [tests/test_operation_documents.py:53-55](file://products/agent-platform/tests/test_operation_documents.py#L53-L55)
 - [runtime_settings.py:319-328](file://products/agent-platform/src/agent_service/runtime_settings.py#L319-L328)
 - [tests/test_runtime_settings.py:637-678](file://products/agent-platform/tests/test_runtime_settings.py#L637-L678)
+- [execution_run_guard.py:187-198](file://products/agent-platform/src/agent_service/services/execution_run_guard.py#L187-L198)
+- [delegated_identity.py:46-48](file://products/agent-platform/src/agent_service/services/delegated_identity.py#L46-L48)
+- [flow_approvals.py:70-75](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L70-L75)
 
 ## Conclusion
 The Agent Platform provides a robust, observable, and durable orchestration layer for AIOPS workflows. It centralizes session lifecycle, supports dynamic model switching across multiple providers, enforces safety through HITL approvals and read-only modes, and captures rich evidence for transparency and replay. With pluggable persistence, streaming responses, and careful error handling, it scales to concurrent sessions while maintaining reliability and auditability. 
 
-**Updated** The addition of optional context compression through the CompressContext tool (SPEC-064) represents a significant advancement in agent autonomy while preserving the platform's security and governance principles. Delivered in v0.44.0 as an opt-in, default-off feature, it enables agents to proactively manage their working context without introducing new execution surfaces or compromising existing safety boundaries. The enhanced system prompt now ensures that operational requests are handled more intelligently by proactively searching for relevant skills before refusing requests due to lack of immediate knowledge, improving both user experience and operational efficiency. The addition of the operation document repository with retention policies provides durable operational documentation with automatic cleanup, while the clock-relative timestamp pattern ensures test stability across different deployment timelines. Together, these enhancements demonstrate the platform's commitment to balancing agent capability with operational safety and governance.
+**Updated** The addition of bounded kernel stop functionality with durable authorization-required evidence tracking represents a significant advancement in safety guarantees. The execution run guard system provides fail-closed protection through process-local latches while maintaining durability across restarts via Postgres-backed execution records. The delegated identity service enables secure user-delegated credential lifecycle management with strict JWT validation and context-scoped identity propagation. The flow approvals system provides session-scoped browser flow authority with TTL-bounded auto-signing capabilities.
+
+The addition of optional context compression through the CompressContext tool (SPEC-064) represents another significant advancement in agent autonomy while preserving the platform's security and governance principles. Delivered in v0.44.0 as an opt-in, default-off feature, it enables agents to proactively manage their working context without introducing new execution surfaces or compromising existing safety boundaries. The enhanced system prompt now ensures that operational requests are handled more intelligently by proactively searching for relevant skills before refusing requests due to lack of immediate knowledge, improving both user experience and operational efficiency. The addition of the operation document repository with retention policies provides durable operational documentation with automatic cleanup, while the clock-relative timestamp pattern ensures test stability across different deployment timelines. Together, these enhancements demonstrate the platform's commitment to balancing agent capability with operational safety and governance.
 
 The stream schema evolution from v5 to v6 and beyond showcases the platform's commitment to incremental, backward-compatible improvements. Each schema version adds optional fields that enhance functionality while maintaining compatibility with existing clients. The risk_level support in v6 enables enhanced risk visualization for confirmation workflows, demonstrating how the platform can evolve its capabilities while preserving contract stability and client interoperability.
+
+The two-part backstop approach (kernel-side checks + gateway enforcement) ensures that safety boundaries are maintained even in the presence of race conditions or partial failures. This architectural pattern, combined with the bounded stop functionality and delegated identity service, creates a comprehensive security model that protects against both malicious and accidental misuse while maintaining operational flexibility.

@@ -1,0 +1,1 @@
+Python ≥3.11 with uv; FastAPI + uvicorn for HTTP, Pydantic v2 for wire schemas, psycopg[binary] for Postgres custody store, httpx for outbound calls, Playwright for browser-bound tools, OpenTelemetry SDK + FastAPI/HTTPX instrumentation, Prometheus client, and MCP/ServiceNow SDKs for ingestion.

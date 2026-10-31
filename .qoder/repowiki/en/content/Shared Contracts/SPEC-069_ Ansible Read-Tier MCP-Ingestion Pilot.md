@@ -21,6 +21,7 @@
 - [test_ansible_mcp_ingestion.py](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py)
 - [test_ansible_native.py](file://products/tool-gateway/tests/test_ansible_native.py)
 - [mock_ansible_mcp_server.py](file://shared/platform-ops/gitops/runtime-profiles/ansible-dev/mock_ansible_mcp_server.py)
+- [ansible-mcp-check.sh](file://shared/platform-ops/e2e/ansible-mcp-check.sh)
 </cite>
 
 ## Update Summary
@@ -31,6 +32,7 @@
 - Updated supply-chain decision from SurgeX-Labs/awx-mcp-server to Red Hat's ansible/aap-mcp-server as production target
 - Added detailed fail-closed failure classification mechanisms for transport/timeout/SDK errors
 - Enhanced troubleshooting guide with new audit attribution troubleshooting entries
+- **Updated**: Documented parameterization changes to R-6 live-check instrument with enhanced security controls for real AAP deployments
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -414,6 +416,48 @@ Audit --> End(["Structured result returned"])
 - [test_ansible_mcp_ingestion.py:375-415](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py#L375-L415)
 - [test_ansible_mcp_ingestion.py:547-598](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py#L547-L598)
 
+### Parameterized Live-Check Instrument with Enhanced Security Controls (R-6 - DELIVERED)
+The R-6 live-check instrument has been comprehensively parameterized to support both development mock environments and production AAP deployments with enhanced security controls. The `ansible-mcp-check.sh` script now takes its expected topology from environment variables, providing robust protection against accidental assertion of mock topology against real servers.
+
+**Security Enhancements:**
+- **Explicit Parameter Validation**: `LIVE_TARGET=true` refuses to start until all seven expected value parameters are set explicitly, preventing accidental use of mock defaults against real AAP
+- **Secure JSON Construction**: Uses a new `json_str()` helper function instead of shell interpolation to prevent injection attacks through free-text values like inventory names containing quotes or backslashes
+- **Enhanced Redaction Testing**: Supports both mock bearer tokens and operator-supplied secrets files for comprehensive credential leakage detection
+- **Strict Live Mode**: Implies `STRICT_LIVE=true` for operator runs, turning skipped live legs into hard failures rather than notes
+
+```mermaid
+flowchart TD
+Start(["Live check execution"]) --> Mode{"LIVE_TARGET set?"}
+Mode --> |false| MockMode["Mock environment mode"]
+Mode --> |true| RealMode["Real AAP deployment mode"]
+MockMode --> MockDefaults["Use canned mock values"]
+RealMode --> ValidateParams["Validate all 7 parameters explicitly set"]
+ValidateParams --> SecureJSON["Build requests with json_str() helper"]
+MockDefaults --> RunChecks["Run standard checks"]
+SecureJSON --> RunChecks
+RunChecks --> RedactionTest["Test credential redaction"]
+RedactionTest --> Success["Validation passed"]
+```
+
+**Diagram sources**
+- [ansible-mcp-check.sh:104-197](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L104-L197)
+- [ansible-mcp-check.sh:244-252](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L244-L252)
+- [ansible-mcp-check.sh:468-534](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L468-L534)
+
+Key implementation details:
+- **Environment Variables**: `EXPECT_INVENTORY_NAME`, `EXPECT_INVENTORY_HOSTS`, `EXPECT_JOB_TEMPLATE_NAME`, `EXPECT_JOB_ID`, `EXPECT_JOB_STATUS`, `EXPECT_STDOUT_MARKER`, and `REDACTION_SECRETS_FILE`
+- **Parameter Tracking**: Tracks which knobs were explicitly set before applying defaults to distinguish mock vs real deployments
+- **Fail-Closed Codes**: Maintains strict accept-list of valid fail-closed codes: `MCP_TRANSPORT_ERROR`, `MCP_SDK_UNAVAILABLE`, `CREDENTIAL_SET_NOT_FOUND`, `CREDENTIAL_SCHEME_UNSUPPORTED`
+- **Two-Sink Credential Management**: Ensures mock bearer and operator secrets are properly handled in different deployment contexts
+
+**Updated** The parameterization provides defense-in-depth against operational mistakes while maintaining backward compatibility with existing mock-based testing workflows. The security controls ensure that real AAP deployments cannot accidentally validate against mock topology data.
+
+**Section sources**
+- [spec.md:459-480](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md#L459-L480)
+- [ansible-mcp-check.sh:104-197](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L104-L197)
+- [ansible-mcp-check.sh:244-252](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L244-L252)
+- [ansible-mcp-check.sh:468-534](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L468-L534)
+
 ### Provisioning and Overlay Wiring (R-6 - DELIVERED)
 The self-hosted Ansible MCP server (AWX plus community AWX MCP server, or a thin mock MCP server) and a mock managed host deploy through the dev-k8s overlay. Any required credential fields are delivered through the sync-script model and never hand-edited in a consumer copy. Inventory source, endpoint, admitted-tool list, and executable path remain operator configuration. CI makes no live external call; real AAP read-only-mode validation is a documented operator step outside CI.
 
@@ -494,8 +538,12 @@ Common operational issues and their expected posture under SPEC-069:
 | Audit attribution shows acting_service | Current dev topology mode | Expected for self-hosted Ansible MCP server |
 | Audit attribution missing target_identity_mode | Tool doesn't implement audit_attribution | Backward compatible - tools without attribution hook audit normally |
 | Reserved audit key collision warning | Key dropped with warning | Connector attribution key conflicts with reserved audit field |
+| Live check refuses to start with LIVE_TARGET=true | Security validation failed | One or more expected parameters not explicitly set |
+| Live check fails with parameter validation error | Mock values used against real server | Required EXPECT_* parameters not set for real AAP deployment |
+| Redaction test passes vacuously | No credential literals available | REDACTION_SECRETS_FILE not provided for live deployments |
+| JSON construction error in live checks | Injection attempt detected | Free-text values contain quotes/backslashes requiring json_str() helper |
 
-**Updated** Added troubleshooting entries for enhanced audit attribution features including target_unavailable classification, failure_class presence/absence patterns, target_identity_mode interpretation, and reserved key collision handling.
+**Updated** Added troubleshooting entries for enhanced audit attribution features including target_unavailable classification, failure_class presence/absence patterns, target_identity_mode interpretation, reserved key collision handling, and the new parameterized live-check security controls.
 
 **Section sources**
 - [spec.md:211-221](file://docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/spec.md#L211-L221)
@@ -505,6 +553,7 @@ Common operational issues and their expected posture under SPEC-069:
 - [ansible_binding.py:44-50](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L44-L50)
 - [mcp_adapter.py:312-328](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L312-L328)
 - [config.py:216-219](file://products/tool-gateway/src/tool_gateway/core/config.py#L216-L219)
+- [ansible-mcp-check.sh:165-197](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L165-L197)
 
 ## Conclusion
 SPEC-069 is a narrowly scoped, operator-directed pilot that proves governance survives the MCP boundary against a self-provisioned Ansible target. Its primary deliverable is a reusable, server-agnostic MCP-ingestion adapter beneath tool-gateway, bound to a read-only discovery set and backed by deny-by-default policy coverage, enhanced audit attribution with target identity mode support, fail-closed failure classification, and robust error handling. It deliberately separates Layer 1 (this spec) from Layer 2 (runbooks as typed tools), defers the outbound user-delegated identity mechanism to **SPEC-070** (outbound user-delegated identity substrate), and positions itself as the first implementable R6 slice ahead of the PDI-blocked ServiceNow pilot.
@@ -516,6 +565,7 @@ The complete implementation includes a robust generic MCP ingestion adapter with
 **Key Deliverables Achieved:**
 - **Enhanced Audit Attribution System**: Duck-typed `audit_attribution()` hooks with target identity mode support (`acting_service` vs `user_delegated`)
 - **Fail-Closed Failure Classification**: `target_unavailable` classification for transport/timeout/SDK errors, distinct from policy denials
+- **Parameterized Live-Check Instrument**: Enhanced security controls for real AAP deployments with explicit parameter validation and secure JSON construction
 - **Comprehensive Test Coverage**: Full validation of audit events, secret redaction, failure classification, and delegation modes
 - **Specification Documentation Updates**: R-4 and R-5 marked as fully delivered with detailed implementation mechanisms
 

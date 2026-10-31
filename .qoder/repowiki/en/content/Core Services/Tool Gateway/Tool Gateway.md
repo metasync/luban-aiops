@@ -8,6 +8,10 @@
 - [base.py](file://products/tool-gateway/src/tool_gateway/tools/base.py)
 - [gateway_service.py](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [authorization_service.py](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py)
+- [authorizations.py](file://products/tool-gateway/src/tool_gateway/api/routes/authorizations.py)
+- [authorization.py](file://products/tool-gateway/src/tool_gateway/schemas/authorization.py)
+- [user_delegated_client.py](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py)
 - [k8s_connector.py](file://products/tool-gateway/src/tool_gateway/tools/k8s_connector.py)
 - [elastic_connector.py](file://products/tool-gateway/src/tool_gateway/tools/elastic_connector.py)
 - [browser_connector.py](file://products/tool-gateway/src/tool_gateway/tools/browser_connector.py)
@@ -17,8 +21,8 @@
 - [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
 - [url_redaction.py](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py)
 - [redaction.py](file://products/tool-gateway/src/tool_gateway/tools/redaction.py)
-- [audit_emitter.py](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
-- [policy_engine.py](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py)
+- [audit_emitter.py](file://products/tool-gateway/services/audit_emitter.py)
+- [policy_engine.py](file://products/tool-gateway/services/policy_engine.py)
 - [secret_delivery.py](file://products/tool-gateway/tools/secret_delivery.py)
 - [router.py](file://products/tool-gateway/src/tool_gateway/api/router.py)
 - [ansible_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_native.py)
@@ -30,33 +34,38 @@
 - [test_redaction.py](file://products/tool-gateway/tests/test_redaction.py)
 - [test_ansible_native.py](file://products/tool-gateway/tests/test_ansible_native.py)
 - [test_ansible_mcp_ingestion.py](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py)
+- [test_user_delegated_client.py](file://products/tool-gateway/tests/test_user_delegated_client.py)
+- [test_delegated_authorization.py](file://products/tool-gateway/tests/test_delegated_authorization.py)
+- [delegated_fixtures.py](file://products/tool-gateway/tests/integration/delegated_fixtures.py)
 - [ansible-mcp-check.sh](file://shared/platform-ops/e2e/ansible-mcp-check.sh)
 - [README.md](file://products/tool-gateway/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for MCP-ingestion capabilities with server-agnostic adapter architecture
-- Documented deny-by-default Ansible integration with operator guidance for enabling the feature
-- Updated configuration reference with new Ansible MCP settings and environment variables
-- Enhanced connector ecosystem documentation to include MCP-based tool ingestion patterns
-- Added operator guidance for production deployment and security considerations
+- Added comprehensive documentation for the complete OAuth2.0 authorization-code flow with PKCE S256 implementation
+- Documented server-side token management with immutable target-account verification
+- Added detailed coverage of user-delegated client implementation with secure caching and refresh mechanisms
+- Enhanced security documentation with dual trust boundaries for human and workload authentication
+- Updated architecture diagrams to include the complete OAuth flow and browser handoff coordination
+- Added operator guidance for deploying the OAuth authorization system with proper configuration validation
 
 ## Table of Contents
 1. Introduction
 2. Project Structure
 3. Core Components
 4. Architecture Overview
-5. Detailed Component Analysis
-6. Dependency Analysis
-7. Performance Considerations
-8. Troubleshooting Guide
-9. Conclusion
+5. OAuth2.0 Authorization System
+6. Detailed Component Analysis
+7. Dependency Analysis
+8. Performance Considerations
+9. Troubleshooting Guide
+10. Conclusion
 
 ## Introduction
 The Tool Gateway is a normalized access layer that exposes external systems through pluggable tool connectors. It centralizes authentication, policy enforcement, parameter validation, output redaction, audit emission, and structured error handling. The platform now provides comprehensive connectivity through eight built-in connectors: Kubernetes, Elasticsearch, browser automation (web-check flows), HTTP services, incidents, skills repositories, secure secret delivery mechanisms, and MCP-ingestion for Ansible/AAP systems. Each connector implements standardized security controls including origin allowlisting, credential set management, parameter validation, and structured error responses. The gateway enforces risk-tier admission for mutating actions and integrates with the platform's audit and policy systems to ensure consistent governance across all tool invocations.
 
-**Updated** The platform now includes MCP-ingestion capabilities that provide secure, server-agnostic access to external Model Context Protocol servers, with deny-by-default Ansible integration that requires explicit operator enablement.
+**Updated** The platform now includes a complete OAuth2.0 authorization-code flow with server-side token management, immutable target-account verification, and user-delegated client implementation. This enables secure OAuth-based authorization flows for external targets while maintaining strict security boundaries between human users and platform workloads.
 
 ## Project Structure
 The Tool Gateway service is organized into:
@@ -67,41 +76,47 @@ The Tool Gateway service is organized into:
 - Policy engine and token verification
 - Audit emission and observability
 - Configuration and runtime settings
+- **New** Complete OAuth2.0 authorization system with PKCE S256
+- **New** User-delegated client with server-side token management
 - MCP-ingestion adapter and bindings
 
 ```mermaid
 graph TB
 A["FastAPI app<br/>lifespan"] --> B["ToolRegistry"]
 A --> C["GatewayService<br/>invoke_tool()"]
-C --> D["PolicyEngine<br/>evaluate()"]
-C --> E["AuditEmitter<br/>emit_audit_event()"]
-C --> F["Redaction<br/>redact_result()"]
-B --> H["KubernetesConnector"]
-B --> I["ElasticConnector"]
-B --> J["BrowserConnector"]
-B --> K["IncidentsConnector"]
-B --> L["SkillsConnector"]
-B --> M["HttpConnector"]
-B --> N["SecretsConnector"]
-B --> O["MCP Ingestion<br/>(Ansible Binding)"]
-O --> P["McpIngestionConnector<br/>(server-agnostic)"]
-P --> Q["McpTransport<br/>(streamable_http/stdio)"]
-M --> R["URL Redaction<br/>secret masking"]
-N --> S["SecretDeliveryBuffer<br/>stash/redeem/discard"]
-S --> T["InMemory/Redis Backend"]
-H --> U["audit_attribution()<br/>opt-in hook"]
-I --> U
-J --> U
-K --> U
-L --> U
-M --> U
-N --> U
-O --> U
+A --> D["AuthorizationService<br/>OAuth2.0 Flow Management"]
+C --> E["PolicyEngine<br/>evaluate()"]
+C --> F["AuditEmitter<br/>emit_audit_event()"]
+C --> G["Redaction<br/>redact_result()"]
+D --> H["UserDelegatedClient<br/>PKCE S256 + Token Management"]
+B --> I["KubernetesConnector"]
+B --> J["ElasticConnector"]
+B --> K["BrowserConnector"]
+B --> L["IncidentsConnector"]
+B --> M["SkillsConnector"]
+B --> N["HttpConnector"]
+B --> O["SecretsConnector"]
+B --> P["MCP Ingestion<br/>(Ansible Binding)"]
+P --> Q["McpIngestionConnector<br/>(server-agnostic)"]
+Q --> R["McpTransport<br/>(streamable_http/stdio)"]
+N --> S["URL Redaction<br/>secret masking"]
+O --> T["SecretDeliveryBuffer<br/>stash/redeem/discard"]
+T --> U["InMemory/Redis Backend"]
+I --> V["audit_attribution()<br/>opt-in hook"]
+J --> V
+K --> V
+L --> V
+M --> V
+N --> V
+O --> V
+P --> V
 ```
 
 **Diagram sources**
 - [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
+- [authorization_service.py:181-483](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L181-L483)
+- [user_delegated_client.py:202-656](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L202-L656)
 - [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
 - [ansible_binding.py:179-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L179-L207)
 
@@ -118,10 +133,12 @@ O --> U
 - URL Redaction: Specialized URL secret masking for query parameters and userinfo components.
 - AuditEmitter: Fire-and-forget durable audit events to the audit service; non-blocking and failure-tolerant.
 - Config: Centralized environment-driven configuration for connectors, policy, auth, and feature flags.
+- **New** AuthorizationService: Manages the complete OAuth2.0 authorization flow with dual trust boundaries for human and workload authentication.
+- **New** UserDelegatedClient: Handles OAuth authorization code flows with PKCE S256, immutable target-account verification, and secure token caching.
 - **New** McpIngestionConnector: Server-agnostic adapter for MCP protocol connections with typed tool registration.
 - **New** AnsibleBinding: Configuration-driven binding for Ansible/AAP read-only tools with deny-by-default policy.
 
-**Updated** The connector ecosystem now includes MCP-ingestion capabilities that provide secure, server-agnostic access to external systems while maintaining strict security boundaries and deny-by-default policies.
+**Updated** The platform now includes a complete OAuth2.0 authorization-code flow with server-side token management, enabling secure authorization without exposing user credentials through dedicated endpoints for enrollment, renewal, and browser handoff coordination.
 
 **Section sources**
 - [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
@@ -130,8 +147,10 @@ O --> U
 - [policy_engine.py:254-355](file://products/tool-gateway/services/policy_engine.py#L254-L355)
 - [redaction.py:1-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L1-L151)
 - [url_redaction.py:1-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L1-L91)
-- [audit_emitter.py:1-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L1-L98)
+- [audit_emitter.py:1-98](file://products/tool-gateway/services/audit_emitter.py#L1-L98)
 - [config.py:32-494](file://products/tool-gateway/src/tool_gateway/core/config.py#L32-L494)
+- [authorization_service.py:181-483](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L181-L483)
+- [user_delegated_client.py:202-656](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L202-L656)
 - [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
 - [ansible_binding.py:1-207](file://products/tool-gateway/src/tool_gateway/ingestion/ansible_binding.py#L1-L207)
 
@@ -144,29 +163,30 @@ The invocation path enforces security and safety at every stage:
 - Safe audit attribution resolution with reserved key collision protection.
 - Output redaction before response and audit emission.
 - Durable audit trail via fire-and-forget emission.
+- **New** Complete OAuth2.0 authorization with PKCE S256 provides secure user delegation with dual trust boundaries.
+- **New** Immutable target-account verification ensures authorized users cannot impersonate other accounts.
 - **New** MCP-ingestion provides server-agnostic access with deny-by-default policies and typed tool registration.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Caller"
-participant Gateway as "FastAPI App"
-participant Service as "GatewayService.invoke_tool"
-participant Policy as "PolicyEngine.evaluate"
-participant Registry as "ToolRegistry.invoke"
+participant Portal as "Portal Browser"
+participant PlatformGW as "Platform Gateway"
+participant ToolGW as "Tool Gateway"
+participant AuthSvc as "AuthorizationService"
+participant OAuthClient as "UserDelegatedClient"
+participant Provider as "External OAuth Provider"
+participant Registry as "ToolRegistry"
 participant HttpConn as "HttpConnector"
 participant McpAdapter as "McpIngestionConnector"
 participant UrlRedact as "URL Redaction"
 participant Redact as "Redaction"
 participant Attrib as "resolve_audit_attribution"
 participant Audit as "AuditEmitter"
-Client->>Gateway : POST /api/v2/tools/invoke
-Gateway->>Service : resolve_request_identity + enforce_policy
-Service->>Policy : evaluate("tools : invoke")
-Policy-->>Service : decision
-alt denied
-Service-->>Client : 403 {status : "denied"}
-else allowed
-Service->>Registry : invoke(tool_name, parameters, identity)
+Note over Client,Provider : Tool Invocation Flow
+Client->>ToolGW : POST /api/v2/tools/invoke
+ToolGW->>ToolGW : resolve_request_identity + enforce_policy
+ToolGW->>Registry : invoke(tool_name, parameters, identity)
 alt http.get/http.post
 Registry->>HttpConn : execute(parameters, identity)
 HttpConn->>UrlRedact : redact_secret_query(url)
@@ -181,92 +201,383 @@ else secrets.generate_password/secrets.deliver
 Registry->>SecretsConn : execute(parameters, identity)
 SecretsConn-->>Registry : ToolResult
 end
-Registry-->>Service : ToolResult
-Service->>Attrib : resolve_audit_attribution(target, result, tool_name, request_id)
-Attrib-->>Service : safe attribution dict
-Service->>Redact : redact_result(result)
-Redact-->>Service : redacted result + stats
-Service->>Audit : emit_audit_event(...)
-Service-->>Client : JSONResponse(status_code)
-end
+Registry-->>ToolGW : ToolResult
+ToolGW->>Attrib : resolve_audit_attribution(target, result, tool_name, request_id)
+Attrib-->>ToolGW : safe attribution dict
+ToolGW->>Redact : redact_result(result)
+Redact-->>ToolGW : redacted result + stats
+ToolGW->>Audit : emit_audit_event(...)
+ToolGW-->>Client : JSONResponse(status_code)
+Note over Portal,Provider : OAuth2.0 Authorization Flow with PKCE S256
+Portal->>ToolGW : POST /api/v2/targets/authorizations/{id}/start
+ToolGW->>AuthSvc : start(owner, browser_secret)
+AuthSvc->>AuthSvc : verify_human_bearer + check_entitlement
+AuthSvc-->>Portal : start_token + expires_at
+Portal->>PlatformGW : GET /provider-url (with start_token)
+PlatformGW->>ToolGW : POST /api/v2/targets/authorizations/provider-url
+ToolGW->>AuthSvc : provider_url(start_token, browser_bindings)
+AuthSvc->>OAuthClient : build_authorization_url(config, state, verifier)
+OAuthClient-->>AuthSvc : provider_url with PKCE S256
+AuthSvc-->>PlatformGW : 302 redirect to provider
+PlatformGW-->>Portal : 302 redirect
+Portal->>Provider : OAuth authorization with PKCE
+Provider->>PlatformGW : callback with code
+PlatformGW->>ToolGW : POST /api/v2/targets/authorizations/callback
+ToolGW->>AuthSvc : callback(code, browser_bindings)
+AuthSvc->>OAuthClient : exchange_authorization_code()
+OAuthClient->>Provider : token exchange with PKCE verification
+Provider-->>OAuthClient : access_token + refresh_token
+OAuthClient-->>AuthSvc : verified token bundle with account verification
+AuthSvc->>AuthSvc : publish_to_custody()
+AuthSvc-->>PlatformGW : status=authorized
+PlatformGW-->>Portal : redirect to return_url
 ```
 
 **Diagram sources**
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
-- [policy_engine.py:299-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L299-L355)
+- [policy_engine.py:299-355](file://products/tool-gateway/services/policy_engine.py#L299-L355)
 - [registry.py:65-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L65-L89)
 - [http_connector.py:389-491](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L389-L491)
 - [mcp_adapter.py:407-453](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L407-L453)
 - [url_redaction.py:49-91](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L49-L91)
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
-- [audit_emitter.py:67-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L67-L98)
+- [audit_emitter.py:67-98](file://products/tool-gateway/services/audit_emitter.py#L67-L98)
+- [authorization_service.py:321-440](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L321-L440)
+- [user_delegated_client.py:244-319](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L244-L319)
 
-## Detailed Component Analysis
+## OAuth2.0 Authorization System
 
-### Tool Registry and Base Abstraction
-- ToolRegistry validates risk_level against a fixed vocabulary and refuses mutating tools unless allow_mutating is enabled.
-- Registry.invoke returns structured ToolResult for both unknown tools and exceptions, ensuring callers always receive a consistent envelope.
-- BaseTool defines the contract: definition and async execute(parameters, identity).
+### Overview
+The OAuth2.0 authorization system provides secure user-delegated authorization flows for external targets, implementing the complete OAuth 2.0 Authorization Code flow with PKCE (Proof Key for Code Exchange) for enhanced security. The system enables users to grant permissions to the platform without exposing their credentials, while maintaining strict security boundaries between human users and platform workloads.
+
+**Key Features:**
+- **PKCE S256 Security**: Implements RFC 7636 PKCE for enhanced security against authorization code interception attacks
+- **Dual Trust Boundaries**: Separate authentication for human users and platform workloads
+- **Immutable Target-Account Verification**: Verifies authorized users cannot impersonate other accounts
+- **Server-Side Token Management**: Secure memory-only token storage with bounded caching and automatic refresh
+- **Browser Handoff Coordination**: Secure coordination between portal browser and backend services
+- **Fail-Closed Design**: All failures return generic error codes without exposing internal details
+- **Comprehensive Audit Trail**: Detailed audit logging for all authorization lifecycle events
+
+### Six Authorization Endpoints
+The system exposes six `/api/v2/targets/authorizations` endpoints:
+
+1. **POST /{challenge_id}/start**: Human-initiated enrollment start with delegated bearer token
+2. **POST /provider-url**: Workload-only provider URL generation with PKCE S256
+3. **POST /callback**: Workload-only callback processing with code exchange
+4. **POST /browser-reset**: Human-initiated browser session cleanup
+5. **GET /{challenge_id}**: Owner-scoped status checking
+6. **POST /{challenge_id}/cancel**: Idempotent cancellation
 
 ```mermaid
-classDiagram
-class BaseTool {
-+definition : ToolDefinition
-+execute(parameters, identity) ToolResult
-+audit_attribution(result) dict
-}
-class ToolDefinition {
-+name : string
-+description : string
-+risk_level : string
-+category : string
-+parameters_schema : dict
-+to_dict() dict
-}
-class ToolResult {
-+tool_name : string
-+status : string
-+data : dict|None
-+evidence : dict
-+error : dict|None
-+to_dict() dict
-}
-class ToolRegistry {
--_tools : dict
--_allow_mutating : bool
-+register(tool) void
-+get(name) BaseTool|None
-+list_definitions() list
-+invoke(name, parameters, identity) ToolResult
-}
-BaseTool <|-- KubernetesConnector
-BaseTool <|-- ElasticConnector
-BaseTool <|-- BrowserConnector
-BaseTool <|-- IncidentsConnector
-BaseTool <|-- SkillsConnector
-BaseTool <|-- HttpGetTool
-BaseTool <|-- HttpPostTool
-BaseTool <|-- GeneratePasswordTool
-BaseTool <|-- DeliverSecretTool
-BaseTool <|-- McpTool
-ToolRegistry --> BaseTool : "dispatches"
+flowchart TD
+Start(["Human User"]) --> StartEndpoint["POST /{challenge_id}/start"]
+StartEndpoint --> VerifyHuman["Verify human bearer token"]
+VerifyHuman --> CheckEntitlement{"Owner entitled for target?"}
+CheckEntitlement --> |No| Deny["403 denied"]
+CheckEntitlement --> |Yes| MintHandle["Mint single-use start handle"]
+MintHandle --> ReturnHandle["Return start_token + expires_at"]
+ReturnHandle --> BrowserNav["Browser navigates to provider URL"]
+BrowserNav --> ProviderURL["POST /provider-url"]
+ProviderURL --> VerifyWorkload["Verify platform workload token"]
+VerifyWorkload --> BuildURL["Build OAuth authorization URL with PKCE S256"]
+BuildURL --> Redirect["302 redirect to provider"]
+Redirect --> OAuthFlow["User completes OAuth flow"]
+OAuthFlow --> Callback["POST /callback"]
+Callback --> VerifyWorkload2["Verify platform workload token"]
+Callback --> ExchangeToken["Exchange code for tokens with PKCE verification"]
+ExchangeToken --> VerifyAccount["Verify immutable target account"]
+VerifyAccount --> PublishGrant["Publish grant to custody store"]
+PublishGrant --> Authorized["Status = authorized"]
+Authorized --> ReturnURL["Redirect to return URL"]
 ```
 
 **Diagram sources**
-- [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
-- [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
-- [http_connector.py:497-699](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L497-L699)
-- [secrets_connector.py:403-620](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L403-L620)
-- [mcp_adapter.py:382-453](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L382-L453)
+- [authorization_service.py:321-440](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L321-L440)
+- [authorizations.py:73-224](file://products/tool-gateway/src/tool_gateway/api/routes/authorizations.py#L73-L224)
+- [user_delegated_client.py:244-319](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L244-L319)
+
+### Authentication and Security Model
+
+#### Human Authentication
+Human users authenticate via delegated bearer tokens that are verified against the configured JWKS endpoint. The system extracts owner information from the verified claims rather than accepting caller-provided identities.
+
+**Security Properties:**
+- Bearer tokens must be valid RS256 JWTs from the configured issuer
+- Claims must include required fields: sub, username, email, roles, groups, act
+- Owner namespace is pinned to the configured delegated identity issuer
+- Subject is derived from the verified token's sub claim
+- All failures return fixed 403 errors without echoing token material
+
+#### Workload Authentication  
+Platform workloads authenticate via a dedicated service account token with a specialized audience (`luban-target-authorization-handoff`). This ensures that only the platform gateway can call the bearerless endpoints.
+
+**Security Properties:**
+- Tokens must be RS256 JWTs from the configured authorization workload issuer
+- Audience must match the dedicated `luban-target-authorization-handoff` value
+- Subject must be in the configured allowlist
+- All failures return fixed 401 errors without echoing token material
+
+#### Browser Proof Validation
+Browser handoffs use cookie-bound proofs to prevent CSRF attacks. The initiating browser presents its whole cookie jar on both the provider URL request and callback, which is validated against stored browser secrets.
+
+**Security Properties:**
+- Cookie secrets are generated fresh per challenge
+- Maximum 8 cookie bindings per request
+- Browser proof validation occurs before any sensitive data is returned
+- Failed proofs collapse to no-oracle responses (404)
 
 **Section sources**
-- [registry.py:18-89](file://products/tool-gateway/src/tool_gateway/tools/registry.py#L18-L89)
-- [base.py:15-123](file://products/tool-gateway/src/tool_gateway/tools/base.py#L15-L123)
-- [test_tool_registry.py:56-172](file://products/tool-gateway/tests/test_tool_registry.py#L56-L172)
+- [authorization_service.py:114-166](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L114-L166)
+- [authorization_service.py:181-239](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L181-L239)
+- [authorizations.py:59-66](file://products/tool-gateway/src/tool_gateway/api/routes/authorizations.py#L59-L66)
+
+### OAuth Flow Implementation
+
+#### Authorization Code Flow with PKCE S256
+The system implements the OAuth 2.0 Authorization Code flow with PKCE (Proof Key for Code Exchange) for enhanced security. This prevents authorization code interception attacks while maintaining compatibility with standard OAuth providers.
+
+**Flow Steps:**
+1. Generate PKCE verifier and code challenge using SHA-256
+2. Construct authorization URL with all required parameters including PKCE
+3. Redirect user to provider for authorization
+4. Handle callback with authorization code
+5. Exchange code for access and refresh tokens with PKCE verification
+6. Verify identity against provider's identity endpoint with immutable account check
+7. Publish grant to durable custody store
+
+#### Token Management
+Access tokens are managed with strict security controls:
+- Memory-only storage with LRU eviction (max 1,024 entries)
+- Single-flight acquisition per binding to prevent race conditions
+- Automatic refresh with bounded lifetime caps
+- Grant invalidation on 401/invalid-token responses
+- Never persisted, logged, echoed, or returned to callers
+- Immutable target-account verification before any token release
+
+```mermaid
+flowchart TD
+Acquire["access_token_for_send(ctx)"] --> CheckCache{"Cached token valid?"}
+CheckCache --> |Yes| ReturnCached["Return cached token"]
+CheckCache --> |No| AcquireLock["Acquire per-binding lock"]
+AcquireLock --> SyncConfig["Sync configuration from custody"]
+SyncConfig --> GetMetadata["Get credential metadata"]
+GetMetadata --> CheckMetadata{"Metadata exists?"}
+CheckMetadata --> |No| ErrorAuthRequired["Error: authorization_required"]
+CheckMetadata --> |Yes| Refresh["Refresh token if needed"]
+Refresh --> ValidateResponse["Validate token response"]
+ValidateResponse --> VerifyIdentity["Verify immutable target account"]
+VerifyIdentity --> CacheToken["Cache token with expiry"]
+CacheToken --> ReturnToken["Return DelegatedAccessToken"]
+```
+
+**Diagram sources**
+- [user_delegated_client.py:269-287](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L269-L287)
+- [user_delegated_client.py:402-425](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L402-L425)
+- [user_delegated_client.py:485-524](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L485-L524)
+
+**Section sources**
+- [user_delegated_client.py:1-656](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L656)
+- [authorization_service.py:342-440](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L342-L440)
+
+### Configuration and Deployment
+
+#### Required Environment Variables
+The OAuth2.0 authorization system requires extensive configuration for secure operation:
+
+**Delegated Identity Trust (Human Users):**
+- `GATEWAY_DELEGATED_IDENTITY_ISSUER`: Trusted JWT issuer for human users
+- `GATEWAY_DELEGATED_IDENTITY_JWKS_URL`: JWKS endpoint for verifying human tokens
+- `GATEWAY_DELEGATED_IDENTITY_AUDIENCE`: Expected audience for human tokens
+- `GATEWAY_DELEGATED_IDENTITY_ACTORS`: Comma-separated list of allowed actor subjects
+
+**Authorization Workload Trust (Platform Services):**
+- `GATEWAY_AUTHORIZATION_WORKLOAD_ISSUER`: Trusted JWT issuer for platform workloads
+- `GATEWAY_AUTHORIZATION_WORKLOAD_JWKS_URL`: JWKS endpoint for verifying workload tokens
+- `GATEWAY_AUTHORIZATION_WORKLOAD_SUBJECTS`: Comma-separated list of allowed workload subjects
+- `GATEWAY_AUTHORIZATION_WORKLOAD_AUDIENCE`: Must be `luban-target-authorization-handoff`
+
+**Custody Store Configuration:**
+- `GATEWAY_DELEGATED_CUSTODY_DB_URL`: PostgreSQL connection string
+- `GATEWAY_DELEGATED_CUSTODY_KEYRING_PATH`: Path to encryption keyring
+- `GATEWAY_DELEGATED_CUSTODY_CONFIG_PATH`: Path to delegation configuration files
+- `GATEWAY_DELEGATED_CUSTODY_SET_ID`: Identifier for the credential set
+- `GATEWAY_DELEGATED_CUSTODY_TRUSTED_CALLBACK`: HTTPS callback URL with exact path
+
+**Feature Flags:**
+- `GATEWAY_DELEGATED_AUTHORIZATION_ENABLED=true`: Enable authorization workflow
+- `GATEWAY_DELEGATED_ACQUISITION_ENABLED=true`: Enable token acquisition
+- `GATEWAY_DELEGATED_INVOKE_ENABLED=true`: Enable private delegated execution route
+
+#### Startup Validation
+The system performs extensive startup validation to ensure secure configuration:
+- All required environment variables must be present and properly formatted
+- URLs must be valid HTTP(S) with no embedded credentials
+- Allowlists must be non-empty when features are enabled
+- Database connectivity and keyring accessibility are verified
+- Callback URL path must exactly match the ratified `CALLBACK_PATH`
+- Both human and workload trust sets must be properly configured
+
+**Section sources**
+- [config.py:425-498](file://products/tool-gateway/src/tool_gateway/core/config.py#L425-L498)
+- [config.py:832-847](file://products/tool-gateway/src/tool_gateway/core/config.py#L832-L847)
+
+## Detailed Component Analysis
+
+### Authorization Service
+The AuthorizationService orchestrates the complete OAuth2.0 authorization workflow, managing transaction state, authentication, and integration with the custody store and OAuth client.
+
+**Key Responsibilities:**
+- Managing authorization challenges and transactions
+- Validating human and workload authentication with dual trust boundaries
+- Coordinating browser handoffs between portal and backend
+- Processing OAuth callbacks and publishing grants
+- Providing owner-scoped status and cancellation operations
+- Implementing PKCE S256 for enhanced security
+
+**Security Posture:**
+- Dual trust boundaries for human vs. workload authentication
+- Fail-closed design with generic error responses
+- No persistence of sensitive bearer tokens or codes
+- Comprehensive audit trail for all authorization lifecycle events
+- Immutable target-account verification prevents impersonation
+
+```mermaid
+classDiagram
+class AuthorizationService {
++produce_challenge(owner_namespace, owner_sub, session_id, call_id) AuthorizationRequired
++start(settings, identity, challenge_id, request) AuthorizationStartResponse
++provider_url(request) ProviderAuthorizationResponse
++callback(request) AuthorizationCallbackResponse
++status(settings, identity, challenge_id) AuthorizationStatusResponse
++cancel(settings, identity, challenge_id) None
++browser_reset(settings, identity, request) int
+-_owner(settings, identity) tuple
+-_entitlement(txn) tuple
+-_emit_authorization(operation, outcome, txn, reason, delegation_mode) void
+}
+class AuthorizationTransaction {
++challenge_id : str
++owner_namespace : str
++owner_sub : str
++target : str
++credential_set_id : str
++config_generation : int
++session_id : str
++call_id : str
++return_url : str
++created_at : datetime
++updated_at : datetime
++expires_at : datetime
++status : str
+}
+class AuthorizationError {
++status_code : int
++detail : str
+}
+AuthorizationService --> AuthorizationTransaction : manages
+AuthorizationService --> AuthorizationError : raises
+```
+
+**Diagram sources**
+- [authorization_service.py:181-483](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L181-L483)
+
+**Section sources**
+- [authorization_service.py:1-483](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L1-L483)
+
+### User-Delegated OAuth Client
+The UserDelegatedClient handles all aspects of OAuth authorization code flows with PKCE S256, including token acquisition, validation, caching, and refresh management with immutable target-account verification.
+
+**Core Features:**
+- PKCE S256 implementation for enhanced security against code interception
+- Strict token response validation with bounded sizes and unique JSON keys
+- Process-local LRU-bounded access token cache (1,024 entries max)
+- Single-flight acquisition per binding to prevent race conditions
+- Automatic token refresh with lifetime caps and safety margins
+- Grant invalidation on authentication failures
+- Secure identity verification against provider endpoints with immutable account check
+
+**Security Controls:**
+- Memory-only token storage with no persistence
+- Bounded response sizes (64 KiB max)
+- Timeout limits (10 seconds default)
+- No redirects, proxies, or automatic retries
+- Strict scope validation against configured allowed scopes
+- Immutable identity claim verification prevents account impersonation
+- Hardened provider channel with no environment proxy inheritance
+
+```mermaid
+flowchart TD
+Request["access_token_for_send(ctx)"] --> CacheLookup{"Check process-local cache"}
+CacheLookup --> |Hit| ReturnCached["Return cached token"]
+CacheLookup --> |Miss| AcquireLock["Acquire per-binding async lock"]
+AcquireLock --> SyncConfig["Sync configuration from custody store"]
+SyncConfig --> GetMetadata["Get credential metadata"]
+GetMetadata --> HasMetadata{"Has active grant?"}
+HasMetadata --> |No| ErrorAuthRequired["Raise authorization_required"]
+HasMetadata --> |Yes| NeedsRefresh{"Token expired?"}
+NeedsRefresh --> |No| ReturnCached
+NeedsRefresh --> |Yes| BeginRefresh["Begin refresh transaction"]
+BeginRefresh --> TokenRequest["Make token request to provider"]
+TokenRequest --> ValidateResponse["Validate token response"]
+ValidateResponse --> VerifyIdentity["Verify immutable target account"]
+VerifyIdentity --> CompleteRefresh["Complete refresh publication"]
+CompleteRefresh --> CacheToken["Cache new token"]
+CacheToken --> ReturnToken["Return token"]
+```
+
+**Diagram sources**
+- [user_delegated_client.py:269-287](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L269-L287)
+- [user_delegated_client.py:402-483](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L402-L483)
+
+**Section sources**
+- [user_delegated_client.py:1-656](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L656)
+
+### Authorization Routes
+The authorization routes provide the public API surface for the OAuth2.0 authorization system, implementing proper authentication, policy enforcement, and response formatting.
+
+**Route Security:**
+- Human endpoints require delegated bearer tokens plus `targets:authorize` policy
+- Workload endpoints require dedicated platform workload tokens with specific audience
+- All responses marked with `no-store`, `no-cache`, and `no-referrer` headers
+- SecretStr fields unwrapped only at serialization boundary
+- Generic error responses without sensitive details
+
+**Endpoints:**
+- `POST /{challenge_id}/start`: Human-initiated enrollment with PKCE setup
+- `POST /provider-url`: Workload-only provider URL generation with PKCE S256
+- `POST /callback`: Workload-only callback processing with code exchange
+- `POST /browser-reset`: Human-initiated browser cleanup
+- `GET /{challenge_id}`: Owner-scoped status checking
+- `POST /{challenge_id}/cancel`: Idempotent cancellation
+
+**Section sources**
+- [authorizations.py:1-224](file://products/tool-gateway/src/tool_gateway/api/routes/authorizations.py#L1-L224)
+
+### Authorization Schemas
+The authorization schemas define the wire format for all OAuth2.0 authorization-related requests and responses, with strict validation and security constraints.
+
+**Security Features:**
+- UUID pattern validation for challenge IDs
+- Bounded browser bindings (max 8 cookies)
+- SecretStr for all sensitive values
+- Literal types for status fields
+- Exact-one-of validation for callback payloads
+- Local return path validation to prevent open redirects
+
+**Key Types:**
+- `ChallengeId`: UUID4 pattern validation
+- `BrowserBindings`: Bounded dictionary of cookie secrets
+- `DenialReason`: Closed set of normalized denial reasons
+- `AuthorizationStatus`: Enumerated status values
+- `LocalReturnPath`: Bounded local URL paths
+
+**Section sources**
+- [authorization.py:1-169](file://products/tool-gateway/src/tool_gateway/schemas/authorization.py#L1-L169)
 
 ### MCP-Ingestion Adapter Architecture
-**New** The MCP-ingestion adapter provides a server-agnostic interface for connecting to external Model Context Protocol servers while maintaining strict security boundaries and deny-by-default policies.
+The MCP-ingestion adapter provides a server-agnostic interface for connecting to external Model Context Protocol servers while maintaining strict security boundaries and deny-by-default policies.
 
 **Key Features:**
 - **Server-Agnostic Design**: One reusable adapter class that works with any MCP server implementation
@@ -300,7 +611,7 @@ Normalize --> ToolResult["ToolResult"]
 - [test_ansible_mcp_ingestion.py:1-200](file://products/tool-gateway/tests/test_ansible_mcp_ingestion.py#L1-L200)
 
 ### Ansible Binding and Deny-by-Default Policy
-**New** The Ansible binding provides a secure, configuration-driven interface to Ansible Automation Platform (AAP) read-only tools with deny-by-default policy enforcement.
+The Ansible binding provides a secure, configuration-driven interface to Ansible Automation Platform (AAP) read-only tools with deny-by-default policy enforcement.
 
 **Security Model:**
 - **Deny-by-Default**: No Ansible tools are exposed unless `GATEWAY_ANSIBLE_MCP_ENABLED=true`
@@ -339,7 +650,7 @@ PolicyCheck --> |No| Deny["Refuse registration"]
 - [ansible-mcp-check.sh:1-395](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L1-L395)
 
 ### Operator Guidance for Enabling Ansible MCP-Ingestion
-**New** Operators must explicitly enable Ansible MCP-ingestion through configuration. The feature is disabled by default and requires careful setup for production use.
+Operators must explicitly enable Ansible MCP-ingestion through configuration. The feature is disabled by default and requires careful setup for production use.
 
 **Configuration Requirements:**
 - `GATEWAY_ANSIBLE_MCP_ENABLED=true`: Enable the connector
@@ -619,6 +930,7 @@ Browser-->>Caller : ToolResult(evidence URL masked)
 - Registry.invoke catches exceptions and returns TOOL_EXECUTION_ERROR with evidence.
 - Safe audit attribution resolution prevents reserved key collisions from causing failures.
 - Redaction applies deterministic masking and fails closed on overflow; audit events emitted for all outcomes.
+- **New** Complete OAuth2.0 authorization provides secure user delegation with PKCE S256 and immutable target-account verification.
 - **New** MCP-ingestion provides structured error handling for transport failures, SDK availability issues, and credential resolution problems.
 
 ```mermaid
@@ -659,6 +971,8 @@ Emit --> Resp["JSONResponse"]
 - Screenshots mask password-tier values to avoid leaking secrets.
 - All connector credentials are passed via configuration and never exposed in results or audit payloads.
 - HTTP connector uses the same credential set mechanism as browser connector, supporting rotation without restart.
+- **New** OAuth2.0 authorization uses secure PKCE S256 flows with memory-only tokens and no persistence of sensitive data.
+- **New** Immutable target-account verification ensures authorized users cannot impersonate other accounts.
 - **New** MCP-ingestion uses bearer tokens from credential sets, never exposing them in tool results or logs.
 
 **Section sources**
@@ -668,6 +982,7 @@ Emit --> Resp["JSONResponse"]
 - [url_redaction.py:27-41](file://products/tool-gateway/src/tool_gateway/tools/url_redaction.py#L27-L41)
 - [config.py:63-73](file://products/tool-gateway/src/tool_gateway/core/config.py#L63-L73)
 - [mcp_adapter.py:285-323](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L285-L323)
+- [user_delegated_client.py:29-32](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L29-L32)
 
 ### Integration with Audit and Policy Systems
 - PolicyEngine loads bundled rules, computes content fingerprint, and evaluates actions with deny-by-default semantics.
@@ -675,14 +990,16 @@ Emit --> Resp["JSONResponse"]
 - GatewayService records metrics for policy decisions, redaction spans, and token verification outcomes.
 - The SecretsConnector integrates with the existing audit and policy systems, introducing a new `secret_delivered` audit event type and `secrets:deliver` policy action for email delivery operations.
 - **Updated** The audit attribution system provides safe, opt-in connector-specific enrichment with reserved key collision protection, preventing HTTP 500 errors from malformed attribution data.
+- **New** OAuth2.0 authorization provides comprehensive audit trails for all authorization lifecycle events with `target_authorization` operation type.
 - **New** MCP-ingestion provides detailed audit attribution including target identity mode and failure classification for transport vs. policy denials.
 
 **Section sources**
 - [policy_engine.py:254-355](file://products/tool-gateway/src/tool_gateway/services/policy_engine.py#L254-L355)
-- [audit_emitter.py:29-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L29-L98)
+- [audit_emitter.py:29-98](file://products/tool-gateway/services/audit_emitter.py#L29-L98)
 - [gateway_service.py:32-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L69)
 - [gateway_service.py:32-59](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L32-L59)
 - [mcp_adapter.py:455-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L455-L472)
+- [authorization_service.py:240-269](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L240-L269)
 
 ## Dependency Analysis
 - Application wiring: app creates registry and optional browser connector; lifespan starts/stops browser pool.
@@ -691,12 +1008,14 @@ Emit --> Resp["JSONResponse"]
 - HTTP connector integrates with URL redaction module and shares credential set infrastructure with browser connector.
 - SecretsConnector depends on password policy validation and secure delivery buffer backends.
 - **Updated** Audit attribution system integrates with all connectors through duck-typed hooks, providing safe enrichment without breaking existing functionality.
+- **New** OAuth2.0 authorization service depends on custody store, PKCE S256 client, and dual trust verifiers.
 - **New** MCP-ingestion adapter is independent of specific server implementations and uses the existing credential set infrastructure.
 
 ```mermaid
 graph LR
 App["app.create_app"] --> Reg["ToolRegistry"]
 App --> Browser["BrowserConnector (optional)"]
+App --> AuthSvc["AuthorizationService"]
 Reg --> K8s["KubernetesConnector"]
 Reg --> ES["ElasticConnector"]
 Reg --> Br["BrowserConnector"]
@@ -705,6 +1024,8 @@ Reg --> Sk["SkillsConnector"]
 Reg --> Http["HttpConnector"]
 Reg --> Secrets["SecretsConnector"]
 Reg --> Mcp["MCP Ingestion (Ansible)"]
+AuthSvc --> OAuthClient["UserDelegatedClient"]
+AuthSvc --> Custody["Custody Store"]
 Mcp --> McpAdapter["McpIngestionConnector"]
 McpAdapter --> Transport["McpTransport"]
 Http --> UrlRedact["URL Redaction"]
@@ -729,6 +1050,7 @@ AA --> Mcp
 - [app.py:19-268](file://products/tool-gateway/src/tool_gateway/app.py#L19-L268)
 - [gateway_service.py:158-376](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L158-L376)
 - [gateway_service.py:43-69](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L43-L69)
+- [authorization_service.py:202-214](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L202-L214)
 - [http_connector.py:350-359](file://products/tool-gateway/src/tool_gateway/tools/http_connector.py#L350-L359)
 - [secret_delivery.py:277-327](file://products/tool-gateway/tools/secret_delivery.py#L277-L327)
 - [mcp_adapter.py:234-472](file://products/tool-gateway/src/tool_gateway/ingestion/mcp_adapter.py#L234-L472)
@@ -745,6 +1067,8 @@ AA --> Mcp
 - HTTP connector uses connection-per-request pattern with timeout limits and response size caps to prevent resource exhaustion.
 - SecretsConnector uses efficient CSPRNG generation and minimal memory footprint for ephemeral delivery handles.
 - **Updated** Audit attribution resolution is lightweight duck-typed inspection with no performance impact for connectors without attribution hooks.
+- **New** OAuth2.0 authorization uses process-local LRU-bounded token caching (1,024 entries) with single-flight acquisition per binding.
+- **New** PKCE S256 implementation adds minimal overhead for cryptographic operations.
 - **New** MCP-ingestion opens sessions per call with timeout limits and lazy SDK imports to minimize startup overhead.
 
 ## Troubleshooting Guide
@@ -758,6 +1082,9 @@ Common issues and diagnostics:
 - HTTP connector issues: Origin allowlist denials, redirect loops, credential set resolution failures, and URL secret masking problems.
 - SecretsConnector issues: Password policy violations, delivery handle expiration, email delivery configuration problems, and active destruction failures.
 - **Updated** Audit attribution issues: Reserved key collisions are now safely handled with warning logs instead of HTTP 500 errors; check logs for "dropped reserved keys" messages if connector attribution is interfering with gateway-managed fields.
+- **New** OAuth2.0 authorization issues: Verify all required environment variables are set, check JWKS endpoint connectivity, validate callback URL configuration, and confirm both human and workload trust sets are properly configured.
+- **New** PKCE S256 issues: Check PKCE implementation, verify provider compatibility, inspect token response validation, and monitor process-local cache size.
+- **New** Immutable target-account verification issues: Verify provider identity endpoint configuration, check account linkage configuration, and ensure authorized users cannot impersonate other accounts.
 - **New** MCP-ingestion issues: Verify `GATEWAY_ANSIBLE_MCP_ENABLED=true`, check credential set configuration, validate MCP server connectivity, and confirm exactly six read-only tools are registered.
 
 **Section sources**
@@ -770,14 +1097,15 @@ Common issues and diagnostics:
 - [redaction.py:126-151](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L126-L151)
 - [test_tool_invoke.py:184-549](file://products/tool-gateway/tests/test_tool_invoke.py#L184-L549)
 - [ansible-mcp-check.sh:188-230](file://shared/platform-ops/e2e/ansible-mcp-check.sh#L188-L230)
+- [test_delegated_authorization.py:249-277](file://products/tool-gateway/tests/test_delegated_authorization.py#L249-L277)
 
 ## Conclusion
 The Tool Gateway provides a secure, extensible, and observable framework for invoking external tools through standardized connectors. It enforces risk-tier admission, policy-based authorization, robust parameter validation, deterministic output redaction, and durable auditing. The platform now includes eight comprehensive built-in connectors covering Kubernetes, Elasticsearch, browser automation, HTTP services, incidents, skills repositories, secure secret delivery, and MCP-ingestion for Ansible/AAP systems, while the registry and base abstractions make it straightforward to add custom connectors with consistent behavior and governance.
 
-**Updated** The critical audit attribution bug fix ensures that connector-provided audit enrichment cannot interfere with gateway-managed fields, preventing HTTP 500 errors that would occur after successful tool execution. The new `resolve_audit_attribution()` helper function provides safe, opt-in connector-specific audit enrichment while maintaining full backward compatibility.
+**Updated** The critical addition of the complete OAuth2.0 authorization-code flow with PKCE S256 provides secure user delegation for external targets, enabling users to grant permissions without exposing credentials. The system implements dual trust boundaries for human and workload authentication, immutable target-account verification, comprehensive audit trails, and fail-closed security design.
 
 The addition of HTTP connector capabilities extends the platform's ability to perform bounded HTTP service checks with the same security guarantees as other connectors, including origin allowlisting, credential set management, and URL secret masking. The complete implementation of SPEC-062 secure password generation and delivery system provides cryptographically strong password generation, secure one-time delivery mechanisms, and active destruction capabilities through the new DELETE endpoint. 
 
 **New** The MCP-ingestion capabilities provide a secure, server-agnostic interface for connecting to external Model Context Protocol servers, with deny-by-default Ansible integration that requires explicit operator enablement. The architecture ensures that server metadata is never trusted, tools are registered purely from gateway-owned configuration, and all failures return structured error codes without exposing internal details.
 
-This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements. The enhanced audit attribution system further strengthens this boundary by enabling rich, connector-specific audit enrichment without compromising system stability or security. The MCP-ingestion adapter extends these capabilities to support modern protocol-based integrations while maintaining the same security and governance standards.
+This comprehensive connector ecosystem ensures that the Tool Gateway serves as a unified, secure boundary between the platform and external systems, maintaining consistent security policies, audit trails, and operational visibility across all tool invocations while providing flexible integration patterns for diverse operational requirements. The enhanced audit attribution system further strengthens this boundary by enabling rich, connector-specific audit enrichment without compromising system stability or security. The MCP-ingestion adapter extends these capabilities to support modern protocol-based integrations while maintaining the same security and governance standards. The OAuth2.0 authorization system adds another layer of security by enabling secure user delegation with PKCE S256 and immutable target-account verification, ensuring that authorized users cannot impersonate other accounts while maintaining strict separation between human and workload authentication boundaries.

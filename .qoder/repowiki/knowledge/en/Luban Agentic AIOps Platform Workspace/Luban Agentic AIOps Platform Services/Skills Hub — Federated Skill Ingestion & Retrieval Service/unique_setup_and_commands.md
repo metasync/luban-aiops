@@ -1,0 +1,1 @@
+Package entrypoint is `skills-hub` (from `pyproject.toml [project.scripts]`), running `skills_hub.main:run`. Tests use pytest with fixtures under `tests/fixtures/` and a Docker Compose Postgres via `tests/support/compose.yaml`; development uses `uv` (see `.python-version` and `uv.lock`).

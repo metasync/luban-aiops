@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: products/execution_runtime/executor_core
+title: 'Executor Core: Gateway Transport, Single-Flight Idempotency & Delegated Execution'
+scope:
+    - products/execution-runtime/src/execution_runtime/services/executor.py
+    - products/execution-runtime/src/execution_runtime/services/single_flight.py
+    - products/execution-runtime/src/execution_runtime/services/delegated_execution.py
+source_files: []
+depends_on: []
+related_to:
+    - path: products/tool_gateway/api_routes_schemas

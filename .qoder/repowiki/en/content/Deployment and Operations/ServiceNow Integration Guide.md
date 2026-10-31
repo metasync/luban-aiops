@@ -10,23 +10,35 @@
 - [servicenow_binding.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py)
 - [servicenow_native.py](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py)
 - [test_servicenow_native.py](file://products/tool-gateway/tests/test_servicenow_native.py)
+- [servicenow-check.sh](file://shared/platform-ops/e2e/servicenow-check.sh)
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Updated documentation to reflect two-mode operation with environment variable parameterization
+- Added comprehensive coverage of LIVE_TARGET mode and credential redaction support
+- Replaced fork-based approach documentation with explicit environment variable gating
+- Enhanced troubleshooting section with new error codes and validation modes
+- Updated architecture diagrams to show the new two-mode execution flow
 
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
-5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+5. [Two-Mode Operation](#two-mode-operation)
+6. [Detailed Component Analysis](#detailed-component-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
-This guide documents the ServiceNow integration delivered by SPEC-067: a read-only ingestion surface that exposes six `servicenow.*` tools through the platform’s existing tool-gateway and agent-platform execution path. The integration is intentionally narrow — it reads incidents, change requests, users, and CMDB configuration items from ServiceNow’s global REST/Table-API endpoint using an acting-service OAuth2 client-credentials identity. It does not write, update, delete, or fetch attachments; those capabilities are deferred to future specs.
+This guide documents the ServiceNow integration delivered by SPEC-067: a read-only ingestion surface that exposes six `servicenow.*` tools through the platform's existing tool-gateway and agent-platform execution path. The integration is intentionally narrow — it reads incidents, change requests, users, and CMDB configuration items from ServiceNow's global REST/Table-API endpoint using an acting-service OAuth2 client-credentials identity. It does not write, update, delete, or fetch attachments; those capabilities are deferred to future specs.
 
 The repository root describes the workspace as a modular platform with product-oriented boundaries, shared contracts, and explicit integration points. The ServiceNow capability lives under `products/tool-gateway`, consumes the outbound credential substrate defined by SPEC-068, and registers its tools into the same registry used by native tools.
+
+**Updated** The integration now supports two distinct operational modes controlled by environment variables: a default mode using the in-cluster mock for development and testing, and a `LIVE_TARGET=true` mode for validating against real ServiceNow instances with enhanced credential redaction support.
 
 **Section sources**
 - [README.md:1-46](file://README.md#L1-L46)
@@ -41,7 +53,7 @@ The ServiceNow integration spans four layers inside `tool-gateway`:
 | Connector bootstrap | Conditional registration when `GATEWAY_SERVICENOW_ENABLED=true` | `app.py` |
 | Binding config | Admitted tool names, fixed tables, field projections, parameter schemas, and tier | `ingestion/servicenow_binding.py` |
 | Transport implementation | HTTP calls, validation, projection, error mapping, audit attribution | `ingestion/servicenow_native.py` |
-| Tests | Registration, projection, fail-closed behaviour, credential handling, deny-by-default, audit fidelity | `tests/test_servicenow_native.py` |
+| E2E testing | Two-mode validation with environment variable parameterization | `tests/test_servicenow_native.py`, `shared/platform-ops/e2e/servicenow-check.sh` |
 
 ```mermaid
 graph TB
@@ -51,12 +63,16 @@ Registry --> SN_Binding["ServiceNow Binding<br/>admitted tools + schemas"]
 Registry --> SN_Native["ServiceNow Native Connector<br/>httpx + Table API"]
 SN_Native --> ServiceNow["ServiceNow REST/Table-API"]
 SN_Native --> Auth["Outbound Auth Resolver<br/>SPEC-068 seam"]
+TestScript["E2E Test Script<br/>Two-Mode Validation"] --> Gateway
+TestScript --> Mock["In-Cluster Mock"]
+TestScript --> RealInstance["Real ServiceNow Instance"]
 ```
 
 **Diagram sources**
 - [app.py:195-209](file://products/tool-gateway/src/tool_gateway/app.py#L195-L209)
 - [servicenow_binding.py:110-175](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py#L110-L175)
 - [servicenow_native.py:135-174](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L135-L174)
+- [servicenow-check.sh:40-54](file://shared/platform-ops/e2e/servicenow-check.sh#L40-L54)
 
 **Section sources**
 - [app.py:195-209](file://products/tool-gateway/src/tool_gateway/app.py#L195-L209)
@@ -68,7 +84,7 @@ SN_Native --> Auth["Outbound Auth Resolver<br/>SPEC-068 seam"]
 The integration exposes exactly six read-tier tools:
 
 | Tool | ServiceNow table | Operation | Parameters |
-|---|---:|---|---|
+|---|---|---|---|
 | `servicenow.incident.list` | `incident` | list | `limit` (1–100, default 20) |
 | `servicenow.incident.get` | `incident` | get | `sys_id` (32-hex, required) |
 | `servicenow.change_request.list` | `change_request` | list | `limit` (1–100, default 20) |
@@ -117,6 +133,46 @@ Gateway-->>Client : "success or error response"
 - [app.py:195-209](file://products/tool-gateway/src/tool_gateway/app.py#L195-L209)
 - [servicenow_native.py:313-408](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L313-L408)
 - [servicenow_native.py:411-471](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L411-L471)
+
+## Two-Mode Operation
+
+### Default Mode (Development & Testing)
+The default mode uses the in-cluster thin mock for development and CI testing. This mode is what `make e2e` runs and proves the wire path, projection, and redaction against mock data without making any live external calls.
+
+Key characteristics:
+- Uses canned mock data (incident `INC0010001`, change `CHG0020001`, user `mock.operator`, CI `Mock DB Cluster`)
+- Validates registration, fail-closed behavior, and credential stripping
+- No live ServiceNow instance contact
+- Suitable for CI and local development
+
+### LIVE_TARGET Mode (Production Validation)
+The `LIVE_TARGET=true` mode validates against a real ServiceNow instance in read-only mode. This mode requires explicit environment variable overrides because the canned defaults cannot exist on a real tenant.
+
+**Critical Security Requirements:**
+- All nine environment variables must be explicitly set (not just defaulted)
+- `REDACTION_SECRETS_FILE` must contain at least one real credential literal
+- The script refuses to start if any expected value is missing
+- `STRICT_LIVE=true` is automatically implied (skipped legs become hard failures)
+
+```mermaid
+flowchart TD
+Start(["Start servicenow-check.sh"]) --> CheckMode{"LIVE_TARGET=true?"}
+CheckMode --> |No| DefaultMode["Default Mode:<br/>- Use mock data<br/>- Validate wire path<br/>- No live calls"]
+CheckMode --> |Yes| RequireEnv["Require all 9 env vars<br/>explicitly set"]
+RequireEnv --> ValidateFile["Validate REDACTION_SECRETS_FILE<br/>must be readable, non-empty,<br/>contain real literals"]
+ValidateFile --> LiveValidation["Live Validation:<br/>- Real ServiceNow instance<br/>- All 6 legs execute<br/>- Credential redaction test"]
+DefaultMode --> End(["Complete"])
+LiveValidation --> End
+```
+
+**Diagram sources**
+- [servicenow-check.sh:179-204](file://shared/platform-ops/e2e/servicenow-check.sh#L179-L204)
+- [servicenow-check.sh:441-508](file://shared/platform-ops/e2e/servicenow-check.sh#L441-L508)
+
+**Section sources**
+- [servicenow-check.sh:40-54](file://shared/platform-ops/e2e/servicenow-check.sh#L40-L54)
+- [servicenow-check.sh:179-204](file://shared/platform-ops/e2e/servicenow-check.sh#L179-L204)
+- [servicenow-check.sh:441-508](file://shared/platform-ops/e2e/servicenow-check.sh#L441-L508)
 
 ## Detailed Component Analysis
 
@@ -189,7 +245,7 @@ ServiceNowBinding --> ServiceNowNativeConnector : "constructs"
 - [servicenow_binding.py:178-196](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_binding.py#L178-L196)
 
 ### Transport Implementation
-`servicenow_native.py` implements the REST/Table-API fallback chosen at Stage-0 because the operator PDI did not expose ServiceNow’s own MCP server. The connector:
+`servicenow_native.py` implements the REST/Table-API fallback chosen at Stage-0 because the operator PDI did not expose ServiceNow's own MCP server. The connector:
 
 1. Validates the base URL scheme and host.
 2. Builds a target URL from the gateway-owned table constant.
@@ -239,7 +295,7 @@ Success --> End
 - [servicenow_native.py:214-408](file://products/tool-gateway/src/tool_gateway/ingestion/servicenow_native.py#L214-L408)
 
 ### Audit Attribution and Identity Mode
-The connector addresses ServiceNow with the acting service’s credential, not the requesting user’s delegated identity. Every call records requester identity and acting-service identity separately, and marks `target_identity_mode=acting_service`. Timeout and unreachable faults are attributed `failure_class=target_unavailable`; policy denials and upstream errors are distinct outcomes.
+The connector addresses ServiceNow with the acting service's credential, not the requesting user's delegated identity. Every call records requester identity and acting-service identity separately, and marks `target_identity_mode=acting_service`. Timeout and unreachable faults are attributed `failure_class=target_unavailable`; policy denials and upstream errors are distinct outcomes.
 
 ```mermaid
 stateDiagram-v2
@@ -363,23 +419,28 @@ The operational guide documents the full end-to-end runbook, including ServiceNo
 | `SERVICENOW_NOT_CONFIGURED` / `SERVICENOW_INVALID_BASE_URL` | Missing or malformed base URL | Set `GATEWAY_SERVICENOW_BASE_URL` to the instance origin |
 | `CREDENTIAL_SET_NOT_FOUND` | Secret not written, mount missing, set-name mismatch, or unknown scheme | Re-run the sync script; verify the JSON key and `scheme` value |
 | `CREDENTIAL_ACQUISITION_FAILED` | Wrong/expired secret, grant type disabled, or token URL unreachable | Smoke-test locally against the instance |
-| `SERVICENOW_UPSTREAM_ERROR` (401/403) | Bound user’s ACLs do not cover the table | Re-check the integration user and role posture |
+| `SERVICENOW_UPSTREAM_ERROR` (401/403) | Bound user's ACLs do not cover the table | Re-check the integration user and role posture |
 | `SERVICENOW_UPSTREAM_ERROR` (404) on `get` | `sys_id` does not exist on this tenant | Use a `sys_id` returned by a live `list` |
 | `SERVICENOW_UPSTREAM_ERROR` (3xx) | Redirects are not followed | Usually a proxy, wrong base URL, or mis-scoped endpoint |
 | `SERVICENOW_TIMEOUT` / `SERVICENOW_UNREACHABLE` | Egress blocked, DNS failure, TLS trust failure, or instance maintenance | Probe from inside the pod; check NetworkPolicy and CA bundle |
 | `SERVICENOW_RESPONSE_INVALID` | HTTP 200 with non-JSON body or unexpected shape | Confirm the endpoint is the global Table API, not an interstitial |
 | `INVALID_PARAMETERS` before any request | Missing/malformed `sys_id` or invalid `limit` | Fix arguments; values above 100 are clamped, not rejected |
+| **LIVE_TARGET mode validation failures** | Missing required environment variables or empty `REDACTION_SECRETS_FILE` | Ensure all 9 environment variables are explicitly set and the secrets file contains real credential literals |
+| **Redaction test failures** | Credentials appearing in tool results or logs | Verify credential redaction is working; check `REDACTION_SECRETS_FILE` contents |
 
 For live validation, the shipped e2e script is mock-bound for its final legs; operators must manually exercise real `sys_id`s and assert field projection, log hygiene, and audit attribution. After validation, the cluster should be restored to the committed dev state so the running overlay matches the repository.
+
+**Updated** Added troubleshooting entries for the new two-mode operation and credential redaction features.
 
 **Section sources**
 - [servicenow-integration.md:633-649](file://docs/guides/servicenow-integration.md#L633-L649)
 - [servicenow-integration.md:432-479](file://docs/guides/servicenow-integration.md#L432-L479)
 - [servicenow-integration.md:570-592](file://docs/guides/servicenow-integration.md#L570-L592)
+- [servicenow-check.sh:179-204](file://shared/platform-ops/e2e/servicenow-check.sh#L179-L204)
 
 ## Conclusion
 The ServiceNow integration is a narrowly scoped, operator-declared read surface built on established platform seams. Its security posture is defined by five hard rules: fixed tables, allowlisted field projection, read tier only, fail-closed no-fabrication, and acting-service identity. The binding layer is the authoritative boundary — adding a new table or column is a configuration change reviewed like any other operator-facing surface, not a dynamic capability advertised by the target.
 
-For operators, the critical path is: provision a dedicated integration user and OAuth client-credentials application in ServiceNow, mount a named credential set, enable the connector, validate against a real instance out-of-band, and record the result in the living documentation. For contributors, the extension point is `servicenow_binding.py`; for consumers, the surface is the same governed tool path used by all other read-tier tools.
+**Updated** The integration now provides robust two-mode operation through environment variable parameterization, replacing the previous fork-based approach. The default mode enables safe development and CI testing against mock data, while `LIVE_TARGET=true` mode provides production validation with enhanced credential redaction support. For operators, the critical path remains: provision a dedicated integration user and OAuth client-credentials application in ServiceNow, mount a named credential set, enable the connector, validate against a real instance out-of-band, and record the result in the living documentation. For contributors, the extension point is `servicenow_binding.py`; for consumers, the surface is the same governed tool path used by all other read-tier tools.
 
 [No sources needed since this section summarizes without analyzing specific files]

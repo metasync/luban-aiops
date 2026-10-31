@@ -1,0 +1,1 @@
+FastAPI service that ingests Markdown skill documents from federated git/local sources, persists them in memory or PostgreSQL, and serves search/list/get endpoints with deterministic keyword scoring.

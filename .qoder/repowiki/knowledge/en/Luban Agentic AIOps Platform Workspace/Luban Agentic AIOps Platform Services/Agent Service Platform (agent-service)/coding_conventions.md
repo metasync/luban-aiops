@@ -1,0 +1,4 @@
+- Application code is organized under `src/agent_service/<concern>/` with each concern owning its own subpackage (api, services, providers, core, contracts, entrypoints).
+- External integrations (LLM providers, session backends) are expressed as pluggable interfaces registered through a registry rather than imported directly by callers.
+- Configuration flows through `core.config.get_settings()` / `core.env` helpers instead of direct `os.environ` reads inside business logic.
+- Cross-cutting concerns (logging, metrics, tracing, request-id propagation) are installed once in `app.create_app()` and accessed via `core.telemetry`/`core.request_context` from all layers.

@@ -1,0 +1,6 @@
+- Model-generated output is never trusted: every draft passes through a fenced-contract parser followed by Pydantic validation and deterministic post-processing (redaction + field clamping + UTF-8 truncation) before being returned.
+- Generation paths are fail-soft: any exception in the bounded LLM call logs a warning and returns `None`, letting callers fall back to a deterministic skeleton rather than raising a 500.
+- Secret detection uses a shared `REDACTION_VALUE_PATTERNS` tuple compiled at import time, applied identically by both `skill_draft.postprocess` and `skill_graduation.revalidate_blast_radius` to keep the redaction vocabulary in sync without importing between modules.
+- Deterministic provenance is embedded as an HTML comment block (`<!-- ... -->`) containing session/incident IDs, UTC date, platform version, and mode, produced by a shared `provenance_block` helper.
+- Backends implement a `Protocol` (`OperationDocumentStore`) and are selected by environment variables (`AGENT_STATE_STORE_BACKEND` / `AGENT_STATE_DB_URL`) via a factory function that falls back to the in-memory implementation on failure.
+- Immutable snapshots are created via a `make_*` constructor (e.g. `make_document`) that sets all fields including timestamps, keeping row shape consistent across in-memory and Postgres implementations.

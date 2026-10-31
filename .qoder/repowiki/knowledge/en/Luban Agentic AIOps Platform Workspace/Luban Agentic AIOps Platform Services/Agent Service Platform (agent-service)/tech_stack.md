@@ -1,0 +1,1 @@
+Python 3.x with FastAPI + Uvicorn as the HTTP server, Pydantic v2 for schema validation, AgentScope as the provider abstraction, Redis and PostgreSQL as pluggable session stores, and OpenTelemetry/Prometheus for telemetry exposed via the shared `core` layer.

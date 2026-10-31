@@ -20,14 +20,24 @@
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_platform/runtime_kernel.py)
 - [approval-and-hitl.md](file://docs/guides/approval-and-hitl.md)
+- [0015-outbound-user-delegated-identity-via-per-user-oauth.md](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md)
+- [0016-just-in-time-outbound-oauth-authorization.md](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md)
+- [SPEC-070-outbound-user-delegated-identity/spec.md](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md)
+- [user_delegated_client.py](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py)
+- [authorization_transactions.py](file://products/tool-gateway/src/tool_gateway/services/authorization_transactions.py)
+- [authorization_transaction_store.py](file://products/tool-gateway/src/tool_gateway/services/authorization_transaction_store.py)
+- [authorization_service.py](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py)
+- [oauth_client.py](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added documentation for the new `secrets:deliver` policy action required for email delivery channel operations
-- Enhanced audit event types with `secret_delivered` events for tracking secret delivery completion
-- Expanded approval workflow coverage to include write-tier secret delivery operations requiring separate authorization
-- Updated policy engine documentation to reflect the distinct action model for secret delivery vs. general tool mutation
+- Added comprehensive documentation for user-delegated outbound identity capabilities via per-user OAuth authorization-code flows
+- Documented new trust boundaries between machine identities (service accounts) and human identities (per-user delegation)
+- Added detailed coverage of the encrypted Postgres credential store for per-user refresh tokens
+- Updated authorization flow diagrams to show both inbound service-to-service delegation and outbound user-delegated execution
+- Enhanced audit trail documentation with `delegation_mode` field supporting `user_delegated` and `acting_service` attribution
+- Added configuration guidance for OAuth target registration, PKCE enforcement, and first-use authorization workflows
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,15 +52,17 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the Luban AIOPS platform's multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. It also provides guidance on configuring security settings, defining custom policies, and implementing additional authorization controls.
+This document explains the Luban AIOPS platform's multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. 
+
+The platform now supports two distinct identity planes: **inbound service-to-service delegation** using broker-mediated tokens that preserve human attribution internally, and **outbound user-delegated execution** where tools act as the requesting human against external targets using per-user OAuth credentials. This dual-plane approach maintains strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts.
 
 ## Project Structure
 Security is enforced at multiple boundaries:
 - Identity broker authenticates users and issues short-lived delegated tokens for service-to-service calls.
 - Platform gateway validates tokens, normalizes identity, evaluates policy-as-code, and bridges HITL approvals.
-- Tool gateway executes tools under strict admission control, applies deterministic redaction, and emits durable audit events.
+- Tool gateway executes tools under strict admission control, applies deterministic redaction, emits durable audit events, and manages per-user OAuth credential acquisition.
 - Agent platform orchestrates sessions, parks risky tool calls for human confirmation, and propagates identity into execution context.
-- Audit service persists tamper-evident-enough audit trails with retention and bounded growth.
+- Audit service persists tamper-evident-enough audit trails with retention and bounded growth, including delegation mode attribution.
 
 ```mermaid
 graph TB
@@ -58,9 +70,10 @@ User["Operator / Developer"] --> Portal["Portal (OIDC login)"]
 Portal --> Gateway["Platform Gateway<br/>Token validation + Policy"]
 Gateway --> Broker["Identity Broker<br/>Delegated token exchange"]
 Gateway --> Agent["Agent Platform<br/>Session + HITL parking"]
-Agent --> ToolGW["Tool Gateway<br/>Admission + Redaction"]
-ToolGW --> Tools["External Tools / Systems"]
-Gateway --> Audit["Audit Service<br/>Durable ingestion"]
+Agent --> ToolGW["Tool Gateway<br/>Admission + Redaction + User Delegation"]
+ToolGW --> ExternalTargets["External Targets<br/>(Per-user OAuth)"]
+ToolGW --> Tools["Internal Tools / Systems"]
+Gateway --> Audit["Audit Service<br/>Durable ingestion + Delegation Mode"]
 ToolGW --> Audit
 Broker --> Audit
 ```
@@ -70,6 +83,7 @@ Broker --> Audit
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 **Section sources**
@@ -80,25 +94,25 @@ Broker --> Audit
 - Authentication and identity federation via Keycloak OIDC, with normalized roles and environment scopes passed downstream.
 - Policy-as-code engine that evaluates action authorization with deny-by-default semantics and explicit approval tiers.
 - Token delegation through a broker-mediated exchange to propagate user identity to downstream services without elevating roles.
+- **New**: User-delegated outbound identity via per-user OAuth authorization-code flows, maintaining strict separation from machine grants.
 - HITL approval workflow that parks mutating tool calls until a designated approver confirms or denies them.
 - Deterministic output redaction at the tool gateway choke point to prevent credential leakage.
-- Durable, permission-scoped audit trail with retention and bounded growth.
+- Durable, permission-scoped audit trail with retention, bounded growth, and delegation mode attribution.
 
 **Section sources**
 - [identity-and-authorization-design.md:121-166](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L121-L166)
 - [policy-engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
+- [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 
 ## Architecture Overview
-The platform enforces least privilege end-to-end:
-- The portal authenticates via Keycloak OIDC; the gateway validates tokens and forwards trusted identity.
-- The policy engine evaluates actions against a versioned bundle with deny-by-default and approval outcomes.
-- Mutating tool calls are parked and require tiered approval before execution.
-- Service-to-service calls use broker-mediated delegated tokens bound to target audiences; roles are never elevated.
-- Tool outputs are deterministically redacted before response and audit emission.
-- All sensitive events are ingested into a durable audit service with retention and query APIs gated by policy.
+The platform enforces least privilege end-to-end across two distinct identity planes:
+
+**Inbound Plane (Service-to-Service)**: The portal authenticates via Keycloak OIDC; the gateway validates tokens and forwards trusted identity. The policy engine evaluates actions against a versioned bundle with deny-by-default and approval outcomes. Mutating tool calls are parked and require tiered approval before execution. Service-to-service calls use broker-mediated delegated tokens bound to target audiences; roles are never elevated.
+
+**Outbound Plane (User-Delegated)**: For external targets requiring per-user RBAC, the tool gateway acquires OAuth 2.x authorization-code credentials on behalf of the requesting user. These target-issued tokens carry the user's identity and authority, allowing external systems to enforce their own RBAC. The platform custodies encrypted refresh tokens but never elevates beyond the user's target-side authority.
 
 ```mermaid
 sequenceDiagram
@@ -108,6 +122,7 @@ participant G as "Platform Gateway"
 participant B as "Identity Broker"
 participant A as "Agent Platform"
 participant T as "Tool Gateway"
+participant E as "External Target"
 participant S as "Audit Service"
 U->>P : Login (Keycloak OIDC)
 P->>G : API call with user JWT
@@ -121,8 +136,17 @@ G->>T : Execute with confirmer's delegated token
 else allow
 G->>T : Execute with requester's delegated token
 end
+T->>T : Check if user-delegated required
+alt user-delegated needed
+T->>E : First-use OAuth authorization redirect
+E-->>T : Authorization code (PKCE S256)
+T->>E : Exchange code for access token
+E-->>T : Target-issued access token (user-bound)
+else machine grant sufficient
+T->>Tools : Execute with service credentials
+end
 T->>T : Redact output
-T->>S : Emit audit event
+T->>S : Emit audit event (with delegation_mode)
 G->>S : Emit policy/session events
 ```
 
@@ -131,6 +155,7 @@ G->>S : Emit policy/session events
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [user_delegated_client.py:485-506](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L485-L506)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 ## Detailed Component Analysis
@@ -178,6 +203,57 @@ IB-->>GW : access_token (aud=target, roles copied, act=caller)
 - [exchange_service.py:1-43](file://products/identity-broker/src/identity_service/services/exchange_service.py#L1-L43)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
+
+### User-Delegated Outbound Identity and Per-User OAuth Flows
+**Updated** Added comprehensive documentation for the new user-delegated outbound identity capabilities that enable tools to act as the requesting human against external targets.
+
+The platform now supports two distinct identity planes with strict isolation:
+
+**Machine Grants (Existing)**: Service accounts with `basic`, `bearer`, or `oauth2_client_credentials` schemes operate without user identity. These are suitable for internal tools or external systems that accept shared service accounts.
+
+**User-Delegated Grants (New)**: The `oauth2_authorization_code` scheme enables per-user OAuth flows where tools act as the requesting human. The platform stores encrypted refresh tokens and exchanges them for target-issued access tokens that carry the user's identity and authority.
+
+Key security properties:
+- **No broker mint**: The identity broker does not sign or mint outbound tokens; only the target issues user-bound credentials
+- **Fail closed**: Failed user-delegated acquisition never falls back to machine grants or other authentication methods
+- **Strict isolation**: Machine and human identities remain separate throughout the platform boundary
+- **Encrypted custody**: Refresh tokens are stored in Postgres with authenticated encryption and versioned keys
+- **First-use consent**: Users complete one-time authorization flows against external targets when needed
+
+```mermaid
+sequenceDiagram
+participant R as "Requester"
+participant TG as "Tool Gateway"
+participant CS as "Credential Store"
+participant ET as "External Target"
+participant AT as "Audit Trail"
+R->>TG : Tool invocation requiring user-delegated auth
+TG->>CS : Lookup encrypted refresh token by owner/target
+alt no refresh token available
+TG->>R : Redirect to target authorization URL (PKCE S256)
+R->>ET : Complete OAuth authorization flow
+ET-->>TG : Authorization code (single-use)
+TG->>ET : Exchange code for access token + refresh token
+ET-->>TG : Target-issued access token (user-bound)
+TG->>CS : Store encrypted refresh token
+else refresh token available
+TG->>ET : Refresh access token using stored refresh token
+ET-->>TG : New access token
+end
+TG->>ET : Execute tool call with user-bound access token
+TG->>AT : Emit audit event with delegation_mode=user_delegated
+```
+
+**Diagram sources**
+- [user_delegated_client.py:485-506](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L485-L506)
+- [authorization_transactions.py:65-100](file://products/tool-gateway/src/tool_gateway/services/authorization_transactions.py#L65-L100)
+- [authorization_transaction_store.py:286-294](file://products/tool-gateway/src/tool_gateway/services/authorization_transaction_store.py#L286-L294)
+
+**Section sources**
+- [0015-outbound-user-delegated-identity-via-per-user-oauth.md:66-95](file://docs/adr/0015-outbound-user-delegated-identity-via-per-user-oauth.md#L66-L95)
+- [0016-just-in-time-outbound-oauth-authorization.md:42-75](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L42-L75)
+- [SPEC-070-outbound-user-delegated-identity/spec.md:98-113](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L98-L113)
+- [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 
 ### Policy Engine and Rule Evaluation
 - The policy engine loads a versioned YAML bundle and evaluates actions with deny-by-default semantics. Outcomes include allow, deny, and require_approval with explicit tiers.
@@ -311,28 +387,34 @@ Withhold --> Audit
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [redaction.py:92-127](file://products/tool-gateway/src/tool_gateway/tools/redaction.py#L92-L127)
 
-### Durable Audit Trail Integrity
-- Audit events are emitted by platform-gateway, tool-gateway, and identity-broker to a dedicated audit service. Ingestion is authenticated via service identity and must not block originating requests.
-- The audit store supports retention and bounded growth, with query APIs gated by policy (audit:read). Results preserve redaction applied upstream.
-- Retention and eviction do not block ingest; health/metrics expose retention window and approximate size.
+### Durable Audit Trail Integrity and Delegation Attribution
+**Updated** Enhanced audit trail with delegation mode attribution to distinguish between machine-grant and user-delegated execution contexts.
+
+The platform now emits comprehensive audit events with delegation mode attribution:
+
+- **Delegation Modes**: Events carry `delegation_mode` values of `none` (legacy), `acting_service` (machine grants), or `user_delegated` (per-user OAuth flows)
+- **Event Type**: New `target_authorization` event type tracks user-delegated authorization lifecycle events including successful authorization and failures
+- **Attribution Fidelity**: Audit events preserve separate requester `sub`, acting service, target identity, and signed-execution correlation
+- **Query Support**: Audit queries support filtering by `delegation_mode` to analyze machine vs. human execution patterns
 
 ```mermaid
-sequenceDiagram
-participant E as "Emitter (Gateway/Tool/Broker)"
-participant AS as "Audit Service"
-E->>AS : POST /api/v1/audit/events (batch)
-AS->>AS : Store with retention/bounded growth
-AS-->>E : Acknowledge (non-blocking)
-Note over E,AS : Unauthorized ingest returns 401; malformed events return 400
+flowchart TD
+MachineGrant["Machine Grant Execution"] --> Event1["Emit audit event (delegation_mode=acting_service)"]
+UserDelegated["User-Delegated Execution"] --> Event2["Emit audit event (delegation_mode=user_delegated)"]
+Legacy["Legacy Tool Invocation"] --> Event3["Emit audit event (delegation_mode omitted)"]
+Event1 --> Audit["Audit Service"]
+Event2 --> Audit
+Event3 --> Audit
 ```
 
 **Diagram sources**
-- [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
-- [SPEC-013-durable-audit-trail/spec.md:86-104](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L86-L104)
+- [audit.py:40-43](file://products/audit-service/src/audit_service/schemas/audit.py#L40-L43)
+- [authorization_service.py:240-243](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L240-L243)
 
 **Section sources**
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 - [SPEC-013-durable-audit-trail/spec.md:86-104](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L86-L104)
+- [authorization_service.py:240-243](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L240-L243)
 
 ### Secret Delivery Audit Events
 **Updated** Enhanced audit trail with `secret_delivered` events for tracking secret delivery completion.
@@ -369,8 +451,8 @@ Event2 --> Audit
 ## Dependency Analysis
 - Platform gateway depends on the policy engine and policy bundle to enforce action authorization and approval requirements.
 - Identity broker provides delegated tokens to platform gateway; roles are copied, never elevated.
-- Tool gateway depends on policy actions for admission and applies deterministic redaction before emitting audit events.
-- Audit service depends on emitters to forward events and provides a policy-gated query API.
+- Tool gateway depends on policy actions for admission, applies deterministic redaction before emitting audit events, and manages per-user OAuth credential acquisition.
+- Audit service depends on emitters to forward events and provides a policy-gated query API with delegation mode filtering.
 
 ```mermaid
 graph LR
@@ -378,6 +460,8 @@ PolicyBundle["Policy Bundle"] --> PolicyEngine["Policy Engine"]
 PolicyEngine --> Gateway["Platform Gateway"]
 Broker["Identity Broker"] --> Gateway
 Gateway --> ToolGW["Tool Gateway"]
+ToolGW --> UserDelegated["User-Delegated Client"]
+UserDelegated --> CredentialStore["Encrypted Credential Store"]
 ToolGW --> Audit["Audit Service"]
 Gateway --> Audit
 Broker --> Audit
@@ -387,18 +471,22 @@ Broker --> Audit
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 **Section sources**
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 ## Performance Considerations
 - Policy evaluation is lightweight and operates on an in-memory bundle; ensure bundles remain concise and prioritized to minimize matching overhead.
 - Redaction walks serialized results; keep tool outputs bounded to avoid excessive traversal and potential overflow rejections.
 - Audit ingestion is fire-and-forget with timeouts; configure appropriate backends and retention to avoid storage pressure.
+- **New**: User-delegated OAuth acquisition uses process-local LRU-bounded access token caching with single-flight coordination to minimize redundant token exchanges while maintaining security boundaries.
+- **New**: Encrypted credential store operations are bounded and coordinated across replicas; rotation and revocation must be tested for performance impact.
 
 ## Troubleshooting Guide
 - Token exchange failures: verify service credentials, subject token validity, and audience allow-lists. Check metrics and logs for exchange errors.
@@ -407,15 +495,19 @@ Broker --> Audit
 - Redaction overflow: if tool output is withheld due to high credential density, tighten parameters or scope inputs to reduce sensitive content.
 - Audit ingestion issues: confirm emitter URLs and service identities; check audit service health and retention configuration.
 - Secret delivery failures: verify email channel configuration, recipient allowlists, and SMTP connectivity; check for UPSTREAM_ERROR responses.
+- **New**: User-delegated OAuth failures: check target client registration, callback URI configuration, PKCE S256 support, and refresh token rotation; verify that failed acquisitions fail closed without falling back to machine grants.
 
 **Section sources**
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [user_delegated_client.py:87-100](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L87-L100)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 ## Conclusion
-Luban AIOPS enforces least privilege through a layered model: OIDC-based authentication, policy-as-code authorization with explicit approval tiers, broker-mediated token delegation preserving human attribution, deterministic redaction of tool outputs, and a durable audit trail with retention. The authorization matrix defines clear permissions per role and environment, while the policy engine ensures consistent enforcement. Operators can configure security settings, extend policies, and add controls while maintaining separation of duties and auditability.
+Luban AIOPS enforces least privilege through a layered model: OIDC-based authentication, policy-as-code authorization with explicit approval tiers, broker-mediated token delegation preserving human attribution, deterministic redaction of tool outputs, and a durable audit trail with retention. The authorization matrix defines clear permissions per role and environment, while the policy engine ensures consistent enforcement.
+
+The platform now supports two distinct identity planes: inbound service-to-service delegation using broker-mediated tokens, and outbound user-delegated execution using per-user OAuth credentials. This dual-plane approach maintains strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts. Operators can configure security settings, extend policies, add OAuth target integrations, and implement additional controls while maintaining separation of duties and auditability.
 
 ## Appendices
 
@@ -465,3 +557,19 @@ Luban AIOPS enforces least privilege through a layered model: OIDC-based authent
 - [secrets_connector.py:295-332](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L295-L332)
 - [app.py:146-162](file://products/tool-gateway/src/tool_gateway/app.py#L146-L162)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
+
+### Configuring User-Delegated OAuth Targets
+**New** Added configuration guidance for setting up per-user OAuth authorization flows with external targets.
+
+- Register the platform as a confidential OAuth client with the external target, configuring exact HTTPS callback URIs and PKCE S256 support.
+- Configure authorization and token endpoints, target identity endpoints for account verification, and allowed scopes/resource destinations.
+- Set refresh token lifetimes, access token caches, and local TTL defaults following the pinned specifications (60-second start, 600-second transaction limits).
+- Configure encrypted credential store with Postgres backend, application-level authenticated encryption, and separately mounted versioned keys.
+- Enable first-use authorization redirects for users who haven't completed target consent; subsequent calls use server-to-server renewal.
+- Monitor delegation mode audit events to distinguish between machine-grant and user-delegated execution patterns.
+
+**Section sources**
+- [SPEC-070-outbound-user-delegated-identity/spec.md:156-177](file://docs/specs/SPEC-070-outbound-user-delegated-identity/spec.md#L156-L177)
+- [user_delegated_client.py:605-623](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L605-L623)
+- [authorization_transaction_store.py:286-294](file://products/tool-gateway/src/tool_gateway/services/authorization_transaction_store.py#L286-L294)
+- [0016-just-in-time-outbound-oauth-authorization.md:42-75](file://docs/adr/0016-just-in-time-outbound-oauth-authorization.md#L42-L75)

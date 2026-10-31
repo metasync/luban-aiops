@@ -1,0 +1,1 @@
+Python ≥3.11, FastAPI + Uvicorn ASGI server, psycopg[binary] async PostgreSQL driver, PyJWT for ingest/workload token handling, Pydantic v2 schemas, OpenTelemetry SDK with OTLP HTTP exporter and FastAPI/HTTPX instrumentation, Prometheus client, cryptography for signing.

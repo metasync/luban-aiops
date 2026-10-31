@@ -1,0 +1,1 @@
+FastAPI (`APIRouter`, `StreamingResponse`, `Header`, `Query`) for the HTTP boundary; Pydantic models in `schemas/` as the shared contract; httpx async client inside `tools/gateway_tools.py` for outbound gateway calls.

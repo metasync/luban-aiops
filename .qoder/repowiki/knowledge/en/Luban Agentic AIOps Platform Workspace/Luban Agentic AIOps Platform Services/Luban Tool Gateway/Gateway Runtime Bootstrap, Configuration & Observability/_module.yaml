@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: products/tool_gateway/core_runtime
+title: Gateway Runtime Bootstrap, Configuration & Observability
+scope:
+    - products/tool-gateway/src/tool_gateway/core/
+    - products/tool-gateway/src/tool_gateway/app.py
+    - products/tool-gateway/src/tool_gateway/main.py
+source_files: []
+depends_on: []
+related_to: []

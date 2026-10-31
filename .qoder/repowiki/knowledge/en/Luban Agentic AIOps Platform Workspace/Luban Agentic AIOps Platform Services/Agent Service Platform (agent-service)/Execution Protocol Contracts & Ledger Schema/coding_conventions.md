@@ -1,0 +1,6 @@
+- Every JSON Schema file declares a stable `$schema` pointing at draft-2020-12 and a globally unique `$id` under `https://metasync.github.io/luban-aiops/schemas/`.
+- Signed envelopes carry a `signature` field whose value is an HMAC-SHA256 hex digest over the canonical JSON of all other fields (sorted keys, no insignificant whitespace) excluding the signature itself.
+- Cryptographic digests are validated with the fixed-length hex pattern `^[0-9a-f]{64}$` both in JSON Schema and mirrored as CHECK constraints in the SQL ledger.
+- Backward-compatible protocol evolution is expressed via `oneOf` discriminators keyed on the presence of `protocol_version`/`expires_at`/`run_id`/`admission_epoch`, allowing legacy envelopes to coexist with newer versions without changing verification logic.
+- The SQL ledger mirrors every JSON Schema invariant through explicit `CHECK` clauses on the `jsonb` columns (field presence arrays, `execution_json_strings`, enum restrictions, length bounds, digest regexes) rather than relying on application-side validation alone.
+- Execution evidence tables use BEFORE UPDATE/DELETE triggers invoking `execution_immutable()` to reject any mutation after insertion, preserving an append-only audit trail.

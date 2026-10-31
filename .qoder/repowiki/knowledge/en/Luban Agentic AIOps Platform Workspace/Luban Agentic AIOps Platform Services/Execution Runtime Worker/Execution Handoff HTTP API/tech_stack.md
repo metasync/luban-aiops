@@ -1,0 +1,1 @@
+FastAPI `APIRouter` + `JSONResponse`; synchronous psycopg2-style DB access wrapped in `asyncio.to_thread` / `owned_thread` so blocking ledger calls do not block the event loop; HMAC-based bearer-token authentication against a shared secret.

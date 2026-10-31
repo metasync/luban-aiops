@@ -1,0 +1,6 @@
+The module is a single uvicorn FastAPI application whose lifecycle is wired in `app.py`/`main.py`: `create_app()` installs request logging, Prometheus metrics, OpenTelemetry telemetry, SIGTERM-driven drain state, and includes the `api/router` which mounts the v3 handoff endpoint plus health probes. The runtime composes three child concerns behind shared contracts:
+- `execution_support` (bootstrap/config/metrics/telemetry) provides settings, `record_drain_state`, and `configure_logging` consumed by every other layer.
+- `handoff_protocol` exposes the HTTP surface; routes read `app.state.draining` and `x-request-id` from the middleware to gate admission.
+- `executor_core` (`delegated_execution`, `single_flight`, `audit_emitter`) performs idempotent gateway POSTs and emits audit events.
+- `ledger_persistence` (`execution_ledger`, `execution_migration`, `execution_records`) owns the Postgres-backed immutable observation log and claim fencing.
+Cross-child wiring happens via `app.state` (ledger instance, draining flag, lifecycle hook) and via the `contracts/` JSON schemas / SQL migrations that bind the HTTP payload, the audit event, and the Postgres schema together. The integration harness under `tests/failure/` spins up this same app against real Postgres/gateway/worker processes to validate SPEC-063 R-7c drain semantics across F-01..F-36 scenarios.

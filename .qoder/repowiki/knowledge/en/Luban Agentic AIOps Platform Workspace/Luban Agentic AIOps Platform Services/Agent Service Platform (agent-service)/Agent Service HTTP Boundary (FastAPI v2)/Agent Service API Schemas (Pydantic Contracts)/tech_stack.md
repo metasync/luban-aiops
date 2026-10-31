@@ -1,0 +1,1 @@
+Pydantic v2 (`BaseModel`, `Field`, `model_validator`, `model_serializer`, `AwareDatetime`, `ConfigDict`) as the schema layer over JSON Schema definitions in `shared/shared-contracts/schemas/agent-*.schema.json`.

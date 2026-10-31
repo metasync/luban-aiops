@@ -1,0 +1,1 @@
+Python + pytest with psycopg (Postgres 16 via `postgres:16-alpine` on Docker Compose); httpx for HTTP probes; subprocess-driven agent release probe invoking the separate agent-platform venv.

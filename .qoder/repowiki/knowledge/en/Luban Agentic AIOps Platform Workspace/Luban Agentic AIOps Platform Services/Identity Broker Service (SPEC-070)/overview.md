@@ -1,0 +1,1 @@
+FastAPI identity-broker that authenticates users via Keycloak OIDC, issues platform-bound JWTs, and delegates short-lived audience-scoped tokens to registered service callers.

@@ -16,6 +16,8 @@
 - [observability.py](file://products/audit-service/src/audit_service/core/observability.py)
 - [telemetry.py](file://products/audit-service/src/audit_service/core/telemetry.py)
 - [request_context.py](file://products/audit-service/src/audit_service/core/request_context.py)
+- [audit.py](file://products/audit-service/src/audit_service/schemas/audit.py)
+- [summary.py](file://products/audit-service/src/audit_service/schemas/summary.py)
 - [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
 - [audit-summary.schema.json](file://shared/shared-contracts/schemas/audit-summary.schema.json)
 - [audit_emitter.py (agent-platform)](file://products/agent-platform/src/agent_service/services/audit_emitter.py)
@@ -27,14 +29,18 @@
 - [audit_emitter.py (incident-service)](file://products/incident-service/src/incident_service/services/audit_emitter.py)
 - [constants.ts](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts)
 - [test_module_parity.py](file://products/tool-gateway/tests/test_module_parity.py)
+- [test_contracts.py](file://products/audit-service/tests/test_contracts.py)
+- [test_audit_store.py](file://products/audit-service/tests/test_audit_store.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated the "Integration with Other Platform Services" section to reflect seven emitter services instead of three
-- Added detailed documentation of all seven audit emitters and their implementation patterns
-- Updated architecture diagrams to show the expanded emitter ecosystem
-- Enhanced the emitter service enumeration with specific service names and roles
+- Added comprehensive documentation for DelegationMode support with three literal values: 'user_delegated', 'acting_service', and 'none'
+- Updated Event Schema section to document the new delegation_mode field and its filtering capabilities
+- Enhanced Query API documentation to include delegation mode filtering parameters
+- Added new Delegation Context Analysis section explaining how to analyze audit trails by delegation context
+- Updated architecture diagrams to reflect delegation mode filtering in query operations
+- Enhanced integration examples to show delegation mode usage patterns
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,22 +48,24 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Delegation Context Analysis](#delegation-context-analysis)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
+11. [Appendices](#appendices)
 
 ## Introduction
-The Audit Service provides durable, queryable, and retention-managed audit event logging for the platform. It accepts batches of audit events from seven emitting platform services, persists them with idempotency guarantees, enforces retention policies, and exposes read APIs for querying, summarizing, and exporting audit data. The service is designed for compliance and operational visibility, with strict envelope schemas, deterministic aggregation, and bounded exports suitable for reporting.
+The Audit Service provides durable, queryable, and retention-managed audit event logging for the platform. It accepts batches of audit events from seven emitting platform services, persists them with idempotency guarantees, enforces retention policies, and exposes read APIs for querying, summarizing, and exporting audit data. The service is designed for compliance and operational visibility, with strict envelope schemas, deterministic aggregation, bounded exports suitable for reporting, and advanced delegation context analysis capabilities.
 
 Key capabilities:
 - Ingestion pipeline with authentication, validation, and idempotent storage
 - Dual backends: in-memory (dev/test) and PostgreSQL (production)
 - Retention enforcement via time-based eviction and hard caps
-- Query API with keyset pagination and envelope-only filters
-- Summary aggregates over envelope columns only
+- Query API with keyset pagination and envelope-only filters including delegation context
+- Summary aggregates over envelope columns only with delegation mode windowing
 - Bounded CSV export with truncation headers for compliance workflows
+- Delegation mode filtering supporting 'user_delegated', 'acting_service', and 'none' values
 - Observability, metrics, and telemetry integration
 
 ## Project Structure
@@ -65,7 +73,7 @@ The Audit Service is a FastAPI application organized into:
 - API routes for ingestion, query, summary, export, and health
 - Services for store abstraction, retention scheduling, and ingest authentication
 - Core modules for configuration, observability, metrics, request context, and telemetry
-- Schemas defining the audit event envelope and summary response contracts
+- Schemas defining the audit event envelope, delegation modes, and summary response contracts
 
 ```mermaid
 graph TB
@@ -104,8 +112,8 @@ end
 - RetentionTask background task enforcing retention days and max events
 - API routes:
   - Ingest: batched event ingestion with auth and validation
-  - Query: filtered, paginated retrieval of stored envelopes
-  - Summary: deterministic aggregates over envelope columns
+  - Query: filtered, paginated retrieval of stored envelopes with delegation mode support
+  - Summary: deterministic aggregates over envelope columns with delegation context
   - Export: bounded CSV streaming with truncation indicators
 - Configuration: environment-driven settings for backend selection, retention, batching, and export limits
 - Observability: structured logging, metrics, and telemetry setup
@@ -151,10 +159,10 @@ participant Gateway as "Platform Gateway"
 participant Audit as "Audit Service"
 participant Store as "AuditStore"
 participant DB as "PostgreSQL"
-Admin->>Gateway : "GET /api/v1/audit/events?filters"
+Admin->>Gateway : "GET /api/v1/audit/events?filters&delegation_mode"
 Gateway->>Audit : "GET /api/v1/audit/events"
 Audit->>Store : "query(filters, cursor, limit)"
-Store->>DB : "SELECT ... ORDER BY occurred_at DESC, event_id DESC LIMIT n+1"
+Store->>DB : "SELECT ... WHERE delegation_mode = ? ORDER BY occurred_at DESC, event_id DESC LIMIT n+1"
 DB-->>Store : "rows"
 Store-->>Audit : "AuditPage(events, next_cursor)"
 Audit-->>Gateway : "200 OK {events, next_cursor}"
@@ -186,9 +194,10 @@ Log --> Sleep
 ## Detailed Component Analysis
 
 ### Event Schema and Contracts
-- AuditEvent envelope fields include identifiers, timestamps, type, service, correlation ID, optional identity fields, outcome, and per-event details.
+- AuditEvent envelope fields include identifiers, timestamps, type, service, correlation ID, optional identity fields, outcome, delegation mode, and per-event details.
 - The schema is enforced by Pydantic models and validated against the shared JSON schema.
 - Outcome values are constrained to a closed enum; event_type is a closed vocabulary aligned with platform actions.
+- **Updated**: DelegationMode is a literal type supporting 'user_delegated', 'acting_service', and 'none' values, enabling precise filtering of audit trails by delegation context.
 
 ```mermaid
 classDiagram
@@ -204,7 +213,14 @@ class AuditEvent {
 +string[] roles
 +string session_id
 +Outcome outcome
++DelegationMode delegation_mode
 +dict details
+}
+class DelegationMode {
+<<literal>>
+"user_delegated"
+"acting_service"
+"none"
 }
 class IngestRequest {
 +AuditEvent[] events
@@ -216,19 +232,22 @@ class AuditQuery {
 +string event_type
 +string service
 +Outcome outcome
++DelegationMode delegation_mode
 +datetime since
 +datetime until
 }
 IngestRequest --> AuditEvent : "contains"
+AuditEvent --> DelegationMode : "uses"
+AuditQuery --> DelegationMode : "filters by"
 ```
 
 **Diagram sources**
-- [audit.py:44-83](file://products/audit-service/src/audit_service/schemas/audit.py#L44-L83)
-- [audit-event.schema.json:1-94](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L94)
+- [audit.py:44-98](file://products/audit-service/src/audit_service/schemas/audit.py#L44-L98)
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
 
 **Section sources**
-- [audit.py:44-83](file://products/audit-service/src/audit_service/schemas/audit.py#L44-L83)
-- [audit-event.schema.json:1-94](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L94)
+- [audit.py:44-98](file://products/audit-service/src/audit_service/schemas/audit.py#L44-L98)
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
 
 ### Ingestion Pipeline
 - Authentication: callers must present registered service credentials or workload-projected tokens mapped to known clients.
@@ -348,17 +367,18 @@ J --> B
 - [config.py:60-111](file://products/audit-service/src/audit_service/core/config.py#L60-L111)
 
 ### Query API
-- Filters: username, session_id, request_id, event_type, service, outcome, since, until.
+- Filters: username, session_id, request_id, event_type, service, outcome, delegation_mode, since, until.
 - Pagination: keyset cursor based on (occurred_at, event_id), newest-first ordering.
 - Limits: default and maximum enforced via query parameters.
 - Authorization: requires registered service caller; user-level authorization is enforced upstream by the platform gateway.
+- **Updated**: Delegation mode filtering supports exact matching of 'user_delegated', 'acting_service', and 'none' values, enabling precise analysis of audit trails by delegation context.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Admin Tool"
 participant Route as "Query Route"
 participant Store as "AuditStore"
-Client->>Route : "GET /api/v1/audit/events?filters&cursor&limit"
+Client->>Route : "GET /api/v1/audit/events?filters&delegation_mode=user_delegated&cursor&limit"
 Route->>Route : "validate cursor if provided"
 Route->>Store : "query(AuditQuery, cursor, limit)"
 Store-->>Route : "AuditPage{events, next_cursor}"
@@ -376,13 +396,14 @@ Route-->>Client : "200 {events, next_cursor}"
 - Aggregates totals, buckets by event_type/outcome/service, top actors, and decision-chain projections.
 - Deterministic sorting ensures identical results across backends.
 - Operates over envelope columns only; details payload is never excavated.
+- **Updated**: Window echo includes delegation_mode when specified, providing transparency about applied filters.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Admin Tool"
 participant Route as "Summary Route"
 participant Store as "AuditStore"
-Client->>Route : "GET /api/v1/audit/summary?filters"
+Client->>Route : "GET /api/v1/audit/summary?filters&delegation_mode=acting_service"
 Route->>Store : "summarize(AuditQuery)"
 Store-->>Route : "AuditSummary"
 Route-->>Client : "200 {summary}"
@@ -402,13 +423,14 @@ Route-->>Client : "200 {summary}"
 - Streams RFC-4180 CSV with a fixed column order including envelope fields and sorted-key JSON details.
 - Reads pages up to AUDIT_EXPORT_MAX_ROWS; truncation is indicated via response headers.
 - Headers are finalized before streaming begins so consumers can detect complete vs truncated exports.
+- **Updated**: Supports delegation mode filtering for targeted export of specific delegation contexts.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Compliance Tool"
 participant Route as "Export Route"
 participant Store as "AuditStore"
-Client->>Route : "GET /api/v1/audit/export?filters"
+Client->>Route : "GET /api/v1/audit/export?filters&delegation_mode=user_delegated"
 Route->>Store : "query(filters, cursor, page_size)"
 Store-->>Route : "page.events, next_cursor"
 Route-->>Client : "Streaming CSV with X-Audit-Export-* headers"
@@ -444,6 +466,40 @@ A --> G["setup_telemetry(app, SERVICE_NAME)"]
 - [observability.py:1-200](file://products/audit-service/src/audit_service/core/observability.py#L1-L200)
 - [telemetry.py:1-200](file://products/audit-service/src/audit_service/core/telemetry.py#L1-L200)
 - [request_context.py:1-200](file://products/audit-service/src/audit_service/core/request_context.py#L1-L200)
+
+## Delegation Context Analysis
+
+### Delegation Mode Values and Semantics
+The Audit Service now supports three distinct delegation modes that provide granular insight into how authority was exercised during audited actions:
+
+- **`user_delegated`**: The action was performed using a user's delegated identity, where a service acts on behalf of a specific user with their authorized permissions.
+- **`acting_service`**: The action was performed using the acting service's own identity, independent of any specific user delegation.
+- **`none`**: Explicitly indicates no delegation context, distinguishing legacy events from explicitly non-delegated actions.
+
+### Filtering and Querying by Delegation Context
+All query endpoints support delegation mode filtering through the `delegation_mode` parameter:
+
+```http
+GET /api/v1/audit/events?delegation_mode=user_delegated&username=alice
+GET /api/v1/audit/events?delegation_mode=acting_service&service=tool-gateway
+GET /api/v1/audit/summary?delegation_mode=none
+GET /api/v1/audit/export?delegation_mode=user_delegated&since=2024-01-01T00:00:00Z
+```
+
+### Legacy Event Handling
+Events without the `delegation_mode` field are treated as legacy events and are not matched by explicit delegation mode filters. This design preserves backward compatibility while enabling precise analysis of modern delegation-aware events.
+
+### Use Cases for Delegation Analysis
+- **Security Auditing**: Identify all actions performed under user delegation versus service identity
+- **Compliance Reporting**: Generate reports showing delegation patterns and authorization chains
+- **Operational Monitoring**: Track service-to-user delegation ratios and patterns
+- **Incident Investigation**: Isolate incidents by delegation context to understand authorization scope
+
+**Section sources**
+- [audit.py:46-64](file://products/audit-service/src/audit_service/schemas/audit.py#L46-L64)
+- [audit-event.schema.json:73-77](file://shared/shared-contracts/schemas/audit-event.schema.json#L73-L77)
+- [test_contracts.py:100-122](file://products/audit-service/tests/test_contracts.py#L100-L122)
+- [test_audit_store.py:157-170](file://products/audit-service/tests/test_audit_store.py#L157-L170)
 
 ## Dependency Analysis
 - Routes depend on:
@@ -496,6 +552,7 @@ Retention --> Config
 - Per-operation connections keep resource usage predictable for low-volume audit traffic.
 - Export streams page-by-page with a hard row cap to prevent unbounded memory use.
 - Envelope-only filters and aggregations reduce payload processing overhead.
+- **Updated**: Delegation mode filtering leverages existing index infrastructure for efficient exact-match queries.
 
 [No sources needed since this section provides general guidance]
 
@@ -512,15 +569,20 @@ Common issues and diagnostics:
   - Errors are caught and logged; check store error metrics and eviction logs.
 - Store readiness:
   - Use readiness checks to verify database connectivity before relying on write/read paths.
+- **Updated**: Delegation mode validation:
+  - Invalid delegation mode values ('delegated', '', 1) cause validation errors
+  - Legacy events without delegation_mode are not matched by explicit filters
+  - Use AuditQuery.delegation_mode parameter for precise filtering
 
 **Section sources**
 - [ingest.py:33-83](file://products/audit-service/src/audit_service/api/routes/ingest.py#L33-L83)
 - [query.py:35-95](file://products/audit-service/src/audit_service/api/routes/query.py#L35-L95)
 - [retention.py:45-76](file://products/audit-service/src/audit_service/services/retention.py#L45-L76)
 - [audit_store.py:535-543](file://products/audit-service/src/audit_service/services/audit_store.py#L535-L543)
+- [test_contracts.py:116-122](file://products/audit-service/tests/test_contracts.py#L116-L122)
 
 ## Conclusion
-The Audit Service delivers a robust, compliant audit trail with durable storage, strict schemas, and controlled access. Its design emphasizes idempotency, deterministic aggregation, and bounded exports suitable for compliance reporting. Retention policies ensure data lifecycle management while maintaining performance under load. Integration points with seven platform services enable comprehensive visibility across tool invocations, policy decisions, sessions, documents, skills, executions, incidents, and identity operations.
+The Audit Service delivers a robust, compliant audit trail with durable storage, strict schemas, controlled access, and advanced delegation context analysis. Its design emphasizes idempotency, deterministic aggregation, bounded exports suitable for compliance reporting, and precise filtering by delegation mode. Retention policies ensure data lifecycle management while maintaining performance under load. Integration points with seven platform services enable comprehensive visibility across tool invocations, policy decisions, sessions, documents, skills, executions, incidents, and identity operations. The new delegation mode support enables sophisticated analysis of authorization patterns and delegation chains.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -528,8 +590,8 @@ The Audit Service delivers a robust, compliant audit trail with durable storage,
 
 ### Data Lifecycle Management
 - Ingestion: validated, authenticated, and persisted with idempotency.
-- Querying: envelope-only filters with keyset pagination.
-- Summarization: deterministic aggregates over envelope columns.
+- Querying: envelope-only filters with keyset pagination including delegation mode support.
+- Summarization: deterministic aggregates over envelope columns with delegation context windowing.
 - Export: bounded CSV streaming with truncation headers.
 - Retention: time-based eviction followed by hard cap enforcement.
 
@@ -589,7 +651,7 @@ end
 **Section sources**
 - [constants.ts:40-48](file://products/operator-portal/web-ui/app/src/views/audit/constants.ts#L40-L48)
 - [test_module_parity.py:155-162](file://products/tool-gateway/tests/test_module_parity.py#L155-L162)
-- [audit-event.schema.json:1-94](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L94)
+- [audit-event.schema.json:1-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L100)
 
 ### Monitoring and Telemetry
 - HTTP middleware records request method, path, status code, and duration.
@@ -602,3 +664,31 @@ end
 - [metrics.py:1-200](file://products/audit-service/src/audit_service/core/metrics.py#L1-L200)
 - [observability.py:1-200](file://products/audit-service/src/audit_service/core/observability.py#L1-L200)
 - [telemetry.py:1-200](file://products/audit-service/src/audit_service/core/telemetry.py#L1-L200)
+
+### Delegation Mode Examples and Usage Patterns
+
+#### Example: Querying User-Delegated Actions
+```http
+GET /api/v1/audit/events?delegation_mode=user_delegated&username=alice&event_type=tool_invoked
+```
+
+#### Example: Analyzing Service Identity Usage
+```http
+GET /api/v1/audit/summary?delegation_mode=acting_service
+```
+
+#### Example: Exporting Compliance Data by Delegation Context
+```http
+GET /api/v1/audit/export?delegation_mode=user_delegated&since=2024-01-01T00:00:00Z&until=2024-12-31T23:59:59Z
+```
+
+#### Example: Combining Delegation Mode with Other Filters
+```http
+GET /api/v1/audit/events?delegation_mode=user_delegated&username=bob&session_id=ses-123&outcome=deny
+```
+
+**Section sources**
+- [query.py:44-73](file://products/audit-service/src/audit_service/api/routes/query.py#L44-L73)
+- [summary.py:43-62](file://products/audit-service/src/audit_service/api/routes/summary.py#L43-L62)
+- [export.py:96-115](file://products/audit-service/src/audit_service/api/routes/export.py#L96-L115)
+- [test_audit_store.py:157-170](file://products/audit-service/tests/test_audit_store.py#L157-L170)

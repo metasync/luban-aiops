@@ -1,0 +1,5 @@
+- Optional third-party imports (AgentScope classes, runtime engine) are performed inside functions guarded by try/except ImportError so the module remains importable when those extras are absent.
+- Provider implementations declare behavior as class attributes (`provider_name`, `default_model`, `model_series`, `discover_family_prefixes`) rather than constructor arguments, with `validate()` raising `ProviderConfigurationError` on mismatched settings.
+- Shared model-discovery filtering lives in `AgentScopeProvider.discover_filter` using a regex for dated snapshots and a tuple of non-chat markers, while each provider narrows results further via `discover_family_prefixes`.
+- Environment-driven configuration is read through `core.env` helpers (`get_env_value`, `get_env_int`) with explicit defaults, and top-level settings objects are cached via `functools.lru_cache(maxsize=1)`.
+- Structured audit logging goes through `log_event(logger, event, **fields)` which serializes payloads as sorted JSON, ensuring log levels are raised to INFO at process start via `configure_logging()`.

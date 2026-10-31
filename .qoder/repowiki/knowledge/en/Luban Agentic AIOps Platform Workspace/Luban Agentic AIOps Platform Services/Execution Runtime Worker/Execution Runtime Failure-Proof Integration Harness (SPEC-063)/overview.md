@@ -1,0 +1,1 @@
+Failure-proof integration test harness that runs the execution runtime against a real Postgres, worker, and gateway processes to prove invariants across F-01..F-36 scenarios.

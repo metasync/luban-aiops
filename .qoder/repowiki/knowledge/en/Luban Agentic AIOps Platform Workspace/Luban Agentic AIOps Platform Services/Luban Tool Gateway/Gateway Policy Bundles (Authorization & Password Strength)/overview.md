@@ -1,0 +1,1 @@
+Packaged YAML policy bundles consumed by the tool-gateway's policy engine: a default action-authorization matrix and a password-strength contract for generated secrets.

@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: products/tool_gateway/ingestion_adapters
+title: Tool Ingestion Adapters (MCP & ServiceNow)
+scope:
+    - products/tool-gateway/src/tool_gateway/ingestion/
+source_files: []
+depends_on: []
+related_to: []

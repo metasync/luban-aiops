@@ -1,0 +1,1 @@
+Built with `uv_build` (see `pyproject.toml` `[build-system]`) and pinned Python version in `.python-version`; entry point `audit-service` maps to `audit_service.main:run`. Tests use pytest under `tests/` with integration contract tests in `tests/integration/`.

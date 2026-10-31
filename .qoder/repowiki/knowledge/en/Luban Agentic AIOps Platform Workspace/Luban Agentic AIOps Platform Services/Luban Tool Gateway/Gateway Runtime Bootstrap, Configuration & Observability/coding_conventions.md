@@ -1,0 +1,6 @@
+- Feature-gated components are constructed lazily inside `app.py` factory functions (`_build_delegated_client`, `_build_authorization_service`, `_build_tool_registry`) so enabling a flag does not import or connect to its dependencies until startup.
+- Optional runtime services are attached to `app.state` and retrieved through FastAPI dependencies rather than global imports, decoupling request handlers from module import order.
+- Environment parsing goes through `GatewaySettings.from_env()` using `os.getenv` with explicit defaults, boolean parsing via the shared `_env_bool` helper, and tuple parsing via `_env_optional_tuple`; raw `os.environ` is not read elsewhere.
+- Security-sensitive feature gates validate their required infrastructure in `__post_init__` (or dedicated `_validate_*` methods) and raise `ValueError` on missing fields, enforcing a fail-closed startup policy instead of degrading at runtime.
+- Observability records use the structured `log_event(logger, event, **fields)` JSON-line format emitted at INFO level, with `LOG_LEVEL` controlling the root logger threshold.
+- Prometheus domain metrics are paired with a `MetricsMirror` call that re-emits the same family name and bounded labels to the OTel meter, keeping the prometheus `/metrics` surface as source of truth while also pushing to OTLP.

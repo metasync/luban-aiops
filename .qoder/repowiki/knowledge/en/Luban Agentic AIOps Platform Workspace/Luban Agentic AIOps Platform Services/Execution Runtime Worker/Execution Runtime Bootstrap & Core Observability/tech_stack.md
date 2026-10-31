@@ -1,0 +1,1 @@
+FastAPI + Uvicorn for the HTTP surface; `prometheus_client` for always-on `/metrics`; optional OpenTelemetry SDK with OTLP HTTP exporters (`opentelemetry.exporter.otlp.proto.http.*`) for traces/metrics/logs push, gated by `OTEL_ENABLED`.

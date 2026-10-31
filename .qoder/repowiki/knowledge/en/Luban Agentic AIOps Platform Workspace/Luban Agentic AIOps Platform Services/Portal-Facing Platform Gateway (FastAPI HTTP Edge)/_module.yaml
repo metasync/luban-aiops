@@ -1,0 +1,14 @@
+schema_version: 1
+module_path: products/platform_gateway
+title: Portal-Facing Platform Gateway (FastAPI HTTP Edge)
+scope:
+    - products/platform-gateway/
+source_files: []
+depends_on: []
+related_to:
+    - path: products/agent_platform
+    - path: products/audit_service
+    - path: products/identity_broker
+    - path: products/incident_service
+    - path: products/skills_hub
+    - path: products/tool_gateway
