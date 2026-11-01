@@ -11,11 +11,11 @@ if [ -z "$PROFILE" ]; then
   exit 1
 fi
 
-if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ] || [ "$PROFILE" = "secrets-dev" ] || [ "$PROFILE" = "ansible-dev" ] || [ "$PROFILE" = "servicenow-dev" ]; then
+if [ "$PROFILE" = "mutating-dev" ] || [ "$PROFILE" = "browser-dev" ] || [ "$PROFILE" = "secrets-dev" ] || [ "$PROFILE" = "ansible-dev" ] || [ "$PROFILE" = "servicenow-dev" ] || [ "$PROFILE" = "model-router-dev" ]; then
   # mutating-dev (SPEC-022 R-3), browser-dev (SPEC-049 R-7), secrets-dev
-  # (SPEC-062 R-7), ansible-dev (SPEC-069 R-6) and servicenow-dev (SPEC-067 R-6)
-  # are the committed dev postures, always wired in below — they are never
-  # switchable LLM provider profiles.
+  # (SPEC-062 R-7), ansible-dev (SPEC-069 R-6), servicenow-dev (SPEC-067 R-6)
+  # and model-router-dev (SPEC-071 R-3) are the committed dev postures, always
+  # wired in below — they are never switchable LLM provider profiles.
   echo "$PROFILE is not a switchable LLM runtime profile" >&2
   exit 1
 fi
@@ -27,8 +27,9 @@ fi
 
 # The LLM provider profile is switchable; the mutating-dev (SPEC-022
 # R-3), browser-dev (SPEC-049 R-7), secrets-dev (SPEC-062 R-7),
-# ansible-dev (SPEC-069 R-6) and servicenow-dev (SPEC-067 R-6) profiles are
-# the committed dev postures and always stay wired in.
+# ansible-dev (SPEC-069 R-6), servicenow-dev (SPEC-067 R-6) and
+# model-router-dev (SPEC-071 R-3) profiles are the committed dev postures
+# and always stay wired in.
 cat <<EOF > "$SCRIPT_DIR/dev-k8s/kustomization.yaml"
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -49,6 +50,7 @@ configMapGenerator:
       - ../runtime-profiles/ansible-dev/ansible.env
       - ../runtime-profiles/servicenow-dev/servicenow.env
       - ../runtime-profiles/secrets-dev/secrets.env
+      - ../runtime-profiles/model-router-dev/model-router.env
 patches:
   # SPEC-049: chromium-headless-shell sidecar + credential-set mount on
   # the tool-gateway pod (browser-dev posture).
