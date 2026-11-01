@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass
 from typing import Literal
@@ -147,6 +148,78 @@ RuntimeProviderOptions = DashScopeOptions | DeepSeekOptions | OpenAIOptions
 
 
 @dataclass(frozen=True)
+class ModelRouterCandidateSpec:
+    """One configured per-turn routing candidate (SPEC-071 R-2).
+
+    ``model_id`` is a ``MODEL_CATALOG`` id the kernel builds with
+    ``_build_model``; ``description`` is the text the router's classifier reads
+    to decide when to pick this candidate. Kept free of agentscope types so the
+    settings layer stays provider-agnostic; the kernel maps it to
+    ``ChatModelCandidate`` at build time.
+    """
+
+    name: str
+    model_id: str
+    description: str
+
+
+def _model_router_candidates_from_env(
+    name: str,
+) -> tuple[ModelRouterCandidateSpec, ...]:
+    """Parse ``AGENTSCOPE_MODEL_ROUTER_CANDIDATES`` into candidate specs.
+
+    The value is a JSON object mapping a candidate ``name`` to an object with a
+    ``model`` (a ``MODEL_CATALOG`` id) and a ``description``. An unset or empty
+    value yields an empty tuple, which makes the router knob inert (the
+    middleware is not registered). Malformed JSON, a non-object shape, or a
+    candidate missing a non-empty ``model``/``description`` fails startup with a
+    clear error rather than reaching the kernel half-configured.
+    """
+    raw = _optional_str(name)
+    if raw is None:
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            f"{name} must be a JSON object mapping a candidate name to an "
+            "object with 'model' (a catalog id) and 'description'."
+        )
+    candidates: list[ModelRouterCandidateSpec] = []
+    for key, value in parsed.items():
+        candidate_name = str(key).strip()
+        if not candidate_name:
+            raise ValueError(f"{name} has an empty candidate name.")
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"{name} candidate {candidate_name!r} must be an object with "
+                "'model' and 'description'."
+            )
+        model_id = value.get("model")
+        description = value.get("description")
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ValueError(
+                f"{name} candidate {candidate_name!r} must have a non-empty "
+                "'model' catalog id."
+            )
+        if not isinstance(description, str) or not description.strip():
+            raise ValueError(
+                f"{name} candidate {candidate_name!r} must have a non-empty "
+                "'description'."
+            )
+        candidates.append(
+            ModelRouterCandidateSpec(
+                name=candidate_name,
+                model_id=model_id.strip(),
+                description=description.strip(),
+            )
+        )
+    return tuple(candidates)
+
+
+@dataclass(frozen=True)
 class RuntimeSettings:
     profile: str | None = None
     provider: RuntimeProvider = "dashscope"
@@ -189,6 +262,20 @@ class RuntimeSettings:
     # optional agentscope ``offloader``: compression state stays in
     # ``state.summary``/``state.context`` and rides the SPEC-017 snapshot.
     compress_context_enabled: bool = False
+    # Per-turn model routing (SPEC-071 R-2): opt-in agentscope
+    # ``ModelRouterMiddleware`` that classifies the latest user input and swaps
+    # the reply's chat model among named candidates. Default off — an unset
+    # deployment is byte-identical to v0.51.1. ``model_router_model`` is the
+    # classifier's catalog id (it routes via ``generate_structured_output``; no
+    # dedicated classifier provider, no new dependency). ``model_router_candidates``
+    # maps a candidate name to a catalog model id + the description the
+    # classifier reads. With no candidate map the knob is inert (the middleware
+    # is not registered). Routing arms only for default-resolved turns
+    # (``request > pinned > routed > default``), never overriding an explicit
+    # request or pin.
+    model_router_enabled: bool = False
+    model_router_model: str | None = None
+    model_router_candidates: tuple[ModelRouterCandidateSpec, ...] = ()
     # HITL confirmation bridging (SPEC-020 R-2): seconds a parked kernel
     # confirmation stays answerable. 0 disables the bridge and restores the
     # pre-SPEC-020 silent-park posture.
@@ -331,6 +418,22 @@ class RuntimeSettings:
                 "AGENTSCOPE_CONTEXT_TRIGGER_RATIO > "
                 f"{_AGENTSCOPE_CONTEXT_BUFFER_RATIO} (agentscope "
                 "context_buffer_ratio)."
+            )
+        # SPEC-071 R-2: an enabled router with a candidate map but no classifier
+        # model id cannot build its classifier, so fail startup with a clear
+        # error. Enabled with *no* candidate map is not an error — the knob is
+        # inert and the middleware is simply not registered (see
+        # _build_middlewares). Catalog-id validity is checked at build time
+        # against MODEL_CATALOG, not here.
+        if (
+            self.model_router_enabled
+            and self.model_router_candidates
+            and not self.model_router_model
+        ):
+            raise ValueError(
+                "AGENTSCOPE_MODEL_ROUTER_MODEL is required when "
+                "AGENTSCOPE_MODEL_ROUTER_ENABLED is set with a non-empty "
+                "AGENTSCOPE_MODEL_ROUTER_CANDIDATES map."
             )
         if self.tool_result_limit < 1:
             raise ValueError("AGENTSCOPE_TOOL_RESULT_LIMIT must be >= 1.")
@@ -556,6 +659,13 @@ class RuntimeSettings:
             ),
             compress_context_enabled=(
                 _optional_bool("AGENTSCOPE_COMPRESS_CONTEXT_ENABLED") or False
+            ),
+            model_router_enabled=(
+                _optional_bool("AGENTSCOPE_MODEL_ROUTER_ENABLED") or False
+            ),
+            model_router_model=_optional_str("AGENTSCOPE_MODEL_ROUTER_MODEL"),
+            model_router_candidates=_model_router_candidates_from_env(
+                "AGENTSCOPE_MODEL_ROUTER_CANDIDATES"
             ),
             hitl_confirm_timeout=int(os.getenv("AGENT_HITL_CONFIRM_TIMEOUT", "600")),
             email_recipient_allowlist=tuple(

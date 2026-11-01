@@ -11,6 +11,56 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.52.0 — 2026-11-01
+
+[SPEC-071](docs/specs/SPEC-071-agentscope-model-router/spec.md) opt-in per-turn
+model routing. Adopts agentscope 2.0.11's `ModelRouterMiddleware` behind a
+default-off kernel knob, extending SPEC-024's audited `request > pinned >
+default` precedence to `request > pinned > routed > default` — a model-selection
+middleware that executes no tool, adds no identity edge, and leaks no agentscope
+type through the v2 contract (SPEC-018 four-point adoption gate; R-1 verdict
+**clears**). No new routes, actions, event types, contracts, or schemas:
+`agent-stream-event.schema.json` is byte-unchanged and the `model_selected_by`
+attribution rides the structured logs only. This release delivers R-2 (the
+opt-in wiring) and R-3 (the routing-accuracy measurement gate) and marks
+SPEC-071 `delivered`; **the router stays default-off** — any move to default-on
+remains a separate operator decision evidenced by the measurement. See the
+[release note](docs/agentic-aiops-platform/release-notes/2026-11-01-per-turn-model-routing.md).
+
+### Added
+
+- **Opt-in per-turn model routing** (`agent-platform`). Three `AGENTSCOPE_*`
+  settings — `AGENTSCOPE_MODEL_ROUTER_ENABLED` (default off),
+  `AGENTSCOPE_MODEL_ROUTER_MODEL` (the classifier's catalog model id), and
+  `AGENTSCOPE_MODEL_ROUTER_CANDIDATES` (a JSON `name → {model, description}` map
+  over the credential-gated `MODEL_CATALOG`) — register agentscope's
+  `ModelRouterMiddleware` in `AgentKernel._build_middlewares()` only when enabled
+  with a non-empty candidate map; otherwise the knob is inert and the kernel is
+  byte-identical to v0.51.1. Enabled with a map but no classifier model fails
+  startup fast.
+- **Precedence + attribution.** The router selects only when a turn carries no
+  explicit request and the session has no pin, so a human's explicit choice
+  always wins. The reply path surfaces the **effective** (post-routing) model id
+  in `AgentChatResponse.model` and the existing `message_end` `model` field, and
+  a `model_selected_by ∈ {request, pin, router, default}` dimension rides the
+  structured logs — extending SPEC-024's audited choice with no new closed-enum
+  audit `event_type`.
+- **Fail-soft + resume-safe.** A routing error or an unknown candidate keeps the
+  agent's own model and never hard-fails a turn; the routed model for a
+  `reply_id` survives a confirmation park/resume via `middle_context` + the
+  SPEC-017 snapshot. The routed model's *reply* tokens stay observed by the
+  always-on `TokenUsageMiddleware` (SPEC-065); the router's own classification
+  call is deliberately unobserved while default-off.
+- **Routing-accuracy measurement harness** (`products/agent-platform/harness/`,
+  offline; outside `tests/`, so never pytest-collected and not part of
+  `make verify`). Reuses the production `_build_middlewares(routing_allowed=True)`
+  wiring for zero drift plus a bounded, measurement-only token counter to capture
+  the classification call's cost. A live A/B/C measurement on a 24-turn labeled
+  sample reached **100% routing accuracy** across every valid classifier — added
+  per-reply latency ~0.46–0.83s, classification overhead ~330–440 input and
+  10–34 output tokens per turn — which pinned the decision inputs and required
+  **no** candidate `description` retuning.
+
 ## 0.51.1 — 2026-10-31
 
 Dependency-refresh patch: a routine re-lock of the agent-platform inside its

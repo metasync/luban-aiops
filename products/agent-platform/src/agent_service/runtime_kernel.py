@@ -86,6 +86,10 @@ class BlockingReply:
     content: str
     structured_output: dict | None = None
     authorization_required: AuthorizationRequired | None = None
+    # SPEC-071 R-2: the catalog id the per-turn router actually served when
+    # routing fired; ``None`` when the turn kept its resolved model. Additive —
+    # the two-value ``__iter__`` unpacking contract below is unchanged.
+    effective_model: str | None = None
 
     def __iter__(self):
         """Preserve the existing two-value internal unpacking contract."""
@@ -100,6 +104,11 @@ class UnknownModelError(ValueError):
     kernel never silently falls back to the default model.
     """
 
+
+# SPEC-071 R-2: the stock ModelRouterMiddleware records its per-reply choice in
+# ``agent.state.middle_context[<key>][reply_id]``; ``get_middleware_key()``
+# defaults to the class name, so this is the stable read key for attribution.
+_MODEL_ROUTER_MIDDLEWARE_KEY = "ModelRouterMiddleware"
 
 TEXT_DELTA_EVENTS = {
     "message_delta",
@@ -548,12 +557,69 @@ class AgentKernel:
 
         return [TaskCreate(), TaskGet(), TaskList(), TaskUpdate()]
 
-    def _build_middlewares(self) -> list:
+    def _routed_candidate_name(self, agent) -> str | None:
+        """The candidate the per-turn router chose for this reply (SPEC-071 R-2).
+
+        Reads the stock ``ModelRouterMiddleware``'s own record in
+        ``agent.state.middle_context``. Returns ``None`` when routing is off,
+        did not fire, or failed soft — the turn then keeps its resolved model.
+        Never raises: attribution must not wedge a completed turn.
+        """
+        try:
+            state = getattr(agent, "state", None)
+            if state is None:
+                return None
+            routed = (getattr(state, "middle_context", None) or {}).get(
+                _MODEL_ROUTER_MIDDLEWARE_KEY, {}
+            )
+            name = routed.get(getattr(state, "reply_id", None))
+            return name if isinstance(name, str) else None
+        except Exception:  # pragma: no cover - defensive
+            return None
+
+    def _candidate_model_id(self, name: str | None) -> str | None:
+        """Map a routed candidate name back to its catalog model id."""
+        if not name:
+            return None
+        for spec in self.settings.model_router_candidates:
+            if spec.name == name:
+                return spec.model_id
+        return None
+
+    def _effective_model_id(self, agent) -> str | None:
+        """The catalog id the per-turn router served, or ``None`` if it did not
+        fire (SPEC-071 R-2). ``None`` lets a caller keep its resolved tier and
+        report ``model_selected_by`` accurately."""
+        return self._candidate_model_id(self._routed_candidate_name(agent))
+
+    def _router_armed(self, routing_allowed: bool) -> bool:
+        """Whether the per-turn router is registered for this turn (SPEC-071 R-2).
+
+        The single condition shared by ``_build_middlewares`` (register the
+        middleware) and ``ensure_agent`` (split the cache key), so the two can
+        never drift: the cache splits *exactly* when the built stack could
+        differ. An inert router (knob off, or no candidate map) never splits the
+        cache — no wasted entry in the default-off deployment.
+        """
+        return bool(
+            routing_allowed
+            and self.settings.model_router_enabled
+            and self.settings.model_router_candidates
+        )
+
+    def _build_middlewares(self, routing_allowed: bool = False) -> list:
         """Compose the kernel middleware stack (SPEC-018).
 
         Permission, evidence, and LLM-token (SPEC-065 R-1) middlewares are
         always registered; OTel kernel tracing (R-3) and the reply token budget
         (R-4) are opt-in via settings and stay absent when unconfigured.
+
+        SPEC-071 R-2: the opt-in ``ModelRouterMiddleware`` is appended only when
+        the knob is on, a candidate map is configured, and ``routing_allowed``
+        (this turn resolved to the default — no explicit request or pin). It is
+        an ``on_reply`` middleware, a separate hook chain from
+        ``TokenUsageMiddleware``'s ``on_model_call``, so its list position does
+        not affect token observation of the routed model's reply (Stage-0 S0-1).
         """
         from agent_service.services.kernel_middleware import (
             GatewayPermissionMiddleware,
@@ -591,6 +657,30 @@ class AgentKernel:
                     token_budget=settings.reply_token_budget,
                     input_token_weight=settings.reply_input_token_weight,
                     output_token_weight=settings.reply_output_token_weight,
+                )
+            )
+        if self._router_armed(routing_allowed):
+            from agentscope.middleware import (
+                ChatModelCandidate,
+                ModelRouterMiddleware,
+            )
+
+            # An unknown/revoked catalog id in the map raises UnknownModelError
+            # here (fail-closed at build, SPEC-071 R-2): a router is never armed
+            # against a model the credential-gated catalog does not have. The
+            # classifier rides an existing catalog ChatModelBase and routes via
+            # ``generate_structured_output`` — no dedicated classifier provider.
+            middlewares.append(
+                ModelRouterMiddleware(
+                    classifier_model=self._build_model(settings.model_router_model),
+                    candidates=[
+                        ChatModelCandidate(
+                            name=spec.name,
+                            model=self._build_model(spec.model_id),
+                            description=spec.description,
+                        )
+                        for spec in settings.model_router_candidates
+                    ],
                 )
             )
         return middlewares
@@ -802,6 +892,7 @@ class AgentKernel:
         bearer_token: str | None = None,
         model_id: str | None = None,
         read_only: bool = False,
+        routing_allowed: bool = False,
     ):
         from agentscope.agent import Agent
         from agentscope.message import UserMsg
@@ -814,7 +905,7 @@ class AgentKernel:
             system_prompt=self.settings.system_prompt,
             model=self._build_model(model_id),
             toolkit=toolkit,
-            middlewares=self._build_middlewares(),
+            middlewares=self._build_middlewares(routing_allowed),
             state=state,
             **configs,
         )
@@ -839,6 +930,7 @@ class AgentKernel:
         bearer_token: str | None = None,
         model_id: str | None = None,
         read_only: bool = False,
+        routing_allowed: bool = False,
     ):
         """Return the agent bound to `session_id`, creating it on first use.
 
@@ -859,6 +951,15 @@ class AgentKernel:
         """
         bound_id = self._normalize_model_id(model_id)
         agent_key = f"{session_id}::read-only" if read_only else session_id
+        # SPEC-071 R-2: an agent built with the router must not be reused for a
+        # turn where routing is disarmed (an explicit request/pin that happens
+        # to resolve to the same model id), and vice versa, so the routing
+        # posture joins the cache key — mirroring ``read_only``. Gated on the
+        # same ``_router_armed`` predicate that registers the middleware, so an
+        # inert (default-off) router never splits the cache. Both entries
+        # restore the same persisted memory.
+        if self._router_armed(routing_allowed):
+            agent_key = f"{agent_key}::routed"
         cached = self._agents.get(agent_key)
         if cached is not None:
             # Gateway tools recovered after this agent was built with an
@@ -903,7 +1004,7 @@ class AgentKernel:
                 self._agents.move_to_end(agent_key)
                 return cached
             agent, user_msg_cls, cached_model_id = await self._build_agent(
-                session_id, bearer_token, model_id, read_only
+                session_id, bearer_token, model_id, read_only, routing_allowed
             )
             self._agents[agent_key] = (agent, user_msg_cls, cached_model_id)
             while len(self._agents) > self._max_cached_agents:
@@ -1003,6 +1104,7 @@ class AgentKernel:
         response_schema: dict | None = None,
         model_id: str | None = None,
         read_only: bool = False,
+        routing_allowed: bool = False,
     ) -> BlockingReply:
         """Run one blocking turn.
 
@@ -1030,7 +1132,7 @@ class AgentKernel:
         try:
             requester = await asyncio.to_thread(self._requester_for_turn, session_id, user_name, bearer_token)
             agent, user_msg_cls, serving_model = await self.ensure_agent(
-                session_id, bearer_token, model_id, read_only
+                session_id, bearer_token, model_id, read_only, routing_allowed
             )
             # Prose redaction for a blocking turn: no streaming, so the reply
             # is masked whole and no hold-back is needed.
@@ -1070,6 +1172,20 @@ class AgentKernel:
                 evidence_frames = []
                 self._drain_trace_queue(trace_queue, "blocking", session_id, evidence_frames, {})
                 self._persist_evidence(session_id, "blocking", turn_index, evidence_frames)
+            # SPEC-071 R-2: attribute the turn to the model that actually served
+            # it — the routed candidate when the router fired, else None so the
+            # caller keeps its resolved tier and reports ``model_selected_by``.
+            routed_model = self._effective_model_id(agent)
+            if routed_model:
+                LOGGER.info(
+                    "model routing served turn",
+                    extra={
+                        "session_id": session_id,
+                        "routed_model": routed_model,
+                        "resolved_model": serving_model,
+                        "model_selected_by": "router",
+                    },
+                )
             return BlockingReply(
                 redact_assistant_text(
                     extract_text(getattr(reply_msg, "content", reply_msg)),
@@ -1077,6 +1193,7 @@ class AgentKernel:
                 ),
                 redact_structure(structured, prose.literals),
                 auth_turn.challenge if auth_turn is not None else None,
+                routed_model,
             )
         except Exception as exc:  # pragma: no cover - defensive fallback
             self.remember_error(exc, prose.literals if prose is not None else ())
@@ -1156,6 +1273,7 @@ class AgentKernel:
         user_name: str,
         bearer_token: str | None = None,
         model_id: str | None = None,
+        routing_allowed: bool = False,
     ) -> AsyncIterator[dict[str, object]]:
         # SPEC-024 R-3: an unknown model id fails closed before any agent
         # work — a deterministic error frame, never a silent default.
@@ -1205,7 +1323,7 @@ class AgentKernel:
             requester = await asyncio.to_thread(self._requester_for_turn, session_id, user_name, bearer_token)
             # Ensure the agent (with the token-cached toolkit) exists.
             agent, user_msg_cls, bound_model_id = await self.ensure_agent(
-                session_id, bearer_token, model_id
+                session_id, bearer_token, model_id, False, routing_allowed
             )
 
             # SPEC-025 R-1: the replay turn ordinal for this stream's
@@ -1373,9 +1491,24 @@ class AgentKernel:
                         ):
                             yield flushed
                     if frame.get("event") == "message_end":
-                        # SPEC-024 R-3: attribute the turn to the model that
-                        # actually served it (resolved or session default).
-                        frame["model"] = bound_model_id
+                        # SPEC-024 R-3 / SPEC-071 R-2: attribute the turn to the
+                        # model that actually served it — the routed candidate
+                        # when the per-turn router fired, else the resolved model
+                        # (or session default). Rides the existing ``model``
+                        # field; no agent-stream-event schema change.
+                        routed_model = self._effective_model_id(agent)
+                        if routed_model:
+                            LOGGER.info(
+                                "model routing served turn",
+                                extra={
+                                    "request_id": request_id,
+                                    "session_id": session_id,
+                                    "routed_model": routed_model,
+                                    "resolved_model": bound_model_id,
+                                    "model_selected_by": "router",
+                                },
+                            )
+                        frame["model"] = routed_model or bound_model_id
                     yield frame
 
                 # Release the tail before the closing trace frames, for the
@@ -2649,6 +2782,7 @@ class AgentKernel:
         bearer_token: str | None = None,
         model_id: str | None = None,
         owner_user_name: str | None = None,
+        routing_allowed: bool = False,
     ) -> AsyncIterator[dict[str, object]]:
         """Own the claimed park's cleanup, including setup failure and disconnect."""
         from contextlib import aclosing
@@ -2656,7 +2790,7 @@ class AgentKernel:
         try:
             async with aclosing(self._resume_confirmation(
                 session_id, pending, decision, user_name, request_id,
-                bearer_token, model_id, owner_user_name,
+                bearer_token, model_id, owner_user_name, routing_allowed,
             )) as stream:
                 async for frame in stream:
                     yield frame
@@ -2686,6 +2820,7 @@ class AgentKernel:
         bearer_token: str | None = None,
         model_id: str | None = None,
         owner_user_name: str | None = None,
+        routing_allowed: bool = False,
     ) -> AsyncIterator[dict[str, object]]:
         """Resume a parked reply with the operator's decision (SPEC-020 R-2).
 
@@ -2748,7 +2883,8 @@ class AgentKernel:
         # Pass the session's pinned model (SPEC-024 R-3) so the resumed
         # stream rebuilds against the same model that parked it.
         agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
-            session_id, None if identity_failed else bearer_token, model_id
+            session_id, None if identity_failed else bearer_token, model_id,
+            False, routing_allowed,
         )
         # SPEC-025 R-1: resumed frames belong to the same assistant turn as
         # the pre-park frames — no user message was added by the park, so
@@ -3036,6 +3172,7 @@ class AgentKernel:
         session_id: str,
         confirm_id: str,
         model_id: str | None = None,
+        routing_allowed: bool = False,
     ) -> None:
         """Close a TTL-expired parked reply without resuming it (SPEC-020 R-2).
 
@@ -3065,7 +3202,7 @@ class AgentKernel:
         pending = CONFIRMATION_REGISTRY.take_for_expiry(session_id, confirm_id)
         try:
             agent, _user_msg_cls, _bound_model_id = await self.ensure_agent(
-                session_id, None, model_id
+                session_id, None, model_id, False, routing_allowed
             )
             prose = self._prose_redactor(agent, "", session_id)
             interrupt = UserInterruptEvent(reply_id=pending.reply_id)

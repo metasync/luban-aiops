@@ -191,7 +191,7 @@ def _kernel() -> AgentKernel:
 
 def _patch(monkeypatch, kernel: AgentKernel, agent: FakeAgent) -> None:
     async def fake_ensure_agent(
-        session_id, bearer_token=None, model_id=None, read_only=False
+        session_id, bearer_token=None, model_id=None, read_only=False, routing_allowed=False
     ):
         return agent, FakeUserMsg, model_id or kernel.settings.provider
 

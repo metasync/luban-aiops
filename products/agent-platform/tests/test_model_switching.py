@@ -55,7 +55,7 @@ class TestResolveModel:
             v2_routes, "MODEL_CATALOG",
             FakeCatalog(ids=("deepseek", "openai"), default="openai"),
         )
-        assert v2_routes._resolve_model("deepseek", "openai") == "deepseek"
+        assert v2_routes._resolve_model("deepseek", "openai") == ("deepseek", "request")
 
     def test_requested_unknown_fails_closed_with_422(self, monkeypatch):
         monkeypatch.setattr(
@@ -71,26 +71,27 @@ class TestResolveModel:
             v2_routes, "MODEL_CATALOG",
             FakeCatalog(ids=("deepseek", "openai"), default="openai"),
         )
-        assert v2_routes._resolve_model(None, "deepseek") == "deepseek"
+        assert v2_routes._resolve_model(None, "deepseek") == ("deepseek", "pin")
 
     def test_pinned_absent_from_catalog_degrades_to_default(self, monkeypatch):
-        # A revoked key drops the entry; the session must not 4xx.
+        # A revoked key drops the entry; the session must not 4xx. The pin
+        # degrades to the default, so provenance reports ``default`` (SPEC-071).
         monkeypatch.setattr(
             v2_routes, "MODEL_CATALOG",
             FakeCatalog(ids=("openai",), default="openai"),
         )
-        assert v2_routes._resolve_model(None, "deepseek") == "openai"
+        assert v2_routes._resolve_model(None, "deepseek") == ("openai", "default")
 
     def test_no_request_no_pin_resolves_default(self, monkeypatch):
         monkeypatch.setattr(
             v2_routes, "MODEL_CATALOG",
             FakeCatalog(ids=("openai",), default="openai"),
         )
-        assert v2_routes._resolve_model(None, None) == "openai"
+        assert v2_routes._resolve_model(None, None) == ("openai", "default")
 
     def test_empty_catalog_resolves_none(self, monkeypatch):
         monkeypatch.setattr(v2_routes, "MODEL_CATALOG", FakeCatalog())
-        assert v2_routes._resolve_model(None, "deepseek") is None
+        assert v2_routes._resolve_model(None, "deepseek") == (None, "default")
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +320,7 @@ def test_stream_message_end_carries_serving_model(monkeypatch):
         FakeCatalog(ids=("deepseek",), default="deepseek"),
     )
 
-    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False):
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False, routing_allowed=False):
         return (FakeEndAgent(), FakeUserMsg, model_id or kernel.settings.provider)
 
     monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
@@ -379,7 +380,7 @@ def test_ensure_agent_rebuilds_on_model_switch(monkeypatch):
     kernel = _configured_kernel()
     builds: list[str | None] = []
 
-    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False):
+    async def fake_build_agent(session_id, bearer_token=None, model_id=None, read_only=False, routing_allowed=False):
         builds.append(model_id)
         return (
             FakeEndAgent(),

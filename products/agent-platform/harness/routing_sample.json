@@ -1,0 +1,27 @@
+[
+  {"id": "fast-01", "intended": "fast", "text": "What's the current status of incident inc-4291?"},
+  {"id": "fast-02", "intended": "fast", "text": "Is the platform gateway healthy right now?"},
+  {"id": "fast-03", "intended": "fast", "text": "Show me the last five deployments."},
+  {"id": "fast-04", "intended": "fast", "text": "What time did the checkout latency alert fire?"},
+  {"id": "fast-05", "intended": "fast", "text": "How many open incidents are there this shift?"},
+  {"id": "fast-06", "intended": "fast", "text": "Acknowledge the Sev3 alert on node-7."},
+  {"id": "fast-07", "intended": "fast", "text": "What's the CPU utilization on node-7 right now?"},
+  {"id": "fast-08", "intended": "fast", "text": "Link me to the runbook for cache eviction."},
+  {"id": "fast-09", "intended": "fast", "text": "Who is on call for the payments team today?"},
+  {"id": "fast-10", "intended": "fast", "text": "Restart the checkout service pod."},
+  {"id": "fast-11", "intended": "fast", "text": "Summarize that last reply in one sentence."},
+  {"id": "fast-12", "intended": "fast", "text": "Thanks, that's all I needed."},
+
+  {"id": "deep-01", "intended": "deep", "text": "Checkout latency spiked 40% in the last ten minutes; correlate the recent deploy, the database slow-query log, and the cache hit ratio to find the root cause and propose a fix."},
+  {"id": "deep-02", "intended": "deep", "text": "Draft a post-incident review for the payment outage including a timeline, contributing factors, and three preventive actions with named owners."},
+  {"id": "deep-03", "intended": "deep", "text": "Compare the last three Sev1 incidents and identify the common failure pattern across services, then reason about whether it is architectural or operational."},
+  {"id": "deep-04", "intended": "deep", "text": "Plan a safe rollout of the new admission controller across all eight services with explicit rollback criteria at each stage."},
+  {"id": "deep-05", "intended": "deep", "text": "Analyze whether this week's token-usage anomaly is driven by a single tenant or is platform-wide, and reason about the cost implications of each hypothesis."},
+  {"id": "deep-06", "intended": "deep", "text": "Given the current service dependency graph, reason about the blast radius if the identity broker degrades and propose a mitigation ordering."},
+  {"id": "deep-07", "intended": "deep", "text": "Design a labeled evaluation set for per-turn model routing and justify the tier boundaries for our operator traffic mix."},
+  {"id": "deep-08", "intended": "deep", "text": "Walk through the delegated-custody proof end to end, explain where a forwarded token could leak, and propose guards for each exposure."},
+  {"id": "deep-09", "intended": "deep", "text": "Triage these twelve alerts, cluster them by likely common cause, and recommend which single remediation action resolves the most of them."},
+  {"id": "deep-10", "intended": "deep", "text": "Reason about why the confirmation resume path might reuse a stale routed model and how the per-turn cache key prevents it."},
+  {"id": "deep-11", "intended": "deep", "text": "Evaluate the trade-offs of enabling context compaction versus raising the reply token budget for long incident sessions, and recommend a configuration."},
+  {"id": "deep-12", "intended": "deep", "text": "Investigate why the tool-gateway intermittently returns 504 under load, form competing hypotheses across the network, pool, and upstream layers, and design a test to discriminate between them."}
+]

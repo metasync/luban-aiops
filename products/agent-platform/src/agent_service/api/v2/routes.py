@@ -236,10 +236,12 @@ async def _reject_if_parked(
         return
     if pending.is_expired(kernel.settings.hitl_confirm_timeout):
         try:
+            expire_model, expire_selected_by = _resolve_model(None, pinned_model)
             await kernel.expire_confirmation(
                 session_id,
                 pending.confirm_id,
-                _resolve_model(None, pinned_model),
+                expire_model,
+                expire_selected_by == "default",
             )
         except ConfirmationNotFound:
             # A concurrent confirm or expiry claimed the entry first — the
@@ -258,8 +260,13 @@ async def _reject_if_parked(
     )
 
 
-def _resolve_model(requested: str | None, pinned: str | None) -> str | None:
+def _resolve_model(requested: str | None, pinned: str | None) -> tuple[str | None, str]:
     """Resolve the model id for a turn (SPEC-024 R-3): request > pinned > default.
+
+    Returns ``(model_id, selected_by)`` where ``selected_by ∈ {request, pin,
+    default}`` records the provenance of the choice (SPEC-071 R-2) so per-turn
+    routing can arm only for default-resolved turns. The request/pin
+    fail-closed and catalog-normalization semantics are unchanged.
 
     An explicitly requested id must exist in the credential-gated
     catalog — unknown ids fail closed with 422, never a silent default.
@@ -276,13 +283,13 @@ def _resolve_model(requested: str | None, pinned: str | None) -> str | None:
                 status_code=422,
                 detail=f"unknown model id: {requested}",
             )
-        return entry.id
+        return entry.id, "request"
     if pinned:
         entry = MODEL_CATALOG.get(pinned)
         if entry is not None:
-            return entry.id
+            return entry.id, "pin"
     default = MODEL_CATALOG.default_entry()
-    return default.id if default is not None else None
+    return (default.id if default is not None else None), "default"
 
 
 # --- Chat ---
@@ -301,8 +308,15 @@ async def chat(
     requester = await _verified_requester(authorization, user_id)
     session = ensure_session(body.session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
-    resolved_model = _resolve_model(body.model, session.model)
-    pin_session_model(session.session_id, resolved_model)
+    resolved_model, selected_by = _resolve_model(body.model, session.model)
+    # SPEC-071 R-2: pin only an explicit per-turn request, so a session pin
+    # always means "a human chose this model" and never an auto-pinned default.
+    # This keeps per-turn routing armed for default-resolved turns while an
+    # explicit choice still sticks (request > pinned > routed > default). It
+    # refines *when* SPEC-024 writes the pin, not its resolution precedence.
+    if body.model:
+        pin_session_model(session.session_id, resolved_model)
+    routing_allowed = selected_by == "default"
     # SPEC-024 R-4: the serving model rides the audit trail via the
     # response; the structured log keeps the runtime-side view.
     LOGGER.info(
@@ -312,6 +326,7 @@ async def chat(
             "session_id": session.session_id,
             "model": resolved_model,
             "requested_model": body.model,
+            "model_selected_by": selected_by,
         },
     )
     mark_session_turn(session.session_id, body.message)
@@ -323,8 +338,12 @@ async def chat(
         response_schema=body.response_schema,
         model_id=resolved_model,
         read_only=body.read_only,
+        routing_allowed=routing_allowed,
     )
     content, structured_output = reply
+    # SPEC-071 R-2: surface the model that actually served the turn — the
+    # routed candidate when the router fired, else the resolved model.
+    effective_model = getattr(reply, "effective_model", None) or resolved_model
     return AgentChatResponse(
         session_id=session.session_id,
         request_id=request_id,
@@ -332,7 +351,7 @@ async def chat(
         status="partial" if getattr(reply, "authorization_required", None) else "ok",
         content=content,
         structured_output=structured_output,
-        model=resolved_model,
+        model=effective_model,
     )
 
 
@@ -356,8 +375,13 @@ async def chat_stream(
     requester = await _verified_requester(authorization, user_id)
     session = ensure_session(session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
-    resolved_model = _resolve_model(model, session.model)
-    pin_session_model(session.session_id, resolved_model)
+    resolved_model, selected_by = _resolve_model(model, session.model)
+    # SPEC-071 R-2: pin only an explicit request (see ``chat``); routing arms
+    # for default-resolved turns and the routed model rides the message_end
+    # frame's existing ``model`` field (no schema change).
+    if model:
+        pin_session_model(session.session_id, resolved_model)
+    routing_allowed = selected_by == "default"
     LOGGER.info(
         "chat stream model resolved",
         extra={
@@ -365,6 +389,7 @@ async def chat_stream(
             "session_id": session.session_id,
             "model": resolved_model,
             "requested_model": model,
+            "model_selected_by": selected_by,
         },
     )
     mark_session_turn(session.session_id, message)
@@ -378,6 +403,7 @@ async def chat_stream(
             user_name=user_id,
             bearer_token=bearer_token,
             model_id=resolved_model,
+            routing_allowed=routing_allowed,
         ):
             event = _normalize_stream_event(chunk, session.session_id, request_id)
             yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
@@ -426,10 +452,12 @@ async def chat_confirm(
         try:
             # Same ladder as the resume below: the interrupt must reach the
             # agent that parked the reply, not a rebuild on the default.
+            expire_model, expire_selected_by = _resolve_model(None, session.model)
             await kernel.expire_confirmation(
                 session.session_id,
                 body.confirm_id,
-                _resolve_model(None, session.model),
+                expire_model,
+                expire_selected_by == "default",
             )
         except ConfirmationNotFound:
             # A concurrent request already closed the expired entry.
@@ -467,6 +495,12 @@ async def chat_confirm(
     )
 
     async def _events() -> AsyncIterator[str]:
+        # SPEC-071 R-2: the resumed turn reuses the parked turn's routing
+        # posture — a default-resolved park (null session pin) resolves to
+        # ``default`` again, so ``routing_allowed`` matches and ``ensure_agent``
+        # hits the same cached (router-armed) agent; the router then replays its
+        # stored ``middle_context[reply_id]`` choice instead of re-routing.
+        resume_model, resume_selected_by = _resolve_model(None, session.model)
         async for chunk in kernel.resume_confirmation(
             session_id=session.session_id,
             pending=pending,
@@ -478,12 +512,13 @@ async def chat_confirm(
             # parked it; a stale pin (evicted by discovery refresh or
             # key revocation) degrades to the default like other turns
             # instead of raising UnknownModelError mid-resume.
-            model_id=_resolve_model(None, session.model),
+            model_id=resume_model,
             # SPEC-054 R-2: a card the resumed turn parks is owned by the
             # SESSION OWNER (the original requester), not this approver,
             # so a tier_2 approver can decide the next unbound per-action
             # card instead of tripping the self-approval block.
             owner_user_name=session.user_id,
+            routing_allowed=resume_selected_by == "default",
         ):
             event = _normalize_stream_event(
                 chunk, session.session_id, request_id

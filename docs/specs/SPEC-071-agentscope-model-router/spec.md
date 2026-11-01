@@ -2,12 +2,12 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: luban-platform-team
 - created: 2026-11-01
 - approved: 2026-11-01 (all five Open Questions ratified exactly as proposed by the operator)
-- delivered: (pending)
-- release slice: Exploration Backlog — agentscope adoption family; target version **v0.52.0** (a minor bump over v0.51.1), assigned at delivery
+- delivered: 2026-11-01 (v0.52.0; router ships default-off)
+- release slice: Exploration Backlog — agentscope adoption family; target version **v0.52.0** (a minor bump over v0.51.1), delivered 2026-11-01
 - related ADRs: [ADR-0006](../../adr/0006-contract-purpose-invariant-enforcement.md)
   (kernel exploitation follows SPEC-018's four-point adoption gate),
   [ADR-0002](../../adr/0002-reaffirm-agentscope-runtime-kernel.md) (AgentScope 2.0 as the
@@ -59,10 +59,12 @@ design decision this spec fixes is how auto-routing reconciles with SPEC-024's a
   for complex ones" path, so operators either over-provision an expensive model for every
   turn or hand-switch per turn. Auto-routing is the out-of-box agentscope answer.
 - **Low-risk; it composes with existing machinery.** It reuses the credential-gated
-  `MODEL_CATALOG` (SPEC-026/027), sits beside the always-on `TokenUsageMiddleware`
-  (SPEC-065 R-1) so its extra classification call's tokens are already observed, and rides
-  the SPEC-017 snapshot for resume — the same integration shape as the delivered
-  `CompressContext` ([SPEC-064](../SPEC-064-agentscope-compression-and-goal-pipeline/spec.md) R-2).
+  `MODEL_CATALOG` (SPEC-026/027), and the routed model's *reply* tokens stay observed by the
+  always-on `TokenUsageMiddleware` (SPEC-065 R-1) because `on_reply` swaps `agent.model`
+  before the inner `_call_model` runs (the router's *own* classification call is a separate
+  direct `generate_structured_output` that bypasses `on_model_call` — see R-2, corrected at
+  Stage-0). It rides the SPEC-017 snapshot for resume — the same integration shape as the
+  delivered `CompressContext` ([SPEC-064](../SPEC-064-agentscope-compression-and-goal-pipeline/spec.md) R-2).
 - **The provider caveat from the headline review is resolved.** The router accepts a plain
   `ChatModelBase` and routes via `generate_structured_output` — the same call the platform's
   threshold compression already uses — so it needs no OpenAI/TypeSafe classifier and no new
@@ -136,12 +138,20 @@ Acceptance criteria:
 - **Contract boundary unchanged.** No agentscope type leaks through v2;
   `agent-stream-event.schema.json` stays byte-unchanged. If the routed model is surfaced to
   the portal it is a plain id in the existing SPEC-024/026 model field.
-- **Token observation reuses SPEC-065.** The extra classification call's tokens are attributed
-  by the existing `TokenUsageMiddleware` (`on_model_call`); no new instrumentation.
+- **Token observation — corrected at Stage-0 (2026-11-01).** The routed model's *reply*
+  tokens **are** observed by the existing `TokenUsageMiddleware`: `on_reply` swaps
+  `agent.model` before the inner `_call_model` runs, and `_call_model` wraps `self.model`
+  (dispatching `on_model_call`), so the serving model's usage rides SPEC-065 unchanged — no
+  new instrumentation. The router's own *classification* call, however, is a direct
+  `classifier_model.generate_structured_output` inside `_route` on a separate `ChatModelBase`;
+  it does **not** pass through `_call_model`, so it is **not** observed by `TokenUsageMiddleware`.
+  R-2 accepts that classification cost as unobserved while default-off (no new instrumentation);
+  R-3's measurement gate captures it via a bounded measurement-only counter instead.
 - **Tests.** opt-in gating (off ⇒ middleware absent, on ⇒ present); precedence (an explicit
   request/pin overrides the router); fail-soft on error and on unknown candidate; resume keeps
-  the routed model; no type leak; `agent-stream-event.schema.json` byte-stability; token
-  attribution of the routing call.
+  the routed model; no type leak; `agent-stream-event.schema.json` byte-stability; the routed
+  model's reply tokens ride SPEC-065 while the classification call is unobserved by design
+  (asserted, not instrumented).
 
 ### R-3: Routing-accuracy measurement gate (before any default-on)
 
@@ -153,7 +163,8 @@ Acceptance criteria:
 
 - A measurement on a representative turn sample records routing **accuracy** (did it select the
   intended tier?), the added **per-reply latency**, and the classification call's **token cost**
-  (from the SPEC-065 metrics).
+  (via a bounded measurement-only counter, since the classification call bypasses
+  `TokenUsageMiddleware` and is therefore absent from the SPEC-065 metrics — see R-2).
 - The candidate `description` criteria are tuned against that measurement, since routing quality
   is only as good as the criteria the classifier is given.
 - Default-on is a **separate operator decision** evidenced by the measurement; absent it, the
@@ -233,6 +244,39 @@ resolved decision below is now binding on R-2.
 
 ## Changelog
 
+- 2026-11-01: **delivered (v0.52.0)** — shipped under the operator's explicit ship-time
+  authorization (R-4 docs + the VERSION lockstep bump; **no commit/push**, and default-on **not**
+  flipped). R-2 wired the opt-in, default-off `ModelRouterMiddleware`
+  (`AGENTSCOPE_MODEL_ROUTER_ENABLED` / `_MODEL` / `_CANDIDATES`; precedence
+  `request > pinned > routed > default`; the effective model + `model_selected_by` attribution on
+  the structured logs; fail-soft; resume-safe; `agent-stream-event.schema.json` byte-unchanged; no
+  new dependency). R-3's offline harness plus a live A/B/C measurement on the 24-turn sample
+  reached **100% accuracy** across every valid classifier (added latency ~0.46–0.83 s; ~330–440
+  input + 10–34 output classification tokens per turn), so **no candidate `description` retuning
+  was required**; the as-provisioned `qwen3-8b` classifier 404'd and demonstrated the fail-soft
+  path (24/24 kept the agent's model) — a dev-catalog side-finding tracked separately. R-4
+  reconciled the living docs, the configuration reference, `CHANGELOG.md`, and the
+  [release note](../../agentic-aiops-platform/release-notes/2026-11-01-per-turn-model-routing.md).
+  **The router stays default-off**; default-on remains a separate, measurement-gated operator
+  decision, not made here.
+- 2026-11-01: **Stage-0 seam verification (no product diff)** — verified the four design risks
+  the [plan](plan.md) flagged against the locked agentscope 2.0.11 install and the 0.51.1 kernel:
+  (S0-1) `on_reply` and `on_model_call` are built as *separate* per-hook chains (`_agent.py:219-241`),
+  so `ModelRouterMiddleware` (on_reply only) and `TokenUsageMiddleware` (on_model_call only) never
+  compete on wrap order; (S0-2) **the R-2 token-observation criterion was factually wrong and is
+  corrected above** — the router's classification `generate_structured_output` is a direct call on a
+  separate `ChatModelBase` inside `_route`, bypassing `_call_model` (the only `on_model_call`
+  dispatch site, `_agent.py:3291-3383`), so it is *not* observed by `TokenUsageMiddleware`; only the
+  routed model's *reply* tokens are (the on_reply swap is active for the inner `_call_model`);
+  (S0-3) the routed model can ride the *existing* `model` field on `message_end`
+  (`agent-stream-event.schema.json:28-31`, byte-unchanged), but the kernel currently hard-stamps
+  `frame["model"] = bound_model_id` (`runtime_kernel.py:1375-1378`) with the pre-routing resolved id,
+  so R-2 wiring must repoint that stamp at the actually-serving model; `model_selected_by` belongs on
+  the audit/structured-log trail (SPEC-024 R-4 pattern), not the stream schema; (S0-4) resume-key
+  stability holds — `get_middleware_key()` returns the class name (`_base.py:296-303`) and
+  `middle_context` is a plain `AgentState` field (`state/_state.py:294`) that rides the SPEC-017
+  snapshot via `_snapshot_state`/`_restore_state` (`runtime_kernel.py:679/649`) with no extra work.
+  Refines R-2/R-3 wording only; no product, contract, policy, or version change.
 - 2026-11-01: **approved** — the operator ratified all five Open Questions exactly as
   proposed (precedence `request > pinned > routed > default`; config-provided minimal
   candidate set, routing inert with no map; router backend = an existing catalog

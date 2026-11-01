@@ -174,7 +174,7 @@ class FakeAgent:
 
 
 def _patch_agent(monkeypatch, kernel: AgentKernel, agent: FakeAgent) -> None:
-    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None):
+    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None, read_only=False, routing_allowed=False):
         return agent, FakeUserMsg, model_id or kernel.settings.provider
 
     monkeypatch.setattr(kernel, "ensure_agent", fake_ensure_agent)
@@ -1190,7 +1190,7 @@ def test_expire_confirmation_binds_the_pinned_model(monkeypatch):
     agent = FakeAgent(events=[])
     bound: list = []
 
-    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None):
+    async def fake_ensure_agent(session_id, bearer_token=None, model_id=None, read_only=False, routing_allowed=False):
         bound.append(model_id)
         return agent, FakeUserMsg, model_id or kernel.settings.provider
 
@@ -1558,7 +1558,7 @@ def test_confirm_expired_returns_410(monkeypatch) -> None:
     kernel = get_runtime_kernel()
     expired_calls: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None, routing_allowed=False):
         expired_calls.append((session_id_arg, confirm_id_arg))
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
@@ -1748,7 +1748,7 @@ def test_confirm_expiry_interrupts_on_the_pinned_model(monkeypatch) -> None:
     kernel = get_runtime_kernel()
     captured: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None, routing_allowed=False):
         captured.append(model_id_arg)
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
@@ -1786,7 +1786,7 @@ def test_expired_park_interrupts_on_the_pinned_model_before_new_turn(
     kernel = get_runtime_kernel()
     captured: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None, routing_allowed=False):
         captured.append(model_id_arg)
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
@@ -1813,7 +1813,7 @@ def test_expired_park_interrupts_before_new_turn(monkeypatch) -> None:
     kernel = get_runtime_kernel()
     expired_calls: list = []
 
-    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None):
+    async def fake_expire(session_id_arg, confirm_id_arg, model_id_arg=None, routing_allowed=False):
         expired_calls.append((session_id_arg, confirm_id_arg))
         CONFIRMATION_REGISTRY.resolve(session_id_arg, confirm_id_arg)
 
