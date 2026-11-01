@@ -1,5 +1,5 @@
-- Each product under `products/` is self-contained with its own `pyproject.toml`, `uv.lock`, `Dockerfile`, `Makefile`, `src/<package>/`, and `tests/`, built and tested independently via `make -C products/<name>`.
-- Cross-product contracts live in `shared/shared-contracts/` (schemas, policies, SQL) and are consumed as read-only fixtures or scripts rather than imported as packages.
-- Policy bundles are authored once in `shared/shared-contracts/policies/` and copied to consumers via `make sync-policy` instead of being edited in place at call sites.
-- Product versions stay locked to the root `VERSION` file, enforced by `make validate-version` which checks every product's declared version.
-- Container images are built with a coordinated tag computed from `PLATFORM_VERSION`, `IMAGE_TAG_PREFIX`, and `IMAGE_TAG_PROFILE`, and pushed together via the root `make push`.
+- Each product is self-contained with its own `pyproject.toml`, `.python-version`, `Dockerfile`, `Makefile`, `src/<package>/`, and `tests/`, and is invoked through the root Makefile rather than imported as a dependency.
+- Cross-product integration points are expressed as files under `shared/shared-contracts/` (schemas, policies, SQL, scripts) and consumed via generated or copied artifacts, not direct package imports.
+- Spec-driven development is enforced by the `docs/specs/SPEC-NNN-<name>/` layout where each feature ships `plan.md`, `spec.md`, and `tasks.md` alongside release notes.
+- Policy bundles are authored once at `shared/shared-contracts/policies/` and synced to consumer locations via `make sync-policy`, keeping canonical and deployed copies in lockstep.
+- Versioning is centralized in the root `VERSION` file and cross-checked by `make validate-version` across all products and the portal.

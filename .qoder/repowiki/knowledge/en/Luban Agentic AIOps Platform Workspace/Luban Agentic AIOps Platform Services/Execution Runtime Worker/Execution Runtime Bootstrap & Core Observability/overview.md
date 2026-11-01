@@ -1,1 +1,0 @@
-Bootstraps the FastAPI execution-worker process, wires lifecycle/signals/drain state, and provides shared configuration, Prometheus metrics, OpenTelemetry push, logging, and request-id resolution.

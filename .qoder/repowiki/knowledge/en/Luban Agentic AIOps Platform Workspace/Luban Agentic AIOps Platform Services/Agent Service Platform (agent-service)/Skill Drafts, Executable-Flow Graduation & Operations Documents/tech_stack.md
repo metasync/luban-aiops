@@ -1,1 +1,0 @@
-Pydantic v2 models for the skill frontmatter contract; AgentScope `Msg`/`TextBlock` for the bounded LLM call; psycopg for the Postgres backend; pure Python regex for secret-redaction patterns and fenced-contract parsing.

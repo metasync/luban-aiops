@@ -1,1 +1,0 @@
-Official `mcp>=2.3.0` Python SDK for the MCP transport (vended `httpx2`); plain `httpx` for the ServiceNow REST fallback. Optional `user_delegated` acquisition uses `tool_gateway.tools.user_delegated_client.AcquisitionContext` per SPEC-070.

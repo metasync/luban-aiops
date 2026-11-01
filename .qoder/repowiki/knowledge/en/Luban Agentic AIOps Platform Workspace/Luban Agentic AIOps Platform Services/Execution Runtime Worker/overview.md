@@ -1,1 +1,0 @@
-FastAPI execution-worker process that accepts delegated handoff requests, persists signed observations to a Postgres ledger, and dispatches tool invocations through the gateway.

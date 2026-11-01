@@ -1,1 +1,0 @@
-FastAPI audit-trail service that ingests, persists, queries, summarizes, and exports immutable audit events with configurable retention and a pluggable in-memory/PostgreSQL backend.

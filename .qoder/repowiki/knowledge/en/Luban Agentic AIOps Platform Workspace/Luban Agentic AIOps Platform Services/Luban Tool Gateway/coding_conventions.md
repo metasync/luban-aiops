@@ -1,4 +1,0 @@
-- Public request/response shapes are declared once as Pydantic models in `schemas/api.py` and reused across routes and tests rather than redefined per endpoint.
-- Tool implementations subclass `BaseTool` and register themselves through `ToolRegistry` instead of being imported directly by routes.
-- Authorization flows go through the `authorization_service` / custody state machine rather than inline checks inside route handlers.
-- External providers (Ansible/MCP, ServiceNow) are reached only via adapter classes in `ingestion/`, keeping connector code out of the API layer.

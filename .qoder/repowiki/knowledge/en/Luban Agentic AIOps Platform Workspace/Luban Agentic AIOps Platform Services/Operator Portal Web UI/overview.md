@@ -1,1 +1,0 @@
-Operator-facing React SPA for Luban AIOps, providing chat, approvals, audit, incidents, workspace and settings views backed by the platform gateway via OIDC.

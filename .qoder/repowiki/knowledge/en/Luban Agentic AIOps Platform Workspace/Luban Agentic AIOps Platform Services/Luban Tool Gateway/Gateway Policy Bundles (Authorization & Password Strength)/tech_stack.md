@@ -1,1 +1,0 @@
-Plain YAML configuration files consumed by the gateway's policy engine; no Python code in scope.

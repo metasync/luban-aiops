@@ -1,1 +1,0 @@
-FastAPI-based agent service that wires HTTP routes, session state, execution pipeline, skill authoring, and provider-agnostic runtime kernel behind a shared v2 contract.

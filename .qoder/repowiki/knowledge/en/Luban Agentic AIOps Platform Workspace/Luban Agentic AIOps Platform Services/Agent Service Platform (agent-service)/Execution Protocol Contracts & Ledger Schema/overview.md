@@ -1,1 +1,0 @@
-JSON-Schema definitions and PostgreSQL migrations that define the signed execution request/receipt/observation protocol and its immutable audit ledger.

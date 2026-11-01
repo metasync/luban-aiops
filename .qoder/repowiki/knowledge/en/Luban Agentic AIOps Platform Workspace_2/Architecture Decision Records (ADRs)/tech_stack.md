@@ -1,0 +1,1 @@
+Markdown-based ADR format inspired by Michael Nygard's Architecture Decision Records; no tooling beyond the repository's markdown rendering.

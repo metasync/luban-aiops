@@ -1,6 +1,0 @@
-- Each feature area lives in its own `test_*.py` file whose name mirrors the production module it exercises, keeping one concern per file.
-- External services are replaced with in-process fakes rather than real connections — Postgres via a local `_fake_connect` factory capturing SQL+params, Redis via `fakeredis.FakeRedis`, and FastAPI endpoints via `TestClient(create_app())`.
-- Module-level singletons (e.g. `AUTHORING_TRACE_STORE`, `EXECUTION_RECORD_STORE`, `FLOW_APPROVALS`, `CONFIRMATION_REGISTRY`) are torn down per test using `@pytest.fixture(autouse=True)` fixtures that call `.clear()` on them.
-- Assertions reference SPEC requirements inline as comments (e.g. `# SPEC-016 R-1`, `# SPEC-022 R-1`, `# SPEC-056 R-1`) so test intent maps back to the design spec.
-- Session-store tests assert both the returned domain objects and the exact SQL fragments (INSERT/UPDATE/DELETE, RETURNING columns, LIMIT, ORDER BY) captured by the fake driver.
-- Environment-driven configuration is validated by setting/deleting `AGENT_*` env vars through `monkeypatch.setenv` / `monkeypatch.delenv` and asserting defaults from the service's constants.

@@ -1,1 +1,0 @@
-Manages agent session creation, ownership/identity checks, listing, deletion and best-effort transcript reconstruction backed by in-memory, Redis or Postgres stores.

@@ -1,1 +1,0 @@
-HTTP via `httpx.AsyncClient` with zero retries and disabled redirect following; JWT handling via PyJWT (`jwt.PyJWKClient` with RS256, cached JWKS keys, 300 s lifespan); HMAC-based replay protection via `hmac.compare_digest` for the decider token; canonical argument hashing via the module's own `canonical_digest`.

@@ -1,1 +1,0 @@
-Generates skill drafts from session/incident facts, re-validates and renders approved authoring traces into executable-flow runbooks, and persists typed operations documents behind a memory/Postgres backend.

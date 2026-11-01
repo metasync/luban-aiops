@@ -1,1 +1,1 @@
-Repository workspace that coordinates Luban's FastAPI microservices, shared contracts, GitOps overlays, and operator portal under a single Makefile-driven build, verify, and deploy pipeline.
+Multi-product workspace for the Luban agentic AIOps platform, coordinating nine Python services plus an operator SPA around shared contracts, GitOps overlays, and spec-driven delivery.

@@ -1,6 +1,0 @@
-- Every asserting test is annotated with `@pytest.mark.scenario("F-NN", "case")` whose row/case pair must exist in `support/scenarios.py.CASES`; missing or invalid markers cause a collection-time `UsageError`.
-- Tests record outcomes through the `evidence(**facts)` fixture rather than printing or logging, and facts are constrained to a fixed allow-list of keys with a total JSON size cap of 8192 bytes.
-- Cross-process coordination uses `support.barriers.Barriers` created via `services.barrier(...)` and released through the same barrier object, with barriers tracked in a list and released in reverse order during teardown.
-- Negative-control tests use deliberately unsafe senders from `support.negative_controls` and assert that the runtime rejects them, setting `negative_detected=True` in evidence when a violation is observed.
-- Baseline-invariant tests are marked with `@pytest.mark.baseline_red` and are selected only when `--stage baseline-red` is passed, keeping pre-fix failures out of normal runs.
-- External services (Postgres, HTTP workers, gateways) are launched as child processes via `support.processes.ProcessService` and shut down in reverse order after each `services` fixture scope.

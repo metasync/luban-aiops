@@ -1,1 +1,0 @@
-No parent-level command boots the suite; each child has its own `Makefile`, `pyproject.toml`, `.python-version`, and `Dockerfile` and is developed/tested/run independently from within its directory.

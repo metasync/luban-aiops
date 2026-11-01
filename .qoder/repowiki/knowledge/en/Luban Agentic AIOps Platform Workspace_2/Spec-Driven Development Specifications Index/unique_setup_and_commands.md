@@ -1,0 +1,1 @@
+New specs are scaffolded from `docs/specs/templates/{spec,plan,tasks}.md`; the `make verify` command at the repository root is the enforcement gate that runs all product test suites and renders GitOps overlays, and reviewers advance a spec to `delivered` only when every `R-x` requirement maps to at least one asserting test recorded in `tasks.md`.

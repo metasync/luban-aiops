@@ -1,5 +1,0 @@
-- Client-side role gating is centralized through role constant arrays (`APPROVAL_DECIDER_ROLES`, `AUDIT_ROLES`, `DOCUMENT_ROLES`, `INCIDENT_VIEW_ROLES`, `STUDIO_ROLES`) and the `hasAnyRole` helper in `roles.ts`, with comments noting that the gateway re-enforces policy server-side.
-- API calls go through the typed wrappers in `api/*.ts` which delegate to `requestJson` in `client.ts`; every request carries an auto-generated `x-request-id` header and the bearer token from the persisted auth session.
-- Feature areas are organized as sibling folders under `src/` (`auth`, `api`, `chat`, `sessions`, `views/*`, `stream`, `voice`, `theme`), each containing colocated `__tests__/` directories mirroring source file names.
-- Streaming chat responses use a dedicated transport layer (`stream/transport.ts`, `stream/decoder.ts`) consumed through the `useChatStream` hook, separating SSE framing from view logic.
-- Long-lived background state (session lists, approval inbox) is owned by custom hooks (`useSessionWorkspace`, `useApprovalsInbox`, `useAuthorizationStatusPoll`, `usePendingDecisionPoll`) rather than ad-hoc `useEffect` calls inside views.

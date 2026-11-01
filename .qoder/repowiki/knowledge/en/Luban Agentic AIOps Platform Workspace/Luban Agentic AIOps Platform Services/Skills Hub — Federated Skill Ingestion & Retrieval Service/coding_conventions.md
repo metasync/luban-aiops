@@ -1,6 +1,0 @@
-- Configuration values are parsed from `SKILLS_*` environment variables into frozen `@dataclass` objects via dedicated `parse_*` helpers that raise `SettingsError` on malformed input, then cached through an `lru_cache(maxsize=1)` accessor.
-- External storage access goes through the `SkillStore` Protocol defined in `skill_store.py`, with separate `InMemorySkillStore` and `PostgresSkillStore` implementations selected by `build_skill_store(settings)` based on `SKILLS_STORE_BACKEND`.
-- Validation functions return either a validated value or a `Rejection(source_id, path, reason)` tuple, allowing callers to accumulate partial failures without aborting the whole source ingest.
-- Deterministic behavior is enforced by sorting inputs (file paths, source IDs, skill IDs) and using stable tie-breakers (ascending `skill_id`) rather than relying on dict/set iteration order.
-- Database DDL is declared as module-level string constants (`_DDL`, `_SEARCH_TSVECTOR`, `_INSERT`, `_ROW_COLUMNS`) and executed inside transactions, with idempotent `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` migrations.
-- Cross-backend parity is maintained by keeping the scorer (`scoring.py`) pure and synchronous, invoked identically by both store backends after a Postgres tsvector prefilter narrows candidates.

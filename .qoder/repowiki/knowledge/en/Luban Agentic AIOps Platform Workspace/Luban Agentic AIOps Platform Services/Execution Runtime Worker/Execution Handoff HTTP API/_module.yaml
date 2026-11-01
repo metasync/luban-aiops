@@ -1,9 +1,0 @@
-schema_version: 1
-module_path: products/execution_runtime/handoff_protocol
-title: Execution Handoff HTTP API
-scope:
-    - products/execution-runtime/src/execution_runtime/api/
-source_files: []
-depends_on: []
-related_to:
-    - path: products/agent_platform/execution_pipeline

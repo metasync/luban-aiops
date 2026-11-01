@@ -1,1 +1,0 @@
-Postgres-backed immutable execution ledger providing single-use dispatch claims, signed observation append-only audit trails, and a fenced migration tool for schema versioning.

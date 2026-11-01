@@ -1,0 +1,5 @@
+- Each product under `products/<name>/` is self-contained with its own `pyproject.toml`, `Dockerfile`, `Makefile`, `src/<package>/`, and `tests/`, exposing entrypoints via `main.py` and `app.py`.
+- Inter-service contracts are authored once in `shared/shared-contracts/schemas/*.schema.json` and consumed by producers/consumers rather than duplicated.
+- Policy bundles live canonically in `shared/shared-contracts/policies/` and are mirrored to consumers via `make sync-policy` instead of edited in place.
+- Cross-product validation logic (policy diff/scenarios, secret vocabulary, version lockstep, password policy) is centralized in `shared/shared-contracts/scripts/` and invoked from the root Makefile.
+- Feature work is driven by numbered specs under `docs/specs/SPEC-NNN-<name>/` with plan/spec/tasks triads, and architectural choices are captured as sequentially-numbered ADRs under `docs/adr/`.

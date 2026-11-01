@@ -1,7 +1,0 @@
-- Each feature lives in its own `routes/<feature>.py` file exporting a module-level `APIRouter`, which is mounted centrally in `api/router.py` rather than registered inline.
-- Settings are injected through `GatewaySettings = Depends(get_settings)` on every handler instead of being read from globals.
-- Request IDs are resolved consistently as `getattr(request.state, 'request_id', None) or resolve_request_id(x_request_id)` where `x_request_id` comes from an `X-Request-Id` header parameter.
-- Identity is derived exclusively from the verified bearer token via `resolve_request_identity(settings, request, request_id)`; caller-supplied identity fields in request bodies are never trusted.
-- Policy checks follow identity resolution using `enforce_policy(settings, identity, '<action>', request_id)` before invoking service logic.
-- Secret-bearing responses are wrapped in `JSONResponse(..., headers={'Cache-Control': 'no-store', 'Pragma': 'no-cache'})` (and `Referrer-Policy: no-referrer` for authorization endpoints), and sensitive values are modeled as `SecretStr` so they redact in repr/logs/dumps.
-- Optional features gated by settings (`delegated_authorization_enabled`, `delegated_invoke_enabled`) fail closed by raising `HTTPException(403)` when disabled or when their runtime service is absent from `request.app.state`.

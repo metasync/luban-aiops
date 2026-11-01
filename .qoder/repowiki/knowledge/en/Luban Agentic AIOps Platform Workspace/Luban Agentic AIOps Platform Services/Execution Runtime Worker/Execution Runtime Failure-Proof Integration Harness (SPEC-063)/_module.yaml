@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: products/execution_runtime/integration_failure_harness
-title: Execution Runtime Failure-Proof Integration Harness (SPEC-063)
-scope:
-    - products/execution-runtime/tests/failure/
-source_files: []
-depends_on: []
-related_to: []

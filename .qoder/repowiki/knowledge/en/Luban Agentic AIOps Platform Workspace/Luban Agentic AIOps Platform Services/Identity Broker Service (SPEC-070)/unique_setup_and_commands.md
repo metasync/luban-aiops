@@ -1,1 +1,0 @@
-Package entry point `identity-service` (from `pyproject.toml`) runs `identity_service.main:run`. Build uses `uv_build` (see `pyproject.toml` `[build-system]`). Tests live under `tests/` and use pytest with a dev dependency group declared in `pyproject.toml`.

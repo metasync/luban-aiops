@@ -1,0 +1,1 @@
+Markdown-only specification documents governed by a manual review workflow; mechanical verification is delegated to the root `Makefile` (`make verify`) and contract tests against `shared/shared-contracts`, not to any spec parser.

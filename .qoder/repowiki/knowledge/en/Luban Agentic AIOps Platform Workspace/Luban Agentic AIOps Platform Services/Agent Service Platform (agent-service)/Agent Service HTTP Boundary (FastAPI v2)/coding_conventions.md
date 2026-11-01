@@ -1,5 +1,0 @@
-- Identity is carried exclusively in HTTP headers (`X-User-ID`, `x-request-id`, `Authorization`); no user or credential fields appear in request/response bodies.
-- The gateway-forwarded bearer token is extracted by `_bearer_token` and passed opaquely to the kernel and downstream tool invocations — the route never inspects or signs it.
-- Route handlers validate inputs against Pydantic models imported from `schemas.v2` before any service call, failing with FastAPI's 422 on malformed payloads.
-- Outbound gateway calls in `tools/gateway_tools.py` read request-scoped identity and correlation data from `ContextVar`s (`DELEGATED_TOKEN`, `CHAT_SESSION_ID`, `EXECUTION_REQUESTS`, …) rather than passing them through function arguments, so cached toolkits stay valid across token refresh.
-- Stream events from the kernel are normalized through `_normalize_stream_event` / `_coerce_*` helpers that coerce unknown fields to `None` and whitelist allowed enum values, keeping the response schema stable even when the kernel evolves.

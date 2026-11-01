@@ -1,1 +1,0 @@
-`make run` starts the worker via `main.run()`, which reads `ExecutionRunSettings.from_env()` and binds uvicorn with a 35-second graceful drain budget (SPEC-063 R-7c pod grace period). The failure harness under `tests/failure/` uses its own `compose.yaml` to bring up Postgres, the execution runtime, a worker, and a gateway for end-to-end scenario runs.

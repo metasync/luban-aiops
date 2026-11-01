@@ -1,5 +1,0 @@
-- Each bundle pins a top-level `version` field that denotes the schema/format revision, not a per-rule counter, so edits do not bump it.
-- Authorization rules follow a uniform shape: `id`, `domain`, `description`, `priority`, `enabled`, a `match` block with `roles_any`/`actions_any`, and a `decision.outcome` of `allow`, `deny`, or `require_approval`.
-- Approval-required rules declare an `approval.tier` (`tier_1` or `tier_2`) plus `decided_by_roles`, keeping synthetic/workload identities out by omission rather than code special-cases.
-- New actions are introduced as new named rules rather than widening existing role lists, preserving deny-by-default posture for roles not explicitly granted.
-- Comments preceding each rule document the spec reference (e.g. SPEC-021, SPEC-030, SPEC-070) and the security rationale for the chosen role/action combination.

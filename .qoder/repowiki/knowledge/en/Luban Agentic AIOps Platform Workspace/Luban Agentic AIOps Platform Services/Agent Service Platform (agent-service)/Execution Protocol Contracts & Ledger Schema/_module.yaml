@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: products/agent_platform/contracts_schemas
-title: Execution Protocol Contracts & Ledger Schema
-scope:
-    - products/agent-platform/src/agent_service/contracts/
-source_files: []
-depends_on: []
-related_to: []

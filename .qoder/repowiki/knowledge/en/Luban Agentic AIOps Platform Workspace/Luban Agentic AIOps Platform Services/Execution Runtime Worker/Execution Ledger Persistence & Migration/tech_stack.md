@@ -1,1 +1,0 @@
-Python with `psycopg` (dict_row, Jsonb) against PostgreSQL; uses PostgreSQL features including `clock_timestamp()`, `pg_try_advisory_lock`, `GENERATED ALWAYS AS IDENTITY`, PL/pgSQL triggers, and `jsonb` constraints. Schema migrations are loaded via `importlib.resources.files("execution_runtime")` from packaged `.sql` files rather than an ORM/migration framework.

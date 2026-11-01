@@ -1,5 +1,0 @@
-- Configuration is modeled as `frozen=True` dataclasses with a `from_env()` classmethod reading `EXECUTION_*` environment variables, and validation centralized in `__post_init__`.
-- Optional external systems (OTel providers, audit client, delegated identity validator) are imported lazily inside functions rather than at module top level, so disabled features impose no import cost.
-- Prometheus metrics are mirrored to OpenTelemetry through a `MetricsMirror` registry of `(name, kind, labels)` tuples declared in `OTEL_MIRROR_FAMILIES`, keeping both surfaces byte-identical without duplicating metric definitions.
-- Operational surfaces use bounded label sets (frozensets of allowed values, status strings, route paths) instead of raw user input, documented alongside the metric definition.
-- Fail-open behavior is enforced by wrapping optional integrations (OTel setup, gauge refresh, signal handler installation) in try/except blocks that log and continue rather than raising.

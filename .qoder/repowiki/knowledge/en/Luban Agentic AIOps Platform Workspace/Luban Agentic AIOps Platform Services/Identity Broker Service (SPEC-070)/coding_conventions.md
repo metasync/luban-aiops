@@ -1,5 +1,0 @@
-- Configuration is modeled as frozen dataclasses with a `from_env()` classmethod reading `os.getenv(...)` with explicit defaults, and a module-level `@lru_cache(maxsize=1)` accessor (`get_settings`) so settings are resolved once per process.
-- External HTTP calls go through `httpx.AsyncClient` with an explicit `timeout=` argument and `raise_for_status()` on responses, rather than raw requests.
-- Error signaling from services uses domain exceptions carrying both a human message and an HTTP status code (e.g. `ExchangeError(detail, status_code)`), allowing routes to translate them directly to HTTP responses.
-- Audit and metric side-effects are recorded by dedicated helpers (`record_token_exchange`, `record_token_issued`, `record_audit_emit`) rather than inline counters, keeping business functions free of instrumentation coupling.
-- Long-lived mutable state used across requests (RSA private key, JWKS discovery clients) is held as module-level globals with explicit `reset_*_state()` helpers exposed for tests.

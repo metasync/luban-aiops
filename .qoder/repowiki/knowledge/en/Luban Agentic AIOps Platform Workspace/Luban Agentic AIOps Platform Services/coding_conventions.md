@@ -1,6 +1,0 @@
-- Every FastAPI service follows the same package layout: `src/<service_name>/api/routes` for endpoints, `core/{config,metrics,observability,request_context,telemetry}` for shared infrastructure, `schemas` for Pydantic models, and `services` for domain logic.
-- Each service exposes an ASGI app via `app.py` and a CLI entrypoint via `main.py`, with metadata loaded from a sibling `metadata.py`.
-- Cross-cutting observability is implemented uniformly: services register metrics, OpenTelemetry tracing, and structured logging through `core/metrics.py`, `core/telemetry.py`, and `core/observability.py`.
-- Audit events are emitted through a local `services.audit_emitter` client rather than direct HTTP calls, keeping audit publishing decoupled from business logic.
-- HTTP routes live one level deep under `api/routes/<feature>.py` and are mounted via a central `api/router.py` that aggregates them.
-- Service-to-service authentication uses bearer tokens issued by `identity_broker`, verified by a shared `token_verifier` pattern present in multiple children.

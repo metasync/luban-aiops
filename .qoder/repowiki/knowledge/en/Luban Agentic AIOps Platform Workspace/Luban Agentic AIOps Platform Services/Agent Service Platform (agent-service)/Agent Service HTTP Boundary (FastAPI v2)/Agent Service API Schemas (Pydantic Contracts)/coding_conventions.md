@@ -1,6 +1,0 @@
-- Every public model is documented with a module-level or class-level docstring that cites the governing SPEC requirement (e.g. `SPEC-022 R-1`, `SPEC-056 R-1`, `SPEC-070`) so the spec-to-model traceability is visible at the definition site.
-- Additive protocol fields are modeled as `str | None = Field(default=None, ...)` rather than required fields, so pre-existing rows and lightweight backends degrade gracefully without migration.
-- Cross-field validation that cannot be expressed by a single `Field(...)` constraint is implemented as a `@model_validator(mode="after")` method raising `ValueError`, used for both requester namespace/sub parity and document-type field mixing.
-- Immutable or opaque envelope models use `model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)` to reject unknown fields and prevent mutation after construction.
-- Wire-format-sensitive serialization is handled with `@model_serializer(mode="wrap")` to drop optional fields when absent (e.g. `preparation_state` in `ExecutionRecoveryModel`) so output matches the closed JSON Schema exactly.
-- Protocol evolution is tracked inline in docstrings as a versioned narrative (e.g. `AgentStreamEvent`'s v3→v13 history) rather than via changelogs, tying each added frame field to its SPEC and client impact.

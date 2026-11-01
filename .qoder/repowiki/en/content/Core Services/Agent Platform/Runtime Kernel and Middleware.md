@@ -9,22 +9,23 @@
 - [metrics.py](file://products/agent-platform/src/agent_service/core/metrics.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [app.py](file://products/agent-platform/src/agent_service/app.py)
+- [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [test_kernel_middleware.py](file://products/agent-platform/tests/test_kernel_middleware.py)
 - [test_runtime_kernel.py](file://products/agent-platform/tests/test_runtime_kernel.py)
 - [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
 - [test_secret_delivery_integration.py](file://products/agent-platform/tests/test_secret_delivery_integration.py)
+- [test_model_router.py](file://products/agent-platform/tests/test_model_router.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for per-stream delivery buffers (STREAM_PENDING_DELIVERIES and PENDING_RELEASE_DELIVERIES) for gated secret delivery workflows
-- Documented new _flush_pending_deliveries() method for standalone generate-and-copy scenarios
-- Documented _drain_held_deliveries() method for HITL workflow support
-- Enhanced ToolEvidenceMiddleware documentation to cover secrets.generate_password interception and deferred delivery mechanism
-- Updated architecture diagrams to reflect the new delivery buffer system
-- Added detailed examples of gated secret delivery workflows
-- **New**: Added CompressContext tool integration documentation as kernel-local operation with AGENTSCOPE_COMPRESS_CONTEXT_ENABLED environment variable and validation guards requiring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2
-- **Updated**: Added TokenUsageMiddleware documentation as part of the default always-on middlewares alongside permission and evidence middlewares, documenting streaming-aware token tracking capabilities
+- Added comprehensive documentation for per-turn model routing capabilities via ModelRouterMiddleware integration
+- Documented new _build_middlewares() method with routing support and candidate management
+- Documented cache key splitting for routed vs non-routed agents using ::routed suffix
+- Documented response attribution tracking with effective model identification and model_selected_by field
+- Updated architecture diagrams to reflect the new routing middleware integration
+- Added detailed examples of routing configuration and behavior patterns
+- Enhanced existing sections to cover routing precedence (request > pinned > routed > default)
 
 ## Table of Contents
 1. Introduction
@@ -39,16 +40,16 @@
 10. Appendices
 
 ## Introduction
-This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating, evidence emission, and LLM token usage tracking, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
+This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating, evidence emission, LLM token usage tracking, and **per-turn model routing**, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
 
-**Updated** The runtime kernel now features enhanced per-stream delivery buffers that enable gated secret delivery workflows, allowing secure one-time password generation with deferred reveal-on-commit semantics. Additionally, the kernel integrates the CompressContext tool as a kernel-local operation, enabling optional context compression with the AGENTSCOPE_COMPRESS_CONTEXT_ENABLED environment variable and validation guards requiring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2. The middleware stack has been enhanced with TokenUsageMiddleware as part of the default always-on middlewares, providing streaming-aware LLM token usage tracking via the `on_model_call` hook. This enhancement supports both standalone generate-and-copy scenarios and complex human-in-the-loop (HITL) approval workflows where secrets are only revealed when approved mutations commit successfully.
+**Updated** The runtime kernel now features sophisticated per-turn model routing capabilities through ModelRouterMiddleware integration, enabling dynamic model selection based on content classification while maintaining strict precedence rules (request > pinned > routed > default). The kernel includes enhanced _build_middlewares() method with routing support, candidate management for multiple model options, cache key splitting for routed vs non-routed agents, and comprehensive response attribution tracking. Additionally, the kernel maintains per-stream delivery buffers for gated secret delivery workflows, integrates the CompressContext tool as a kernel-local operation, and incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking.
 
 ## Project Structure
 The runtime kernel lives under the agent-service package and is composed of:
-- A central kernel orchestrating agent lifecycle, toolkit caching, model switching, and streaming turns.
-- A middleware stack that enforces permissions, emits evidence frames, and tracks LLM token usage for streamed tool calls.
+- A central kernel orchestrating agent lifecycle, toolkit caching, model switching, per-turn routing, and streaming turns.
+- A middleware stack that enforces permissions, emits evidence frames, tracks LLM token usage, and handles model routing.
 - Cross-cutting services for request context resolution, telemetry (OpenTelemetry), and Prometheus metrics.
-- Configuration via environment-driven runtime settings.
+- Configuration via environment-driven runtime settings including routing candidates and classifier models.
 
 ```mermaid
 graph TB
@@ -60,17 +61,21 @@ RC["Request Context<br/>request_context.py"]
 TEL["Telemetry (OTel)<br/>telemetry.py"]
 MET["Prometheus Metrics<br/>metrics.py"]
 SET["Runtime Settings<br/>runtime_settings.py"]
+ROUTES["API Routes<br/>routes.py"]
 BUF["Delivery Buffers<br/>STREAM_PENDING_DELIVERIES<br/>PENDING_RELEASE_DELIVERIES"]
 COMP["CompressContext Tool<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED"]
+ROUTER["ModelRouterMiddleware<br/>Per-turn Routing"]
 end
 APP --> RC
 APP --> MET
 APP --> TEL
-APP --> KERNEL
+APP --> ROUTES
+ROUTES --> KERNEL
 KERNEL --> MW
 KERNEL --> SET
 KERNEL --> BUF
 KERNEL --> COMP
+KERNEL --> ROUTER
 RC --> TEL
 ```
 
@@ -82,6 +87,7 @@ RC --> TEL
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
 - [metrics.py:52-73](file://products/agent-platform/src/agent_service/core/metrics.py#L52-L73)
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
+- [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
 
 **Section sources**
 - [app.py:49-76](file://products/agent-platform/src/agent_service/app.py#L49-L76)
@@ -91,20 +97,23 @@ RC --> TEL
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
 - [metrics.py:52-73](file://products/agent-platform/src/agent_service/core/metrics.py#L52-L73)
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
+- [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
 
 ## Core Components
-- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, and evidence persistence. **Updated** Now includes per-stream delivery buffers for gated secret delivery workflows and CompressContext tool integration for optional context compression.
+- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, evidence persistence, and **per-turn model routing**. **Updated** Now includes per-stream delivery buffers for gated secret delivery workflows, CompressContext tool integration, and ModelRouterMiddleware integration with candidate management.
 - GatewayPermissionMiddleware: Enforces a platform allow-list for auto-approved read-only tools, always allows kernel-local task tools, and routes other tool invocations to explicit ASK for operator confirmation; supports browser flow unlock for approved mutating flows. **Updated** Outbound HTTP requests now require explicit operator confirmation by default. **Updated** CompressContext tool is registered as kernel-local and always allowed.
 - ToolEvidenceMiddleware: Emits tool_call and tool_result evidence frames for gateway-backed tools during streaming, with bounded data summaries and optional full payloads, and redacts sensitive parameters. **Updated** Now intercepts secrets.generate_password calls and implements deferred delivery mechanism using per-stream buffers.
 - **TokenUsageMiddleware**: Records provider-reported LLM token usage as a metric via the `on_model_call` hook, always-on with no opt-in knob, streaming-aware, and pure observation without cost calculation.
+- **ModelRouterMiddleware**: Provides per-turn model routing capabilities, classifying user input to select from configured candidate models while respecting precedence rules.
 - Request Context: Resolves x-request-id by preferring inbound header, then current OTel trace_id, then generating a UUID.
 - Telemetry: Optional OpenTelemetry push pipeline for traces, metrics, and logs; integrates FastAPI and HTTPX instrumentation.
 - Metrics: Always-on Prometheus surface with RED middleware and /metrics endpoint; includes counters/gauges for sessions, chat requests, store backends, evidence writes, audit emissions, model discovery, and LLM token usage.
-- Runtime Settings: Environment-driven configuration for provider options, kernel tuning, middleware toggles, HITL timeouts, evidence caps, model discovery, signed execution, isolated worker, browser flow TTL, audit/incident/skills clients, and authoring-trace bounds. **Updated** Enhanced default system prompt with operational request handling improvements and CompressContext tool configuration.
+- Runtime Settings: Environment-driven configuration for provider options, kernel tuning, middleware toggles, HITL timeouts, evidence caps, model discovery, signed execution, isolated worker, browser flow TTL, audit/incident/skills clients, authoring-trace bounds, and **model routing configuration**. **Updated** Enhanced default system prompt with operational request handling improvements and CompressContext tool configuration.
 
 **Section sources**
 - [runtime_kernel.py:212-235](file://products/agent-platform/src/agent_service/runtime_kernel.py#L212-L235)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
+- [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
 - [kernel_middleware.py:151-193](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L151-L193)
 - [kernel_middleware.py:282-398](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L282-L398)
 - [kernel_middleware.py:636-741](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L636-L741)
@@ -113,27 +122,32 @@ RC --> TEL
 - [metrics.py:23-73](file://products/agent-platform/src/agent_service/core/metrics.py#L23-L73)
 - [metrics.py:284-312](file://products/agent-platform/src/agent_service/core/metrics.py#L284-L312)
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
+- [runtime_settings.py:265-278](file://products/agent-platform/src/agent_service/runtime_settings.py#L265-L278)
 
 ## Architecture Overview
-The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions, emit evidence frames, and track LLM token usage. Observability is enabled via optional OTel and always-on Prometheus metrics. **Updated** The architecture now includes per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics, CompressContext tool integration for optional context compression, and TokenUsageMiddleware for streaming-aware LLM token tracking.
+The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions, emit evidence frames, track LLM token usage, and handle per-turn model routing. Observability is enabled via optional OTel and always-on Prometheus metrics. **Updated** The architecture now includes per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics, CompressContext tool integration for optional context compression, TokenUsageMiddleware for streaming-aware LLM token tracking, and ModelRouterMiddleware for intelligent model selection based on content classification.
 
 ```mermaid
 sequenceDiagram
 participant Client as "Client"
 participant App as "FastAPI app<br/>app.py"
+participant Routes as "API Routes<br/>routes.py"
 participant RC as "Request Context<br/>request_context.py"
 participant Kernel as "AgentKernel<br/>runtime_kernel.py"
 participant Perm as "GatewayPermissionMiddleware"
 participant Evidence as "ToolEvidenceMiddleware"
 participant Token as "TokenUsageMiddleware"
+participant Router as "ModelRouterMiddleware"
 participant Buf as "Delivery Buffers"
 participant Comp as "CompressContext Tool"
 participant Provider as "Model Provider"
 Client->>App : HTTP request
-App->>RC : resolve_request_id(x-request-id)
-App->>App : log request + record metrics
-App->>Kernel : stream_events / reply_text
-Kernel->>Kernel : ensure_agent(session_id, bearer_token, model_id)
+App->>Routes : Route to handler
+Routes->>RC : resolve_request_id(x-request-id)
+Routes->>Routes : _resolve_model(model, session.model)
+Routes->>Routes : Determine routing_allowed
+Routes->>Kernel : stream_events / reply_text + routing_allowed
+Kernel->>Kernel : ensure_agent(session_id, bearer_token, model_id, routing_allowed)
 Kernel->>Perm : on_check_permission(tool)
 Perm-->>Kernel : ALLOW or ASK
 Kernel->>Evidence : on_acting(tool_call)
@@ -141,16 +155,19 @@ Evidence->>Buf : Buffer portal_copy deliveries
 Evidence-->>Kernel : yield items + emit frames
 Kernel->>Token : on_model_call(current_model)
 Token-->>Kernel : record usage from terminal chunk
+Kernel->>Router : on_reply(agent, inputs)
+Router-->>Kernel : swap agent.model if routing fires
 Kernel->>Comp : CompressContext (if enabled)
-Kernel->>Provider : execute turn
+Kernel->>Provider : execute turn with selected model
 Provider-->>Kernel : stream events / result
 Kernel->>Buf : Flush pending deliveries
-Kernel-->>App : normalized events / reply
-App-->>Client : SSE or response
+Kernel-->>Routes : normalized events / reply + effective_model
+Routes-->>Client : SSE or response + model_selected_by
 ```
 
 **Diagram sources**
 - [app.py:55-71](file://products/agent-platform/src/agent_service/app.py#L55-L71)
+- [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
 - [request_context.py:8-19](file://products/agent-platform/src/agent_service/core/request_context.py#L8-L19)
 - [runtime_kernel.py:662-697](file://products/agent-platform/src/agent_service/runtime_kernel.py#L662-L697)
 - [kernel_middleware.py:195-279](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L195-L279)
@@ -164,6 +181,7 @@ Responsibilities:
 - Agent lifecycle: build, cache, and reuse per session; LRU-bounded cache; serializes concurrent creation to avoid memory loss.
 - Toolkit management: discovers tools from the tool-gateway per delegated token; caches per token; filters mutating tools when HITL bridging is disabled; supports read-only toolkits for automated diagnostics.
 - Model switching: resolves model id via catalog; rebuilds agent when bound model changes; restores persisted state.
+- **Per-turn model routing**: manages routing configuration, candidate models, and effective model attribution; splits cache keys for routed vs non-routed agents; tracks routed candidate names and maps them back to catalog model ids.
 - Streaming and evidence: sets request-scoped evidence sink around streamed turns; persists evidence frames best-effort; flushes streaming prose redactor tails on terminal events. **Updated** Manages per-stream delivery buffers for gated secret delivery workflows and CompressContext tool integration.
 - Structured output: passes schema to agent and returns validated structured output when requested.
 - Observability integration: records metrics for evidence writes and agent state errors; emits audit events via configured service.
@@ -179,15 +197,16 @@ Key behaviors verified by tests:
 - State persistence and snapshot failure tolerance.
 - **Updated** Per-stream delivery buffer management for gated secret delivery workflows.
 - **Updated** CompressContext tool registration and configuration via ContextConfig.compression_tool_enabled.
+- **Updated** Per-turn model routing with candidate management, cache key splitting, and response attribution.
 
 ```mermaid
 flowchart TD
-Start(["Turn Entry"]) --> EnsureAgent["ensure_agent(session_id, bearer_token, model_id)"]
+Start(["Turn Entry"]) --> EnsureAgent["ensure_agent(session_id, bearer_token, model_id, routing_allowed)"]
 EnsureAgent --> CacheHit{"Cached agent<br/>and model match?"}
 CacheHit --> |Yes| UseAgent["Reuse agent"]
 CacheHit --> |No| BuildAgent["_build_agent(...)"]
 BuildAgent --> RestoreState["_restore_state(session_id)"]
-RestoreState --> ComposeMW["_build_middlewares()"]
+RestoreState --> ComposeMW["_build_middlewares(routing_allowed)"]
 ComposeMW --> StreamOrReply{"Streaming?"}
 StreamOrReply --> |Yes| SetSink["Set TOOL_EVIDENCE_SINK"]
 StreamOrReply --> |No| Execute["Execute turn"]
@@ -201,7 +220,7 @@ DrainDeliveries --> End
 
 **Diagram sources**
 - [runtime_kernel.py:699-774](file://products/agent-platform/src/agent_service/runtime_kernel.py#L699-L774)
-- [runtime_kernel.py:539-582](file://products/agent-agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
+- [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 
@@ -210,6 +229,7 @@ DrainDeliveries --> End
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
+- [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
 - [test_runtime_kernel.py:219-298](file://products/agent-platform/tests/test_runtime_kernel.py#L219-L298)
 - [test_runtime_kernel.py:301-552](file://products/agent-platform/tests/test_runtime_kernel.py#L301-L552)
 - [test_runtime_kernel.py:652-683](file://products/agent-platform/tests/test_runtime_kernel.py#L652-L683)
@@ -471,6 +491,55 @@ ConfigError --> DeploymentFailure["Deployment fails startup"]
 - [test_runtime_settings.py:637-678](file://products/agent-platform/tests/test_runtime_settings.py#L637-L678)
 - [test_kernel_middleware.py:491-513](file://products/agent-platform/tests/test_kernel_middleware.py#L491-L513)
 
+### Per-Turn Model Routing
+**New Section** The enhanced runtime kernel implements sophisticated per-turn model routing capabilities through ModelRouterMiddleware integration, enabling intelligent model selection based on content classification while maintaining strict precedence rules.
+
+Key components:
+- **ModelRouterMiddleware**: AgentScope middleware that classifies user input and swaps the reply's chat model among configured candidates
+- **Classifier Model**: A dedicated model used for classification decisions, built from the configured `model_router_model` catalog id
+- **Candidate Models**: Named model options with descriptions that guide the classifier's decision-making process
+- **Routing Precedence**: Strict ordering ensuring explicit requests and pins take priority over automatic routing
+- **Cache Key Splitting**: Separate agent instances for routed vs non-routed turns to maintain routing state consistency
+- **Response Attribution**: Tracking which model actually served each turn for accurate reporting and auditing
+
+Core behaviors:
+- **Opt-in gating**: Router is only registered when `model_router_enabled=True`, candidate map is configured, and `routing_allowed=True`
+- **Precedence enforcement**: Explicit request model and live pin both suppress routing; only default-resolved turns arm the router
+- **Fail-soft operation**: Classifier errors and unknown candidates keep the agent's original model without hard-failing the turn
+- **Resume safety**: Routed reply_ids reuse stored choices without re-routing across park/resume cycles
+- **Attribution tracking**: Effective model mapping from routed candidate names back to catalog model ids
+
+Configuration requirements:
+- `AGENTSCOPE_MODEL_ROUTER_ENABLED`: Enable/disable routing (default: false)
+- `AGENTSCOPE_MODEL_ROUTER_MODEL`: Classifier model catalog id (required when candidates are configured)
+- `AGENTSCOPE_MODEL_ROUTER_CANDIDATES`: Map of candidate names to catalog model ids and descriptions
+
+```mermaid
+flowchart TD
+Input["User Input"] --> Classify["Classifier Model<br/>generate_structured_output"]
+Classify --> Choice{"Valid Candidate?"}
+Choice --> |Yes| SwapModel["Swap agent.model to candidate"]
+Choice --> |No| KeepOriginal["Keep original model"]
+SwapModel --> Execute["Execute turn with selected model"]
+KeepOriginal --> Execute
+Execute --> StoreChoice["Store choice in middle_context[reply_id]"]
+StoreChoice --> RestoreModel["Restore original model after reply"]
+RestoreModel --> Attribute["Attribute turn to effective model"]
+```
+
+**Diagram sources**
+- [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
+- [routes.py:378-384](file://products/agent-platform/src/agent_service/api/v2/routes.py#L378-L384)
+
+**Section sources**
+- [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
+- [runtime_kernel.py:927-1012](file://products/agent-platform/src/agent_service/runtime_kernel.py#L927-L1012)
+- [runtime_kernel.py:1175-1188](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1175-L1188)
+- [runtime_settings.py:265-278](file://products/agent-platform/src/agent_service/runtime_settings.py#L265-L278)
+- [routes.py:378-384](file://products/agent-platform/src/agent_service/api/v2/routes.py#L378-L384)
+- [test_model_router.py:1-200](file://products/agent-platform/tests/test_model_router.py#L1-L200)
+- [test_model_router.py:349-412](file://products/agent-platform/tests/test_model_router.py#L349-L412)
+
 ### Request Context and Tracing Integration
 - Request ID resolution prefers inbound x-request-id, falls back to current OTel trace_id when tracing is enabled, otherwise generates a UUID.
 - Telemetry setup initializes providers and instrumentations when OTEL_ENABLED is true; fail-open on setup errors.
@@ -514,6 +583,7 @@ HasTrace --> |No| GenUUID["Generate UUID"]
 - Validation ensures sane defaults and rejects invalid values at startup.
 - **Updated** Enhanced default system prompt with operational request handling improvements including skills.search-first policy and anti-fabrication prevention.
 - **Updated** CompressContext tool configuration with AGENTSCOPE_COMPRESS_CONTEXT_ENABLED and validation requiring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2.
+- **Updated** Model routing configuration with AGENTSCOPE_MODEL_ROUTER_ENABLED, AGENTSCOPE_MODEL_ROUTER_MODEL, and AGENTSCOPE_MODEL_ROUTER_CANDIDATES.
 
 **Section sources**
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
@@ -527,7 +597,7 @@ The kernel depends on:
 - Tool-gateway for discovering and invoking tools.
 - Stores for agent state, evidence, execution records, confirmations, and approvals.
 - Audit emitter for durable audit trail.
-- Middleware base classes from AgentScope for permission, acting, and model call hooks.
+- Middleware base classes from AgentScope for permission, acting, model call hooks, and **model routing**.
 
 ```mermaid
 graph LR
@@ -540,6 +610,7 @@ Kernel --> Middleware["AgentScope MiddlewareBase"]
 Kernel --> DeliveryBuffers["Delivery Buffers"]
 Kernel --> CompressContext["CompressContext Tool"]
 Kernel --> TokenTracking["TokenUsageMiddleware"]
+Kernel --> ModelRouter["ModelRouterMiddleware"]
 ```
 
 **Diagram sources**
@@ -567,6 +638,7 @@ Kernel --> TokenTracking["TokenUsageMiddleware"]
 - **Updated** Delivery buffer management: Per-stream buffers minimize memory footprint and provide efficient deferred delivery mechanisms without blocking main execution paths.
 - **Updated** CompressContext tool: Optional context compression reduces memory usage for long conversations; disabled by default to maintain backward compatibility; when enabled, operates efficiently without external network calls.
 - **Updated** TokenUsageMiddleware: Pure observation middleware with minimal overhead; streaming-aware design ensures accurate token counting without impacting stream performance; bounded label cardinality prevents metric explosion.
+- **Updated** Model routing: Opt-in feature with minimal overhead when disabled; classifier calls are separate from agent model calls; cache key splitting prevents unnecessary agent duplication; fail-soft operation ensures routing errors don't impact turn completion.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -580,6 +652,7 @@ Common issues and diagnostics:
 - **Updated** Secret delivery issues: Monitor delivery buffer states and verify portal_copy handles are properly formatted; check that held deliveries are released only on successful gated commits.
 - **Updated** CompressContext configuration issues: Verify AGENTSCOPE_COMPRESS_CONTEXT_ENABLED is set correctly and AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2; check for startup validation errors indicating invalid configuration.
 - **Updated** Token usage tracking issues: Verify agent_llm_tokens_total metrics are appearing on /metrics endpoint; check that provider/model labels are bounded and no high-cardinality identifiers are leaking.
+- **Updated** Model routing issues: Check AGENTSCOPE_MODEL_ROUTER_ENABLED, AGENTSCOPE_MODEL_ROUTER_MODEL, and AGENTSCOPE_MODEL_ROUTER_CANDIDATES configuration; verify routing precedence (request > pinned > routed > default); monitor effective model attribution in logs.
 - Telemetry misconfiguration: OTel setup failures are logged but do not block requests; verify OTEL_ENABLED and endpoint configuration.
 
 **Section sources**
@@ -592,9 +665,9 @@ Common issues and diagnostics:
 - [metrics.py:156-185](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L185)
 
 ## Conclusion
-The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, LLM token usage tracking, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads), resilience (best-effort persistence, fail-open telemetry), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
+The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, LLM token usage tracking, **per-turn model routing**, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads), resilience (best-effort persistence, fail-open telemetry), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
 
-**Updated** The enhanced runtime kernel now includes sophisticated per-stream delivery buffers that enable secure gated secret delivery workflows with reveal-on-commit semantics, integrates the CompressContext tool as a kernel-local operation for optional context compression, and incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking. The TokenUsageMiddleware provides pure observation of provider-reported token usage via the `on_model_call` hook, recording `agent_llm_tokens_total{provider,model,direction}` metrics with bounded label cardinality and streaming-aware usage extraction from terminal chunks. The CompressContext tool provides agent-driven context summarization while maintaining strict safety guarantees: it never parks on the ASK gate, performs no external access, and requires explicit opt-in via AGENTSCOPE_COMPRESS_CONTEXT_ENABLED with validation ensuring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2. The enhanced default system prompt significantly improves operational request handling by ensuring models consult skills.search FIRST for any request to act on named systems, accounts, or targets. This prevents anti-fabrication refusals and promotes better operational workflows by prioritizing skill-based guidance over model-generated procedures. The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
+**Updated** The enhanced runtime kernel now includes sophisticated per-stream delivery buffers that enable secure gated secret delivery workflows with reveal-on-commit semantics, integrates the CompressContext tool as a kernel-local operation for optional context compression, incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking, and adds comprehensive per-turn model routing capabilities through ModelRouterMiddleware integration. The model routing system provides intelligent model selection based on content classification while maintaining strict precedence rules (request > pinned > routed > default), fail-soft operation that never hard-fails turns on routing errors, and precise response attribution tracking. The TokenUsageMiddleware provides pure observation of provider-reported token usage via the `on_model_call` hook, recording `agent_llm_tokens_total{provider,model,direction}` metrics with bounded label cardinality and streaming-aware usage extraction from terminal chunks. The CompressContext tool provides agent-driven context summarization while maintaining strict safety guarantees: it never parks on the ASK gate, performs no external access, and requires explicit opt-in via AGENTSCOPE_COMPRESS_CONTEXT_ENABLED with validation ensuring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2. The enhanced default system prompt significantly improves operational request handling by ensuring models consult skills.search FIRST for any request to act on named systems, accounts, or targets. This prevents anti-fabrication refusals and promotes better operational workflows by prioritizing skill-based guidance over model-generated procedures. The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
 
 ## Appendices
 
@@ -610,6 +683,7 @@ Guidance grounded in existing patterns:
 - **Updated** For secret delivery workflows, leverage the per-stream delivery buffers (STREAM_PENDING_DELIVERIES and PENDING_RELEASE_DELIVERIES) for deferred reveal semantics.
 - **Updated** For kernel-local tools like CompressContext, register them in KERNEL_LOCAL_TOOL_NAMES to ensure they're always allowed and don't park on the ASK gate.
 - **Updated** For model interaction observation, follow TokenUsageMiddleware pattern using on_model_call hook with streaming-aware response handling.
+- **Updated** For model routing, consider ModelRouterMiddleware integration for intelligent model selection based on content classification.
 
 **Section sources**
 - [kernel_middleware.py:151-193](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L151-L193)
@@ -625,6 +699,7 @@ Guidance grounded in existing patterns:
 - **Updated** Leverage per-stream delivery buffers for implementing custom secret delivery workflows with gated reveal semantics.
 - **Updated** Consider kernel-local tool patterns for internal operations that should never park on the ASK gate.
 - **Updated** Utilize on_model_call hook for observing model interactions similar to TokenUsageMiddleware implementation.
+- **Updated** Integrate ModelRouterMiddleware for intelligent model selection based on content classification while respecting precedence rules.
 
 **Section sources**
 - [app.py:55-76](file://products/agent-platform/src/agent_service/app.py#L55-L76)
@@ -639,6 +714,7 @@ Guidance grounded in existing patterns:
 - **Updated** For secret delivery issues: Monitor delivery buffer states, verify portal_copy handle formatting, and ensure held deliveries are properly released on successful gated commits.
 - **Updated** For CompressContext issues: Check AGENTSCOPE_COMPRESS_CONTEXT_ENABLED and AGENTSCOPE_CONTEXT_TRIGGER_RATIO configuration, verify startup validation passes, and ensure the tool is registered as kernel-local.
 - **Updated** For token usage tracking issues: Verify agent_llm_tokens_total metrics appear on /metrics endpoint, check provider/model label cardinality, and ensure streaming responses are properly handled.
+- **Updated** For model routing issues: Check AGENTSCOPE_MODEL_ROUTER_ENABLED, AGENTSCOPE_MODEL_ROUTER_MODEL, and AGENTSCOPE_MODEL_ROUTER_CANDIDATES configuration; verify routing precedence is working correctly; monitor effective model attribution in logs and responses.
 
 **Section sources**
 - [runtime_kernel.py:236-289](file://products/agent-platform/src/agent_service/runtime_kernel.py#L236-L289)
@@ -812,3 +888,42 @@ agent_llm_tokens_total{provider="dashscope",model="qwen-plus",direction="cache_i
 - [kernel_middleware.py:636-741](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L636-L741)
 - [metrics.py:284-312](file://products/agent-platform/src/agent_service/core/metrics.py#L284-L312)
 - [test_kernel_middleware.py:1396-1530](file://products/agent-platform/tests/test_kernel_middleware.py#L1396-L1530)
+
+### Model Routing Configuration Reference
+**New Section** Configuration and behavior reference for the per-turn model routing system:
+
+**Environment Variables:**
+- `AGENTSCOPE_MODEL_ROUTER_ENABLED`: Enable/disable model routing (default: false)
+- `AGENTSCOPE_MODEL_ROUTER_MODEL`: Classifier model catalog id (required when candidates are configured)
+- `AGENTSCOPE_MODEL_ROUTER_CANDIDATES`: JSON map of candidate names to {model_id, description} objects
+
+**Routing Precedence:**
+- **Explicit Request**: Client-specified model takes highest priority
+- **Live Pin**: Session-pinned model suppresses routing
+- **Automatic Routing**: Content-based model selection (only when above two are absent)
+- **Default**: Deploy-time default model
+
+**Behavioral Characteristics:**
+- **Opt-in gating**: Router middleware only registered when enabled, candidates configured, and routing_allowed=True
+- **Fail-soft operation**: Classifier errors and unknown candidates keep original model without failing the turn
+- **Resume safety**: Stored routing choices persist across park/resume cycles
+- **Cache isolation**: Separate agent instances for routed vs non-routed turns
+- **Attribution tracking**: Effective model identification and model_selected_by field in responses
+
+**Configuration Example:**
+```bash
+# Enable model routing with fast/deep candidates
+export AGENTSCOPE_MODEL_ROUTER_ENABLED=true
+export AGENTSCOPE_MODEL_ROUTER_MODEL=openai
+export AGENTSCOPE_MODEL_ROUTER_CANDIDATES='{"fast":{"model_id":"deepseek","description":"quick, simple tasks"},"deep":{"model_id":"openai","description":"complex, multi-step reasoning"}}'
+
+# Disable model routing (default behavior)
+export AGENTSCOPE_MODEL_ROUTER_ENABLED=false
+```
+
+**Section sources**
+- [runtime_settings.py:265-278](file://products/agent-platform/src/agent_service/runtime_settings.py#L265-L278)
+- [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
+- [routes.py:378-384](file://products/agent-platform/src/agent_service/api/v2/routes.py#L378-L384)
+- [test_model_router.py:1-200](file://products/agent-platform/tests/test_model_router.py#L1-L200)
+- [test_model_router.py:349-412](file://products/agent-platform/tests/test_model_router.py#L349-L412)

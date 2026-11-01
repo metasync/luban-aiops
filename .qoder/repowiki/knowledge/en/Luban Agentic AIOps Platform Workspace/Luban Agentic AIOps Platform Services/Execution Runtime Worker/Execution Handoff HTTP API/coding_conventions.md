@@ -1,5 +1,0 @@
-- Route handlers return responses through the local `response()` helper, which injects `protocol_version: 3`, `x-request-id`, and runs the body through `validate("execution-handoff-response", ...)` before serialization.
-- Failure paths funnel through `refused(request_id, reason_code)`, which maps known reasons to specific HTTP status codes (401 unauthorized, 410 request_expired, 409 conflict, 400 bad_request).
-- Blocking operations (ledger lookups, claim/open_send/finish, audit emission) are dispatched off the event loop via `asyncio.to_thread` or `owned_thread`, keeping the FastAPI coroutine non-blocking.
-- Audit events are emitted as a side effect separate from execution authority: failures in `emit_audit_event` are caught and recorded via `record_audit_emit("error")` without altering the response.
-- Database write uncertainty is handled by retrying within `database_budget(5)` and reconciling ambiguous outcomes by re-reading the receipt digest rather than re-dispatching.

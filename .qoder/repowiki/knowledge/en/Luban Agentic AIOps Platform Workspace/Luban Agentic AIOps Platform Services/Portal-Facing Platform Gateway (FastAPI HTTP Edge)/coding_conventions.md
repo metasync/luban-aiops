@@ -1,6 +1,0 @@
-- Downstream proxy functions follow a uniform try/except pattern: upstream `httpx.HTTPStatusError` with status <500 is re-raised as FastAPI `HTTPException` preserving the original code, while transport failures and upstream 5xx are collapsed into a 502 with a human-readable detail string.
-- Every outbound call carries an `x-request-id` header produced by `_service_headers(request_id)` so tracing spans across the gateway and its downstream services stay correlated.
-- Policy decisions are recorded both in structured logs and via `emit_audit_event` through `audit_emitter.build_audit_event`, with the decision reason and matched rule IDs included in the event payload.
-- Configuration is centralized in the frozen `PlatformGatewaySettings` dataclass with a `from_env()` classmethod mapping each `os.getenv(...)` call to a field, and a module-level `@lru_cache(maxsize=1) get_settings()` accessor used throughout services.
-- Secret-bearing responses on the authorization flow carry the `NO_STORE` header set (`Cache-Control: no-store`, `Pragma: no-cache`, `Referrer-Policy: no-referrer`) and are excluded from telemetry URL logging via `authorization_log_path`.
-- Input validation on sensitive endpoints uses strict Pydantic models with `ConfigDict(extra='forbid', hide_input_in_errors=True)` plus manual regex checks on raw cookies/query strings before deserialization.

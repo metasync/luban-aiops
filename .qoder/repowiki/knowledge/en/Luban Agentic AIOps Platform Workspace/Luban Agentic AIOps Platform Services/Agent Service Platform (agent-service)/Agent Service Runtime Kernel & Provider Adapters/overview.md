@@ -1,1 +1,0 @@
-Runtime kernel that wires AgentScope providers, configuration, observability, and the two entrypoints (native HTTP service and AgentScope runtime app) for the agent platform.

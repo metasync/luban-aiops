@@ -1,1 +1,0 @@
-Provider-agnostic adapters that register external tool surfaces — a generic MCP adapter over the Ansible AAP server and a native ServiceNow Table-API connector — as typed gateway tools.

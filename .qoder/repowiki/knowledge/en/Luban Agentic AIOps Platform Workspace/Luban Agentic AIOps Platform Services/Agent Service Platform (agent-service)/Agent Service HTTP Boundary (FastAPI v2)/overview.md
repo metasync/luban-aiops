@@ -1,1 +1,0 @@
-FastAPI router layer exposing the transitional agent-service HTTP contract, binding Pydantic schemas to runtime services and forwarding tool calls through the gateway.

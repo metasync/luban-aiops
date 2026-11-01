@@ -1,1 +1,0 @@
-React 19 + TypeScript + Vite 8 build toolchain; Ant Design 6 with Ant Design X for UI primitives; Vitest 4 + jsdom for unit tests; Docker image uses `node:22-alpine` for the build stage and `nginxinc/nginx-unprivileged:1.27-alpine` at runtime; Web Speech API for voice input.

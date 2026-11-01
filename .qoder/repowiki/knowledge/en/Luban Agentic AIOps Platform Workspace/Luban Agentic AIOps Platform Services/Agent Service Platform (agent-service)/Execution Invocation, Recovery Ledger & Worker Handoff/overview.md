@@ -1,1 +1,0 @@
-Agent-side durable execution pipeline that registers approved mutations, dispatches them to the execution-runtime worker over a bounded HTTP handoff, and persists an append-only observation ledger for recovery.

@@ -1,1 +1,0 @@
-Backend selection is driven by environment variables `SESSION_STORE_BACKEND` (memory|redis|postgres), `SESSION_TTL_SECONDS` (default 3600), `SESSION_MAX_ENTRIES` (default 1000); Postgres requires the `sessions` table bootstrapped via `PostgresSessionStore.initialize()` which runs the embedded `_SESSIONS_DDL`.

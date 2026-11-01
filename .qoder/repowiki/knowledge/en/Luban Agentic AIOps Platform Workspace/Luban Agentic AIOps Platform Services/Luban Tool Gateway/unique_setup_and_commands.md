@@ -1,1 +1,0 @@
-`uv run tool-gateway` (or `make` targets defined in `Makefile`) starts the process; `pytest` under `tests/` runs both unit and `integration/delegated_*` suites against the live FastAPI app.

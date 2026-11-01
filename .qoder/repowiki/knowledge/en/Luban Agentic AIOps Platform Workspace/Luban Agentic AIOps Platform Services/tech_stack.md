@@ -1,1 +1,0 @@
-All Python services are FastAPI apps packaged with uv/pyproject.toml and containerized via per-service Dockerfiles; the operator portal is a Vite/React SPA behind nginx. Cross-service contracts are expressed as JSON Schema files plus Postgres migration SQL kept in lockstep between agent_platform and execution_runtime.

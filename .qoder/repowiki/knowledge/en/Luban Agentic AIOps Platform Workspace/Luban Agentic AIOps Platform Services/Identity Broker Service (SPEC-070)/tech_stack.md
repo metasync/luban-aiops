@@ -1,1 +1,0 @@
-Python ≥3.11, FastAPI + uvicorn ASGI server, PyJWT + cryptography for RS256 JWT issuance/JWKS, httpx for async Keycloak calls and sync audit delivery, OpenTelemetry SDK with OTLP HTTP exporter and FastAPI/httpx instrumentation, Prometheus client for metrics, Pydantic v2 for request/response schemas, built with uv_build.

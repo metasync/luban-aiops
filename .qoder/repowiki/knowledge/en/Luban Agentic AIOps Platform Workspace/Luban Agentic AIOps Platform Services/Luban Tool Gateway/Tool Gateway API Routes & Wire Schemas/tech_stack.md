@@ -1,1 +1,0 @@
-FastAPI `APIRouter` + Pydantic v2 (`SecretStr`, `model_validator`, `ConfigDict(extra='forbid')`) for request/response validation; response bodies use `JSONResponse` with explicit `Cache-Control: no-store` / `Pragma: no-cache` headers on every secret-bearing endpoint.

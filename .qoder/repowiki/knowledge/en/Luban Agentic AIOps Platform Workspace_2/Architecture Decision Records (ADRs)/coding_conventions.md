@@ -1,0 +1,4 @@
+- Each ADR file follows the `template.md` section order: Status (with date, deciders, related specs), Context, Decision, Alternatives Considered, Consequences.
+- File names use a four-digit zero-padded sequence followed by a kebab-case slug (e.g. `0013-durable-single-use-execution-claims.md`).
+- Status values are restricted to `proposed`, `accepted`, or `superseded by ADR-NNNN`; accepted records are treated as immutable except for status updates and supersession links.
+- Superseded ADRs keep their original body unchanged and link forward to the replacing record rather than editing the old text.

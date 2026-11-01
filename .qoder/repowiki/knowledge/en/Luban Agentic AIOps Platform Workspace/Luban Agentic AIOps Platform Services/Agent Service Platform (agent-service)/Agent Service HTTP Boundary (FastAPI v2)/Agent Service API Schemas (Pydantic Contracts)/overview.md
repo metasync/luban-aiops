@@ -1,1 +1,0 @@
-Pydantic models defining the transitional and v2 agent-service HTTP contracts, including chat, sessions, streaming events, HITL confirmations, execution recovery, model catalog, health, and operations documents.

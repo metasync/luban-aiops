@@ -1,1 +1,0 @@
-FastAPI route definitions and Pydantic wire schemas for the tool-gateway's public HTTP surface, covering health checks, tool discovery/invocation, one-time secret delivery, and the provider-independent authorization workflow.

@@ -1,1 +1,0 @@
-Defines the BaseTool/ToolRegistry execution framework and implements connector plugins (HTTP, browser, Kubernetes, Elastic, ServiceNow, secrets, skills) that expose bounded tool surfaces to the API gateway.

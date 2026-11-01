@@ -1,1 +1,0 @@
-JSON Schema Draft 2020-12 for wire-format contracts; PostgreSQL with PL/pgSQL triggers and CHECK constraints for immutability and monotonicity on the execution ledger.

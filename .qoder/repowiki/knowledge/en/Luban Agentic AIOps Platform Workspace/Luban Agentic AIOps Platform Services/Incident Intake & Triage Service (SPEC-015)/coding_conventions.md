@@ -1,5 +1,0 @@
-- Configuration is modeled as frozen `dataclass` instances loaded from `INCIDENT_*` environment variables via a `from_env()` classmethod and cached through `@lru_cache(maxsize=1)` (`IncidentSettings`, `QueryClient`, `WorkloadClient`).
-- Pluggable subsystems (stores, connectors) are exposed through a `Protocol` interface plus a registry/factory function selected at startup from settings, so implementations stay decoupled from callers.
-- External failures in background paths (connector dispatches, store readiness checks) are caught with broad `except Exception` blocks and converted into status records rather than propagated, ensuring one failing component does not abort the caller's workflow.
-- Structured observability uses the shared `log_event(LOGGER, event_name, ...)` helper with a `service=` tag instead of ad-hoc print/log statements.
-- SQL queries in `PostgresIncidentStore` use parameterized `%(...)s` placeholders with explicit dict bindings and never interpolate user input directly.
