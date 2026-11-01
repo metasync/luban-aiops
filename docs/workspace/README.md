@@ -53,6 +53,12 @@ This folder contains the documents that define how the platform should be organi
 - [semantic-skill-retrieval-spike.md](semantic-skill-retrieval-spike.md)
   - evaluates semantic skill retrieval against skills-hub's lexical `rank()` baseline using live corpus and audit evidence; recommends measuring before building, corrects the `pgvector`-is-free premise, and records the sidecar-schema, embedding, gating, and go/no-go criteria; assessment only
 
+- [agentscope-model-router-spike.md](agentscope-model-router-spike.md)
+  - evaluates the agentscope 2.0.9/2.0.10 `ModelRouterMiddleware` (auto per-turn chat-model selection) against SPEC-018's four-point adoption gate; finds it **clears** all four points as a model-selection (not tool-execution) middleware that is resume-safe (`middle_context[reply_id]`, snapshot-covered) and fail-soft, and that routes via a plain `ChatModelBase` / `generate_structured_output` so no OpenAI/TypeSafe classifier dependency is needed; recommends opt-in adoption as candidate SPEC-071 pending a SPEC-024 `request > pinned > routed > default` precedence reconciliation, a `model_selected_by` audit attribution, and a routing-accuracy measurement; assessment only, no implementation authorized
+
+- [multi-agent-orchestration-spike.md](multi-agent-orchestration-spike.md)
+  - frames the operator's named multi-agent / segregation-of-duty / bounded-autonomy need (autonomous detect→troubleshoot→resolve, incident-driven diagnosis) as the SPEC-064 R-1 `GoalPipeline` reopen trigger; scores `TeamPipeline`, `A2AAgent`, and `GoalPipeline` against the four-point gate (all **fail** as shipped) and finds the change is a substrate change requiring a superseding ADR to ADR-0011 ("no control flow"); lays out the five architecture dimensions (identity, policy, audit, orchestration, contract), recommends scoping as diagnose-before-act bounded autonomy (autonomous read-only diagnosis, every mutation behind the existing HITL + signed dispatch), and proposes a superseding-ADR → phased-SPEC path; assessment only, no ADR, SPEC number, or implementation authorized
+
 ## Relationship To The Platform Study
 
 These documents extend the main platform study in `docs/agentic-aiops-platform/` by answering:
