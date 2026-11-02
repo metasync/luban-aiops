@@ -15,14 +15,19 @@ class DashScopeProvider(AgentScopeProvider):
     default_model = "qwen-plus"
     default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     # SPEC-027 R-6: curated series refreshed to the decimal-generation
-    # lineup (verified 2026-08-24) plus the stable tier aliases.
+    # lineup plus the stable tier aliases. Re-verified against the live
+    # compatible-mode API 2026-11-02: dropped ``qwen-turbo`` (no longer
+    # advertised; only the dated ``qwen-turbo-0919`` remains and it 404s on
+    # call) and added the current ``qwen3.8`` flash/27b tier. Every id below
+    # returns 200 on a real chat completion with the dev credential.
     model_series = (
         "qwen-plus",
         "qwen-max",
         "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.8-27b",
         "qwen3.7-plus",
         "qwen3.7-flash",
-        "qwen-turbo",
     )
     # SPEC-027 R-4: DashScope's /models payload is huge — restrict to the
     # qwen chat families and drop vision/omni/translation/OCR modalities

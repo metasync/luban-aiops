@@ -11,6 +11,30 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## Unreleased
+
+### Fixed
+
+- **DashScope model catalog correctness** (`agent-platform`). The curated
+  `model_series` carried `qwen-turbo`, which the live compatible-mode API no
+  longer advertises (only the dated `qwen-turbo-0919` remains, and it 404s on
+  call). It is dropped and the series is refreshed to the verified current
+  `qwen3.8` generation (`qwen3.8-max`, `qwen3.8-flash`, `qwen3.8-27b`) alongside
+  the stable `qwen-plus`/`qwen-max`/`qwen3.7-*` aliases — every id re-confirmed
+  to return 200 on a real chat completion (2026-11-02). The committed
+  `runtime-secrets.example.env` `DASHSCOPE_MODELS` pin, which previously carried
+  ids that 404 at the real API, is expanded to the same verified `qwen3.8`
+  generation. The router's DeepSeek `fast`/`deep` candidates are unaffected.
+
+### Changed
+
+- **dev-k8s enables per-turn model routing** (`gitops`). A new env-only
+  `model-router-dev` runtime posture switches on `AGENTSCOPE_MODEL_ROUTER_*`
+  (classifier `deepseek-v4-flash`; `fast`/`deep` candidates
+  `deepseek-v4-flash`/`deepseek-v4-pro`) on the dev overlay only — the
+  measurement-gated default-on decision evidenced by SPEC-071 R-3. The kernel
+  default stays off for every other environment.
+
 ## 0.52.0 — 2026-11-01
 
 [SPEC-071](docs/specs/SPEC-071-agentscope-model-router/spec.md) opt-in per-turn
