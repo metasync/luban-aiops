@@ -37,6 +37,10 @@
     "default": {
       "type": ["string", "null"],
       "description": "Id of the default model, or null when no model is configured."
+    },
+    "routing_available": {
+      "type": "boolean",
+      "description": "Additive (SPEC-072 R-1): true when per-turn model routing is configured (router enabled with a non-empty candidate map), so the portal may offer an 'Auto (routed)' choice. Optional; defaults to false. 'auto' is a reserved chat-request sentinel and is never a models[] entry."
     }
   }
 }

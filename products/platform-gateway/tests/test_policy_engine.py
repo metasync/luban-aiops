@@ -331,7 +331,8 @@ class ContractAlignmentTests(unittest.TestCase):
         # skill-draft entry points (SPEC-044 R-3 / SPEC-045 R-3).
         # session:skill_graduate guards skill graduation and the target
         # declaration that scopes it — one capability, one action
-        # (SPEC-055 R-4/OQ-3).
+        # (SPEC-055 R-4/OQ-3). runtime:flags guards the authenticated
+        # feature-flag inventory read (SPEC-072 R-5).
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
@@ -345,6 +346,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "policy:read", "tools:list", "tools:mutate", "secrets:deliver", "skills:read",
                 "models:list", "approvals:list",
                 "documents:create", "documents:read",
+                "runtime:flags",
             }),
         )
 

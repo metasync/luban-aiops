@@ -560,6 +560,10 @@ class AgentModelCatalog(BaseModel):
 
     models: list[AgentModelInfo]
     default: str | None = None
+    # SPEC-072 R-1: additive — whether per-turn routing is configured, so the
+    # portal can offer an "Auto (routed)" choice. Defaults False (v0.52.0 shape);
+    # ``auto`` is never a ``models[]`` entry.
+    routing_available: bool = False
 
 
 # --- Runtime metadata ---
@@ -572,6 +576,34 @@ class AgentRuntimeMetadata(BaseModel):
     model_name: str | None = None
     hint: str | None = None
     last_error: str | None = None
+
+
+# --- Feature-flag inventory (SPEC-072 R-4) ---
+
+
+class FeatureFlag(BaseModel):
+    """One curated feature-flag entry (SPEC-072 R-4).
+
+    Discovery-safe by construction: a stable snake_case ``name``, a boolean
+    ``enabled``, and an optional human ``label`` — never a secret value. A flag
+    whose knob is a secret (e.g. ``execution_signing_key``) reports only
+    configured / not configured.
+    """
+
+    name: str
+    enabled: bool
+    label: str | None = None
+
+
+class AgentFeatureFlags(BaseModel):
+    """Envelope for ``GET /api/v2/runtime/flags`` (SPEC-072 R-4).
+
+    The authenticated feature-flag inventory. Distinct from
+    ``AgentRuntimeMetadata`` (the unauthenticated ``/api/v2/runtime`` probe),
+    which stays flag-free and byte-unchanged.
+    """
+
+    feature_flags: list[FeatureFlag]
 
 
 # --- Health ---

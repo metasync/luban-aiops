@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from platform_gateway.app import create_app
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.schemas.api import IdentityContext
+from platform_gateway.services import agent_client
 from platform_gateway.services.policy_engine import reset_policy_state
 
 TOOL_DEFINITIONS = [
@@ -628,6 +629,139 @@ class ModelsProxyTests(WorkspaceProxyBase):
                 },
                 schema,
             )
+
+
+RUNTIME_FLAGS_PAYLOAD = {
+    "feature_flags": [
+        {"name": "model_routing", "enabled": False, "label": "Per-turn model routing"},
+        {"name": "model_discovery", "enabled": True, "label": "Live model discovery"},
+        {"name": "signed_execution", "enabled": True, "label": "Signed execution requests"},
+    ]
+}
+
+RUNTIME_FLAGS_CLIENT = (
+    "platform_gateway.services.gateway_service.agent_client.feature_flags"
+)
+
+
+def _flags_status_error(status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://agent-service/api/v2/runtime/flags")
+    return httpx.HTTPStatusError(
+        "upstream error", request=request, response=httpx.Response(status_code)
+    )
+
+
+class RuntimeFlagsProxyTests(WorkspaceProxyBase):
+    """Feature-flag inventory pass-through (SPEC-072 R-5)."""
+
+    def test_operator_allowed_and_payload_proxied_verbatim(self) -> None:
+        upstream = AsyncMock(return_value=RUNTIME_FLAGS_PAYLOAD)
+        with (
+            self._patch_identity("operator", "runtime"),
+            patch(RUNTIME_FLAGS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/runtime/flags")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), RUNTIME_FLAGS_PAYLOAD)
+        upstream.assert_awaited_once()
+
+    def test_operational_trio_allowed(self) -> None:
+        # F4: platform-admin, approver, and operator all hold runtime:flags.
+        for role in ("platform-admin", "approver", "operator"):
+            upstream = AsyncMock(return_value=RUNTIME_FLAGS_PAYLOAD)
+            with (
+                self._patch_identity(role, "runtime"),
+                patch(RUNTIME_FLAGS_CLIENT, upstream),
+            ):
+                response = self.client.get("/api/v1/runtime/flags")
+            self.assertEqual(response.status_code, 200, role)
+
+    def test_ungranted_roles_denied_before_upstream(self) -> None:
+        # F5: developer/observer/auditor are denied by default; the 403 carries
+        # the action and the upstream is never reached.
+        for role in ("developer", "read-only-observer", "auditor"):
+            upstream = AsyncMock(return_value=RUNTIME_FLAGS_PAYLOAD)
+            with (
+                self._patch_identity(role, "runtime"),
+                patch(RUNTIME_FLAGS_CLIENT, upstream),
+            ):
+                response = self.client.get("/api/v1/runtime/flags")
+            self.assertEqual(response.status_code, 403, role)
+            self.assertEqual(
+                response.json()["detail"]["action"], "runtime:flags", role
+            )
+            upstream.assert_not_awaited()
+
+    def test_upstream_4xx_passed_through(self) -> None:
+        upstream = AsyncMock(side_effect=_flags_status_error(401))
+        with (
+            self._patch_identity("operator", "runtime"),
+            patch(RUNTIME_FLAGS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/runtime/flags")
+        self.assertEqual(response.status_code, 401)
+
+    def test_upstream_5xx_mapped_to_502(self) -> None:
+        upstream = AsyncMock(side_effect=_flags_status_error(500))
+        with (
+            self._patch_identity("operator", "runtime"),
+            patch(RUNTIME_FLAGS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/runtime/flags")
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_returns_502(self) -> None:
+        upstream = AsyncMock(side_effect=httpx.ConnectError("boom"))
+        with (
+            self._patch_identity("operator", "runtime"),
+            patch(RUNTIME_FLAGS_CLIENT, upstream),
+        ):
+            response = self.client.get("/api/v1/runtime/flags")
+        self.assertEqual(response.status_code, 502)
+
+    def test_payload_validates_against_feature_flags_contract(self) -> None:
+        """Lockstep: the proxied shape must satisfy feature-flags.schema.json,
+        and a secret *value* riding a flag entry violates the contract's
+        additionalProperties:false (the inventory is names + booleans only)."""
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[3]
+                / "shared"
+                / "shared-contracts"
+                / "schemas"
+                / "feature-flags.schema.json"
+            ).read_text()
+        )
+        jsonschema.validate(RUNTIME_FLAGS_PAYLOAD, schema)
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(
+                {
+                    "feature_flags": [
+                        {
+                            "name": "signed_execution",
+                            "enabled": True,
+                            "signing_key": "hmac-secret",
+                        }
+                    ]
+                },
+                schema,
+            )
+
+    def test_base_runtime_probe_stays_flag_free(self) -> None:
+        """F6: the unauthenticated base /api/v1/runtime probe relays the agent
+        metadata (version-merged) and never grows a feature_flags field — the
+        inventory lives only behind the authenticated /api/v1/runtime/flags
+        route (OQ-5)."""
+
+        async def fake_runtime_metadata(settings):
+            return {"service": "agent-service", "models": []}
+
+        with patch.object(
+            agent_client, "runtime_metadata", fake_runtime_metadata
+        ):
+            response = self.client.get("/api/v1/runtime")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("feature_flags", response.json())
 
 
 INBOX_PAYLOAD = {

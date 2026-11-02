@@ -83,7 +83,14 @@ pre-selected.
 - Your selection rides with each turn and **pins to the session**:
   switching sessions re-seeds the selector from that session's pinned
   model.
-- If exactly one model is configured, the bar renders as a fixed label.
+- When the deployment enables per-turn routing, the selector leads with an
+  explicit **Auto (routed)** entry — choosing it lets the platform pick the
+  best candidate model for each turn (SPEC-071) instead of pinning one. It
+  pins to the session like any other choice, and a routed turn is attributed
+  to the router in the audit trail. When routing is off the entry is absent
+  and the selector is exactly as before.
+- If exactly one model is configured and routing is off, the bar renders as
+  a fixed label.
 - If the catalog cannot be fetched, the selector hides and chat continues
   on the default model — model choice is never a blocker.
 
@@ -559,7 +566,18 @@ A read-only panel over the portal's own state, visible to everyone
   live version where applicable — read from the gateway's health
   (`/health/ready`) and runtime (`/api/v1/runtime`) probes. Status uses
   one vocabulary — *ready*, *degraded*, *not ready* — with *unavailable*
-  when a health probe fails and *checking…* while probes load.
+  when a health probe fails and *checking…* while probes load. Below the
+  component table sits a **Feature flags** section: the curated runtime
+  inventory the platform reports, each flag by name with an **on**/**off**
+  state and never a secret value — per-turn model routing, live model
+  discovery, context compression, outbound delegated identity, kernel
+  tracing, task tools, reply-token budget, HITL confirmation bridging, and
+  signed execution — so you can confirm at a glance what is active in this
+  deployment (the full list and the knob behind each flag are in the
+  [Configuration Reference](configuration-reference.md#auto-routing-selection-and-feature-flag-transparency-spec-072)).
+  It needs the `runtime:flags` grant (platform-admin, approver, operator);
+  a role without it sees this section show *unavailable* while the
+  component-health rows above persist for everyone.
 
 The view carries no mutable controls; authorization decisions always come
 from the gateway.

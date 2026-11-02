@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metasync.github.io/luban-aiops/schemas/feature-flags.schema.json",
+  "title": "Feature Flags (v2)",
+  "description": "Response body for GET /api/v2/runtime/flags (agent) and GET /api/v1/runtime/flags (gateway pass-through) per SPEC-072 R-4: the authenticated, curated feature-flag inventory. Discovery-safe by construction — each entry is a stable snake_case name plus a boolean (and optional human label), never a secret value; a flag whose knob is a secret reports only configured / not configured. Distinct from the unauthenticated GET /api/v2/runtime probe (agent-runtime-metadata.schema.json), which carries no flags and is unchanged.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature_flags"],
+  "properties": {
+    "feature_flags": {
+      "type": "array",
+      "description": "The curated allowlist of deployment toggles. Always-on invariants with no knob are deliberately absent.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "enabled"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "Stable snake_case flag identifier (e.g. 'model_routing')."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the flag is on for this deployment."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional human-readable label for the portal panel."
+          }
+        }
+      }
+    }
+  }
+}

@@ -43,7 +43,7 @@
     },
     "model": {
       "type": ["string", "null"],
-      "description": "Model id pinned on the session by the most recent turn (SPEC-024 R-3); null when the session never selected a model. Resolution order for new turns is request model > pinned model > deploy-time default."
+      "description": "Model id pinned on the session by the most recent turn (SPEC-024 R-3); null when the session never selected a model. Resolution order for new turns is request model > pinned model > deploy-time default. The reserved sentinel \"auto\" (SPEC-072) may be pinned to keep per-turn model routing armed across request-less turns; it degrades to the deploy-time default when routing is unavailable."
     },
     "transcript_available": {
       "type": "boolean",

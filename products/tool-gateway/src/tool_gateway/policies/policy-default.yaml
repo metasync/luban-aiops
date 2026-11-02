@@ -370,3 +370,20 @@ rules:
       actions_any: ["session:skill_graduate"]
     decision:
       outcome: allow
+
+  # Runtime feature-flag inventory (SPEC-072 R-5): runtime:flags gates an
+  # authenticated read of how the platform is deployed/configured. An
+  # operational concern rather than a chat-surface read like models:list, so it
+  # follows the operational-trio grant posture (documents:read /
+  # session:skill_graduate): platform admins, approvers, and operators;
+  # developer, read-only-observer, and auditor denied by default.
+  - id: allow-operators-runtime-flags
+    domain: action_authz
+    description: Platform admins, approvers, and operators may read the runtime feature-flag inventory.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator"]
+      actions_any: ["runtime:flags"]
+    decision:
+      outcome: allow

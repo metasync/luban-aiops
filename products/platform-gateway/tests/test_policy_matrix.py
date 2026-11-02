@@ -208,6 +208,15 @@ class PolicyMatrixScopingTests(PolicyMatrixBase):
         self.assertFalse(matrix["developer"]["session:skill_graduate"])
         self.assertFalse(matrix["read-only-observer"]["session:skill_graduate"])
         self.assertFalse(matrix["auditor"]["session:skill_graduate"])
+        # SPEC-072 R-5: runtime:flags is an operational read of how the
+        # platform is deployed/configured, so it follows the operational-trio
+        # grant posture; developer, observer, and auditor are denied by default.
+        self.assertIn("runtime:flags", payload["actions"])
+        for role in ("platform-admin", "approver", "operator"):
+            self.assertTrue(matrix[role]["runtime:flags"], role)
+        self.assertFalse(matrix["developer"]["runtime:flags"])
+        self.assertFalse(matrix["read-only-observer"]["runtime:flags"])
+        self.assertFalse(matrix["auditor"]["runtime:flags"])
         # auditor exists in the bundle (audit:read) but holds nothing else.
         self.assertTrue(matrix["auditor"]["audit:read"])
         self.assertFalse(matrix["auditor"]["chat"])

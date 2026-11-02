@@ -90,6 +90,12 @@ ACTION_INCIDENT_SKILL_DRAFT = "incident:skill_draft"
 # would let a bundle grant one half without the other (the documents:create
 # precedent, which gates create/publish/delete of one capability).
 ACTION_SESSION_SKILL_GRADUATE = "session:skill_graduate"
+# Runtime feature-flag inventory (SPEC-072 R-5): an authenticated read of how
+# the platform is deployed/configured. An operational concern rather than a
+# chat-surface read like models:list, so it is gated separately and granted to
+# the operational trio only — developer, read-only-observer, and auditor are
+# denied by default (the documents:read / session:skill_graduate posture).
+ACTION_RUNTIME_FLAGS = "runtime:flags"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -115,6 +121,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_SESSION_SKILL_DRAFT,
         ACTION_INCIDENT_SKILL_DRAFT,
         ACTION_SESSION_SKILL_GRADUATE,
+        ACTION_RUNTIME_FLAGS,
     }
 )
 

@@ -1,3 +1,3 @@
 """incident-service: incident intake, triage, and collaboration dispatch."""
 
-__version__ = "0.52.0"
+__version__ = "0.53.0"

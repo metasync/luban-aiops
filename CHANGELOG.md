@@ -13,6 +13,64 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.53.0 — 2026-11-02
+
+[SPEC-072](docs/specs/SPEC-072-auto-routing-and-platform-feature-flags/spec.md)
+auto-routing model selection and platform feature-flag transparency. Surfaces two
+things the runtime already knew but did not expose: an explicit **“Auto
+(routed)”** choice in the composer model selector (a reserved `auto` sentinel on
+the chat `model` field plus an additive `routing_available` catalog boolean, so
+per-turn routing (SPEC-071) becomes an intentional, pinnable selection rather
+than an invisible side effect of leaving the model unset), and a curated
+**feature-flag inventory** served by a new authenticated
+`GET /api/v1/runtime/flags` route behind a new `runtime:flags` policy action and
+rendered read-only in the portal’s Settings ▸ Platform pane. All contract changes
+are additive; `agent-runtime-metadata.schema.json` and
+`agent-stream-event.schema.json` are byte-unchanged; no new audit event type; and
+the router’s **default-off** kernel posture is unchanged. This release delivers
+R-1…R-7 and marks SPEC-072 `delivered`. See the
+[release note](docs/agentic-aiops-platform/release-notes/2026-11-02-auto-routing-and-platform-feature-flags.md).
+
+### Added
+
+- **Explicit “Auto (routed)” model selection** (`agent-platform`,
+  `operator-portal`). The catalog envelope gains an additive `routing_available`
+  boolean and the chat `model` field a reserved `auto` sentinel; `_resolve_model`
+  arms routing for `selected_by ∈ {auto, default}` (precedence
+  `request > pinned > routed > default`) and pins the sentinel so a request-less
+  turn re-arms routing each turn. An explicit `auto` while routing is unavailable
+  fails closed with `422`; a pinned `auto` whose routing is later removed degrades
+  to the default. `ModelSelect.tsx` leads with an **Auto (routed)** entry iff
+  `routing_available`, and a routed turn is attributed to the router
+  (`model_selected_by == "router"`) on the structured-log path.
+- **Platform feature-flag inventory** (`agent-platform`, `platform-gateway`,
+  `operator-portal`). A new authenticated `GET /api/v2/runtime/flags` returns the
+  new `feature-flags.schema.json` envelope — nine curated deployment toggles
+  (`model_routing`, `model_discovery`, `context_compression`,
+  `outbound_delegated_identity`, `kernel_tracing`, `task_tools`,
+  `reply_token_budget`, `hitl_bridging`, `signed_execution`) as `{name, enabled,
+  label?}`, discovery-safe by construction (a secret-backed knob reports only
+  configured / not configured, never its value). `platform-gateway` proxies it at
+  `GET /api/v1/runtime/flags` (logged `runtime_flags_listed`) and the portal’s
+  `PlatformPane` renders it read-only, degrading to *unavailable* on `403`/error
+  while the unauthenticated component-health rows persist for every role.
+- **New `runtime:flags` policy action** (`platform-gateway`, `shared-contracts`).
+  Granted to `platform-admin`/`approver`/`operator` and denied to
+  `developer`/`read-only-observer`/`auditor`, it joins `policy_engine.py`
+  (`ACTION_RUNTIME_FLAGS` + `PROTECTED_ACTIONS`), all four bundle mirrors (the new
+  `allow-operators-runtime-flags` rule), and `policy-scenarios.yaml` — added to
+  the deny-by-default bundle exactly as `models:list`/`documents:read` were, not a
+  change to the trust model.
+
+### Changed
+
+- **dev-k8s enables per-turn model routing** (`gitops`). A new env-only
+  `model-router-dev` runtime posture switches on `AGENTSCOPE_MODEL_ROUTER_*`
+  (classifier `deepseek-v4-flash`; `fast`/`deep` candidates
+  `deepseek-v4-flash`/`deepseek-v4-pro`) on the dev overlay only — the
+  measurement-gated default-on decision evidenced by SPEC-071 R-3. The kernel
+  default stays off for every other environment.
+
 ### Fixed
 
 - **DashScope model catalog correctness** (`agent-platform`). The curated
@@ -24,16 +82,7 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   to return 200 on a real chat completion (2026-11-02). The committed
   `runtime-secrets.example.env` `DASHSCOPE_MODELS` pin, which previously carried
   ids that 404 at the real API, is expanded to the same verified `qwen3.8`
-  generation. The router's DeepSeek `fast`/`deep` candidates are unaffected.
-
-### Changed
-
-- **dev-k8s enables per-turn model routing** (`gitops`). A new env-only
-  `model-router-dev` runtime posture switches on `AGENTSCOPE_MODEL_ROUTER_*`
-  (classifier `deepseek-v4-flash`; `fast`/`deep` candidates
-  `deepseek-v4-flash`/`deepseek-v4-pro`) on the dev overlay only — the
-  measurement-gated default-on decision evidenced by SPEC-071 R-3. The kernel
-  default stays off for every other environment.
+  generation. The router’s DeepSeek `fast`/`deep` candidates are unaffected.
 
 ## 0.52.0 — 2026-11-01
 

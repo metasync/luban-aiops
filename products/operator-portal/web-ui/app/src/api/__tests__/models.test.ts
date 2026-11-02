@@ -56,6 +56,41 @@ describe("getModelCatalog", () => {
     expect(catalog.default).toBe("deepseek-chat");
   });
 
+  it("passes routing_available through and defaults it to false when absent (SPEC-072 R-1/R-3)", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            models: [
+              {
+                id: "deepseek-chat",
+                label: "DeepSeek Chat",
+                provider: "deepseek",
+                default: true,
+              },
+            ],
+            default: "deepseek-chat",
+            routing_available: true,
+          }),
+      }),
+    );
+    const withRouting = await getModelCatalog();
+    expect(withRouting.routing_available).toBe(true);
+
+    // A v0.52.0 gateway omits the field entirely ⇒ normalized to false.
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ models: [], default: null }),
+      }),
+    );
+    const withoutRouting = await getModelCatalog();
+    expect(withoutRouting.routing_available).toBe(false);
+  });
+
   it("normalizes a sparse payload (missing models/default)", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve({
@@ -65,6 +100,10 @@ describe("getModelCatalog", () => {
       }),
     );
     const catalog = await getModelCatalog();
-    expect(catalog).toEqual({ models: [], default: null });
+    expect(catalog).toEqual({
+      models: [],
+      default: null,
+      routing_available: false,
+    });
   });
 });

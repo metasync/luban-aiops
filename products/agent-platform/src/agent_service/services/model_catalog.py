@@ -46,6 +46,13 @@ from agent_service.runtime_settings import (
 LOGGER = logging.getLogger(__name__)
 
 
+# SPEC-072 R-2: the one accepted chat ``model`` value that is not a catalog id.
+# Reserved so a request or pin of ``"auto"`` always means "route this turn" and
+# never collides with a real model; catalog construction rejects any entry named
+# ``auto`` (the same fail-startup posture as the duplicate-id guard below).
+RESERVED_AUTO_MODEL_ID = "auto"
+
+
 @dataclass(frozen=True)
 class ModelCatalogEntry:
     """One selectable model: a provider + credentials + concrete model."""
@@ -197,6 +204,12 @@ def build_entries(
             )
     seen: dict[str, RuntimeProvider] = {}
     for entry in entries:
+        if entry.id == RESERVED_AUTO_MODEL_ID:
+            raise ValueError(
+                f"Model id {RESERVED_AUTO_MODEL_ID!r} is reserved for "
+                f"auto-routing (SPEC-072 R-2) and cannot be a catalog entry "
+                f"(provider {entry.provider!r})."
+            )
         if entry.id in seen:
             raise ValueError(
                 f"Duplicate model id {entry.id!r} configured by providers "
@@ -282,14 +295,21 @@ class ModelCatalog:
         with self._lock:
             return next((e for e in self._entries if e.default), None)
 
-    def public_models(self) -> dict[str, object]:
-        """Discovery payload per shared-contracts model-catalog schema."""
+    def public_models(self, routing_available: bool = False) -> dict[str, object]:
+        """Discovery payload per shared-contracts model-catalog schema.
+
+        SPEC-072 R-1: ``routing_available`` is an additive envelope boolean the
+        caller threads from the kernel's ``routing_available()`` accessor (the
+        catalog holds no settings reference). It defaults to ``False`` so a
+        v0.52.0 caller and catalog stay valid; ``auto`` is never a model entry.
+        """
         with self._lock:
             entries = self._entries
         default = next((e for e in entries if e.default), None)
         return {
             "models": [entry.to_public_dict() for entry in entries],
             "default": default.id if default is not None else None,
+            "routing_available": routing_available,
         }
 
 

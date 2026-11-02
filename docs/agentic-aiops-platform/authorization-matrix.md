@@ -514,6 +514,27 @@ policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).
 
+Since v0.53.0 (SPEC-072) one new action gates platform-configuration
+transparency: `runtime:flags` authorizes an authenticated read of the runtime's
+curated feature-flag inventory — each entry a stable `name`, an optional human
+`label`, and an on/off `enabled` boolean, **never a secret value** — served by
+`GET /api/v1/runtime/flags` (proxying the agent's `GET /api/v2/runtime/flags`)
+and rendered read-only in the portal's Settings ▸ Platform pane. It follows the
+operational-trio grant pattern (`documents:read`, `session:skill_graduate`):
+`platform-admin`, `approver`, and `operator` hold it; `developer`,
+`read-only-observer`, and `auditor` receive the standard audited policy 403, for
+which the pane degrades just that section to “unavailable” while the
+unauthenticated component-health rows persist for every role. This is
+deliberately narrower than `models:list` — a chat-surface read granted wherever
+`chat` is (including `read-only-observer`) because discovery is safe by
+construction — since the flag inventory describes *how the platform is
+deployed*, an operational concern rather than a chat input. The unauthenticated
+`/api/v1/runtime` probe stays flag-free, and the same spec's composer **“Auto
+(routed)”** selector introduces **no** new action: it rides the existing
+`chat`/`models:list` surface plus an additive `routing_available` catalog
+boolean, so SPEC-072 adds exactly one new policy action (`runtime:flags`) to the
+bundle.
+
 ## Final Recommendation
 
 Use this matrix as the default enterprise baseline for the platform:

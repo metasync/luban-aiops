@@ -28,7 +28,7 @@
     },
     "model": {
       "type": ["string", "null"],
-      "description": "Optional model selection (SPEC-024 R-3): a model id from GET /api/v2/models. Resolution order is request model > session-pinned model > deploy-time default; an unknown id is refused with 4xx (fail-closed)."
+      "description": "Optional model selection (SPEC-024 R-3): a model id from GET /api/v2/models, or the reserved sentinel 'auto' (SPEC-072 R-2) to opt this turn into per-turn model routing. Resolution order is request model > session-pinned model > deploy-time default; an unknown id is refused with 4xx (fail-closed). 'auto' is accepted only when the catalog reports routing_available=true (otherwise 422), arms routing with the default as its base model, and is never itself a catalog model id."
     }
   }
 }

@@ -25,6 +25,16 @@ api:
   - roles: ["developer", "read-only-observer", "auditor", "unknown"]
     action: secrets:deliver
     expect: deny
+  # allow-operators-runtime-flags (SPEC-072 R-5): the runtime feature-flag
+  # inventory is an operational read of how the platform is deployed, granted to
+  # the trio and denied to developer/observer/auditor/unknown (the
+  # secrets:deliver grant shape).
+  - roles: ["platform-admin", "approver", "operator"]
+    action: runtime:flags
+    expect: allow
+  - roles: ["developer", "read-only-observer", "auditor", "unknown"]
+    action: runtime:flags
+    expect: deny
   # allow-operators-chat: operational and developer roles use chat and
   # manage their session workspace.
   - roles: ["platform-admin", "approver", "operator", "developer"]

@@ -1596,6 +1596,29 @@ def test_parked_session_rejects_new_turns_with_409() -> None:
     assert blocked_stream.status_code == 409
 
 
+def test_parked_session_rejects_auto_model_change_with_409() -> None:
+    """SPEC-072 R-2 (A10): ``auto`` is metadata only — a parked session still
+    refuses a model change (including to the routing sentinel) with 409, because
+    ``_reject_if_parked`` runs before ``_resolve_model`` in both chat handlers."""
+    client = _client()
+    session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})
+    session_id = session.json()["session_id"]
+    _park_registered(session_id)
+
+    blocked = client.post(
+        "/api/v2/chat",
+        json={"message": "hello", "session_id": session_id, "model": "auto"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert blocked.status_code == 409
+    blocked_stream = client.get(
+        "/api/v2/chat/stream",
+        params={"message": "hello", "session_id": session_id, "model": "auto"},
+        headers={"X-User-ID": "alice"},
+    )
+    assert blocked_stream.status_code == 409
+
+
 def test_confirm_approve_streams_confirmation_result_first(monkeypatch) -> None:
     client = _client()
     session = client.post("/api/v2/sessions", headers={"X-User-ID": "alice"})

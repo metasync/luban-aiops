@@ -237,7 +237,11 @@ resolved decision below is now binding on R-2.
    exercised by threshold compression.
 4. **Visibility — proposed: surface the routed model + `model_selected_by` in the portal model
    field and the audit attribution.** Rationale: prevents a silent downgrade and keeps SPEC-024's
-   "audited choice" property intact.
+   "audited choice" property intact. *(Follow-up: the audit-attribution half shipped here in
+   SPEC-071 — `model_selected_by ∈ {request, pin, default, router}`; the operator-facing portal
+   half — an explicit "Auto (routed)" selector entry plus a Settings ▸ Platform feature-flag
+   inventory — is realized by
+   [SPEC-072](../SPEC-072-auto-routing-and-platform-feature-flags/spec.md).)*
 5. **Default posture — proposed: opt-in, default-off, until R-3's measurement justifies broader
    enablement.** Rationale: routing quality depends on the candidate criteria; measure before
    trusting it by default.

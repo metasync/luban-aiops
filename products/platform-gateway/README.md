@@ -44,6 +44,13 @@ combined api-gateway by SPEC-010, per ADR-0005).
   Audit enrichment records the requested model on `chat_started` and the
   serving model (teed from the `message_end` frame) on `chat_completed`
   for both chat surfaces.
+- Proxies the read-only platform feature-flag inventory to `agent-platform`
+  (SPEC-072): `GET /api/v1/runtime/flags` is gated by the `runtime:flags`
+  action (granted to `platform-admin`, `approver`, `operator`; denied to
+  `developer`, `read-only-observer`, `auditor`) and relays the agent's curated
+  name + on/off inventory verbatim — never a secret value — with upstream `4xx`
+  pass-through and `502` on transport/`5xx`. The unauthenticated
+  `/api/v1/runtime` probe is unchanged and carries no flags.
 - Forwards policy decision, session, and chat lifecycle audit events to
   `audit-service` fire-and-forget when `PLATFORM_GATEWAY_AUDIT_SERVICE_URL`
   is set (log-only otherwise; SPEC-013).

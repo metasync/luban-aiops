@@ -138,6 +138,26 @@ async def list_models(
     return response.json()
 
 
+async def feature_flags(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Authenticated feature-flag inventory pass-through (SPEC-072 R-5).
+
+    Mirrors ``list_models``: forwards the caller identity to agent-service
+    ``GET /api/v2/runtime/flags``. The upstream payload is discovery-safe by
+    construction (names + booleans, never a secret value).
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{settings.agent_service_url}/api/v2/runtime/flags",
+            headers=_headers(request_id, user_id),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def delete_session(
     settings: PlatformGatewaySettings,
     request_id: str,

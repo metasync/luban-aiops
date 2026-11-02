@@ -516,6 +516,34 @@ async def list_models(
         ) from exc
 
 
+async def feature_flags(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+) -> dict:
+    """Proxy the feature-flag inventory (SPEC-072 R-5).
+
+    Same posture as the model-list proxy: upstream 4xx passes through
+    unchanged; transport failures and upstream 5xx map to 502.
+    """
+    try:
+        return await agent_client.feature_flags(settings, request_id, user_id)
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            raise HTTPException(
+                status_code=status,
+                detail="agent service rejected the feature flags",
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service feature flags failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+
 async def delete_session(
     settings: PlatformGatewaySettings,
     request_id: str,

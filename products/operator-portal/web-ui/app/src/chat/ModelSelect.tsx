@@ -10,6 +10,13 @@
 import { Select, Typography } from "antd";
 import type { ModelCatalogResponse } from "../api/models";
 
+// SPEC-072 R-3: the reserved sentinel the runtime resolves as "route this turn"
+// (never a catalog model id), rendered as a first-class "Auto (routed)" choice
+// in its own group at the top of the dropdown when routing is available.
+const AUTO_MODEL_ID = "auto";
+const AUTO_OPTION_LABEL = "Auto (routed)";
+const AUTO_GROUP_LABEL = "routing";
+
 export interface ModelSelectProps {
   catalog: ModelCatalogResponse | null;
   value: string | null;
@@ -28,8 +35,13 @@ export function ModelSelect({
     // hides and turns resolve server-side to the deploy-time default.
     return null;
   }
-  if (catalog.models.length === 1) {
-    // Nothing to choose: show the single serving model as a fixed label.
+  // SPEC-072 R-3: "Auto (routed)" is a first-class choice whenever the catalog
+  // reports routing is available; when it is not, the component is unchanged.
+  const routingAvailable = catalog.routing_available === true;
+  if (catalog.models.length === 1 && !routingAvailable) {
+    // Nothing to choose: show the single serving model as a fixed label. With
+    // routing available there are two choices (the model + Auto), so fall
+    // through to the dropdown instead of the fixed label.
     return (
       <Typography.Text
         type="secondary"
@@ -42,12 +54,22 @@ export function ModelSelect({
   }
   const fallback =
     catalog.models.find((entry) => entry.default) ?? catalog.models[0];
-  const known = catalog.models.some((entry) => entry.id === value);
-  // Group the series by provider, preserving catalog order.
+  // A pinned "auto" is a known value only while routing is available.
+  const known =
+    catalog.models.some((entry) => entry.id === value) ||
+    (routingAvailable && value === AUTO_MODEL_ID);
+  // Group the series by provider, preserving catalog order, with the Auto group
+  // pinned at the top when routing is available.
   const groups: {
     label: string;
     options: { value: string; label: string }[];
   }[] = [];
+  if (routingAvailable) {
+    groups.push({
+      label: AUTO_GROUP_LABEL,
+      options: [{ value: AUTO_MODEL_ID, label: AUTO_OPTION_LABEL }],
+    });
+  }
   for (const entry of catalog.models) {
     let group = groups.find((g) => g.label === entry.provider);
     if (!group) {

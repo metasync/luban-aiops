@@ -284,7 +284,7 @@ business action).
 
 ### Default Policy Bundle
 
-The platform ships with eighteen allow rules at priority 100 plus one tier-2
+The platform ships with twenty allow rules at priority 100 plus one tier-2
 `require-approval` rule at priority 200 (`require-approval-tools-mutate`). Everything
 else is denied:
 
@@ -294,6 +294,7 @@ else is denied:
 | `allow-observer-read-and-chat` | read-only-observer | `chat`, `session:create`, `session:read`, `session:list`, `session:delete`, `session:update`, `models:list` |
 | `allow-chat-confirm` | platform-admin, approver, operator, developer | `chat:confirm` |
 | `allow-operators-tools` | platform-admin, approver, operator, developer, read-only-observer | `tools:invoke` |
+| `allow-operators-targets-authorize` | platform-admin, approver, operator, developer, read-only-observer | `targets:authorize` |
 | `allow-operators-tools-mutate` | platform-admin, approver, operator | `tools:mutate` |
 | `allow-operators-secrets-deliver` | platform-admin, approver, operator | `secrets:deliver` |
 | `allow-operators-tools-list` | platform-admin, approver, operator, developer, read-only-observer | `tools:list` |
@@ -308,6 +309,7 @@ else is denied:
 | `allow-operators-skill-draft` | platform-admin, approver, operator | `session:skill_draft` |
 | `allow-operators-incident-skill-draft` | platform-admin, approver, operator | `incident:skill_draft` |
 | `allow-operators-skill-graduate` | platform-admin, approver, operator | `session:skill_graduate` |
+| `allow-operators-runtime-flags` | platform-admin, approver, operator | `runtime:flags` |
 | `require-approval-tools-mutate` *(priority 200, tier_2)* | platform-admin, approver, operator, developer | `tools:mutate` → parked for approval by an approver or platform-admin distinct from the requester |
 
 > **Note:** The live matrix these rules produce is served by platform-gateway at

@@ -30,6 +30,7 @@ from agent_service.services.model_catalog import (
     build_model_catalog,
     refresh_catalog,
 )
+from agent_service.services.runtime_dependencies import get_runtime_kernel
 
 CATALOG_ENV_KNOBS = (
     "DASHSCOPE_API_KEY",
@@ -206,12 +207,38 @@ def test_luban_duplicate_model_ids_fail_startup(clean_env):
         build_model_catalog(_settings())
 
 
+def test_reserved_auto_model_id_fails_startup(clean_env):
+    """SPEC-072 R-2 (A8): ``auto`` is reserved for the routing sentinel, so a
+    model literally named ``auto`` fails catalog construction — the same
+    fail-startup posture as the duplicate-id guard above."""
+    clean_env.setenv("DEEPSEEK_MODELS", "auto")
+    with pytest.raises(ValueError, match="reserved for auto-routing"):
+        build_model_catalog(_settings())
+
+
+def test_refresh_rejects_reserved_auto_fail_soft(clean_env, monkeypatch):
+    """A live-discovered ``auto`` id keeps the previous catalog (fail-soft),
+    matching the duplicate-id refresh posture (SPEC-027 R-2)."""
+    settings = _settings()
+    catalog = _catalog(settings)
+    monkeypatch.setattr(
+        "agent_service.services.model_catalog.MODEL_CATALOG", catalog
+    )
+    before = catalog.entries
+    assert refresh_catalog({"deepseek": ("auto",)}, settings) is False
+    assert catalog.entries == before
+
+
 def test_empty_catalog_allowed_when_nothing_configured(clean_env):
     entries = build_model_catalog(_settings(provider="dashscope", api_key=None))
     assert entries == ()
     catalog = ModelCatalog(entries)
     assert catalog.default_entry() is None
-    assert catalog.public_models() == {"models": [], "default": None}
+    assert catalog.public_models() == {
+        "models": [],
+        "default": None,
+        "routing_available": False,
+    }
 
 
 def test_public_view_never_exposes_credentials(clean_env):
@@ -226,6 +253,24 @@ def test_public_view_never_exposes_credentials(clean_env):
     assert "base_url" not in serialized
     for model in payload["models"]:
         assert set(model) == {"id", "label", "provider", "default"}
+
+
+def test_public_models_threads_routing_available_envelope_flag(clean_env):
+    """SPEC-072 R-1 (A1/A2): the envelope boolean is caller-threaded and purely
+    additive — ``models[]`` and ``default`` are byte-identical whether routing is
+    available or not (no synthetic ``auto`` entry), and the flag defaults False
+    so a v0.52.0 caller stays valid.
+    """
+    catalog = _catalog(_settings())
+    base = catalog.public_models()
+    routed = catalog.public_models(routing_available=True)
+    assert base["routing_available"] is False
+    assert routed["routing_available"] is True
+    # Only the envelope flag differs; the selectable list is unchanged.
+    assert base["models"] == routed["models"]
+    assert base["default"] == routed["default"]
+    # ``auto`` is a reserved chat sentinel, never a catalog entry.
+    assert "auto" not in {m["id"] for m in routed["models"]}
 
 
 def test_catalog_lookup_fails_closed_for_unknown_ids(clean_env):
@@ -357,4 +402,41 @@ def test_models_route_empty_catalog_is_not_an_error(monkeypatch):
     client = TestClient(create_app())
     response = client.get("/api/v2/models", headers={"X-User-ID": "alice"})
     assert response.status_code == 200
-    assert response.json() == {"models": [], "default": None}
+    assert response.json() == {
+        "models": [],
+        "default": None,
+        "routing_available": False,
+    }
+
+
+def test_models_route_reports_routing_available_from_kernel(monkeypatch):
+    """SPEC-072 R-1 (A1/X1): the route sources ``routing_available`` from the
+    same kernel accessor the router arms on, so the envelope reports true when
+    per-turn routing is configured — and the payload stays schema-valid with no
+    synthetic ``auto`` entry (A2).
+    """
+    catalog = ModelCatalog(
+        (
+            ModelCatalogEntry(
+                id="deepseek-v4-flash",
+                label="deepseek-v4-flash",
+                provider="deepseek",
+                api_key="sk-secret",
+                model_name="deepseek-v4-flash",
+                base_url="https://api.deepseek.com",
+                default=True,
+            ),
+        )
+    )
+    monkeypatch.setattr("agent_service.api.v2.routes.MODEL_CATALOG", catalog)
+    # A deployment with routing configured ⇒ the kernel accessor returns True.
+    monkeypatch.setattr(get_runtime_kernel(), "routing_available", lambda: True)
+    client = TestClient(create_app())
+    response = client.get("/api/v2/models", headers={"X-User-ID": "alice"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["routing_available"] is True
+    assert "auto" not in {m["id"] for m in payload["models"]}
+    assert "sk-secret" not in json.dumps(payload)
+    schema = json.loads((SCHEMAS_DIR / "model-catalog.schema.json").read_text())
+    jsonschema.validate(payload, schema)

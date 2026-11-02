@@ -29,10 +29,12 @@ Covers the seven R-2 acceptance-test criteria (spec.md:150-154):
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import jsonschema
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from agent_service import runtime_kernel
@@ -163,6 +165,36 @@ class TestOptInGating:
         monkeypatch.setattr(kernel, "_build_model", _fake)
         with pytest.raises(UnknownModelError):
             kernel._build_middlewares(routing_allowed=True)
+
+    def test_routing_available_reflects_deployment_not_the_turn(self):
+        # SPEC-072 R-1 keystone: ``routing_available()`` is the deployment-level
+        # half of ``_router_armed`` — the knob is on *and* a candidate map is
+        # configured — and takes no per-turn ``routing_allowed`` argument, so the
+        # catalog boolean, the ``auto`` branch, and the ``model_routing`` flag all
+        # read one value (failure-matrix F3 parity by construction).
+        assert _router_kernel().routing_available() is True
+        # Disabled knob ⇒ unavailable, whatever the candidate map.
+        assert _configured_kernel().routing_available() is False
+        # Enabled knob but no candidate map ⇒ inert ⇒ unavailable (settings guard).
+        assert (
+            AgentKernel(
+                settings=RuntimeSettings(
+                    api_key="test-key", model_router_enabled=True
+                )
+            ).routing_available()
+            is False
+        )
+
+    def test_router_armed_is_routing_allowed_and_routing_available(self):
+        # The exact refactor invariant (R-1): ``_router_armed`` now delegates its
+        # deployment half to ``routing_available()``, so arming is the conjunction
+        # of the per-turn flag and the deployment capability — no other coupling.
+        armed = _router_kernel()
+        assert armed._router_armed(routing_allowed=True) is True
+        assert armed._router_armed(routing_allowed=False) is False
+        inert = _configured_kernel()  # knob off
+        assert inert._router_armed(routing_allowed=True) is False
+        assert inert._router_armed(routing_allowed=False) is False
 
 
 # ---------------------------------------------------------------------------
@@ -611,3 +643,173 @@ class TestTokenObservationDisposition:
         assert classifier.calls == 1  # the classification call happened
         assert observed == [_ROUTED_MODEL]  # only the routed reply model was observed
         assert classifier not in observed  # the classifier never rode the model call
+
+
+# ---------------------------------------------------------------------------
+# 8. SPEC-072 R-2: the reserved ``auto`` sentinel
+# ---------------------------------------------------------------------------
+
+
+def _auto_catalog(monkeypatch):
+    """Pin the routes catalog to a two-model fake whose default is ``openai``."""
+    monkeypatch.setattr(
+        v2_routes,
+        "MODEL_CATALOG",
+        FakeCatalog(ids=("deepseek", "openai"), default="openai"),
+    )
+
+
+class TestAutoSentinelResolution:
+    """R-2 at the ``_resolve_model`` seam: the ``auto`` branch and precedence."""
+
+    def test_explicit_auto_arms_and_returns_the_default_base(self, monkeypatch):
+        # A3: auto resolves to the catalog default (the model the router swaps
+        # *from*, and the fail-soft fallback) with provenance ``auto``.
+        _auto_catalog(monkeypatch)
+        assert v2_routes._resolve_model("auto", None, routing_available=True) == (
+            "openai",
+            "auto",
+        )
+
+    def test_explicit_auto_without_routing_fails_closed_422(self, monkeypatch):
+        # A5: an explicit auto with routing unavailable is refused, never a
+        # silent default (same posture as an unknown model id).
+        _auto_catalog(monkeypatch)
+        with pytest.raises(HTTPException) as exc:
+            v2_routes._resolve_model("auto", None, routing_available=False)
+        assert exc.value.status_code == 422
+
+    def test_pinned_auto_rearms_while_routing_available(self, monkeypatch):
+        # A4: a session pinned ``auto`` re-arms on the next model-less turn.
+        _auto_catalog(monkeypatch)
+        assert v2_routes._resolve_model(None, "auto", routing_available=True) == (
+            "openai",
+            "auto",
+        )
+
+    def test_pinned_auto_degrades_to_default_when_routing_removed(self, monkeypatch):
+        # A6: routing later disabled ⇒ the pinned sentinel degrades to a plain
+        # default (no raise), mirroring a pin whose model lost credentials.
+        _auto_catalog(monkeypatch)
+        assert v2_routes._resolve_model(None, "auto", routing_available=False) == (
+            "openai",
+            "default",
+        )
+
+    def test_concrete_request_and_pin_still_override_auto(self, monkeypatch):
+        # A7: precedence is unchanged for concrete ids — a concrete request beats
+        # a pinned auto, and neither a concrete request nor pin arms routing.
+        _auto_catalog(monkeypatch)
+        assert v2_routes._resolve_model(
+            "deepseek", "auto", routing_available=True
+        ) == ("deepseek", "request")
+        assert v2_routes._resolve_model(None, "deepseek", routing_available=True) == (
+            "deepseek",
+            "pin",
+        )
+
+    def test_routing_selected_by_set_is_auto_and_default(self):
+        # S0-1: the five ``_resolve_model`` callers share one arming predicate,
+        # so exactly ``auto`` and ``default`` arm routing — no per-site drift.
+        assert v2_routes._ROUTING_SELECTED_BY == frozenset({"auto", "default"})
+
+
+class TestAutoSentinelChat:
+    """R-2 end-to-end through ``POST /api/v2/chat`` and the kernel attribution."""
+
+    def test_chat_auto_arms_pins_sentinel_and_rearms(self, monkeypatch):
+        # A3 + A4: an explicit auto turn arms routing and pins the SENTINEL, so a
+        # later model-less turn re-arms from the pin — auto is a durable session
+        # posture. Had the pin stored the resolved default (``openai``), turn 2
+        # would resolve ``pin`` and suppress routing (seen would be [True, False]).
+        _auto_catalog(monkeypatch)
+        kernel = get_runtime_kernel()
+        monkeypatch.setattr(kernel, "routing_available", lambda: True)
+        seen: list = []
+
+        async def fake_reply_text(**kwargs):
+            seen.append(kwargs.get("routing_allowed"))
+            return BlockingReply("ok")
+
+        monkeypatch.setattr(kernel, "reply_text", fake_reply_text)
+        client = TestClient(create_app())
+        sid = client.post(
+            "/api/v2/sessions", headers={"X-User-ID": "alice"}
+        ).json()["session_id"]
+
+        client.post(
+            "/api/v2/chat",
+            json={"message": "hi", "session_id": sid, "model": "auto"},
+            headers={"X-User-ID": "alice"},
+        )  # 1) explicit auto ⇒ armed, pins "auto"
+        client.post(
+            "/api/v2/chat",
+            json={"message": "hi", "session_id": sid},
+            headers={"X-User-ID": "alice"},
+        )  # 2) model-less ⇒ re-arms from the pinned sentinel
+
+        assert seen == [True, True]
+
+    def test_chat_auto_without_routing_is_refused_422(self, monkeypatch):
+        # A5: end-to-end fail-closed — the 422 reaches the client before any
+        # reply, so the sentinel can never silently ride the default.
+        _auto_catalog(monkeypatch)
+        kernel = get_runtime_kernel()
+        monkeypatch.setattr(kernel, "routing_available", lambda: False)
+        client = TestClient(create_app())
+        sid = client.post(
+            "/api/v2/sessions", headers={"X-User-ID": "alice"}
+        ).json()["session_id"]
+        resp = client.post(
+            "/api/v2/chat",
+            json={"message": "hi", "session_id": sid, "model": "auto"},
+            headers={"X-User-ID": "alice"},
+        )
+        assert resp.status_code == 422
+
+    def test_routed_turn_attributes_serving_model_to_router(self, monkeypatch, caplog):
+        # A9: an auto turn arms routing (``routing_allowed=True``); when the
+        # router fires, the kernel's audit attribution logs ``model_selected_by
+        # == "router"`` (SPEC-071's serving dimension) — the routes-level ``auto``
+        # resolution provenance never leaks into the audit vocabulary.
+        kernel = _router_kernel()
+        monkeypatch.setattr(
+            runtime_kernel,
+            "MODEL_CATALOG",
+            FakeCatalog(ids=("deepseek", "openai"), default="openai"),
+        )
+        agent = _RoutedEndAgent("fast", "reply-x")
+
+        async def fake_build_agent(
+            session_id,
+            bearer_token=None,
+            model_id=None,
+            read_only=False,
+            routing_allowed=False,
+        ):
+            return (agent, FakeUserMsg, model_id or kernel.settings.provider)
+
+        monkeypatch.setattr(kernel, "_build_agent", fake_build_agent)
+        monkeypatch.setattr(
+            kernel, "_snapshot_state", lambda session_id, agent, turn_literals=(): None
+        )
+        monkeypatch.setattr(kernel, "_persist_evidence", lambda *args: None)
+
+        with caplog.at_level(logging.INFO, logger="agent_service.runtime_kernel"):
+            frames = _drain(
+                kernel.stream_events(
+                    message="hi",
+                    request_id="req-1",
+                    session_id="ses-1",
+                    user_name="alice",
+                    model_id="openai",
+                    routing_allowed=True,  # what an auto-resolved turn produces
+                )
+            )
+        assert any(
+            getattr(record, "model_selected_by", None) == "router"
+            for record in caplog.records
+        )
+        end = [f for f in frames if f.get("event") == "message_end"]
+        assert len(end) == 1
+        assert end[0]["model"] == "deepseek"  # routed, not the resolved openai

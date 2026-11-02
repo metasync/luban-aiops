@@ -7,7 +7,7 @@ from agentscope.event import RequireUserConfirmEvent
 from agentscope.message import ToolCallBlock
 
 from agent_service.runtime_kernel import AgentKernel
-from agent_service.runtime_settings import RuntimeSettings
+from agent_service.runtime_settings import ModelRouterCandidateSpec, RuntimeSettings
 from agent_service.services.authoring_trace import AUTHORING_TRACE_STORE
 from agent_service.services.execution_records import EXECUTION_RECORD_STORE
 from agent_service.services.execution_run_guard import (
@@ -130,6 +130,126 @@ def test_runtime_metadata_uses_provider_defaults_when_unset():
 
     assert metadata["model_name"] == "qwen-plus"
     assert metadata["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+# The curated nine (SPEC-072 R-4), in the fixed order ``feature_flags()`` emits.
+_FEATURE_FLAG_NAMES = [
+    "model_routing",
+    "model_discovery",
+    "context_compression",
+    "outbound_delegated_identity",
+    "kernel_tracing",
+    "task_tools",
+    "reply_token_budget",
+    "hitl_bridging",
+    "signed_execution",
+]
+
+
+def _flags_by_name(kernel) -> dict:
+    return {flag["name"]: flag["enabled"] for flag in kernel.feature_flags()}
+
+
+def test_feature_flags_report_each_knob():
+    """SPEC-072 R-4 (F1): the inventory is a curated allowlist of the nine
+    toggles in a stable order, each reporting its knob's correct ``enabled`` —
+    and every entry carries a human label (the portal renders ``label ?? name``).
+    """
+    # An unconfigured-for-extras deployment: discovery defaults on and HITL
+    # bridging defaults on (timeout 600 > 0); every opt-in knob is off.
+    baseline = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+    names = [flag["name"] for flag in baseline.feature_flags()]
+    assert names == _FEATURE_FLAG_NAMES
+    assert all(flag.get("label") for flag in baseline.feature_flags())
+    off = _flags_by_name(baseline)
+    assert off["model_discovery"] is True
+    assert off["hitl_bridging"] is True
+    for name in (
+        "model_routing",
+        "context_compression",
+        "outbound_delegated_identity",
+        "kernel_tracing",
+        "task_tools",
+        "reply_token_budget",
+        "signed_execution",
+    ):
+        assert off[name] is False, name
+
+    # Flip every simple knob; each corresponding flag follows (and discovery
+    # flips off, proving the flag tracks the setting rather than a constant).
+    flipped = AgentKernel(
+        settings=RuntimeSettings(
+            api_key="test-key",
+            model_router_enabled=True,
+            model_router_model="openai",
+            model_router_candidates=(
+                ModelRouterCandidateSpec(
+                    name="fast", model_id="deepseek", description="quick"
+                ),
+            ),
+            model_discovery_enabled=False,
+            compress_context_enabled=True,
+            kernel_tracing=True,
+            task_tools_enabled=True,
+            reply_token_budget=1024.0,
+            hitl_confirm_timeout=0,
+            execution_signing_key="hmac-key",
+        )
+    )
+    on = _flags_by_name(flipped)
+    assert on["model_routing"] is True
+    assert on["model_discovery"] is False
+    assert on["context_compression"] is True
+    assert on["kernel_tracing"] is True
+    assert on["task_tools"] is True
+    assert on["reply_token_budget"] is True
+    assert on["hitl_bridging"] is False  # a 0 timeout disables the bridge
+    assert on["signed_execution"] is True
+
+    # ``outbound_delegated_identity`` needs the full SPEC-070 trust config to
+    # enable (settings validation rejects a bare True), so flip it separately.
+    delegated = AgentKernel(
+        settings=RuntimeSettings(
+            api_key="test-key",
+            target_authorization_enabled=True,
+            delegated_identity_issuer="trusted-issuer",
+            delegated_identity_audience="tool-gateway",
+            delegated_identity_actors=("platform-gateway",),
+            delegated_identity_jwks_url="https://identity.test/jwks",
+        )
+    )
+    assert _flags_by_name(delegated)["outbound_delegated_identity"] is True
+
+
+def test_feature_flag_model_routing_equals_routing_available():
+    """SPEC-072 R-4 (F3): the ``model_routing`` flag reads the *same*
+    ``routing_available()`` accessor the catalog boolean (R-1) and the ``auto``
+    resolution branch (R-2) do, so the three surfaces can never disagree —
+    across router-off, router-on-with-map, and router-on-without-map (inert).
+    """
+    router_off = AgentKernel(settings=RuntimeSettings(api_key="test-key"))
+    router_on = AgentKernel(
+        settings=RuntimeSettings(
+            api_key="test-key",
+            model_router_enabled=True,
+            model_router_model="openai",
+            model_router_candidates=(
+                ModelRouterCandidateSpec(
+                    name="fast", model_id="deepseek", description="quick"
+                ),
+            ),
+        )
+    )
+    router_inert = AgentKernel(
+        settings=RuntimeSettings(api_key="test-key", model_router_enabled=True)
+    )
+    for kernel in (router_off, router_on, router_inert):
+        assert _flags_by_name(kernel)["model_routing"] == kernel.routing_available()
+    # The parity is meaningful, not vacuously False: only the configured router
+    # (knob on *and* a candidate map) reports True.
+    assert _flags_by_name(router_on)["model_routing"] is True
+    assert _flags_by_name(router_off)["model_routing"] is False
+    assert _flags_by_name(router_inert)["model_routing"] is False
 
 
 def test_configuration_hint_mentions_provider_error():

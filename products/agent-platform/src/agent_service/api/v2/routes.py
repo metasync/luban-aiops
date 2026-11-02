@@ -24,6 +24,7 @@ from agent_service.schemas.v2 import (
     AgentChatConfirmRequest,
     AgentChatRequest,
     AgentChatResponse,
+    AgentFeatureFlags,
     AgentHealth,
     AgentModelCatalog,
     AgentRuntimeMetadata,
@@ -76,7 +77,10 @@ from agent_service.services.incident_report import (
     build_digest as build_incident_digest,
     document_summary as incident_document_summary,
 )
-from agent_service.services.model_catalog import MODEL_CATALOG
+from agent_service.services.model_catalog import (
+    MODEL_CATALOG,
+    RESERVED_AUTO_MODEL_ID,
+)
 from agent_service.services.operation_documents import (
     OPERATION_DOCUMENT_STORE,
     make_document,
@@ -236,12 +240,14 @@ async def _reject_if_parked(
         return
     if pending.is_expired(kernel.settings.hitl_confirm_timeout):
         try:
-            expire_model, expire_selected_by = _resolve_model(None, pinned_model)
+            expire_model, expire_selected_by = _resolve_model(
+                None, pinned_model, kernel.routing_available()
+            )
             await kernel.expire_confirmation(
                 session_id,
                 pending.confirm_id,
                 expire_model,
-                expire_selected_by == "default",
+                expire_selected_by in _ROUTING_SELECTED_BY,
             )
         except ConfirmationNotFound:
             # A concurrent confirm or expiry claimed the entry first — the
@@ -260,12 +266,24 @@ async def _reject_if_parked(
     )
 
 
-def _resolve_model(requested: str | None, pinned: str | None) -> tuple[str | None, str]:
+# SPEC-072 R-2: provenance values that arm per-turn routing. ``default`` (no
+# explicit choice) and ``auto`` (the reserved sentinel) both route; a concrete
+# ``request``/``pin`` never does (SPEC-071 precedence request > pin > routed >
+# default). Centralized so the five ``_resolve_model`` callers cannot drift.
+_ROUTING_SELECTED_BY = frozenset({"auto", "default"})
+
+
+def _resolve_model(
+    requested: str | None,
+    pinned: str | None,
+    routing_available: bool = False,
+) -> tuple[str | None, str]:
     """Resolve the model id for a turn (SPEC-024 R-3): request > pinned > default.
 
     Returns ``(model_id, selected_by)`` where ``selected_by ∈ {request, pin,
-    default}`` records the provenance of the choice (SPEC-071 R-2) so per-turn
-    routing can arm only for default-resolved turns. The request/pin
+    auto, default}`` records the provenance of the choice (SPEC-071 R-2,
+    extended by SPEC-072 R-2) so per-turn routing arms only for
+    auto/default-resolved turns (see ``_ROUTING_SELECTED_BY``). The request/pin
     fail-closed and catalog-normalization semantics are unchanged.
 
     An explicitly requested id must exist in the credential-gated
@@ -275,8 +293,28 @@ def _resolve_model(requested: str | None, pinned: str | None) -> tuple[str | Non
     Resolved ids are normalized to the concrete catalog entry (bare
     provider names alias to the provider default, SPEC-026 R-3), so
     pinning and audit attribution carry model names.
+
+    SPEC-072 R-2: the reserved sentinel ``"auto"`` is the one accepted value
+    that is not a catalog id. An explicit ``auto`` request arms routing and
+    uses the catalog default as its base model — but only when
+    ``routing_available``; otherwise it fails closed with 422 (never a silent
+    default). A *pinned* ``auto`` re-arms while routing stays available and
+    degrades to a plain ``default`` (no raise) if routing was later disabled,
+    mirroring the revoked-pin posture.
     """
+    default = MODEL_CATALOG.default_entry()
+    default_id = default.id if default is not None else None
     if requested:
+        if requested == RESERVED_AUTO_MODEL_ID:
+            if not routing_available:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "model 'auto' requires per-turn model routing to be "
+                        "enabled on this deployment"
+                    ),
+                )
+            return default_id, "auto"
         entry = MODEL_CATALOG.get(requested)
         if entry is None:
             raise HTTPException(
@@ -285,11 +323,14 @@ def _resolve_model(requested: str | None, pinned: str | None) -> tuple[str | Non
             )
         return entry.id, "request"
     if pinned:
+        if pinned == RESERVED_AUTO_MODEL_ID:
+            # A prior turn chose Auto: re-arm while routing is available, else
+            # degrade to a plain default (no raise) like a revoked pin.
+            return default_id, ("auto" if routing_available else "default")
         entry = MODEL_CATALOG.get(pinned)
         if entry is not None:
             return entry.id, "pin"
-    default = MODEL_CATALOG.default_entry()
-    return (default.id if default is not None else None), "default"
+    return default_id, "default"
 
 
 # --- Chat ---
@@ -308,15 +349,24 @@ async def chat(
     requester = await _verified_requester(authorization, user_id)
     session = ensure_session(body.session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
-    resolved_model, selected_by = _resolve_model(body.model, session.model)
+    resolved_model, selected_by = _resolve_model(
+        body.model, session.model, get_runtime_kernel().routing_available()
+    )
     # SPEC-071 R-2: pin only an explicit per-turn request, so a session pin
     # always means "a human chose this model" and never an auto-pinned default.
     # This keeps per-turn routing armed for default-resolved turns while an
     # explicit choice still sticks (request > pinned > routed > default). It
     # refines *when* SPEC-024 writes the pin, not its resolution precedence.
+    # SPEC-072 R-2: an explicit "auto" pins the sentinel (not the resolved base)
+    # so a later model-less turn re-arms routing from the pin.
     if body.model:
-        pin_session_model(session.session_id, resolved_model)
-    routing_allowed = selected_by == "default"
+        pin_session_model(
+            session.session_id,
+            RESERVED_AUTO_MODEL_ID
+            if body.model == RESERVED_AUTO_MODEL_ID
+            else resolved_model,
+        )
+    routing_allowed = selected_by in _ROUTING_SELECTED_BY
     # SPEC-024 R-4: the serving model rides the audit trail via the
     # response; the structured log keeps the runtime-side view.
     LOGGER.info(
@@ -375,13 +425,21 @@ async def chat_stream(
     requester = await _verified_requester(authorization, user_id)
     session = ensure_session(session_id, user_id, **({"requester": requester} if requester else {}))
     await _reject_if_parked(session.session_id, session.model)
-    resolved_model, selected_by = _resolve_model(model, session.model)
+    resolved_model, selected_by = _resolve_model(
+        model, session.model, get_runtime_kernel().routing_available()
+    )
     # SPEC-071 R-2: pin only an explicit request (see ``chat``); routing arms
     # for default-resolved turns and the routed model rides the message_end
-    # frame's existing ``model`` field (no schema change).
+    # frame's existing ``model`` field (no schema change). SPEC-072 R-2: an
+    # explicit "auto" pins the sentinel so a later model-less turn re-arms.
     if model:
-        pin_session_model(session.session_id, resolved_model)
-    routing_allowed = selected_by == "default"
+        pin_session_model(
+            session.session_id,
+            RESERVED_AUTO_MODEL_ID
+            if model == RESERVED_AUTO_MODEL_ID
+            else resolved_model,
+        )
+    routing_allowed = selected_by in _ROUTING_SELECTED_BY
     LOGGER.info(
         "chat stream model resolved",
         extra={
@@ -452,12 +510,14 @@ async def chat_confirm(
         try:
             # Same ladder as the resume below: the interrupt must reach the
             # agent that parked the reply, not a rebuild on the default.
-            expire_model, expire_selected_by = _resolve_model(None, session.model)
+            expire_model, expire_selected_by = _resolve_model(
+                None, session.model, kernel.routing_available()
+            )
             await kernel.expire_confirmation(
                 session.session_id,
                 body.confirm_id,
                 expire_model,
-                expire_selected_by == "default",
+                expire_selected_by in _ROUTING_SELECTED_BY,
             )
         except ConfirmationNotFound:
             # A concurrent request already closed the expired entry.
@@ -500,7 +560,9 @@ async def chat_confirm(
         # ``default`` again, so ``routing_allowed`` matches and ``ensure_agent``
         # hits the same cached (router-armed) agent; the router then replays its
         # stored ``middle_context[reply_id]`` choice instead of re-routing.
-        resume_model, resume_selected_by = _resolve_model(None, session.model)
+        resume_model, resume_selected_by = _resolve_model(
+            None, session.model, kernel.routing_available()
+        )
         async for chunk in kernel.resume_confirmation(
             session_id=session.session_id,
             pending=pending,
@@ -518,7 +580,7 @@ async def chat_confirm(
             # so a tier_2 approver can decide the next unbound per-action
             # card instead of tripping the self-approval block.
             owner_user_name=session.user_id,
-            routing_allowed=resume_selected_by == "default",
+            routing_allowed=resume_selected_by in _ROUTING_SELECTED_BY,
         ):
             event = _normalize_stream_event(
                 chunk, session.session_id, request_id
@@ -1933,7 +1995,11 @@ async def list_models(x_user_id: str | None = Header(None)) -> AgentModelCatalog
     configured, mirroring the ``not_configured`` runtime posture.
     """
     _user_id(x_user_id)
-    payload = MODEL_CATALOG.public_models()
+    # SPEC-072 R-1: the envelope signals whether an "Auto (routed)" choice is
+    # meaningful, sourced from the same kernel accessor the router arms on.
+    payload = MODEL_CATALOG.public_models(
+        routing_available=get_runtime_kernel().routing_available()
+    )
     return AgentModelCatalog.model_validate(payload)
 
 
@@ -1951,6 +2017,25 @@ async def runtime_metadata() -> AgentRuntimeMetadata:
         model_name=meta.get("model_name") if isinstance(meta.get("model_name"), str) else None,
         hint=meta.get("hint") if isinstance(meta.get("hint"), str) else None,
         last_error=meta.get("last_error") if isinstance(meta.get("last_error"), str) else None,
+    )
+
+
+@router.get("/runtime/flags", response_model=AgentFeatureFlags)
+async def runtime_feature_flags(
+    x_user_id: str | None = Header(None),
+) -> AgentFeatureFlags:
+    """Authenticated feature-flag inventory (SPEC-072 R-4).
+
+    A *new* endpoint distinct from the unauthenticated ``/api/v2/runtime``
+    probe above, which stays byte-unchanged and flag-free. Requires
+    ``X-User-ID`` (the ``list_models`` posture); the platform-gateway enforces
+    the ``runtime:flags`` policy action ahead of it (R-5). Discovery-safe by
+    construction — each entry is a name + boolean (+ optional label), never a
+    secret value.
+    """
+    _user_id(x_user_id)
+    return AgentFeatureFlags.model_validate(
+        {"feature_flags": get_runtime_kernel().feature_flags()}
     )
 
 

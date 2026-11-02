@@ -1895,9 +1895,15 @@ export default function ChatView({
         // SPEC-024 R-3: the selector follows the session's pinned model;
         // a session without a pin falls back to the catalog default.
         const catalog = catalogRef.current;
+        // SPEC-072 R-3: a session pinned to the "auto" sentinel reconciles to
+        // "Auto (routed)" while routing is available, instead of falling back to
+        // the default (which would silently drop the operator's Auto choice).
+        const pinnedAuto =
+          detail.model === "auto" && catalog?.routing_available === true;
         if (
           detail.model &&
-          catalog?.models.some((entry) => entry.id === detail.model)
+          (catalog?.models.some((entry) => entry.id === detail.model) ||
+            pinnedAuto)
         ) {
           setSelectedModel(detail.model);
         } else {

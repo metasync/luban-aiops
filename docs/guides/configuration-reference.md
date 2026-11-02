@@ -39,6 +39,62 @@ activate them. A feature is **active** when all required variables are set to no
 | **Portal voice input** | *(none — browser Web Speech API; `input_modality` passes through gateway/agent and is audited only)* | operator-portal, platform-gateway, agent-service | enabled (browser-capability gated) |
 | **Agent-driven context compression (`CompressContext`, SPEC-064)** | `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED=true` + `AGENTSCOPE_CONTEXT_TRIGGER_RATIO>0.2`; *(no execution/audit surface — kernel-local, state-only, no `offloader`)* | agent-service | disabled (`false`) |
 | **Per-turn model routing (`ModelRouterMiddleware`, SPEC-071)** | `AGENTSCOPE_MODEL_ROUTER_ENABLED=true` + a non-empty `AGENTSCOPE_MODEL_ROUTER_CANDIDATES` map + `AGENTSCOPE_MODEL_ROUTER_MODEL`; *(model-selection only — no execution/identity/audit surface, no new event type; inert without a candidate map)* | agent-service | disabled (`false`) |
+| **Auto-routing selection + feature-flag transparency (SPEC-072)** | *(no activation switch — surfaces state the runtime already holds)*; the composer **“Auto (routed)”** entry appears only when the **Per-turn model routing** row above is active (the catalog then reports `routing_available: true`), and the Settings ▸ Platform **feature-flag inventory** is served by the authenticated `GET /api/v1/runtime/flags` route behind the `runtime:flags` grant | agent-service, platform-gateway, operator-portal, policy bundle | selector hidden unless routing is active; flags panel read-only, `403` → “unavailable” for an ungranted role |
+
+## Auto-Routing Selection and Feature-Flag Transparency (SPEC-072)
+
+SPEC-072 adds **no new environment variable** — both features surface state the runtime
+already holds, configured entirely through the knobs documented elsewhere in this
+reference. Nothing here flips a default: the kernel `AGENTSCOPE_MODEL_ROUTER_ENABLED`
+stays `false`.
+
+### The `auto` sentinel and `routing_available`
+
+The composer model selector offers an explicit **“Auto (routed)”** entry only when the
+deployment has activated **Per-turn model routing** above
+(`AGENTSCOPE_MODEL_ROUTER_ENABLED=true` + a non-empty `AGENTSCOPE_MODEL_ROUTER_CANDIDATES`
+map). The catalog endpoint (`GET /api/v1/models`) then carries an additive
+`routing_available: true` envelope boolean — the single source of truth is the kernel's
+`routing_available()`, the same expression that drives the `auto` branch and the
+`model_routing` flag below, so the three surfaces can never disagree. An older gateway
+omits the boolean and the portal treats it as `false`, so the entry stays hidden.
+
+Choosing “Auto (routed)” pins the reserved `auto` sentinel on the session `model` field —
+**never a catalog entry** (no synthetic `id == "auto"` is emitted, preserving the
+id-equals-model-name invariant and the closed provider enum). Each subsequent
+request-less turn re-arms routing from the pin (attributed `model_selected_by ==
+"router"`). An explicit `auto` when routing is unavailable fails closed with `422`; a
+session already pinned `auto` degrades to the deploy-time default if routing is later
+removed (no raise). A concrete request/pinned model still overrides `auto`.
+
+### The feature-flag inventory (`runtime:flags`)
+
+The Settings ▸ Platform pane reads a curated, **read-only** inventory from the
+authenticated `GET /api/v1/runtime/flags` gateway route (proxying the agent's
+`GET /api/v2/runtime/flags`). Each entry reports a stable snake_case `name`, an optional
+human `label`, and an `enabled` boolean — **never a secret value** (a flag whose knob is
+a secret reports only configured / not configured). The route is gated by the new
+`runtime:flags` policy action, granted to `platform-admin`, `approver`, and `operator`
+and denied (`403`) to `developer`, `read-only-observer`, and `auditor`; for an ungranted
+role the pane degrades just this section to “unavailable” while the unauthenticated
+component-health rows persist. The unauthenticated `/api/v1/runtime` probe and
+`AgentRuntimeMetadata` are unchanged and carry no flags.
+
+| Flag `name` | Reports on/off from | Knob |
+|---|---|---|
+| `model_routing` | Per-turn model routing is armed — equals the catalog's `routing_available` | `AGENTSCOPE_MODEL_ROUTER_ENABLED` + a non-empty `AGENTSCOPE_MODEL_ROUTER_CANDIDATES` (SPEC-071) |
+| `model_discovery` | Live model discovery feeds the catalog | `AGENT_MODEL_DISCOVERY_ENABLED` (SPEC-027) |
+| `context_compression` | Agent-driven context compression (`CompressContext`) | `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` (SPEC-064) |
+| `outbound_delegated_identity` | Outbound user-delegated execution identity | `AGENT_TARGET_AUTHORIZATION_ENABLED` (SPEC-070) |
+| `kernel_tracing` | agentscope `TracingMiddleware` kernel spans | `AGENTSCOPE_KERNEL_TRACING` |
+| `task_tools` | Bounded agentscope task tools | `AGENTSCOPE_TASK_TOOLS_ENABLED` |
+| `reply_token_budget` | A per-reply token budget is set | `AGENTSCOPE_REPLY_TOKEN_BUDGET` (set) |
+| `hitl_bridging` | HITL confirmation bridging is live | `AGENT_HITL_CONFIRM_TIMEOUT > 0` |
+| `signed_execution` | Signed execution requests/receipts | `AGENT_EXECUTION_SIGNING_KEY` (provisioned; SPEC-037) |
+
+Always-on invariants with no knob (permission enforcement, evidence capture, token
+observation) are deliberately **absent** — the inventory reports toggles an operator can
+turn on or off, not invariants.
 
 ## Secure Password Generation and Delivery (SPEC-062)
 

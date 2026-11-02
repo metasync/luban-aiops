@@ -55,6 +55,93 @@ def test_runtime_metadata_conforms_to_contract() -> None:
     jsonschema.validate(response.json(), load_schema("agent-runtime-metadata.schema.json"))
 
 
+# --- SPEC-072 R-4: the authenticated feature-flag inventory ---
+
+
+def test_runtime_flags_conforms_to_contract() -> None:
+    """X1: the new authenticated endpoint validates against
+    ``feature-flags.schema.json`` and reports the curated nine in order; it
+    requires ``X-User-ID`` (the ``list_models`` posture), rejecting a missing
+    header with 401."""
+    client = _client()
+    assert client.get("/api/v2/runtime/flags").status_code == 401
+    response = client.get("/api/v2/runtime/flags", headers={"X-User-ID": "alice"})
+    assert response.status_code == 200
+    payload = response.json()
+    jsonschema.validate(payload, load_schema("feature-flags.schema.json"))
+    assert [flag["name"] for flag in payload["feature_flags"]] == [
+        "model_routing",
+        "model_discovery",
+        "context_compression",
+        "outbound_delegated_identity",
+        "kernel_tracing",
+        "task_tools",
+        "reply_token_budget",
+        "hitl_bridging",
+        "signed_execution",
+    ]
+
+
+def test_runtime_probe_stays_flag_free() -> None:
+    """F6: the unauthenticated ``/api/v2/runtime`` probe is unchanged — it
+    carries no ``feature_flags`` field (flags live only behind the authenticated
+    ``runtime:flags`` action, OQ-5) and still validates against the untouched
+    ``agent-runtime-metadata.schema.json``."""
+    response = _client().get("/api/v2/runtime")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "feature_flags" not in payload
+    assert set(payload) <= {
+        "runtime_mode",
+        "runtime_state",
+        "provider",
+        "model_name",
+        "hint",
+        "last_error",
+    }
+    jsonschema.validate(payload, load_schema("agent-runtime-metadata.schema.json"))
+
+
+def test_runtime_flags_payload_carries_no_secret_value(monkeypatch) -> None:
+    """F2: the inventory is discovery-safe — a flag whose knob is a secret
+    reports only configured / not configured, so none of the runtime's secret
+    *values* (keys, JWKS URL, client secret) nor the budget/timeout *numbers*
+    reach the payload. Distinctive sentinels make the absence assertions
+    non-vacuous (the SPEC-045 lesson: prove the secret was present first)."""
+    from agent_service.runtime_settings import RuntimeSettings
+    from agent_service.services.runtime_dependencies import get_runtime_kernel
+
+    monkeypatch.setattr(
+        get_runtime_kernel(),
+        "settings",
+        RuntimeSettings(
+            api_key="sk-SENTINEL-api-key",
+            execution_signing_key="hmac-SENTINEL-signing-key",
+            delegated_identity_jwks_url="https://jwks-SENTINEL.example/keys",
+            audit_client_secret="audit-SENTINEL-secret",
+            reply_token_budget=4321.0,
+            hitl_confirm_timeout=4321,
+        ),
+    )
+    response = _client().get("/api/v2/runtime/flags", headers={"X-User-ID": "alice"})
+    assert response.status_code == 200
+    body = response.text
+    for sentinel in (
+        "sk-SENTINEL-api-key",
+        "hmac-SENTINEL-signing-key",
+        "jwks-SENTINEL",
+        "audit-SENTINEL-secret",
+        "4321",  # neither the budget nor the timeout value leaks
+    ):
+        assert sentinel not in body
+    # The flags those secrets gate still report as *configured* (a boolean, not
+    # the value), which is what makes the absence assertions above meaningful.
+    flags = {flag["name"]: flag["enabled"] for flag in response.json()["feature_flags"]}
+    assert flags["signed_execution"] is True
+    assert flags["reply_token_budget"] is True
+    assert flags["hitl_bridging"] is True
+
+
 def test_health_conforms_to_contract() -> None:
     response = _client().get("/api/v2/health")
     assert response.status_code == 200

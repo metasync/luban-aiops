@@ -3,8 +3,8 @@
 // failure, collapses to a fixed label for a single configured model,
 // groups multi-provider series, and propagates the operator's choice
 // through onChange.
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeAll, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { ModelCatalogResponse } from "../../api/models";
 import { ModelSelect } from "../ModelSelect";
 
@@ -37,9 +37,17 @@ beforeAll(() => {
   }
 });
 
+// Vitest globals are off, so testing-library's auto-cleanup never registers;
+// unmount explicitly so each render's antd Select dropdown portal (mounted into
+// document.body on demand) does not leak into the next test's queries.
+afterEach(() => {
+  cleanup();
+});
+
 function catalogOf(
   ids: [string, string, string?][],
   defaultId: string | null = null,
+  routingAvailable = false,
 ): ModelCatalogResponse {
   return {
     models: ids.map(([id, label, provider], index) => ({
@@ -49,7 +57,20 @@ function catalogOf(
       default: defaultId ? id === defaultId : index === 0,
     })),
     default: defaultId ?? ids[0]?.[0] ?? null,
+    routing_available: routingAvailable,
   };
+}
+
+// A two-provider catalog so the multi-entry dropdown branch always mounts.
+const TWO_PROVIDER_CATALOG: [string, string, string?][] = [
+  ["deepseek-chat", "deepseek-chat", "deepseek"],
+  ["qwen-plus", "qwen-plus", "dashscope"],
+];
+
+function openDropdown(container: HTMLElement) {
+  fireEvent.mouseDown(
+    container.querySelector(".ant-select-content") as HTMLElement,
+  );
 }
 
 describe("ModelSelect", () => {
@@ -148,5 +169,77 @@ describe("ModelSelect", () => {
     expect(
       container.querySelector(".ant-select-content")?.textContent,
     ).toContain("qwen-plus");
+  });
+
+  // --- SPEC-072 R-3: the "Auto (routed)" sentinel choice ---
+
+  it("offers 'Auto (routed)' only when routing is available", () => {
+    const { container } = render(
+      <ModelSelect
+        catalog={catalogOf(TWO_PROVIDER_CATALOG, "deepseek-chat", true)}
+        value="deepseek-chat"
+        onChange={() => {}}
+      />,
+    );
+    openDropdown(container);
+    expect(screen.getByText("Auto (routed)")).toBeTruthy();
+  });
+
+  it("omits 'Auto (routed)' when routing is unavailable (byte-identical to v0.52.0)", () => {
+    const { container } = render(
+      <ModelSelect
+        catalog={catalogOf(TWO_PROVIDER_CATALOG, "deepseek-chat", false)}
+        value="deepseek-chat"
+        onChange={() => {}}
+      />,
+    );
+    openDropdown(container);
+    expect(screen.queryByText("Auto (routed)")).toBeNull();
+  });
+
+  it("renders a dropdown (not the fixed label) for a single model when routing is available", () => {
+    render(
+      <ModelSelect
+        catalog={catalogOf(
+          [["deepseek-v4-flash", "deepseek-v4-flash"]],
+          null,
+          true,
+        )}
+        value="deepseek-v4-flash"
+        onChange={() => {}}
+      />,
+    );
+    // One model + Auto = two choices, so the fixed-label shortcut yields to a Select.
+    expect(screen.queryByRole("combobox")).toBeTruthy();
+  });
+
+  it("propagates onChange('auto') when 'Auto (routed)' is chosen", () => {
+    let chosen: string | null = null;
+    const { container } = render(
+      <ModelSelect
+        catalog={catalogOf(TWO_PROVIDER_CATALOG, "deepseek-chat", true)}
+        value="deepseek-chat"
+        onChange={(id) => {
+          chosen = id;
+        }}
+      />,
+    );
+    openDropdown(container);
+    fireEvent.click(screen.getByText("Auto (routed)"));
+    expect(chosen).toBe("auto");
+  });
+
+  it("shows 'Auto (routed)' as selected when the session is pinned to 'auto'", () => {
+    const { container } = render(
+      <ModelSelect
+        catalog={catalogOf(TWO_PROVIDER_CATALOG, "deepseek-chat", true)}
+        value="auto"
+        onChange={() => {}}
+      />,
+    );
+    // The collapsed selector reflects the pinned sentinel, not the default.
+    expect(
+      container.querySelector(".ant-select-content")?.textContent,
+    ).toContain("Auto (routed)");
   });
 });

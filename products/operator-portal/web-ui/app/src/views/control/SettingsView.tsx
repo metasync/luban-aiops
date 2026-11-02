@@ -21,6 +21,7 @@ import {
   lastApiRequestId,
   requestJson,
 } from "../../api/client";
+import { getRuntimeFlags, type FeatureFlag } from "../../api/runtime";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionWorkspace } from "../../sessions/useSessionWorkspace";
 import { PLATFORM_VERSION, REACT_VERSION, ANTD_VERSION } from "../../version";
@@ -153,6 +154,12 @@ interface ComponentRow {
   status: ReactNode;
 }
 
+interface FeatureFlagRow {
+  key: string;
+  flag: string;
+  state: ReactNode;
+}
+
 const TAG_FLAT = { margin: 0 };
 
 // One status vocabulary across every row.
@@ -180,6 +187,17 @@ function checking(): ReactNode {
   return <Typography.Text type="secondary">checking…</Typography.Text>;
 }
 
+// SPEC-072 R-6: a feature flag is on/off, reusing the pane's success color
+// for "on" so the inventory reads with the same visual language as the
+// component-health statuses above. Read-only — no control is offered.
+function flagStateTag(enabled: boolean): ReactNode {
+  return enabled ? (
+    <Tag color="success" style={TAG_FLAT}>on</Tag>
+  ) : (
+    <Tag style={TAG_FLAT}>off</Tag>
+  );
+}
+
 function backendLabel(backend: string | null | undefined): string {
   if (backend === "postgres") return "PostgreSQL";
   if (backend === "redis") return "Redis";
@@ -196,6 +214,12 @@ function PlatformPane() {
   const [readyFailed, setReadyFailed] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeMetadata | null>(null);
   const [runtimeFailed, setRuntimeFailed] = useState(false);
+  // SPEC-072 R-6: the feature-flag inventory is authenticated and role-gated
+  // (runtime:flags), unlike the unauthenticated health probes above, so it
+  // carries its own state and degrades to "unavailable" without disturbing
+  // the component-health rows.
+  const [flags, setFlags] = useState<FeatureFlag[] | null>(null);
+  const [flagsFailed, setFlagsFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,6 +236,13 @@ function PlatformPane() {
       })
       .catch(() => {
         if (!cancelled) setRuntimeFailed(true);
+      });
+    getRuntimeFlags()
+      .then((data) => {
+        if (!cancelled) setFlags(data.feature_flags);
+      })
+      .catch(() => {
+        if (!cancelled) setFlagsFailed(true);
       });
     return () => {
       cancelled = true;
@@ -317,6 +348,16 @@ function PlatformPane() {
     ];
   }, [ready, readyFailed, runtime, runtimeFailed]);
 
+  const flagRows = useMemo<FeatureFlagRow[]>(
+    () =>
+      (flags ?? []).map((flag) => ({
+        key: flag.name,
+        flag: flag.label ?? flag.name,
+        state: flagStateTag(flag.enabled),
+      })),
+    [flags],
+  );
+
   return (
     <div>
       <Descriptions column={1} size="small" bordered>
@@ -352,6 +393,34 @@ function PlatformPane() {
         ]}
         dataSource={rows}
       />
+      <Typography.Text strong style={{ display: "block", marginTop: 16 }}>
+        Feature flags
+      </Typography.Text>
+      <Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>
+        Opt-in platform capabilities reported live by the runtime, read-only
+        — toggling them stays a deploy-time action. This inventory needs the{" "}
+        <Typography.Text code>runtime:flags</Typography.Text> grant; a role
+        without it sees this section degrade while the component-health rows
+        above persist for everyone.
+      </Typography.Paragraph>
+      {flagsFailed ? (
+        unavailable()
+      ) : flags === null ? (
+        checking()
+      ) : flags.length === 0 ? (
+        <Typography.Text type="secondary">no flags reported</Typography.Text>
+      ) : (
+        <Table<FeatureFlagRow>
+          size="small"
+          pagination={false}
+          rowKey="key"
+          columns={[
+            { title: "Feature flag", dataIndex: "flag", key: "flag" },
+            { title: "State", dataIndex: "state", key: "state" },
+          ]}
+          dataSource={flagRows}
+        />
+      )}
     </div>
   );
 }
