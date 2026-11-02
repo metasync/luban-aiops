@@ -1,1 +1,0 @@
-Python + uv + pytest for all service products; Node/Vitest/TSC for the operator-portal SPA; Docker images built from shared `base-images/base-uv`; Kubernetes deployment via Kustomize overlays under `shared/platform-ops/gitops`; OpenObserve dashboards defined as JSON config validated offline.

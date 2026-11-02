@@ -11,18 +11,24 @@
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [model-router.env](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env)
+- [kustomization.yaml](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml)
+- [verify-runtime-profile.sh](file://shared/platform-ops/gitops/verify-runtime-profile.sh)
+- [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
+- [configmap.yaml](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml)
+- [deepseek.py](file://products/agent-platform/src/agent_service/providers/deepseek.py)
+- [2026-11-01-per-turn-model-routing.md](file://docs/agentic-aiops-platform/release-notes/2026-11-01-per-turn-model-routing.md)
 - [README.md](file://docs/specs/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated spec status from 'approved' to 'delivered' (v0.52.0)
-- Added comprehensive implementation details including ModelRouterMiddleware integration
-- Documented complete testing coverage with 27 tests in test_model_router.py
-- Added measurement harness documentation with R-3 accuracy results
-- Updated configuration system details with all environment variables
-- Enhanced troubleshooting guide with operational scenarios
-- Added detailed performance metrics from live measurements
+- Added GitOps runtime profile documentation for the `model-router-dev` posture deployed in the development cluster
+- Documented the classifier model setup using `deepseek-v4-flash` with fast/deep candidate map configuration
+- Updated deployment configuration section with kustomization.yaml integration details
+- Added operational posture documentation showing how the router is enabled via environment variables
+- Enhanced troubleshooting guide with GitOps-specific scenarios and dev-cluster operational guidance
+- Updated configuration reference to include the complete runtime profile structure
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -35,16 +41,17 @@
 8. [Testing Coverage](#testing-coverage)
 9. [Measurement Harness](#measurement-harness)
 10. [Configuration Reference](#configuration-reference)
-11. [Troubleshooting Guide](#troubleshooting-guide)
-12. [Conclusion](#conclusion)
-13. [Appendices](#appendices)
+11. [GitOps Runtime Profile Deployment](#gitops-runtime-profile-deployment)
+12. [Troubleshooting Guide](#troubleshooting-guide)
+13. [Conclusion](#conclusion)
+14. [Appendices](#appendices)
 
 ## Introduction
 SPEC-071 specifies the opt-in adoption of AgentScope 2.0.9/2.0.10 `ModelRouterMiddleware` as a per-turn model router for the Luban agent-platform kernel. **STATUS: DELIVERED (v0.52.0)** - The feature has been fully implemented, tested, and shipped with complete measurement harness and configuration system.
 
 The router classifies the latest user input over named candidates drawn from the credential-gated `MODEL_CATALOG`, swaps the reply's chat model, and remains resume-safe and fail-soft. It extends SPEC-024's audited per-turn model selection by inserting a routed tier between pinned and default, with precedence `request > pinned > routed > default`.
 
-The spec was approved (2026-11-01), delivered in v0.52.0 (2026-11-01), and ships with the router disabled by default. Default-on is gated by R-3 routing-quality measurement, which achieved 100% accuracy across all valid classifiers tested.
+The spec was approved (2026-11-01), delivered in v0.52.0 (2026-11-01), and ships with the router disabled by default. Default-on is gated by R-3 routing-quality measurement, which achieved 100% accuracy across all valid classifiers tested. The implementation is now deployed in the development cluster via the `model-router-dev` runtime profile posture.
 
 **Section sources**
 - [spec.md:1-45](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L1-L45)
@@ -64,6 +71,8 @@ SPEC-071 spans three documentation tiers plus the complete agent-platform runtim
 - Runtime settings seam: `products/agent-platform/src/agent_service/runtime_settings.py`
 - Route-level model resolution: `products/agent-platform/src/agent_service/api/v2/routes.py`
 - Kernel middleware wiring: `products/agent-platform/src/agent_service/runtime_kernel.py`
+- GitOps runtime profile: `shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env`
+- Dev cluster deployment: `shared/platform-ops/gitops/dev-k8s/kustomization.yaml`
 - Spec index entry: `docs/specs/README.md`
 
 ```mermaid
@@ -78,7 +87,8 @@ Spec --> Index["docs/specs/README.md"]
 Tests["tests/test_model_router.py"] --> Routes
 Tests --> Kernel
 Harness["harness/routing_accuracy.py"] --> Kernel
-Harness --> Tests
+Profile["model-router.env"] --> Kustomize["dev-k8s/kustomization.yaml"]
+Kustomize --> RuntimeProfile["platform-runtime-config ConfigMap"]
 ```
 
 **Diagram sources**
@@ -87,6 +97,8 @@ Harness --> Tests
 - [tasks.md:21-83](file://docs/specs/SPEC-071-agentscope-model-router/tasks.md#L21-L83)
 - [routes.py:261-385](file://products/agent-platform/src/agent_service/api/v2/routes.py#L261-L385)
 - [runtime_kernel.py:551-596](file://products/agent-platform/src/agent_service/runtime_kernel.py#L551-L596)
+- [model-router.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 
 **Section sources**
 - [spec.md:1-45](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L1-L45)
@@ -398,6 +410,65 @@ The harness (`products/agent-platform/harness/routing_accuracy.py`) provides:
 - [runtime_settings.py:429-435](file://products/agent-platform/src/agent_service/runtime_settings.py#L429-L435)
 - [runtime_settings.py:663-664](file://products/agent-platform/src/agent_service/runtime_settings.py#L663-L664)
 
+## GitOps Runtime Profile Deployment
+**DEPLOYMENT STATUS: ACTIVE** - The model router is deployed in the development cluster via the `model-router-dev` runtime profile posture.
+
+### Runtime Profile Configuration
+The `model-router-dev` runtime profile provides the complete configuration for enabling per-turn model routing in the development environment:
+
+| Environment Variable | Value | Purpose |
+|---|---|---|
+| `AGENTSCOPE_MODEL_ROUTER_ENABLED` | `true` | Enables the router in the dev cluster |
+| `AGENTSCOPE_MODEL_ROUTER_MODEL` | `deepseek-v4-flash` | Uses the always-keyed active provider as classifier |
+| `AGENTSCOPE_MODEL_ROUTER_CANDIDATES` | JSON map | Defines fast/deep model tiers with descriptive criteria |
+
+### Candidate Map Configuration
+The candidate map defines two model tiers with specific use cases:
+
+- **Fast tier** (`fast`): `deepseek-v4-flash` - For routine operator work including status checks, short factual lookups, simple summaries, and single-step questions where speed and low cost matter most.
+- **Deep tier** (`deep`): `deepseek-v4-pro` - For complex work including multi-step reasoning, incident diagnosis and root-cause analysis, code or architecture review, planning, and nuanced judgment where capability matters most.
+
+### Kustomization Integration
+The dev-k8s overlay integrates the model router profile through the standard runtime profile mechanism:
+
+```mermaid
+flowchart TD
+DevOverlay["dev-k8s/kustomization.yaml"] --> ConfigMapGen["configMapGenerator"]
+ConfigMapGen --> ModelRouterEnv["runtime-profiles/model-router-dev/model-router.env"]
+ModelRouterEnv --> PlatformConfig["platform-runtime-config ConfigMap"]
+PlatformConfig --> AgentService["Agent Service Deployment"]
+AgentService --> RuntimeSettings["RuntimeSettings.from_env()"]
+RuntimeSettings --> ModelRouterMiddleware["ModelRouterMiddleware"]
+```
+
+**Diagram sources**
+- [kustomization.yaml:11-20](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L20)
+- [model-router.env:23-25](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L23-L25)
+
+### Operational Posture
+The development cluster deployment demonstrates the measurement-gated enablement approach:
+
+- **Code default**: `AGENTSCOPE_MODEL_ROUTER_ENABLED=false` (deny-by-default)
+- **Dev cluster**: Router enabled via runtime profile overlay
+- **Reversible**: Can be disabled by removing the profile from the overlay
+- **Scoped**: Only affects the development cluster, not production deployments
+
+The classifier uses `deepseek-v4-flash` as the always-keyed active provider, providing a fast/cheap tier for routine turns and a high-capability tier (`deepseek-v4-pro`) for complex ones. Routing is fail-soft (a routing error or unknown candidate keeps the agent's own model) and resume-safe (the routed model survives a park/resume).
+
+**Operational Notes:**
+- The classifier call is a separate `ChatModelBase.generate_structured_output` that does not ride SPEC-065 `TokenUsageMiddleware`
+- Classification tokens (~330-440 input + 10-34 output per turn) are not metered in `agent_llm_tokens_total`
+- Added latency of ~0.5-0.8s per reply is accepted for the dev cluster
+- This posture is scoped and reversible, demonstrating the measurement-gated approach before broader enablement
+
+**Section sources**
+- [model-router.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
+- [kustomization.yaml:11-20](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L20)
+- [verify-runtime-profile.sh:8-14](file://shared/platform-ops/gitops/verify-runtime-profile.sh#L8-L14)
+- [select-runtime-profile.sh:14-21](file://shared/platform-ops/gitops/select-runtime-profile.sh#L14-L21)
+- [configmap.yaml:6-10](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L6-L10)
+- [deepseek.py:9-20](file://products/agent-platform/src/agent_service/providers/deepseek.py#L9-L20)
+
 ## Troubleshooting Guide
 Common operational concerns and their prescribed handling:
 
@@ -412,17 +483,23 @@ Common operational concerns and their prescribed handling:
 | Contract validation fails | `agent-stream-event.schema.json` must stay byte-unchanged | Ensure no agentscope types leak through v2 |
 | Measurement harness prerequisite failure | Missing env vars or credentials | Set `AGENTSCOPE_MODEL_ROUTER_ENABLED=true`, candidate map, and classifier model |
 | Live measurement shows 0% accuracy | Likely provider endpoint issue (like qwen3-8b 404) | Check provider availability; use alternative classifier like qwen-flash |
+| Dev cluster router not working | Runtime profile not included in overlay | Verify `model-router-dev` is listed in dev-k8s kustomization.yaml configMapGenerator |
+| GitOps validation fails | Profile recognized as dev posture | Check `verify-runtime-profile.sh` excludes `model-router-dev` from switchable profiles |
+| Configuration not applied | ConfigMap merge order issue | Ensure model-router.env is processed after base runtime profile |
 
 **Operational Best Practices:**
 - Start with minimal candidate set (fast/deep) and expand based on measurement results
 - Monitor classification latency and token costs before enabling broadly
 - Use the harness to validate routing accuracy before production deployment
 - Keep router disabled until measurement results justify enablement
+- For GitOps deployments, ensure the runtime profile is properly integrated into the overlay structure
+- Test configuration changes with `kubectl kustomize` before applying to clusters
 
 **Section sources**
 - [agentscope-model-router-spike.md:79-90](file://docs/workspace/agentscope-model-router-spike.md#L79-L90)
 - [plan.md:109-124](file://docs/specs/SPEC-071-agentscope-model-router/plan.md#L109-L124)
 - [tasks.md:70-82](file://docs/specs/SPEC-071-agentscope-model-router/tasks.md#L70-L82)
+- [model-router.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 
 ## Conclusion
 SPEC-071 has been successfully delivered in v0.52.0 as a narrowly scoped, opt-in extension to the agent-platform kernel: per-turn model routing through AgentScope's `ModelRouterMiddleware`, wired behind `AGENTSCOPE_MODEL_ROUTER_ENABLED`, drawing candidates from the credential-gated catalog, and respecting `request > pinned > routed > default`. 
@@ -435,16 +512,18 @@ SPEC-071 has been successfully delivered in v0.52.0 as a narrowly scoped, opt-in
 - ✅ Complete documentation and configuration reference updates
 - ✅ CHANGELOG.md and release notes published
 - ✅ VERSION lockstep maintained across all products
+- ✅ GitOps runtime profile deployed in development cluster
 
 The most important boundary remains R-3: default-on is not authorized by approval. Any broader enablement must be justified by measured routing accuracy, latency, and classification-token cost. Until that gate clears, the feature should remain default-off and inert without a candidate map.
 
-**Current Status**: Router ships default-off. Default-on remains a separate measurement-gated operator decision.
+**Current Status**: Router ships default-off in production code, but is actively deployed in the development cluster via the `model-router-dev` runtime profile posture, demonstrating the measurement-gated enablement approach.
 
 **Section sources**
 - [spec.md:33-45](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L33-L45)
 - [spec.md:146-191](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L146-L191)
 - [spec.md:234-249](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L234-L249)
 - [spec.md:247-259](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L247-L259)
+- [model-router.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 
 ## Appendices
 
@@ -465,5 +544,14 @@ The spec index currently lists SPEC-071 as **delivered** and describes its targe
 - SPEC-063 campaign: ✅ Green (795 passed, 2 deselected)
 - Version lockstep: ✅ Green at 0.52.0
 
+### Release Notes
+The release notes document the complete delivery including the measurement outcomes, configuration details, and operational posture.
+
 **Section sources**
-- [tasks.md:188-202](file://docs/specs/SPEC-071-agentscope-model-router/tasks.md#L188-L202)
+- [2026-11-01-per-turn-model-routing.md:1-154](file://docs/agentic-aiops-platform/release-notes/2026-11-01-per-turn-model-routing.md#L1-L154)
+
+### Tasks Completion Status
+All task items have been completed including the delivery gate requirements.
+
+**Section sources**
+- [tasks.md:188-203](file://docs/specs/SPEC-071-agentscope-model-router/tasks.md#L188-L203)

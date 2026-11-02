@@ -3,32 +3,12 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-11-01T08:44:09Z"
+exported_at: "2026-11-02T00:15:04Z"
 modules:
     "":
-        dir_name: Luban Agentic AIOps Platform Workspace_2
+        dir_name: Luban Agentic AIOps Platform Workspace
         title: Luban Agentic AIOps Platform Workspace
         scope: []
-        source_files: []
-        children:
-            - adr
-            - specs
-        depends_on: []
-        related_to: []
-    adr:
-        dir_name: Architecture Decision Records (ADRs)
-        title: Architecture Decision Records (ADRs)
-        scope:
-            - docs/adr/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs:
-        dir_name: Spec-Driven Development Specifications Index
-        title: Spec-Driven Development Specifications Index
-        scope:
-            - docs/specs/
         source_files: []
         children: []
         depends_on: []

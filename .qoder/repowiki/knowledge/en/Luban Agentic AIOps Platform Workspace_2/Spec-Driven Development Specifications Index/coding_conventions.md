@@ -1,6 +1,0 @@
-- Each spec directory follows the fixed triple-file layout `spec.md` / `plan.md` / `tasks.md`, with `spec.md` written and approved first, then `plan.md`, then `tasks.md` derived from the plan.
-- Specs are sequentially numbered `SPEC-NNN` with kebab-case slugs, and requirement IDs inside a spec use stable `R-1`, `R-2`, ... identifiers once the spec reaches `approved` status.
-- Every spec carries a YAML-like Status header listing `status`, `owner`, `created`, `release slice`, and `related ADRs`, with status restricted to the five values `draft`, `approved`, `in-progress`, `delivered`, `superseded`.
-- Cross-spec dependencies are declared declaratively via an `extends SPEC-XXX` suffix in the README index entry rather than by embedding or importing other spec content.
-- The Impact section enumerates affected products under `products/`, contracts under `shared/shared-contracts`, identity/policy/audit/execution safety impact, and living-state docs to update on delivery.
-- Open Questions must be empty before a spec can reach `approved` status, and `delivered` specs are never rewritten — corrections go into the spec changelog or a replacement spec marked `superseded`.

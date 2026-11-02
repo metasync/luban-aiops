@@ -1,1 +1,0 @@
-New ADRs are created by copying `template.md`, naming files `NNNN-<slug>.md`, assigning a sequential number, setting one of the three statuses, and updating the index table in `README.md`.

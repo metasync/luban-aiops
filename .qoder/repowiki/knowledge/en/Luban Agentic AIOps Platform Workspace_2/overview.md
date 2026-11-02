@@ -1,1 +1,0 @@
-Monorepo orchestrating the Luban Agentic AIOps platform's Python services, operator portal, shared contracts, GitOps overlays, and spec-driven development artifacts under a single verification gate.

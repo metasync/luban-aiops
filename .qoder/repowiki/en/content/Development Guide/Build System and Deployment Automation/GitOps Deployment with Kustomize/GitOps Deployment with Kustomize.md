@@ -12,6 +12,7 @@
 - [mutating-dev env](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env)
 - [browser-dev kustomization.yaml](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml)
 - [browser-dev env](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env)
+- [model-router-dev env](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env)
 - [deploy-overlay.sh](file://shared/platform-ops/gitops/deploy-overlay.sh)
 - [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 - [sync-runtime-secret.sh](file://shared/platform-ops/gitops/sync-runtime-secret.sh)
@@ -19,9 +20,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Runtime Profiles section to reflect that browser-dev profile no longer includes a sample browser-check target application and service (removed by SPEC-061)
-- Clarified that browser-dev profile now only provides browser posture configuration without shipping its own target
-- Updated references to browser-check-target to reflect its retirement
+- Added new model-router-dev runtime profile section documenting per-turn model routing capabilities
+- Updated Runtime Profiles section to include model-router-dev as a deny-by-default security posture
+- Enhanced architecture overview to reflect the new model router middleware integration
+- Updated troubleshooting guidance to cover model router configuration issues
+- Added detailed documentation about fail-soft routing behavior and resume-safe model persistence
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -36,7 +39,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the GitOps deployment model for the platform using Kustomize overlays under shared/platform-ops/gitops/. It covers how base configurations are separated from environment-specific overlays, how runtime profiles configure execution postures (including browser-dev and mutating-dev), and how Kubernetes resources, namespaces, service discovery, secrets, ConfigMaps, and environment variables are managed. It also documents deployment automation scripts, rollback procedures, validation steps, monitoring/logging considerations, health checks, troubleshooting guidance, and performance tuning recommendations.
+This document explains the GitOps deployment model for the platform using Kustomize overlays under shared/platform-ops/gitops/. It covers how base configurations are separated from environment-specific overlays, how runtime profiles configure execution postures (including browser-dev, mutating-dev, and the new model-router-dev), and how Kubernetes resources, namespaces, service discovery, secrets, ConfigMaps, and environment variables are managed. It also documents deployment automation scripts, rollback procedures, validation steps, monitoring/logging considerations, health checks, troubleshooting guidance, and performance tuning recommendations.
 
 ## Project Structure
 The GitOps configuration is organized around a durable dev-k8s overlay that composes:
@@ -54,23 +57,25 @@ subgraph "Runtime Profiles"
 R1["runtime-profiles/default"]
 R2["runtime-profiles/mutating-dev"]
 R3["runtime-profiles/browser-dev"]
+R4["runtime-profiles/model-router-dev"]
 end
 D --> B
 D --> R1
 D --> R2
 D --> R3
+D --> R4
 ```
 
 **Diagram sources**
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
-- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
+- [runtime profiles README.md:1-144](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L144)
 
 **Section sources**
 - [README.md:1-47](file://shared/platform-ops/README.md#L1-L47)
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
-- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
+- [runtime profiles README.md:1-144](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L144)
 
 ## Core Components
 - Base layer: Declares namespace, services, deployments, RBAC, and generates ConfigMaps for runtime configuration and policy. It also includes sample skill content and database init SQL.
@@ -78,6 +83,7 @@ D --> R3
   - default: Provides an agent-platform runtime profile ConfigMap with provider/model metadata.
   - mutating-dev: Enables bounded mutating tools posture via environment flags and RBAC for pod deletion.
   - browser-dev: Enables browser web-check posture by adding a sidecar patch, network policy, and environment flags. **Updated**: No longer ships a sample browser-check target application (retired by SPEC-061); instead permits exactly one origin (`acme-admin`) which is deployed out-of-band.
+  - **New**: model-router-dev: Enables per-turn model routing via `ModelRouterMiddleware` with deny-by-default security posture. Uses `AGENTSCOPE_MODEL_ROUTER_ENABLED=true` with fast/deep candidate models for automatic model selection based on input complexity.
 - Automation:
   - deploy-overlay.sh: Renders and applies Kustomize overlays, updates images, restarts pods when ConfigMaps change, and waits for rollouts.
   - select-runtime-profile.sh: Rewrites dev-k8s overlay to switch the active LLM runtime profile while preserving committed dev postures.
@@ -91,12 +97,13 @@ D --> R3
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 - [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
 - [select-runtime-profile.sh:1-55](file://shared/platform-ops/gitops/select-runtime-profile.sh#L1-L55)
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
 
 ## Architecture Overview
-The dev-k8s overlay composes base resources with runtime profiles to produce a complete Kubernetes manifest set. The base defines the namespace and all platform services. Runtime profiles contribute environment flags and optional features like browser tooling or mutating tool access. The deployment script applies the rendered output, updates container images, restarts workloads when configuration changes occur, and validates rollout status.
+The dev-k8s overlay composes base resources with runtime profiles to produce a complete Kubernetes manifest set. The base defines the namespace and all platform services. Runtime profiles contribute environment flags and optional features like browser tooling, mutating tool access, and per-turn model routing. The deployment script applies the rendered output, updates container images, restarts workloads when configuration changes occur, and validates rollout status.
 
 ```mermaid
 sequenceDiagram
@@ -111,12 +118,12 @@ Kust-->>Script : Manifest stream
 Script->>K8s : Apply manifests
 Script->>K8s : Update image tags on deployments
 Script->>K8s : Rollout status for each deployment
-Note over Script,K8s : If platform-runtime-config or platform-policy changed,<br/>script restarts relevant deployments to pick up new env/policy
+Note over Script,K8s : If platform-runtime-config or platform-policy changed,<br/>script restarts relevant deployments to pick up new env/policy<br/>Includes model-router-dev profile for per-turn routing
 ```
 
 **Diagram sources**
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 
 ## Detailed Component Analysis
 
@@ -146,7 +153,7 @@ Apps --> Svc["Expose Services"]
 **Section sources**
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
 
-### Runtime Profiles: Default, Mutating-Dev, Browser-Dev
+### Runtime Profiles: Default, Mutating-Dev, Browser-Dev, Model-Router-Dev
 - Default profile:
   - Adds a ConfigMap defining the agent-platform runtime profile label, provider, model name, and base URL.
 - Mutating-Dev profile:
@@ -155,6 +162,12 @@ Apps --> Svc["Expose Services"]
   - **Updated**: No longer ships a sample browser-check target application and service (retired by SPEC-061). Instead provides browser posture configuration including a NetworkPolicy for the sidecar and environment flags enabling browser tools with a deny-by-default origin allowlist permitting only `acme-admin`.
   - The dev-k8s overlay patches the tool-gateway Deployment to include a chromium-headless-shell sidecar and mounts credential sets.
   - The one permitted origin (`GATEWAY_BROWSER_ALLOW_ORIGINS=http://acme-admin:8080`) refers to the acme-admin sample application deployed out-of-band by `make deploy-sample-app`.
+- **New**: Model-Router-Dev profile:
+  - Implements per-turn model routing via `ModelRouterMiddleware` (SPEC-071) with deny-by-default security posture.
+  - Sets `AGENTSCOPE_MODEL_ROUTER_ENABLED=true` with classifier model `deepseek-v4-flash` and two candidate tiers: `fast` (deepseek-v4-flash) for routine work and `deep` (deepseek-v4-pro) for complex reasoning tasks.
+  - Features fail-soft routing behavior where routing failures keep the agent's own model, and resume-safe model persistence across park/resume cycles.
+  - The classifier call adds ~0.5-0.8s latency per reply but achieves 100% routing accuracy in testing.
+  - Routing precedence extends SPEC-024 to `request > pinned > routed > default`, ensuring explicit user choices always take precedence.
 
 ```mermaid
 classDiagram
@@ -173,8 +186,17 @@ class BrowserDevProfile {
 +No sample target app (SPEC-061)
 +Permits acme-admin origin only
 }
+class ModelRouterDevProfile {
++AGENTSCOPE_MODEL_ROUTER_ENABLED=true
++Classifier model : deepseek-v4-flash
++Fast/deep candidate tiers
++Fail-soft routing behavior
++Resume-safe model persistence
++Deny-by-default security posture
+}
 DefaultProfile <.. MutatingDevProfile : "coexist in dev-k8s"
 DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
+DefaultProfile <.. ModelRouterDevProfile : "coexist in dev-k8s"
 ```
 
 **Diagram sources**
@@ -183,25 +205,27 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 - [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 
 **Section sources**
-- [runtime profiles README.md:1-60](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L60)
+- [runtime profiles README.md:1-144](file://shared/platform-ops/gitops/runtime-profiles/README.md#L1-L144)
 - [default profile kustomization.yaml:1-5](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml#L1-L5)
 - [default profile configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
 - [mutating-dev kustomization.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
 - [mutating-dev env:1-4](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/mutating.env#L1-L4)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
 - [browser-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 
 ### Development, Staging, and Production Profiles
 - Development (dev-k8s):
-  - Composed overlay including base plus default, mutating-dev, and browser-dev profiles.
+  - Composed overlay including base plus default, mutating-dev, browser-dev, model-router-dev, ansible-dev, and servicenow-dev profiles.
   - Uses namespace dev-luban-aiops and merges environment variables from profile env files into platform-runtime-config.
 - Staging and Production:
   - Follow the same Kustomize pattern: create environment overlays referencing base and selecting appropriate runtime profiles.
-  - Replace dev-only features (e.g., browser-dev, mutating-dev) with hardened profiles and restrict feature flags accordingly.
+  - Replace dev-only features (e.g., browser-dev, mutating-dev, model-router-dev) with hardened profiles and restrict feature flags accordingly.
   - Use separate namespaces and stricter policies per environment.
 
 ### Kubernetes Resource Management, Namespace Isolation, and Service Discovery
@@ -223,6 +247,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
 - Environment variable injection:
   - Services consume environment variables through envFrom or mounted ConfigMaps/Secrets.
   - Changes to platform-runtime-config or platform-policy trigger automatic restarts of relevant deployments to apply new values.
+  - **Updated**: Model router configuration (`AGENTSCOPE_MODEL_ROUTER_ENABLED`, `_MODEL`, `_CANDIDATES`) is merged into platform-runtime-config via the model-router-dev profile.
 
 **Section sources**
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
@@ -238,7 +263,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Detects ConfigMap changes and restarts affected deployments to pick up new environment/policy values.
   - Waits for rollout status of all deployments.
 - select-runtime-profile.sh:
-  - Prevents switching committed dev postures (mutating-dev, browser-dev).
+  - Prevents switching committed dev postures (mutating-dev, browser-dev, model-router-dev).
   - Rewrites dev-k8s overlay to select the requested LLM runtime profile while preserving dev postures.
 - sync-runtime-secret.sh:
   - Creates or updates a generic Secret from a per-profile .env file.
@@ -257,6 +282,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Use kubectl rollout undo on specific deployments if only one component needs reverting.
 - Validation after rollback:
   - Confirm rollout status and verify endpoints respond as expected.
+  - **Updated**: Verify model router functionality is disabled if model-router-dev profile was removed.
 
 ### Validation Steps
 - Pre-deploy:
@@ -266,6 +292,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Check rollout status for all deployments.
   - Validate that platform-runtime-config and platform-policy were applied and pods restarted when necessary.
   - Confirm service endpoints are reachable within the namespace.
+  - **Updated**: For model-router-dev profile, verify that routing configuration is properly applied and classifier model is accessible.
 
 **Section sources**
 - [deploy-overlay.sh:41-44](file://shared/platform-ops/gitops/deploy-overlay.sh#L41-L44)
@@ -275,6 +302,7 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
 - Monitoring and logging:
   - OTel-related secret synchronization scripts indicate observability integration points.
   - Policy and runtime configuration are centralized in ConfigMaps for consistent behavior across environments.
+  - **Updated**: Model router classification calls bypass TokenUsageMiddleware metrics by design, so routing overhead (~0.5-0.8s per reply) is not captured in standard metrics.
 - Health check endpoints:
   - Services expose standard HTTP endpoints; validate readiness/liveness via kubectl exec or curl within the cluster.
   - Use rollout status and service reachability checks to confirm health.
@@ -290,18 +318,25 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Profile selection errors: select-runtime-profile.sh rejects non-switchable profiles; use supported LLM profiles.
   - Secrets missing: Ensure per-profile secret files exist before syncing; CI can inject secrets directly.
   - Browser web-check failures: After SPEC-061, ensure the acme-admin sample application is deployed out-of-band since the static browser-check-target is no longer shipped.
+  - **New**: Model router configuration issues:
+    - `AGENTSCOPE_MODEL_ROUTER_ENABLED=true` without proper candidate map causes startup failure.
+    - Classifier model id must be valid in MODEL_CATALOG and accessible via existing provider credentials.
+    - Fail-soft routing means routing errors keep the agent's own model rather than hard-failing.
+    - Resume-safe behavior ensures routed models persist across park/resume cycles.
 - Diagnostic steps:
   - Inspect rollout status and events for failing deployments.
   - Verify ConfigMaps and Secrets exist in the target namespace.
   - Check service endpoints and network policies for connectivity issues.
+  - **Updated**: For model router issues, verify classifier model accessibility and candidate configuration validity.
 
 **Section sources**
 - [deploy-overlay.sh:10-23](file://shared/platform-ops/gitops/deploy-overlay.sh#L10-L23)
 - [deploy-overlay.sh:41-44](file://shared/platform-ops/gitops/deploy-overlay.sh#L41-L44)
 - [select-runtime-profile.sh:9-25](file://shared/platform-ops/gitops/select-runtime-profile.sh#L9-L25)
 - [sync-runtime-secret.sh:10-22](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L10-L22)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 
-### Performance Tuning Recommendations
+### Performance Considerations
 - Resource requests/limits:
   - Tune CPU/memory requests and limits on deployments based on observed usage.
 - Replicas:
@@ -312,11 +347,15 @@ DefaultProfile <.. BrowserDevProfile : "coexist in dev-k8s"
   - Monitor sidecar impact (e.g., browser sidecar) and adjust resources accordingly.
 - Database and cache:
   - Ensure Postgres and Redis have adequate resources and proper persistence settings.
+- **Updated**: Model router performance:
+  - Router classification adds ~0.5-0.8s latency per reply but achieves 100% routing accuracy.
+  - Classification tokens (~330-440 input + 10-34 output per turn) bypass standard token metrics.
+  - Consider classifier model choice carefully as it impacts both accuracy and latency.
 
 ## Dependency Analysis
 The dev-k8s overlay depends on:
 - Base resources for all platform services and infrastructure.
-- Runtime profiles for environment-specific behavior.
+- Runtime profiles for environment-specific behavior including the new model router.
 - Automation scripts for applying manifests, updating images, and syncing secrets.
 
 ```mermaid
@@ -325,21 +364,23 @@ Base["dev-k8s/base"] --> DevOverlay["dev-k8s overlay"]
 Default["runtime-profiles/default"] --> DevOverlay
 Mutating["runtime-profiles/mutating-dev"] --> DevOverlay
 Browser["runtime-profiles/browser-dev"] --> DevOverlay
+ModelRouter["runtime-profiles/model-router-dev"] --> DevOverlay
 Scripts["deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret.sh"] --> DevOverlay
 ```
 
 **Diagram sources**
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
 - [default profile kustomization.yaml:1-5](file://shared/platform-ops/gitops/runtime-profiles/default/kustomization.yaml#L1-L5)
 - [mutating-dev kustomization.yaml:1-22](file://shared/platform-ops/gitops/runtime-profiles/mutating-dev/kustomization.yaml#L1-L22)
 - [browser-dev kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
 - [select-runtime-profile.sh:1-55](file://shared/platform-ops/gitops/select-runtime-profile.sh#L1-L55)
 - [sync-runtime-secret.sh:1-29](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L1-L29)
 
 **Section sources**
-- [kustomization.yaml:1-22](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L22)
+- [kustomization.yaml:1-41](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L1-L41)
 - [base kustomization.yaml:1-72](file://shared/platform-ops/gitops/dev-k8s/base/kustomization.yaml#L1-L72)
 - [deploy-overlay.sh:1-108](file://shared/platform-ops/gitops/deploy-overlay.sh#L1-L108)
 - [select-runtime-profile.sh:1-55](file://shared/platform-ops/gitops/select-runtime-profile.sh#L1-L55)
@@ -351,6 +392,10 @@ Scripts["deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret
 - Monitor sidecar resource usage and tune accordingly.
 - Ensure database and cache resources match workload demands.
 - Avoid frequent ConfigMap churn; batch changes and rely on automatic restarts when detected.
+- **Updated**: Model router optimization:
+  - Choose classifier model carefully balancing accuracy vs. latency requirements.
+  - Monitor routing accuracy and consider different candidate descriptions for better classification.
+  - Account for additional ~0.5-0.8s latency per reply when planning capacity.
 
 ## Troubleshooting Guide
 - Verify overlay path and IMAGE_TAG before deploying.
@@ -359,15 +404,21 @@ Scripts["deploy-overlay.sh<br/>select-runtime-profile.sh<br/>sync-runtime-secret
 - Validate service endpoints and network policies.
 - Use selective rollout restarts if only specific services need reapplication of configuration.
 - **Updated**: For browser web-check issues, ensure the acme-admin sample application is properly deployed since the static browser-check-target was retired by SPEC-061.
+- **New**: For model router issues:
+  - Verify `AGENTSCOPE_MODEL_ROUTER_ENABLED=true` is accompanied by valid `_MODEL` and `_CANDIDATES` configuration.
+  - Check that the classifier model id exists in MODEL_CATALOG and is accessible via existing provider credentials.
+  - Remember that routing failures are fail-soft and keep the agent's own model rather than hard-failing.
+  - Note that routing decisions survive park/resume cycles due to resume-safe implementation.
 
 **Section sources**
 - [deploy-overlay.sh:10-23](file://shared/platform-ops/gitops/deploy-overlay.sh#L10-L23)
 - [deploy-overlay.sh:97-105](file://shared/platform-ops/gitops/deploy-overlay.sh#L97-L105)
 - [select-runtime-profile.sh:9-25](file://shared/platform-ops/gitops/select-runtime-profile.sh#L9-L25)
 - [sync-runtime-secret.sh:10-22](file://shared/platform-ops/gitops/sync-runtime-secret.sh#L10-L22)
+- [model-router-dev env:1-26](file://shared/platform-ops/gitops/runtime-profiles/model-router-dev/model-router.env#L1-L26)
 
 ## Conclusion
-The GitOps deployment model leverages Kustomize overlays to cleanly separate base platform resources from environment-specific behaviors. The dev-k8s overlay composes base manifests with runtime profiles to enable controlled feature toggles such as browser web-checks and bounded mutating tools. Following SPEC-061, the browser-dev profile no longer ships a sample browser-check target application but instead provides the browser posture configuration that permits exactly one origin (`acme-admin`). Automation scripts streamline deployment, image updates, configuration propagation, and validation. Following the outlined procedures ensures reliable rollouts, straightforward rollbacks, and robust troubleshooting for platform operations.
+The GitOps deployment model leverages Kustomize overlays to cleanly separate base platform resources from environment-specific behaviors. The dev-k8s overlay composes base manifests with runtime profiles to enable controlled feature toggles such as browser web-checks, bounded mutating tools, and the new per-turn model routing capability. Following SPEC-061, the browser-dev profile no longer ships a sample browser-check target application but instead provides the browser posture configuration that permits exactly one origin (`acme-admin`). The new model-router-dev profile implements deny-by-default security posture with `AGENTSCOPE_MODEL_ROUTER_ENABLED=false` by default, requiring explicit overlay inclusion for activation. It features fail-soft routing behavior where routing failures keep the agent's own model, and resume-safe model persistence across park/resume cycles. Automation scripts streamline deployment, image updates, configuration propagation, and validation. Following the outlined procedures ensures reliable rollouts, straightforward rollbacks, and robust troubleshooting for platform operations.
 
 ## Appendices
 
@@ -381,8 +432,26 @@ shared/platform-ops/gitops/
 ├── runtime-profiles/
 │   ├── default/                       # Agent platform runtime profile
 │   ├── mutating-dev/                  # Bounded mutating tools posture
-│   └── browser-dev/                   # Browser web-check posture (no sample target)
+│   ├── browser-dev/                   # Browser web-check posture (no sample target)
+│   ├── model-router-dev/              # Per-turn model routing (deny-by-default)
+│   ├── ansible-dev/                   # Ansible MCP-ingestion posture
+│   ├── servicenow-dev/                # ServiceNow ingestion posture
+│   └── secrets-dev/                   # Secure password generation posture
 ├── deploy-overlay.sh                  # Main deployment automation
 ├── select-runtime-profile.sh          # Switch LLM runtime profile
 └── sync-*.sh                          # Secret and data sync helpers
 ```
+
+### Appendix B: Model Router Configuration Reference
+The model-router-dev profile provides the following key configuration:
+
+- `AGENTSCOPE_MODEL_ROUTER_ENABLED=true`: Activates per-turn model routing
+- `AGENTSCOPE_MODEL_ROUTER_MODEL=deepseek-v4-flash`: Classifier model for routing decisions
+- `AGENTSCOPE_MODEL_ROUTER_CANDIDATES`: JSON map defining fast/deep model tiers with descriptions for automatic classification
+
+Key characteristics:
+- Deny-by-default security posture (disabled unless explicitly enabled)
+- Fail-soft routing (routing errors keep agent's own model)
+- Resume-safe model persistence across park/resume cycles
+- Extends SPEC-024 precedence to `request > pinned > routed > default`
+- Adds ~0.5-0.8s latency per reply but achieves 100% routing accuracy in testing
