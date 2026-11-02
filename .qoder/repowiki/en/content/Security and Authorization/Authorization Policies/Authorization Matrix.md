@@ -14,7 +14,15 @@
 - [user-and-role-administration.md](file://docs/guides/user-and-role-administration.md)
 - [PermissionsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
+- [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Feature Access Matrix to include Platform feature-flag transparency
+- Added runtime:flags action to Complete Permission Matrix section
+- Enhanced Administrative Functions section with runtime:flags details
+- Updated Policy Engine Integration section to reflect new protected action
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,7 +37,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document defines the platform’s authorization matrix: the role hierarchy, environment scoping, feature and action permissions, approval model, and how the policy engine enforces decisions. It consolidates design intent from the authorization matrix document with the implemented policy bundle, gateway enforcement, identity mapping, and portal transparency surfaces.
+This document defines the platform's authorization matrix: the role hierarchy, environment scoping, feature and action permissions, approval model, and how the policy engine enforces decisions. It consolidates design intent from the authorization matrix document with the implemented policy bundle, gateway enforcement, identity mapping, and portal transparency surfaces.
 
 The platform uses a deny-by-default model. Roles are normalized from directory groups into a fixed vocabulary. Actions are granted by explicit rules in a versioned policy bundle. Risk tiers gate approvals, and production actions require stronger controls than development or test environments.
 
@@ -75,7 +83,7 @@ IdentityBroker --> Keycloak["Keycloak / AD"]
 - Outcomes: allow, deny, request-only, approve-only, request-and-approve.
 - Enforcement: deny-by-default; explicit deny wins; require_approval overrides allow; higher priority wins within an outcome class; disabled rules ignored.
 
-Role definitions and default permissions are documented in the authorization matrix. The policy bundle implements the concrete grants for today’s surface.
+Role definitions and default permissions are documented in the authorization matrix. The policy bundle implements the concrete grants for today's surface.
 
 **Section sources**
 - [authorization-matrix.md:18-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L18-L60)
@@ -83,7 +91,7 @@ Role definitions and default permissions are documented in the authorization mat
 - [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
 
 ## Architecture Overview
-The authorization flow evaluates identity, roles, environment scope, requested action, and risk tier against the loaded policy bundle. For mutating tool execution, a tier_2 approval is required before execution proceeds under the confirmer’s delegated token.
+The authorization flow evaluates identity, roles, environment scope, requested action, and risk tier against the loaded policy bundle. For mutating tool execution, a tier_2 approval is required before execution proceeds under the confirmer's delegated token.
 
 ```mermaid
 sequenceDiagram
@@ -149,14 +157,19 @@ Feature access is governed by both UI visibility and backend action grants. The 
 - Skill management UI: allowed for platform-admin; limited for operator/approver where explicitly granted.
 - Policy admin UI: allowed for platform-admin only.
 - Identity mapping admin UI: allowed for platform-admin only.
+- **Platform feature-flag transparency**: allowed for platform-admin, approver, and operator via the `runtime:flags` action; denied for developer, read-only-observer, and auditor.
 
-These are enforced by route-level checks and action grants such as policy:read, skills:read, documents:create/read, session actions, and approvals:list.
+These are enforced by route-level checks and action grants such as policy:read, skills:read, documents:create/read, session actions, approvals:list, and runtime:flags.
+
+**Updated** Added Platform feature-flag transparency capability granted to the operational trio via the `runtime:flags` action.
 
 **Section sources**
 - [authorization-matrix.md:155-168](file://docs/agentic-aiops-platform/authorization-matrix.md#L155-L168)
+- [authorization-matrix.md:517-536](file://docs/agentic-aiops-platform/authorization-matrix.md#L517-L536)
 - [policy-default.yaml:53-127](file://shared/shared-contracts/policies/policy-default.yaml#L53-L127)
 - [policy-default.yaml:153-175](file://shared/shared-contracts/policies/policy-default.yaml#L153-L175)
 - [policy-default.yaml:214-256](file://shared/shared-contracts/policies/policy-default.yaml#L214-L256)
+- [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
 
 ### Environment Scoping
 Environment eligibility affects what actions can be requested or approved:
@@ -172,17 +185,20 @@ The authorization matrix documents default environment eligibility and environme
 ### Relationship Between Roles, Features, Actions, and Risk Tiers
 - Roles define who may act.
 - Features define UI surfaces and capabilities.
-- Actions define enforceable operations (e.g., tools:invoke, tools:mutate, session:create, incident:triage).
+- Actions define enforceable operations (e.g., tools:invoke, tools:mutate, session:create, incident:triage, runtime:flags).
 - Risk tiers determine approval requirements:
   - tier 0: read-only, no approval.
   - tier 1: low-risk non-production; may allow self-approval when policy permits.
   - tier 2: production low-risk; requires designated approver distinct from requester.
   - tier 3: high-risk production; strong controls, often two-person approval recommended.
 
-Mutating tool execution is bridged through chat:confirm and requires tier_2 approval by approver or platform-admin.
+Mutating tool execution is bridged through chat:confirm and requires tier_2 approval by approver or platform-admin. The `runtime:flags` action is a tier 0 read operation requiring no approval but restricted to the operational trio.
+
+**Updated** Added runtime:flags as a tier 0 read operation for the operational trio.
 
 **Section sources**
 - [authorization-matrix.md:34-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L34-L60)
+- [authorization-matrix.md:517-536](file://docs/agentic-aiops-platform/authorization-matrix.md#L517-L536)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
 
@@ -194,7 +210,9 @@ The authoritative, enforced matrix is exposed by the platform gateway and render
 - matrix: boolean cells indicating immediate allowance.
 - approval_requirements: additive third cell state for require_approval outcomes, including tier and decider roles.
 
-Tests assert many grant postures for actions like approvals:list, documents:create/read, session:update, session:skill_draft, and incident:skill_draft.
+Tests assert many grant postures for actions like approvals:list, documents:create/read, session:update, session:skill_draft, incident:skill_draft, and runtime:flags.
+
+**Updated** Added runtime:flags to the list of tested actions in the permission matrix.
 
 **Section sources**
 - [api.py:209-226](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L209-L226)
@@ -211,7 +229,7 @@ Session actions include create, read, list, delete, update, and skill-related op
 Ownership scoping is enforced server-side to prevent enumeration of foreign sessions.
 
 **Section sources**
-- [policy-default.yaml:53-74](file://shared/shared-concontracts/policies/policy-default.yaml#L53-L74)
+- [policy-default.yaml:53-74](file://shared/shared-contracts/policies/policy-default.yaml#L53-L74)
 - [policy-default.yaml:275-326](file://shared/shared-contracts/policies/policy-default.yaml#L275-L326)
 - [authorization-matrix.md:368-415](file://docs/agentic-aiops-platform/authorization-matrix.md#L368-L415)
 
@@ -226,6 +244,22 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 - [policy-default.yaml:90-127](file://shared/shared-contracts/policies/policy-default.yaml#L90-L127)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [authorization-matrix.md:360-397](file://docs/agentic-aiops-platform/authorization-matrix.md#L360-L397)
+
+### Runtime Feature-Flag Transparency
+- runtime:flags: allowed for platform-admin, approver, and operator; denied for developer, read-only-observer, and auditor.
+- Serves a curated inventory of platform feature flags as name + enabled boolean pairs.
+- No secret values are exposed; the payload is discovery-safe by construction.
+- Implemented via authenticated GET /api/v1/runtime/flags endpoint proxying agent-service GET /api/v2/runtime/flags.
+- Rendered read-only in the portal's Settings ▸ Platform pane.
+- Follows the operational-trio grant pattern similar to documents:read and session:skill_graduate.
+
+**New Section** Added comprehensive documentation for the runtime:flags capability introduced in SPEC-072.
+
+**Section sources**
+- [authorization-matrix.md:517-536](file://docs/agentic-aiops-platform/authorization-matrix.md#L517-L536)
+- [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
+- [runtime.py:27-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L27-L55)
+- [policy_engine.py:93-98](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L93-L98)
 
 ### Incident Operations
 - incident:read: allowed for operational roles and observers.
@@ -243,10 +277,14 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 - documents:create, documents:read: allowed for platform-admin, approver, and operator.
 - approvals:list: allowed for approver and platform-admin.
 - audit:read: allowed for auditor and platform-admin.
+- **runtime:flags**: allowed for platform-admin, approver, and operator for platform configuration transparency.
+
+**Updated** Added runtime:flags to administrative functions as a platform configuration transparency capability.
 
 **Section sources**
 - [policy-default.yaml:214-256](file://shared/shared-contracts/policies/policy-default.yaml#L214-L256)
 - [policy-default.yaml:164-175](file://shared/shared-contracts/policies/policy-default.yaml#L164-L175)
+- [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
 
 ### Audit Access
 - audit:read: allowed for auditor and platform-admin.
@@ -301,10 +339,13 @@ Matrix --> Portal["Operator Portal"]
 
 ## Troubleshooting Guide
 Common issues and resolutions:
-- User signs in but has only observer access: verify group membership and that the realm’s groups client scope is attached.
+- User signs in but has only observer access: verify group membership and that the realm's groups client scope is attached.
 - Role change not taking effect: old token still live; revoke sessions or wait for refresh.
 - Login fails outright: check OIDC flow configuration and network connectivity.
 - Permissions mismatch: confirm the deployed bundle version and source via the portal Permissions view; compare SHA-256 fingerprint with canonical file.
+- **Feature-flag transparency unavailable**: verify user has platform-admin, approver, or operator role; the runtime:flags action is denied by default for developer, read-only-observer, and auditor roles.
+
+**Updated** Added troubleshooting guidance for the new runtime:flags capability.
 
 **Section sources**
 - [user-and-role-administration.md:118-137](file://docs/guides/user-and-role-administration.md#L118-L137)
@@ -312,7 +353,7 @@ Common issues and resolutions:
 - [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
 
 ## Conclusion
-The platform’s authorization model combines a fixed role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime.
+The platform's authorization model combines a fixed role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime. The addition of runtime:flags provides operational teams with safe visibility into platform configuration without exposing sensitive values.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -335,10 +376,15 @@ The schema defines the structure of the live permission matrix response, includi
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
 
 ### Integration With Broader Policy Engine
-- The platform gateway’s policy engine implements the action_authz slice of the Tier-1 policy specification.
+- The platform gateway's policy engine implements the action_authz slice of the Tier-1 policy specification.
 - It supports deny, allow, and require_approval outcomes with explicit tiers and decider roles.
 - Bridged actions (currently tools:mutate) are enforced through the chat:confirm flow with tier_2 approval.
+- **Protected actions now include runtime:flags** as a tier 0 read operation for the operational trio.
+
+**Updated** Added runtime:flags to the list of protected actions in the policy engine integration.
 
 **Section sources**
 - [policy_engine.py:1-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L127)
+- [policy_engine.py:93-98](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L93-L98)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
+- [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)

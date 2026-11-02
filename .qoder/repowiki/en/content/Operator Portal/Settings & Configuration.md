@@ -8,10 +8,19 @@
 - [runtime.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [config.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [runtime_settings.py (agent-service)](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [runtime.ts](file://products/operator-portal/web-ui/app/src/api/runtime.ts)
+- [feature-flags.schema.json](file://shared/shared-contracts/schemas/feature-flags.schema.json)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
 - [troubleshooting.md](file://docs/guides/troubleshooting.md)
 - [test_runtime_settings.py (platform-gateway)](file://products/platform-gateway/tests/test_runtime_settings.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added documentation for the new authenticated feature-flag inventory endpoint
+- Updated SettingsView Platform pane to include read-only feature flags section
+- Documented policy enforcement with `runtime:flags` action
+- Added information about curated feature flag inventory and security considerations
 
 ## Table of Contents
 1. Introduction
@@ -25,7 +34,7 @@
 9. Conclusion
 
 ## Introduction
-This document explains the operator-facing Settings and Configuration interface that lets you view platform version information, runtime configuration status, and environment-specific settings. It focuses on the SettingsView component, which is a read-only surface for identity, session, and platform state. It also documents how the portal injects build-time versions, how it queries live backend health and runtime metadata, and how these pieces integrate with the broader platform configuration system. Where relevant, links to the full configuration reference and troubleshooting guides are provided.
+This document explains the operator-facing Settings and Configuration interface that lets you view platform version information, runtime configuration status, environment-specific settings, and a curated feature-flag inventory. It focuses on the SettingsView component, which is a read-only surface for identity, session, platform state, and deployment posture. It also documents how the portal injects build-time versions, how it queries live backend health and runtime metadata, and how these pieces integrate with the broader platform configuration system. Where relevant, links to the full configuration reference and troubleshooting guides are provided.
 
 ## Project Structure
 The Settings experience lives in the operator portal web UI and integrates with platform services through well-defined endpoints:
@@ -34,46 +43,48 @@ The Settings experience lives in the operator portal web UI and integrates with 
 - The Platform pane displays:
   - Build-time platform version and tech stack versions injected at build time.
   - Live status and versions of key platform components by calling gateway health and runtime endpoints.
+  - A curated feature-flag inventory via an authenticated endpoint showing opt-in platform capabilities.
 - Backend services expose configuration-driven surfaces:
-  - Platform gateway exposes runtime metadata and readiness information used by the portal.
+  - Platform gateway exposes runtime metadata, readiness information, and feature-flag inventory used by the portal.
   - Agent service provides runtime configuration and health data surfaced via the gateway.
 
 ```mermaid
 graph TB
-Portal["Operator Portal<br/>SettingsView"] --> Gateway["Platform Gateway<br/>/health/ready, /api/v1/runtime"]
-Gateway --> AgentService["Agent Service<br/>Runtime + Health"]
+Portal["Operator Portal<br/>SettingsView"] --> Gateway["Platform Gateway<br/>/health/ready, /api/v1/runtime, /api/v1/runtime/flags"]
+Gateway --> AgentService["Agent Service<br/>Runtime + Health + Feature Flags"]
 Portal --> |Build-time constants| Versions["Version Constants<br/>__PLATFORM_VERSION__, REACT_VERSION, ANTD_VERSION"]
 ```
 
 **Diagram sources**
-- [SettingsView.tsx:194-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L357)
-- [runtime.py (platform-gateway):9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
+- [SettingsView.tsx:194-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L426)
+- [runtime.py (platform-gateway):20-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L20-L55)
 - [vite.config.ts:27-33](file://products/operator-portal/web-ui/app/vite.config.ts#L27-L33)
 - [version.ts:1-6](file://products/operator-portal/web-ui/app/src/version.ts#L1-L6)
 
 **Section sources**
-- [SettingsView.tsx:1-405](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L405)
+- [SettingsView.tsx:1-474](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L1-L474)
 - [vite.config.ts:1-54](file://products/operator-portal/web-ui/app/vite.config.ts#L1-L54)
-- [runtime.py (platform-gateway):1-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L13)
+- [runtime.py (platform-gateway):1-56](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L1-L56)
 
 ## Core Components
 - SettingsView (operator portal)
   - Identity pane: shows sign-in state, username, roles, subject, and groups from client-side auth context; degrades to a sign-in prompt when signed out.
   - Session pane: shows selected session id, title, and total sessions from workspace state; explicitly handles no-session-selected state.
-  - Platform pane: shows platform version, API origin, last request id, and a table of key platform components with technology, version, and status.
+  - Platform pane: shows platform version, API origin, last request id, a table of key platform components with technology, version, and status, and a read-only feature flags section.
 - Version injection
   - Build-time constants for platform version and tech stack versions are injected into the portal bundle and exposed via a small module consumed by SettingsView.
 - Backend integration
   - Platform pane calls gateway endpoints to fetch readiness and runtime metadata, then maps responses to a consistent status vocabulary (ready, degraded, not ready, unavailable, checking).
+  - Feature flags are fetched via authenticated endpoint requiring `runtime:flags` policy grant.
 
 **Section sources**
 - [SettingsView.tsx:28-103](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L28-L103)
-- [SettingsView.tsx:105-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L357)
+- [SettingsView.tsx:105-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L426)
 - [version.ts:1-6](file://products/operator-portal/web-ui/app/src/version.ts#L1-L6)
 - [vite.config.ts:6-33](file://products/operator-portal/web-ui/app/vite.config.ts#L6-L33)
 
 ## Architecture Overview
-The Settings page composes read-only views from client-side state and live backend signals. The Platform pane is the most configuration-sensitive area because it reflects the operational posture of the platform’s core services.
+The Settings page composes read-only views from client-side state and live backend signals. The Platform pane is the most configuration-sensitive area because it reflects the operational posture of the platform's core services and includes a curated feature-flag inventory.
 
 ```mermaid
 sequenceDiagram
@@ -86,13 +97,15 @@ Portal->>GW : GET /health/ready
 GW-->>Portal : {status, agent_service, policy_rules, ...}
 Portal->>GW : GET /api/v1/runtime
 GW-->>Portal : {runtime_mode, runtime_state, provider, model_name}
+Portal->>GW : GET /api/v1/runtime/flags (authenticated)
+GW-->>Portal : {feature_flags : [{name, enabled, label?}]}
 Portal->>Portal : Map statuses (ready/degraded/not ready/unavailable/checking)
-Portal-->>User : Render component inventory table
+Portal-->>User : Render component inventory table + feature flags
 ```
 
 **Diagram sources**
-- [SettingsView.tsx:194-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L357)
-- [runtime.py (platform-gateway):9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
+- [SettingsView.tsx:194-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L426)
+- [runtime.py (platform-gateway):20-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L20-L55)
 
 ## Detailed Component Analysis
 
@@ -117,7 +130,7 @@ Render --> End
 - [SettingsView.tsx:28-79](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L28-L79)
 
 ### SettingsView: Session Pane
-- Shows the active session id and title if present; otherwise shows an explicit “no session selected” message.
+- Shows the active session id and title if present; otherwise shows an explicit "no session selected" message.
 - Displays the number of sessions known to the workspace.
 
 ```mermaid
@@ -142,34 +155,45 @@ Count --> End(["Exit"])
   - Platform version (build-time constant).
   - API origin and last request id (from portal client helpers).
   - A table of key platform components with technology, version, and status.
+  - A read-only feature flags section showing opt-in platform capabilities.
 - Status mapping:
   - Gateway readiness: ok → ready; other values → degraded; missing or failed → unavailable/checking.
   - Agent service: ready → ready; not ready → not ready; missing or failed → unavailable/checking.
   - Agent runtime (LLM): ready → ready; not ready → not ready; missing or failed → unavailable/checking.
   - Session store and agent state stores: boolean readiness mapped to ready/not ready; unknown → unknown; unavailable/checking when backend is unreachable.
   - Policy bundle: counts rules; status always ready when available.
+- Feature flags:
+  - Fetched via authenticated `/api/v1/runtime/flags` endpoint requiring `runtime:flags` policy grant.
+  - Each flag displays as name/label with on/off state using success color for "on".
+  - Degrades to "unavailable" when authentication fails or endpoint is unreachable.
 
 ```mermaid
 flowchart TD
 Start(["PlatformPane mount"]) --> FetchReady["GET /health/ready"]
 FetchReady --> FetchRuntime["GET /api/v1/runtime"]
+FetchRuntime --> FetchFlags["GET /api/v1/runtime/flags (authenticated)"]
 FetchReady --> ReadyOK{"Ready received?"}
 FetchRuntime --> RuntimeOK{"Runtime received?"}
+FetchFlags --> FlagsOK{"Flags received?"}
 ReadyOK --> |No| MarkReadyFailed["Mark readyFailed = true"]
 RuntimeOK --> |No| MarkRuntimeFailed["Mark runtimeFailed = true"]
+FlagsOK --> |No| MarkFlagsFailed["Mark flagsFailed = true"]
 ReadyOK --> |Yes| BuildRows["Build rows with status mapping"]
 RuntimeOK --> |Yes| BuildRows
-BuildRows --> Render["Render descriptions + component table"]
+FlagsOK --> |Yes| BuildFlagRows["Build feature flag rows"]
+BuildRows --> Render["Render descriptions + component table + feature flags"]
+BuildFlagRows --> Render
 MarkReadyFailed --> BuildRows
 MarkRuntimeFailed --> BuildRows
+MarkFlagsFailed --> Render
 Render --> End(["Exit"])
 ```
 
 **Diagram sources**
-- [SettingsView.tsx:194-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L357)
+- [SettingsView.tsx:194-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L194-L426)
 
 **Section sources**
-- [SettingsView.tsx:105-357](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L357)
+- [SettingsView.tsx:105-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L105-L426)
 
 ### Version Display Mechanism
 - Build-time injection:
@@ -246,14 +270,65 @@ RuntimeSettings <.. PlatformGatewaySettings : "consumed via gateway routes"
 - [config.py (platform-gateway):23-131](file://products/platform-gateway/src/platform_gateway/core/config.py#L23-L131)
 - [test_runtime_settings.py (platform-gateway):7-37](file://products/platform-gateway/tests/test_runtime_settings.py#L7-L37)
 
+### Feature Flag Inventory System
+**Updated** Added comprehensive documentation for the new feature-flag inventory system.
+
+The platform now exposes a curated feature-flag inventory through an authenticated endpoint, providing operators with visibility into opt-in platform capabilities without exposing sensitive configuration values.
+
+#### Authenticated Endpoint
+- **Endpoint**: `GET /api/v1/runtime/flags`
+- **Authentication**: Requires bearer token with `runtime:flags` policy grant
+- **Response**: Curated list of feature flags with stable names, boolean states, and optional labels
+- **Security**: Discovery-safe by construction - never exposes secret values like keys, URLs, or configuration details
+
+#### Policy Enforcement
+- **Policy Action**: `ACTION_RUNTIME_FLAGS = "runtime:flags"`
+- **Access Control**: Granted to operational trio (`platform-admin`, `approver`, `operator`)
+- **Denial**: Developer, observer, and auditor roles receive 403 Forbidden response
+- **Audit Logging**: All access attempts logged with user ID, role, and flag count
+
+#### Frontend Implementation
+- **Client Function**: `getRuntimeFlags()` in `api/runtime.ts`
+- **Component Section**: Read-only feature flags table in Platform pane
+- **Visual State**: Success color for "on", neutral for "off"
+- **Error Handling**: Degrades to "unavailable" when authentication fails or endpoint unreachable
+
+#### Data Contract
+- **Schema**: `feature-flags.schema.json` enforces discovery-safe structure
+- **Structure**: Array of objects with `name` (snake_case), `enabled` (boolean), and optional `label`
+- **Validation**: Additional properties forbidden to prevent secret leakage
+
+```mermaid
+flowchart TD
+Client["Portal Client"] --> Gateway["Platform Gateway"]
+Gateway --> Policy["Policy Engine<br/>runtime:flags"]
+Policy --> Agent["Agent Service"]
+Agent --> Response["Feature Flags<br/>{name, enabled, label?}"]
+Response --> Gateway
+Gateway --> Client
+```
+
+**Diagram sources**
+- [runtime.py (platform-gateway):27-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L27-L55)
+- [runtime.ts:1-32](file://products/operator-portal/web-ui/app/src/api/runtime.ts#L1-L32)
+- [feature-flags.schema.json:1-35](file://shared/shared-contracts/schemas/feature-flags.schema.json#L1-L35)
+
+**Section sources**
+- [runtime.py (platform-gateway):27-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L27-L55)
+- [runtime.ts:1-32](file://products/operator-portal/web-ui/app/src/api/runtime.ts#L1-L32)
+- [feature-flags.schema.json:1-35](file://shared/shared-contracts/schemas/feature-flags.schema.json#L1-L35)
+- [SettingsView.tsx:157-199](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L157-L199)
+- [SettingsView.tsx:351-426](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L351-L426)
+
 ## Dependency Analysis
 - Frontend dependencies:
   - SettingsView depends on:
     - AuthContext for identity and session state.
     - Version constants for platform and tech stack versions.
     - Client helpers for gateway origin and last request id.
+    - Runtime flags client for authenticated feature-flag inventory.
 - Backend dependencies:
-  - Platform gateway exposes runtime metadata and readiness used by the portal.
+  - Platform gateway exposes runtime metadata, readiness, and feature-flag inventory used by the portal.
   - Agent service runtime configuration drives availability and capabilities surfaced through the gateway.
 
 ```mermaid
@@ -261,27 +336,28 @@ graph LR
 SV["SettingsView"] --> AC["AuthContext"]
 SV --> VER["version.ts"]
 SV --> API["client helpers"]
-SV --> GW["/health/ready, /api/v1/runtime"]
+SV --> RF["runtime.ts (flags)"]
+SV --> GW["/health/ready, /api/v1/runtime, /api/v1/runtime/flags"]
 GW --> CFG["PlatformGatewaySettings"]
 GW --> AG["Agent Service Runtime"]
+GW --> POL["Policy Engine"]
 ```
 
 **Diagram sources**
-- [SettingsView.tsx:18-26](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L18-L26)
-- [runtime.py (platform-gateway):9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
+- [SettingsView.tsx:18-27](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L18-L27)
+- [runtime.py (platform-gateway):20-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L20-L55)
 - [config.py (platform-gateway):23-131](file://products/platform-gateway/src/platform_gateway/core/config.py#L23-L131)
 
 **Section sources**
-- [SettingsView.tsx:18-26](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L18-L26)
-- [runtime.py (platform-gateway):9-13](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L9-L13)
+- [SettingsView.tsx:18-27](file://products/operator-portal/web-ui/app/src/views/control/SettingsView.tsx#L18-L27)
+- [runtime.py (platform-gateway):20-55](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py#L20-L55)
 - [config.py (platform-gateway):23-131](file://products/platform-gateway/src/platform_gateway/core/config.py#L23-L131)
 
 ## Performance Considerations
-- The Platform pane performs two lightweight GET requests on mount and caches results in local state; this keeps the UI responsive while reflecting live backend posture.
+- The Platform pane performs three lightweight GET requests on mount: two unauthenticated (health and runtime) and one authenticated (feature flags); this keeps the UI responsive while reflecting live backend posture.
 - Status labels use a small, deterministic mapping function to avoid repeated logic during render.
 - Build-time version constants eliminate runtime lookups for portal version and tech stack versions.
-
-[No sources needed since this section provides general guidance]
+- Feature flags are cached in local state after initial load, avoiding redundant authenticated requests.
 
 ## Troubleshooting Guide
 Common configuration issues visible or diagnosable via the Settings interface and related documentation:
@@ -300,6 +376,10 @@ Common configuration issues visible or diagnosable via the Settings interface an
   - Review policy grants and mutating tool activation checklist.
 - Audit events missing:
   - Check emitter *_AUDIT_SERVICE_URL and matching secrets; audit delivery is fire-and-forget and can degrade silently.
+- Feature flags section shows unavailable:
+  - Indicates missing `runtime:flags` policy grant or authentication failure.
+  - Verify user has appropriate role (`platform-admin`, `approver`, or `operator`).
+  - Check network connectivity to platform gateway and agent service.
 
 For detailed diagnostics and resolution steps, consult:
 - Configuration Reference: full environment variable map, cross-service dependency chains, and secret contracts.
@@ -310,4 +390,4 @@ For detailed diagnostics and resolution steps, consult:
 - [troubleshooting.md:1-800](file://docs/guides/troubleshooting.md#L1-L800)
 
 ## Conclusion
-The Settings interface provides operators with a clear, read-only view of identity, session, and platform state. The Platform pane is especially valuable for diagnosing configuration and runtime posture by combining build-time version constants with live backend signals. For deeper configuration details and step-by-step resolutions, refer to the configuration reference and troubleshooting guide linked above.
+The Settings interface provides operators with a clear, read-only view of identity, session, platform state, and deployment posture. The Platform pane is especially valuable for diagnosing configuration and runtime posture by combining build-time version constants with live backend signals and a curated feature-flag inventory. For deeper configuration details and step-by-step resolutions, refer to the configuration reference and troubleshooting guide linked above.

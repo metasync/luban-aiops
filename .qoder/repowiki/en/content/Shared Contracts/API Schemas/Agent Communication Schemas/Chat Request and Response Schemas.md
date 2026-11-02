@@ -4,14 +4,24 @@
 **Referenced Files in This Document**
 - [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
 - [agent-chat-response.schema.json](file://shared/shared-contracts/schemas/agent-chat-response.schema.json)
+- [model-catalog.schema.json](file://shared/shared-contracts/schemas/model-catalog.schema.json)
 - [chat-request.schema.json](file://shared/shared-contracts/schemas/chat-request.schema.json)
 - [chat-response.schema.json](file://shared/shared-contracts/schemas/chat-response.schema.json)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [api.py](file://products/agent-platform/src/agent_service/schemas/api.py)
+- [model_catalog.py](file://products/agent-platform/src/agent_service/services/model_catalog.py)
 - [spec.md](file://docs/specs/SPEC-002-agent-service-contract/spec.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated Agent Chat Request section to document the reserved 'auto' sentinel value for explicit auto-routing model selection
+- Added Model Catalog Schema section documenting the additive routing_available boolean field
+- Enhanced Model Selection Resolution section with auto sentinel behavior and precedence rules
+- Updated Example Requests and Responses section with auto routing examples
+- Added Auto Routing Behavior subsection under Architecture Overview
 
 ## Table of Contents
 1. Introduction
@@ -53,8 +63,9 @@ Routes --> Kernel
 - [routes.py:1-9](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1-L9)
 
 ## Core Components
-- Agent chat request (v2): message, optional session_id, input_modality, optional response_schema, optional model. Identity comes from headers.
+- Agent chat request (v2): message, optional session_id, input_modality, optional response_schema, optional model (including reserved 'auto' sentinel). Identity comes from headers.
 - Agent chat response (v2): session_id, request_id, content, optional status, optional structured_output, optional model.
+- Model catalog (v2): models array, default model id, and additive routing_available boolean indicating per-turn model routing capability.
 - Streaming events (v11): typed frames carrying deltas, tool invocations, confirmation requests/results, errors, and per-frame metadata such as model and evidence.
 
 Key behaviors:
@@ -62,16 +73,18 @@ Key behaviors:
 - Input modality is metadata only and never changes policy or HITL outcomes.
 - Model selection follows request > session-pinned > deploy-time default; unknown ids are refused with 4xx.
 - Structured output validation is requested via response_schema and returned when present.
+- Reserved 'auto' sentinel enables explicit per-turn model routing when routing_available=true.
 
 **Section sources**
 - [agent-chat-request.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-request.schema.json#L1-L35)
 - [agent-chat-response.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-response.schema.json#L1-L35)
+- [model-catalog.schema.json:1-47](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L47)
 - [agent-stream-event.schema.json:1-160](file://shared/shared-contracts/schemas/agent-stream-event.schema.json#L1-L160)
 - [v2.py:37-186](file://products/agent-platform/src/agent_service/schemas/v2.py#L37-L186)
 - [routes.py:246-270](file://products/agent-platform/src/agent_service/api/v2/routes.py#L246-L270)
 
 ## Architecture Overview
-The v2 chat surface is the single platform-owned boundary. Clients send a chat request or open a stream; the route validates inputs, resolves identity from headers, manages sessions, resolves the model, and either returns a final response or streams SSE frames.
+The v2 chat surface is the single platform-owned boundary. Clients send a chat request or open a stream; the route validates inputs, resolves identity from headers, manages sessions, resolves the model (including auto sentinel handling), and either returns a final response or streams SSE frames.
 
 ```mermaid
 sequenceDiagram
@@ -82,7 +95,8 @@ participant S as "Session store"
 C->>R : POST /api/v2/chat {message, session_id?, input_modality?, response_schema?, model?}
 R->>R : validate headers X-User-ID, x-request-id
 R->>S : ensure_session(session_id, user_id)
-R->>R : resolve_model(requested, pinned)
+R->>R : resolve_model(requested, pinned, routing_available)
+Note over R : Handle 'auto' sentinel for explicit routing
 R->>K : reply_text(message, session_id, user_name, bearer_token, response_schema, model_id, read_only?)
 K-->>R : content, structured_output?
 R-->>C : {session_id, request_id, content, status?, structured_output?, model?}
@@ -93,6 +107,20 @@ R-->>C : {session_id, request_id, content, status?, structured_output?, model?}
 - [routes.py:246-270](file://products/agent-platform/src/agent_service/api/v2/routes.py#L246-L270)
 - [v2.py:37-94](file://products/agent-platform/src/agent_service/schemas/v2.py#L37-L94)
 
+### Auto Routing Behavior
+The model selection system now supports a reserved 'auto' sentinel value that enables explicit per-turn model routing:
+
+- **Explicit 'auto'**: When `model="auto"` is sent in a request, it arms routing for that turn if `routing_available=true`, otherwise returns 422 error (fail-closed posture).
+- **Pinned 'auto'**: Sessions can be pinned to 'auto', which re-arms routing on subsequent turns while routing remains available, or degrades to default routing if routing becomes unavailable.
+- **Resolution precedence**: Explicit request ('auto' or concrete) > session-pinned ('auto' or concrete) > deploy-time default.
+- **Base model**: 'auto' resolves to the catalog's default model as its base, allowing the router to swap between candidates.
+- **Routing availability**: The `routing_available` boolean in the model catalog indicates whether per-turn routing is configured and enabled.
+
+**Section sources**
+- [routes.py:297-327](file://products/agent-platform/src/agent_service/api/v2/routes.py#L297-L327)
+- [routes.py:360-368](file://products/agent-platform/src/agent_service/api/v2/routes.py#L360-L368)
+- [model_catalog.py:50-53](file://products/agent-platform/src/agent_service/services/model_catalog.py#L50-L53)
+
 ## Detailed Component Analysis
 
 ### Agent Chat Request (v2)
@@ -100,12 +128,13 @@ R-->>C : {session_id, request_id, content, status?, structured_output?, model?}
 - session_id: optional string to continue an existing conversation; omitted to start a new session.
 - input_modality: enum text|voice, default text; metadata only, no effect on policy or HITL.
 - response_schema: optional JSON schema dict passed through to the kernel for structured output validation.
-- model: optional model id from GET /api/v2/models; resolution order is request model > session-pinned model > deploy-time default; unknown ids are refused with 4xx.
+- model: optional model id from GET /api/v2/models, or the reserved sentinel 'auto' for explicit per-turn model routing. Resolution order is request model > session-pinned model > deploy-time default; unknown ids are refused with 4xx. The 'auto' sentinel is accepted only when the catalog reports routing_available=true (otherwise 422), arms routing with the default as its base model, and is never itself a catalog model id.
 
 Implementation notes:
 - Pydantic model enforces types and constraints.
 - Route extracts identity from X-User-ID and correlation id from x-request-id.
-- Model resolution is centralized and fail-closed.
+- Model resolution is centralized and fail-closed, including 'auto' sentinel validation.
+- Reserved 'auto' sentinel is protected against collision with real model names.
 
 **Section sources**
 - [agent-chat-request.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-request.schema.json#L1-L35)
@@ -125,6 +154,14 @@ Implementation notes:
 - [agent-chat-response.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-response.schema.json#L1-L35)
 - [v2.py:76-94](file://products/agent-platform/src/agent_service/schemas/v2.py#L76-L94)
 - [routes.py:276-317](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L317)
+
+### Model Catalog Schema (v2)
+- models: array of selectable model entries, each containing id, label, provider, and default fields.
+- default: id of the default model, or null when no model is configured.
+- routing_available: additive boolean (SPEC-072 R-1) indicating true when per-turn model routing is configured (router enabled with a non-empty candidate map), so the portal may offer an 'Auto (routed)' choice. Optional; defaults to false. The 'auto' value is a reserved chat-request sentinel and is never included in the models[] array.
+
+**Section sources**
+- [model-catalog.schema.json:1-47](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L47)
 
 ### Streaming Events (v11)
 Streaming uses Server-Sent Events with typed frames:
@@ -159,6 +196,7 @@ These conventions are enforced at the route layer and documented alongside the s
 - v1 chat schemas use a response envelope with a response field and carry user_id/request_id in the body.
 - v2 simplifies the response envelope to content and moves identity into headers (X-User-ID, x-request-id).
 - v2 introduces structured output via response_schema and richer streaming events for tool execution and HITL bridging.
+- v2 adds the reserved 'auto' sentinel for explicit model routing and the additive routing_available field in the model catalog.
 - The platform-owned contract lives under /api/v2 and is the stable boundary; v1 is transitional and being retired.
 
 **Section sources**
@@ -166,6 +204,7 @@ These conventions are enforced at the route layer and documented alongside the s
 - [chat-response.schema.json:1-26](file://shared/shared-contracts/schemas/chat-response.schema.json#L1-L26)
 - [agent-chat-request.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-request.schema.json#L1-L35)
 - [agent-chat-response.schema.json:1-35](file://shared/shared-contracts/schemas/agent-chat-response.schema.json#L1-L35)
+- [model-catalog.schema.json:1-47](file://shared/shared-contracts/schemas/model-catalog.schema.json#L1-L47)
 - [api.py:36-47](file://products/agent-platform/src/agent_service/schemas/api.py#L36-L47)
 - [spec.md:27-47](file://docs/specs/SPEC-002-agent-service-contract/spec.md#L27-L47)
 
@@ -180,7 +219,7 @@ Below are example payloads conforming to the schemas. Replace placeholders with 
     - session_id: "<optional-session-id>"
     - input_modality: "text"
     - response_schema: {"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}
-    - model: "<model-id-from-/api/v2/models>"
+    - model: "<model-id-from-/api/v2/models>" OR "auto" for explicit routing
 
 - Synchronous chat response (v2)
   - Status: 200
@@ -193,21 +232,22 @@ Below are example payloads conforming to the schemas. Replace placeholders with 
     - model: "<resolved-model-id>"
 
 - Streaming chat request (v2)
-  - URL: GET /api/v2/chat/stream?message=...&session_id=...&input_modality=text&model=<id>
+  - URL: GET /api/v2/chat/stream?message=...&session_id=...&input_modality=text&model=<id-or-auto>
   - Headers: X-User-ID: "<operator-id>", x-request-id: "<correlation-id>"
   - Events: message_start, message_delta..., message_end, optional tool_call/tool_result, optional confirmation_request/confirmation_result, optional error.
 
-- Confirmation request event (stream)
-  - type: "confirmation_request"
-  - confirm_id: "<confirm-id>"
-  - pending_calls: [{"call_id":"...","tool_name":"...","parameters":{...},"risk_level":"write","action":"tools:mutate"}]
-  - approval_kind: "flow" or "action"
-  - flow_summary: {"skill_id":"...","origin":"...","title":"...","description":"...","flow_intent":"...","risk_class":"..."}
+- Model catalog response (v2)
+  - Status: 200
+  - Body:
+    - models: [{"id": "openai-gpt-4", "label": "GPT-4", "provider": "openai", "default": true}]
+    - default: "openai-gpt-4"
+    - routing_available: true (when per-turn routing is enabled)
 
-- Confirmation result event (stream)
-  - type: "confirmation_result"
-  - confirm_id: "<confirm-id>"
-  - status: "approved" | "denied" | "expired" | "interrupted"
+- Auto routing request (v2)
+  - Body:
+    - message: "Analyze system performance metrics."
+    - model: "auto" (explicitly opt into per-turn routing)
+  - Behavior: Arms routing for this turn if routing_available=true, otherwise returns 422 error.
 
 [No sources needed since these examples illustrate schema usage without quoting source lines]
 
@@ -216,6 +256,7 @@ Below are example payloads conforming to the schemas. Replace placeholders with 
   - Send POST /api/v2/chat with required headers and a valid message.
   - Handle structured_output when response_schema was provided.
   - Respect status and model fields for downstream telemetry.
+  - Use model="auto" for explicit per-turn routing when routing_available=true.
 
 - Streaming clients:
   - Open GET /api/v2/chat/stream with query parameters mirroring the request body fields.
@@ -228,7 +269,7 @@ Below are example payloads conforming to the schemas. Replace placeholders with 
   - 401 when X-User-ID is missing.
   - 409 when a parked confirmation blocks a new turn until resolved.
   - 410 when a confirmation has expired.
-  - 422 for unknown model ids or invalid request shapes.
+  - 422 for unknown model ids, invalid request shapes, or explicit 'auto' when routing is unavailable.
 
 **Section sources**
 - [routes.py:276-317](file://products/agent-platform/src/agent_service/api/v2/routes.py#L276-L317)
@@ -241,7 +282,7 @@ Below are example payloads conforming to the schemas. Replace placeholders with 
 The v2 chat endpoints depend on:
 - Header extraction for identity and correlation.
 - Session service for ensuring and pinning sessions and models.
-- Model catalog for resolving model ids.
+- Model catalog for resolving model ids and providing routing_available status.
 - Kernel adapter for executing turns and streaming events.
 - Event normalization to enforce the stream schema.
 
@@ -249,7 +290,7 @@ The v2 chat endpoints depend on:
 graph LR
 H["Headers<br/>X-User-ID, x-request-id"] --> R["Route handler"]
 R --> S["Session service"]
-R --> M["Model catalog"]
+R --> M["Model catalog<br/>(with routing_available)"]
 R --> K["Kernel adapter"]
 K --> E["Stream normalizer"]
 E --> C["Contract models"]
@@ -271,6 +312,7 @@ E --> C["Contract models"]
 - Tool result data is size-capped in the stream to avoid oversized frames.
 - Model resolution happens once per turn and is cached in session pins to minimize repeated lookups.
 - Unknown model ids fail early to prevent unnecessary work.
+- Auto sentinel resolution avoids unnecessary routing overhead when routing is unavailable.
 
 [No sources needed since this section provides general guidance]
 
@@ -280,6 +322,7 @@ Common issues and resolutions:
 - Parked confirmation blocking new turns: answer or expire the parked confirmation before sending another message; expect 409 until resolved.
 - Expired confirmation: re-initiate the interaction; expect 410 for expired confirmations.
 - Unknown model id: verify the model exists in GET /api/v2/models; unknown ids return 422.
+- Explicit 'auto' with routing unavailable: check routing_available in model catalog; explicit 'auto' requires routing to be enabled, otherwise returns 422.
 - Streaming anomalies: check event type and normalize unknown events to message_delta; inspect error frames for codes and messages.
 
 **Section sources**
@@ -290,6 +333,6 @@ Common issues and resolutions:
 - [routes.py:598-653](file://products/agent-platform/src/agent_service/api/v2/routes.py#L598-L653)
 
 ## Conclusion
-The v2 chat contract provides a clear, versioned boundary for operator-to-agent communication. It standardizes request/response envelopes, supports structured outputs, and exposes rich streaming events for tool execution and human-in-the-loop approvals. Clients should implement both synchronous and streaming paths, honor header-based identity, and handle parked confirmations and model resolution according to the documented rules.
+The v2 chat contract provides a clear, versioned boundary for operator-to-agent communication. It standardizes request/response envelopes, supports structured outputs, exposes rich streaming events for tool execution and human-in-the-loop approvals, and now includes explicit per-turn model routing via the reserved 'auto' sentinel. The additive routing_available field in the model catalog enables transparent feature-flag discovery. Clients should implement both synchronous and streaming paths, honor header-based identity, handle parked confirmations and model resolution according to the documented rules, and leverage the 'auto' sentinel for dynamic model routing when appropriate.
 
 [No sources needed since this section summarizes without analyzing specific files]
