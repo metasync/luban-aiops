@@ -15,7 +15,15 @@
 - [test_model_catalog.py](file://products/agent-platform/tests/test_model_catalog.py)
 - [test_model_discovery.py](file://products/agent-platform/tests/test_model_discovery.py)
 - [test_runtime_providers.py](file://products/agent-platform/tests/test_runtime_providers.py)
+- [runtime-secrets.example.env](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated DashScope provider section to reflect removal of deprecated qwen-turbo model
+- Added documentation for new qwen3.8 generation models (qwen3.8-flash, qwen3.8-27b)
+- Updated example environment configuration to show full representative current-generation catalog
+- Enhanced model series documentation with latest DashScope API offerings
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -37,7 +45,7 @@ The provider subsystem is organized under the agent-service package:
 - Provider adapters live under providers and implement a common base interface.
 - A registry maps provider names to adapter instances.
 - The model catalog builds a credential-gated list of selectable models from environment configuration and per-provider series.
-- Live model discovery periodically refreshes the catalog by querying each provider’s OpenAI-compatible /models endpoint with a fail-soft fallback ladder.
+- Live model discovery periodically refreshes the catalog by querying each provider's OpenAI-compatible /models endpoint with a fail-soft fallback ladder.
 - Runtime settings centralize configuration parsing, validation, and provider-specific option shapes.
 - Metrics expose observability hooks for discovery and request lifecycle.
 
@@ -205,6 +213,7 @@ AgentScopeProvider <|-- LubanProvider
   - Builds an OpenAIChatModel using OpenAICredential with optional organization and base URL overrides.
 - DashScopeProvider:
   - Curated series targets Qwen family; discovery filter excludes vision/translation/OCR variants beyond shared non-chat markers.
+  - **Updated**: Model series refreshed to current-generation lineup with removal of deprecated qwen-turbo and addition of qwen3.8 generation models.
   - Builds a DashScopeChatModel with parameters such as thinking budget and top_k.
 - DeepSeekProvider:
   - Curated series targets V4 family; discovery filter restricts to deepseek prefix.
@@ -219,6 +228,11 @@ Configuration and authentication:
 - Active profile falls back to AGENTSCOPE_* knobs for zero-change upgrades.
 - Luban requires both API key and base URL; missing base URL gates the provider out at catalog resolution time.
 
+**Updated** The DashScope provider now features an updated model series reflecting current DashScope API offerings:
+- Removed deprecated `qwen-turbo` model (no longer advertised, dated `qwen-turbo-0919` returns 404)
+- Added current-generation `qwen3.8` tier models: `qwen3.8-max`, `qwen3.8-flash`, `qwen3.8-27b`
+- Maintained backward compatibility with `qwen-plus`, `qwen-max`, `qwen3.7-plus`, `qwen3.7-flash`
+
 **Section sources**
 - [openai.py:9-50](file://products/agent-platform/src/agent_service/providers/openai.py#L9-L50)
 - [dashscope.py:13-64](file://products/agent-platform/src/agent_service/providers/dashscope.py#L13-L64)
@@ -228,7 +242,7 @@ Configuration and authentication:
 
 ### Model Catalog Management
 - Entries represent a provider + credentials + concrete model id, with a public view that omits secrets and base URLs.
-- Legacy provider-name aliases map bare provider names to that provider’s default model entry for backward compatibility.
+- Legacy provider-name aliases map bare provider names to that provider's default model entry for backward compatibility.
 - Duplicate model ids across providers are rejected at build time to enforce uniqueness.
 - Atomic swap: refresh_catalog rebuilds entries and aliases under a lock and replaces internal references so imported catalog objects remain valid.
 
@@ -310,11 +324,16 @@ end
   - All live /models calls use Authorization: Bearer tokens derived from the resolved API key.
   - Luban enforces bearer-only access to the operator-declared endpoint.
 
+**Updated** Example environment configuration now includes the full representative current-generation DashScope catalog:
+- `DASHSCOPE_MODEL_NAME=qwen3.8-max`
+- `DASHSCOPE_MODELS=qwen3.8-max,qwen3.8-flash,qwen3.8-27b`
+
 **Section sources**
 - [runtime_settings.py:247-411](file://products/agent-platform/src/agent_service/runtime_settings.py#L247-L411)
 - [runtime_settings.py:413-527](file://products/agent-platform/src/agent_service/runtime_settings.py#L413-L527)
 - [model_catalog.py:100-138](file://products/agent-platform/src/agent_service/services/model_catalog.py#L100-L138)
 - [test_runtime_providers.py:53-66](file://products/agent-platform/tests/test_runtime_providers.py#L53-L66)
+- [runtime-secrets.example.env:30-31](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env#L30-L31)
 
 ### Error Recovery Patterns
 - Discovery failures are fail-soft: network errors, unexpected envelopes, and Postgres unavailability are logged and skipped; the previous catalog remains in effect.
@@ -409,6 +428,7 @@ Common issues and resolutions:
 - Duplicate model ids: ensure model names are unique across configured providers; duplicates cause catalog build failure.
 - Discovery not updating: check AGENT_MODEL_DISCOVERY_ENABLED, network reachability to provider /models, and Postgres availability for last-good persistence.
 - Secrets exposure: verify public catalog view does not include api_key or base_url; tests assert these fields are omitted.
+- **Updated**: DashScope model deprecation: if encountering 404 errors for `qwen-turbo`, migrate to current-generation models like `qwen3.8-flash`, `qwen3.8-27b`, or `qwen3.8-max`.
 
 **Section sources**
 - [runtime_settings.py:413-421](file://products/agent-platform/src/agent_service/runtime_settings.py#L413-L421)
@@ -416,6 +436,7 @@ Common issues and resolutions:
 - [model_catalog.py:198-207](file://products/agent-platform/src/agent_service/services/model_catalog.py#L198-L207)
 - [model_discovery.py:161-199](file://products/agent-platform/src/agent_service/services/model_discovery.py#L161-L199)
 - [test_model_catalog.py:217-229](file://products/agent-platform/tests/test_model_catalog.py#L217-L229)
+- [dashscope.py:17-22](file://products/agent-platform/src/agent_service/providers/dashscope.py#L17-L22)
 
 ## Conclusion
 The multi-model provider system offers a robust, extensible foundation for integrating multiple LLM vendors. The base interface standardizes configuration and discovery filtering, the registry centralizes provider access, and the catalog plus discovery pipeline provide resilient runtime model selection. With clear configuration rules, fail-soft discovery, and comprehensive metrics, teams can safely add new providers, switch models dynamically, and monitor system health effectively.
@@ -449,9 +470,16 @@ The multi-model provider system offers a robust, extensible foundation for integ
   - Observe discovery refresh counters and model count gauges to detect failures and track catalog sizes.
   - Use HTTP RED metrics to correlate provider issues with request latency and error rates.
 
+- **Updated**: DashScope model migration:
+  - Migrate from deprecated `qwen-turbo` to current-generation models: `qwen3.8-flash`, `qwen3.8-27b`, `qwen3.8-max`
+  - Update environment configurations to use the full representative current-generation catalog
+  - Verify model availability through live discovery or curated series
+
 **Section sources**
 - [registry.py:9-29](file://products/agent-platform/src/agent_service/providers/registry.py#L9-L29)
 - [model_catalog.py:296-325](file://products/agent-platform/src/agent_service/services/model_catalog.py#L296-L325)
 - [model_discovery.py:233-279](file://products/agent-platform/src/agent_service/services/model_discovery.py#L233-L279)
 - [runtime_settings.py:247-411](file://products/agent-platform/src/agent_service/runtime_settings.py#L247-L411)
 - [metrics.py:202-224](file://products/agent-platform/src/agent_service/core/metrics.py#L202-L224)
+- [dashscope.py:17-31](file://products/agent-platform/src/agent_service/providers/dashscope.py#L17-L31)
+- [runtime-secrets.example.env:30-31](file://shared/platform-ops/gitops/runtime-profiles/default/runtime-secrets.example.env#L30-L31)
