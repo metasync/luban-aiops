@@ -2,16 +2,19 @@
 
 ## Status
 
-`proposed`
+`accepted`
 
 - date: 2026-11-01
+- accepted: 2026-11-03
 - deciders: workspace operator — the three load-bearing decisions (control-flow **option b**
   bounded read-only loop; **diagnose-before-act** autonomy ceiling with autonomous resolve
   deferred; role-scoped agents on the **same delegated token, narrowed per role**) were
-  ratified 2026-11-01. `proposed` because this drafted record itself awaits the operator's
-  review pass before `accepted`, mirroring SPEC-071's draft→approved flow. Acceptance would
-  ratify the architecture and unblock drafting the phased SPEC series; it authorizes no
-  runtime code, deployment, commit/push, version bump, or SPEC number.
+  ratified 2026-11-01. **Accepted 2026-11-03** on the operator's review pass, mirroring
+  SPEC-071's draft→approved flow. Acceptance ratifies the architecture and unblocks drafting
+  the phased SPEC series ([memo](../workspace/multi-agent-orchestration-spike.md) §7),
+  beginning with role-scoped identity & authority (§4.1); it authorizes no runtime code,
+  deployment, commit/push, version bump, or SPEC number on its own — the operator separately
+  directed opening that first spec (SPEC-073).
 - related specs: the phased series the [memo](../workspace/multi-agent-orchestration-spike.md)
   §7 sketches (not yet numbered) — role-scoped identity & authority, policy role axis,
   multi-agent audit & attribution, bounded autonomous diagnosis, v2 multi-agent contract;
