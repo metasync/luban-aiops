@@ -23,12 +23,10 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation of SPEC-072's "Auto (routed)" model selection capability layered on top of the v0.52.0 router kernel
-- Documented the routing_available signal, auto sentinel value handling, and portal UI integration
-- Updated architecture diagrams to reflect the new auto-routing flow and feature-flag transparency
-- Enhanced configuration reference with the complete SPEC-072 feature-flag inventory
-- Added troubleshooting guidance for auto-routing scenarios and feature-flag panel issues
-- Updated delivery status to reflect v0.53.0 completion with both SPEC-071 and SPEC-072 features
+- Updated delivery status to reflect the operator's decision to keep the router default-off/opt-in while confirming live dev-cluster provisioning works with `routing_available=true` and Auto (routed) functionality operational
+- Added documentation of the closed model-router backlog row and its resolution, including the measurement-gated enablement approach that was validated in the development cluster
+- Enhanced the conclusion section to clarify the current operational posture where both SPEC-071 and SPEC-072 are delivered but the router remains opt-in by default
+- Updated troubleshooting guidance to include scenarios for the auto-routing selector and feature-flag panel functionality
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -54,7 +52,7 @@ The router classifies the latest user input over named candidates drawn from the
 
 The spec was approved (2026-11-01), delivered in v0.52.0 (2026-11-01), and ships with the router disabled by default. Default-on is gated by R-3 routing-quality measurement, which achieved 100% accuracy across all valid classifiers tested. The implementation is now deployed in the development cluster via the `model-router-dev` runtime profile posture.
 
-**Updated**: SPEC-072 (v0.53.0) adds explicit "Auto (routed)" model selection capability layered on top of the v0.52.0 router kernel, including the routing_available signal, auto sentinel value handling, and portal UI integration, plus authenticated feature-flag transparency.
+**Updated**: The model-router backlog row has been closed, confirming the operator elected to keep the router default-off/opt-in. Live dev-cluster provisioning verified shows `routing_available=true` and Auto (routed) functionality working without requiring a global default flip. SPEC-072 (v0.53.0) adds explicit "Auto (routed)" model selection capability layered on top of the v0.52.0 router kernel, including the routing_available signal, auto sentinel value handling, and portal UI integration.
 
 **Section sources**
 - [spec.md:1-45](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L1-L45)
@@ -652,7 +650,7 @@ Common operational concerns and their prescribed handling:
 ## Conclusion
 SPEC-071 has been successfully delivered in v0.52.0 as a narrowly scoped, opt-in extension to the agent-platform kernel: per-turn model routing through AgentScope's `ModelRouterMiddleware`, wired behind `AGENTSCOPE_MODEL_ROUTER_ENABLED`, drawing candidates from the credential-gated catalog, and respecting `request > pinned > routed > default`. 
 
-**Updated**: SPEC-072 (v0.53.0) completes the operator experience by adding explicit "Auto (routed)" model selection and authenticated feature-flag transparency, making per-turn routing an intentional, pinnable choice rather than an invisible side effect.
+**Updated**: The model-router backlog row has been closed, confirming the operator elected to keep the router default-off/opt-in. Live dev-cluster provisioning verified shows `routing_available=true` and Auto (routed) functionality working without requiring a global default flip. SPEC-072 (v0.53.0) completes the operator experience by adding explicit "Auto (routed)" model selection and authenticated feature-flag transparency, making per-turn routing an intentional, pinnable choice rather than an invisible side effect.
 
 **Delivery Summary:**
 - ✅ Complete implementation with ModelRouterMiddleware integration
@@ -666,10 +664,11 @@ SPEC-071 has been successfully delivered in v0.52.0 as a narrowly scoped, opt-in
 - ✅ **Updated**: SPEC-072 auto-routing selector and feature-flag panel delivered
 - ✅ **Updated**: Portal UI integration with "Auto (routed)" selection
 - ✅ **Updated**: Authenticated feature-flag transparency for operators
+- ✅ **Updated**: Operator decision to keep router default-off/opt-in confirmed
 
 The most important boundary remains R-3: default-on is not authorized by approval. Any broader enablement must be justified by measured routing accuracy, latency, and classification-token cost. Until that gate clears, the feature should remain default-off and inert without a candidate map.
 
-**Current Status**: Router ships default-off in production code, but is actively deployed in the development cluster via the `model-router-dev` runtime profile posture, demonstrating the measurement-gated enablement approach. Both SPEC-071 and SPEC-072 are fully delivered and ready for operator use.
+**Current Status**: Router ships default-off in production code, but is actively deployed in the development cluster via the `model-router-dev` runtime profile posture, demonstrating the measurement-gated enablement approach. Both SPEC-071 and SPEC-072 are fully delivered and ready for operator use, with the router remaining opt-in by default as confirmed by the closed backlog row.
 
 **Section sources**
 - [spec.md:33-45](file://docs/specs/SPEC-071-agentscope-model-router/spec.md#L33-L45)

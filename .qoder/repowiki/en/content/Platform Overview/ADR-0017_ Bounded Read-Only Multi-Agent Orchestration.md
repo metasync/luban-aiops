@@ -13,7 +13,15 @@
 - [secret_params.py](file://products/agent-platform/src/agent_service/services/secret_params.py)
 - [tool-gateway app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [tool-gateway config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
+- [SPEC-073 role-scoped agent identity](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md)
 </cite>
+
+## Update Summary
+**Changes Made**   
+- Updated ADR-0017 status from `proposed` to `accepted` (2026-11-03)
+- Added reference to SPEC-073 as the first concrete implementation spec
+- Updated acceptance rationale and downstream implications
+- Enhanced section sources with SPEC-073 references where relevant
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,19 +35,25 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-ADR-0017 is a proposed architecture decision that opens the platform to **bounded, read-only multi-agent orchestration** while preserving every existing mutation gate. It does not adopt an agentscope orchestration surface as shipped; instead, it defines the control-flow model the platform may admit and the identity, policy, audit, and contract boundaries any downstream implementation must respect.
+ADR-0017 is an **accepted** architecture decision that formally ratifies bounded read-only multi-agent orchestration while preserving every existing mutation gate. It does not adopt an agentscope orchestration surface as shipped; instead, it defines the control-flow model the platform may admit and the identity, policy, audit, and contract boundaries any downstream implementation must respect.
 
-The record’s status is `proposed`. The three load-bearing decisions — bounded read-only loop, diagnose-before-act autonomy ceiling, and role-scoped agents on the same delegated token narrowed per role — were ratified by the workspace operator on 2026-11-01, but acceptance awaits the operator’s review pass before promotion to `accepted`. Acceptance would authorize drafting the phased SPEC series described in the related memo; it authorizes no runtime code, deployment, commit/push, version bump, or SPEC number.
+The record's status is `accepted` as of 2026-11-03. The three load-bearing decisions — bounded read-only loop, diagnose-before-act autonomy ceiling, and role-scoped agents on the same delegated token narrowed per role — were ratified by the workspace operator on 2026-11-01 and formally accepted on 2026-11-03. Acceptance authorizes drafting the phased SPEC series described in the related memo, beginning with SPEC-073 (role-scoped identity & authority). It authorizes no runtime code, deployment, commit/push, version bump, or additional SPEC numbers beyond what the operator separately directed.
+
+**Updated** Status changed from `proposed` to `accepted` on 2026-11-03, formally ratifying the architecture and unblocking the phased multi-agent SPEC series.
+
+**Section sources**   
+- [ADR-0017:3-17](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L3-L17)
 
 ## Project Structure
-This document is primarily an architectural decision record supported by a prior exploration memo and several existing platform components that define the mutation gates, HITL bridging, browser tool sets, and step-budget discipline the ADR references.
+This document is primarily an architectural decision record supported by a prior exploration memo and several existing platform components that define the mutation gates, HITL bridging, browser tool sets, and step-budget discipline the ADR references. The acceptance of ADR-0017 has now triggered the opening of SPEC-073 as the first concrete implementation artifact.
 
 ```mermaid
 graph TB
-ADR["ADR-0017<br/>Bounded read-only multi-agent orchestration"]
+ADR["ADR-0017<br/>Bounded read-only multi-agent orchestration<br/>Status: accepted"]
 SPIKE["Multi-agent orchestration spike<br/>exploration & gate scoring"]
 COMP_ADR["ADR-0011<br/>Composition carries no authority"]
 SPEC64["SPEC-064<br/>GoalPipeline reopen trigger"]
+SPEC073["SPEC-073<br/>Role-scoped agent identity<br/>(first concrete spec)"]
 HITL["HITL confirmations<br/>parking & resume"]
 FLOW["Flow approvals<br/>browser write set"]
 GW_APP["Tool-gateway app<br/>step budget wiring"]
@@ -47,6 +61,7 @@ GW_CFG["Tool-gateway config<br/>GATEWAY_BROWSER_FLOW_MAX_STEPS"]
 ADR --> SPIKE
 ADR --> COMP_ADR
 ADR --> SPEC64
+ADR --> SPEC073
 ADR --> HITL
 ADR --> FLOW
 ADR --> GW_APP
@@ -54,10 +69,11 @@ GW_APP --> GW_CFG
 ```
 
 **Diagram sources**
-- [ADR-0017:1-134](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L1-L134)
+- [ADR-0017:1-17](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L1-L17)
 - [multi-agent-orchestration-spike.md:1-329](file://docs/workspace/multi-agent-orchestration-spike.md#L1-L329)
 - [ADR-0011:1-119](file://docs/adr/0011-composition-carries-no-authority.md#L1-L119)
 - [SPEC-064 spec:31-41](file://docs/specs/SPEC-064-agentscope-compression-and-goal-pipeline/spec.md#L31-L41)
+- [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
 - [hitl_confirmations.py:1-12](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L12)
 - [flow_approvals.py:43-53](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L43-L53)
 - [tool-gateway app.py:200-210](file://products/tool-gateway/src/tool_gateway/app.py#L200-L210)
@@ -154,11 +170,11 @@ StepBudget --> End
 - [ADR-0017:65-69](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L65-L69)
 
 ### Gate Scoring and Rejected Alternatives
-The exploration memo scored three agentscope surfaces against SPEC-018’s four-point adoption gate and found all three failing as shipped:
+The exploration memo scored three agentscope surfaces against SPEC-018's four-point adoption gate and found all three failing as shipped:
 
 | Surface | Primary failure |
 |---|---|
-| `TeamPipeline` | Platform-owned leader loop is a second orchestration edge; `TeamAssign` is not read-only; member activity falls outside the leader’s transcript unless re-attributed; per-participant parking conflicts with the single-turn v2 frame. |
+| `TeamPipeline` | Platform-owned leader loop is a second orchestration edge; `TeamAssign` is not read-only; member activity falls outside the leader's transcript unless re-attributed; per-participant parking conflicts with the single-turn v2 frame. |
 | `A2AAgent` | Remote peer owns its own toolkit and reasoning loop; Luban cannot enforce deny-by-default policy, delegated-token identity, or read-only posture. |
 | `GoalPipeline` | Executor-until-verifier retry loop is autonomous multi-step execution beside the governed dispatch path. |
 
@@ -256,7 +272,7 @@ Hint --> Render
 - [secret_params.py:77-142](file://products/agent-platform/src/agent_service/services/secret_params.py#L77-L142)
 
 ### Step Budget Discipline and Bounded Autonomy
-ADR-0017 ties the bounded read-only loop to the same discipline used for browser flows: an iteration/step budget mirroring `GATEWAY_BROWSER_FLOW_MAX_STEPS`. The tool-gateway reads this setting and wires it into the browser connector’s flow budget. Any bounded autonomous diagnosis must therefore establish its own equivalent guard rather than relying on unbounded model-driven delegation.
+ADR-0017 ties the bounded read-only loop to the same discipline used for browser flows: an iteration/step budget mirroring `GATEWAY_BROWSER_FLOW_MAX_STEPS`. The tool-gateway reads this setting and wires it into the browser connector's flow budget. Any bounded autonomous diagnosis must therefore establish its own equivalent guard rather than relying on unbounded model-driven delegation.
 
 ```mermaid
 flowchart TD
@@ -278,22 +294,47 @@ Exhausted --> |No| Continue["Continue bounded flow"]
 - [ADR-0017:52-58](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L52-L58)
 
 ### SPEC-064 Reopen Trigger and Kept-Out Surfaces
-SPEC-064 recorded the `GoalPipeline` reopen condition as “a concrete autonomous-remediation product need.” ADR-0017 acknowledges that the need is now live, but the reopening belongs to the ADR decision about admissible control flow, not to wiring `GoalPipeline`. The compression surface (`CompressContext`) was assessed separately and recommended for opt-in adoption if it clears the four-point gate; `GoalPipeline` remains kept out.
+SPEC-064 recorded the `GoalPipeline` reopen condition as "a concrete autonomous-remediation product need." ADR-0017 acknowledges that the need is now live, but the reopening belongs to the ADR decision about admissible control flow, not to wiring `GoalPipeline`. The compression surface (`CompressContext`) was assessed separately and recommended for opt-in adoption if it clears the four-point gate; `GoalPipeline` remains kept out.
 
 **Section sources**
 - [SPEC-064 spec:31-41](file://docs/specs/SPEC-064-agentscope-compression-and-goal-pipeline/spec.md#L31-L41)
 - [agentscope compression goal pipeline spike:1-6](file://docs/workspace/agentscope-compression-goal-pipeline-spike.md#L1-L6)
 - [ADR-0017:30-44](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L30-L44)
 
+### Downstream Implementation: SPEC-073 Role-Scoped Agent Identity
+With ADR-0017 now accepted, the first concrete implementation artifact is SPEC-073, which focuses on role-scoped identity and authority. This spec addresses the mechanism by which per-role agents carry narrowed authority on the delegated-token/broker model, building on the existing `_ensure_toolkit(bearer_token, read_only)` seam in the runtime kernel.
+
+SPEC-073 establishes an inert substrate where every requirement is provable by unit/contract tests over the role-narrowing and identity-preservation seams with no orchestration caller and no change to the deployed single-agent path. The spec introduces a closed, platform-owned agent-role vocabulary (`diagnostician`, `planner`/`orchestrator`, `executor`) bound to an agent-construction context, immutable for the life of that context, and never model-chosen.
+
+```mermaid
+flowchart TD
+ADR17["ADR-0017 Accepted<br/>Role-scoped agents on same token"] --> SPEC073["SPEC-073<br/>Role-scoped identity & authority"]
+SPEC073 --> ROLE_ENUM["Closed agent-role enum<br/>diagnostician/planner/orchestrator/executor"]
+SPEC073 --> TOOLKIT_NARROWING["Per-role toolkit narrowing<br/>on delegated token"]
+SPEC073 --> POLICY_AXIS["Policy role axis<br/>authorization matrix"]
+ROLE_ENUM --> IMPLEMENTATION["Runtime substrate<br/>no orchestration caller"]
+TOOLKIT_NARROWING --> IMPLEMENTATION
+POLICY_AXIS --> IMPLEMENTATION
+```
+
+**Diagram sources**
+- [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
+- [SPEC-073 spec:93-109](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L93-L109)
+
+**Section sources**
+- [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
+- [SPEC-073 spec:93-109](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L93-L109)
+
 ## Dependency Analysis
-ADR-0017 depends on existing platform invariants more than it introduces new runtime dependencies.
+ADR-0017 depends on existing platform invariants more than it introduces new runtime dependencies. With its acceptance, it now gates the phased multi-agent SPEC series.
 
 ```mermaid
 graph LR
-ADR["ADR-0017"] --> ADR11["ADR-0011<br/>composition authority"]
+ADR["ADR-0017<br/>Accepted"] --> ADR11["ADR-0011<br/>composition authority"]
 ADR --> HITL["HITL confirmation registry"]
 ADR --> GW["Tool-gateway policy + audit"]
 ADR --> SPEC64["SPEC-064 reopen trigger"]
+ADR --> SPEC073["SPEC-073<br/>role-scoped identity"]
 ADR --> SPIKE["Multi-agent spike"]
 ADR --> CONTRACT["v2 stream schema<br/>additive, versioned, last"]
 ```
@@ -301,6 +342,7 @@ ADR --> CONTRACT["v2 stream schema<br/>additive, versioned, last"]
 **Diagram sources**
 - [ADR-0017:15-23](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L15-L23)
 - [ADR-0017:85-88](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L85-L88)
+- [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
 
 Key dependency relationships:
 
@@ -310,6 +352,7 @@ Key dependency relationships:
 | SPEC-020/030/031 | HITL confirmation path remains the sole mutation gate. |
 | SPEC-037/038/063 | Signed at-most-one dispatch remains the sole mutation execution path. |
 | SPEC-064 | Provides the reopened `GoalPipeline` trigger but does not authorize adoption. |
+| SPEC-073 | First concrete implementation spec for role-scoped identity & authority. |
 | Tool-gateway | Supplies deny-by-default policy, redaction, evidence, audit, and step-budget discipline. |
 | v2 stream schema | Must remain additive and versioned; no agentscope types leak through. |
 
@@ -355,6 +398,8 @@ Common pitfalls grounded in the source:
 - [ADR-0017:92-107](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L92-L107)
 
 ## Conclusion
-ADR-0017 is a controlled relaxation of ADR-0011’s no-control-flow rule, limited to a bounded read-only orchestration loop. It preserves the platform’s governed mutation path, denies adoption of agentscope orchestration surfaces as shipped, and defers autonomous resolve and external A2A federation until later, evidence-backed decisions. On acceptance, it unblocks a phased SPEC series covering role-scoped identity and authority, policy role axis, multi-agent audit and attribution, bounded autonomous diagnosis, and finally an additive, versioned v2 multi-agent contract.
+ADR-0017 is a controlled relaxation of ADR-0011's no-control-flow rule, limited to a bounded read-only orchestration loop. It preserves the platform's governed mutation path, denies adoption of agentscope orchestration surfaces as shipped, and defers autonomous resolve and external A2A federation until later, evidence-backed decisions. 
+
+**Updated** On acceptance (2026-11-03), ADR-0017 unblocks a phased SPEC series covering role-scoped identity and authority (SPEC-073), policy role axis, multi-agent audit and attribution, bounded autonomous diagnosis, and finally an additive, versioned v2 multi-agent contract. The first concrete implementation artifact, SPEC-073, focuses on establishing the role-scoped identity and authority substrate that enables all subsequent phases.
 
 [No sources needed since this section summarizes without analyzing specific files]
