@@ -2,9 +2,13 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-11-03
+- approved: 2026-11-03 (all six Open Questions ratified by the operator; **OQ-1 resolved as a
+  three-value closed enum** — `diagnostician`, `orchestrator`, `executor` — collapsing ADR-0017
+  Decision 4's "`planner`/`orchestrator`" into one `orchestrator` value, with **no `approver`
+  role**; see `## Open Questions — resolved`)
 - release slice: the **multi-agent / bounded-autonomy program** — phase 2 of the phased SPEC
   series [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
   ([memo](../../workspace/multi-agent-orchestration-spike.md) §7). No target version is pinned
@@ -33,11 +37,12 @@
   [SPEC-038](../SPEC-038-isolated-execution-worker/spec.md) /
   [SPEC-063](../SPEC-063-crash-safe-execution/spec.md).
 
-> SDD note: `spec.md` is drafted first and carries **six Open Questions** that block `approved`
-> (see `## Open Questions`). Approval authorizes the [plan](plan.md) / [tasks](tasks.md) — not
-> yet written — and lets implementation **begin**. It does **not** authorize a merge,
-> commit/push, deployment, or a version bump; those stay separate boundaries, and the standing
-> "review before any merge/deploy" constraint governs. This is phase 2 of a five-spec series:
+> SDD note: `spec.md` was drafted first and carried **six Open Questions**, all ratified by the
+> operator **2026-11-03** (see `## Open Questions — resolved`). Approval authorizes the
+> [plan](plan.md) / [tasks](tasks.md) — now written and binding — and lets implementation
+> **begin**. It does **not** authorize a merge, commit/push, deployment, or a version bump; those
+> stay separate boundaries, and the standing "review before any merge/deploy" constraint governs.
+> This is phase 2 of a five-spec series:
 > the **policy role axis** (§4.2), **audit & attribution** (§4.3), **bounded autonomous
 > diagnosis** (§5), and the **v2 multi-agent contract** (§4.5) are separate later specs and are
 > explicitly out of scope here.
@@ -45,7 +50,7 @@
 ## Summary
 
 Build the **role-scoped identity & authority substrate** the ADR-0017 phased series needs first:
-a closed, platform-owned **agent-role** concept (`diagnostician`, `planner`/`orchestrator`,
+a closed, platform-owned **agent-role** concept (`diagnostician`, `orchestrator`,
 `executor`) that narrows a sub-agent's authority **at the toolkit layer** while every role rides
 the **same** gateway-forwarded delegated token (ADR-0004) — no per-role broker identity, no
 second identity edge, no new principal. It preserves "on whose behalf" end-to-end (the human
@@ -93,7 +98,8 @@ acceptance).
 ### R-1: A closed, platform-owned agent-role vocabulary
 
 Introduce an **agent-role** as a closed, platform-owned enum — `diagnostician`,
-`planner`/`orchestrator`, `executor` — bound to an agent-construction context, **immutable** for
+`orchestrator`, `executor` (three values; `orchestrator` collapses ADR-0017 Decision 4's
+"`planner`/`orchestrator`" into one role — OQ-1) — bound to an agent-construction context, **immutable** for
 the life of that context (the SPEC-056 `session_type` posture: fixed at birth, never promoted or
 converted in place), and **never model-chosen** (a role is a platform fact, not derivable from
 model output, tool output, or any request field the model controls). No agentscope type appears
@@ -113,7 +119,7 @@ Acceptance criteria:
 Generalize `_ensure_toolkit`'s `read_only` narrowing into a **per-role toolkit restriction** on
 the same code path and the same per-token cache (keyed by `(token, role)`): a `diagnostician`
 sees **read-level tools only** (reusing `_filter_read_only`); an `executor` may see mutating
-tools (which still park on the existing HITL confirmation — R-4); a `planner`/`orchestrator`
+tools (which still park on the existing HITL confirmation — R-4); an `orchestrator`
 holds **no direct tool authority** (it delegates; it does not itself invoke tools). Narrowing is
 **subtractive only** — a role's toolkit is always a subset of what the underlying token's
 `roles` already permit at the gateway; phase 2 never *grants* a tool the token could not reach.
@@ -122,7 +128,7 @@ Acceptance criteria:
 
 - Given one delegated token, a `diagnostician` context's toolkit contains no mutating tool; an
   `executor` context's toolkit is a superset of the diagnostician's read tools and may contain
-  mutating tools; a `planner` context's toolkit is empty of gateway tools.
+  mutating tools; an `orchestrator` context's toolkit is empty of gateway tools.
 - The cache is split per `(token, role)` and only when a role could change the built toolkit —
   an unrole-scoped (today's single-agent) turn keeps one cache entry, byte-identical to current
   behavior.
@@ -163,7 +169,7 @@ projection of role provenance is deferred to phase 4 (audit) and phase 6 (contra
 Acceptance criteria:
 
 - An executor-staged mutation produces a parked confirmation carrying the staging role; a
-  `diagnostician` or `planner` context **cannot** stage a mutation at all (no mutating tool in
+  `diagnostician` or `orchestrator` context **cannot** stage a mutation at all (no mutating tool in
   its toolkit, R-2), asserted by a test.
 - The staged mutation dispatches only through the existing signed path with a human decider
   distinct from the requester; the self-approval block (SPEC-030) still fires for a role-staged
@@ -248,38 +254,55 @@ Acceptance criteria:
 - living state docs to update on delivery: `identity-and-authorization-design.md`, the ADR-0017
   consequence note, the roadmap multi-agent backlog row, and `docs/specs/README.md` (index).
 
-## Open Questions
+## Open Questions — resolved
 
-Unresolved points that block `approved`; must be empty before approval.
+All six Open Questions were ratified by the operator **2026-11-03** (the SPEC-072 pattern). Each
+resolution is binding on the [plan](plan.md) / [tasks](tasks.md).
 
-- **OQ-1 — role vocabulary.** Is the three-role set (`diagnostician`, `planner`/`orchestrator`,
-  `executor`) the right phase-2 vocabulary, and is `planner` a distinct role from `orchestrator`
-  or one combined role (ADR-0017 Decision 4 names them together as "`planner`/`orchestrator`")?
-  Does phase 2 need an `approver`-facing role, or is the human approver never an agent (so no
-  role)?
-- **OQ-2 — where the role binds and its lifetime.** Does the role bind on a new
-  agent-construction context carried in a contextvar beside `DELEGATED_TOKEN`, and must it
-  survive a park/resume under the SPEC-017 snapshot (i.e., is a role part of resumable kernel
-  state), or is it re-derived per turn from the (phase-5) orchestration frame?
-- **OQ-3 — narrowing granularity.** Is read/write-tier narrowing (`_filter_read_only`)
-  sufficient for `diagnostician`, or does a role need an explicit tool-family allowlist
-  (observability / k8s / ServiceNow / log reads) beyond the tier? And is **toolkit-only**
-  narrowing a sufficient phase-2 safety boundary given the gateway still enforces per the token's
-  `roles` (with the policy role axis deferred to phase 3) — or must a minimal gateway-side role
-  check land in phase 2 to avoid a toolkit-widening regression between phases?
-- **OQ-4 — provenance shape.** Does the staging agent-role stay **kernel-internal** in phase 2
-  (recorded on the confirmation/parked record only, no contract field), or does an OQ-3/phase-4
-  dependency require an additive optional field on `execution-request.schema.json` now (the
-  ADR-0010 `approval_kind` precedent)? This decides whether phase 2 touches a contract at all.
-- **OQ-5 — inertness proof.** What is the acceptance evidence that the substrate is correct with
-  no orchestration caller — unit/contract tests over the narrowing + identity-preservation seams
-  (the SPEC-070 inert-substrate precedent) plus a `make verify` green with the deployed path
-  byte-identical? Confirm no live-cluster or browser evidence is required at phase 2.
-- **OQ-6 — executor staging mechanism.** Does the `executor` role's "may *stage* a mutation"
-  reuse the existing HITL park + signed dispatch **entirely** (ADR-0017 Decision 2: no new
-  enforcement machinery), so phase 2 adds zero new mutation-path code beyond the toolkit
-  narrowing and the kernel-internal provenance label? Confirm no new gate, worker, or claim
-  type is introduced.
+- **OQ-1 — role vocabulary. RESOLVED:** a **three-value closed enum** — `diagnostician`,
+  `orchestrator`, `executor`. ADR-0017 Decision 4's "`planner`/`orchestrator`" collapses into
+  **one** `orchestrator` value: at the toolkit layer the two are indistinguishable (both hold no
+  mutation authority and no direct tools) and phase 2 has no caller to exercise a plan-vs-delegate
+  split; a closed enum grows additively if phase 5's bounded loop later needs the distinction.
+  **No `approver` role** — ADR-0017 Decision 2 fixes the approver as a *distinct human, never an
+  agent*, so an approver-facing agent role would contradict the autonomy ceiling.
+- **OQ-2 — where the role binds and its lifetime. RESOLVED:** the role binds as a **process-local
+  ContextVar beside `DELEGATED_TOKEN`** (`AGENT_ROLE`), set by the kernel around a role-scoped
+  turn, mirroring `REQUESTER_IDENTITY`/`CHAT_SESSION_ID`. It is **not** part of the SPEC-017
+  resumable snapshot — exactly like `VerifiedHuman`, which is deliberately non-serializable — so a
+  park/resume **re-derives** it per turn from the (phase-5) orchestration frame rather than
+  persisting a stale role. The toolkit cache key extends the existing `::read-only` suffix to
+  `::{role}`. An absent role yields today's byte-identical single-agent path.
+- **OQ-3 — narrowing granularity. RESOLVED:** **read/write-tier narrowing is sufficient** for
+  phase 2 — `diagnostician` reuses `_filter_read_only` (`risk_level == "read"`); **no tool-family
+  allowlist** (a family allowlist is a *policy* concern for phase 3's role axis, and adding it now
+  would pre-empt the phase-3 authorization-matrix work). **Toolkit-only narrowing is a sufficient
+  phase-2 boundary** because phase 2 is inert (no caller, R-5) and narrowing is *subtractive-only*
+  (R-2) — the gateway's deny-by-default policy on the token's `roles` stays the real enforcement
+  edge, so the toolkit can never widen authority. **No gateway-side role check lands in phase 2**
+  (that is phase 3); the between-phases widening risk is closed by R-2's subtractive-only
+  invariant, R-5's fail-closed posture, and a guard test — not a gateway change.
+- **OQ-4 — provenance shape. RESOLVED:** role provenance stays **kernel-internal** in phase 2 —
+  recorded on the parked confirmation record only, **no field added to
+  `execution-request.schema.json`** (byte-unchanged). ADR-0017 Decision 6 defers any contract
+  change to *last* (phase 6); and unlike `approval_kind` (which the gateway enforces
+  one-directionally), a phase-2 role label has **no enforcement consumer yet** (policy axis =
+  phase 3, audit projection = phase 4). Phase 4 adds the additive optional field when a real
+  consumer exists, following the `approval_kind` pattern.
+- **OQ-5 — inertness proof. RESOLVED:** acceptance evidence is **unit + contract tests** over the
+  role-narrowing and identity-preservation seams, a **green root `make verify`**, a **guard test**
+  asserting no role-scoped path is reachable from the deployed `/api/v2/chat`/`/chat/stream`
+  handlers (R-5), and a **no-diff assertion** on the single-agent turn. **No live-cluster or
+  browser evidence at phase 2** (nothing deployed to observe), mirroring SPEC-070's separation of
+  development acceptance from the live integration milestone; live evidence becomes relevant at
+  phase 5.
+- **OQ-6 — executor staging mechanism. RESOLVED:** the `executor` role **reuses the existing HITL
+  park + signed dispatch entirely**. Its mutating call parks on the *same* confirmation card
+  (SPEC-020/030/031) and, once a **distinct human** approves, dispatches through the *same* signed
+  at-most-one-dispatch worker (SPEC-037/038/063). Phase 2 adds **zero new mutation-path code**
+  beyond the toolkit narrowing (R-2) and the kernel-internal provenance label (R-4) — **no new
+  gate, worker, claim type, or schema**. The SPEC-030 self-approval block fires unchanged because
+  the executor still acts *as the same human requester* (R-3).
 
 ## Changelog
 
@@ -287,3 +310,9 @@ Unresolved points that block `approved`; must be empty before approval.
   phased multi-agent series, opened on the operator's acceptance of ADR-0017 (2026-11-03) and
   direction to begin the program. Six Open Questions block `approved`; `plan.md` / `tasks.md`
   are authored on approval.
+- 2026-11-03: **approved** — the operator ratified all six Open Questions (OQ-1 resolved as a
+  three-value closed enum collapsing `planner`/`orchestrator` into `orchestrator`, no `approver`
+  role; OQ-2…OQ-6 as recommended). Status `draft` → `approved`; the role vocabulary in R-1…R-4
+  updated to `orchestrator`; the [plan](plan.md) and [tasks](tasks.md) are authored and binding.
+  Approval authorizes implementation to *begin* — not a merge, commit/push, deployment, or version
+  bump; those stay separate gates.
