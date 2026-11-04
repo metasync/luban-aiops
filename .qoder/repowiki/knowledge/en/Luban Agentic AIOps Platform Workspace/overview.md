@@ -1,1 +1,1 @@
-Multi-product workspace for the Luban agentic AIOps platform, coordinating nine Python services plus an operator SPA around shared contracts, GitOps overlays, and spec-driven delivery.
+Multi-product workspace for the Luban agentic AIOps platform, orchestrating nine Python services plus an operator portal around shared contracts, GitOps overlays, and spec-driven delivery.

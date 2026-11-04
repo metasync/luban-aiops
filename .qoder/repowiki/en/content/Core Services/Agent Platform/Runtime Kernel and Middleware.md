@@ -15,17 +15,19 @@
 - [test_runtime_settings.py](file://products/agent-platform/tests/test_runtime_settings.py)
 - [test_secret_delivery_integration.py](file://products/agent-platform/tests/test_secret_delivery_integration.py)
 - [test_model_router.py](file://products/agent-platform/tests/test_model_router.py)
+- [agent_role.py](file://products/agent-platform/src/agent_service/services/agent_role.py)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [test_agent_role.py](file://products/agent-platform/tests/test_agent_role.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for per-turn model routing capabilities via ModelRouterMiddleware integration
-- Documented new _build_middlewares() method with routing support and candidate management
-- Documented cache key splitting for routed vs non-routed agents using ::routed suffix
-- Documented response attribution tracking with effective model identification and model_selected_by field
-- Updated architecture diagrams to reflect the new routing middleware integration
-- Added detailed examples of routing configuration and behavior patterns
-- Enhanced existing sections to cover routing precedence (request > pinned > routed > default)
+- Added comprehensive documentation for per-role toolkit narrowing via `_narrow_for_role()` method with three role types (diagnostician, executor, orchestrator)
+- Documented role-scoped cache keys that split toolkit caching by `(token, role)` tuples while maintaining backward compatibility
+- Documented staged-by-role provenance tracking on parked confirmations for authority attribution
+- Documented fail-closed authority enforcement ensuring unknown roles result in empty toolkits
+- Enhanced existing sections to cover role context propagation and process-local scope management
+- Updated architecture diagrams to reflect the new role-based toolkit narrowing system
 
 ## Table of Contents
 1. Introduction
@@ -40,16 +42,16 @@
 10. Appendices
 
 ## Introduction
-This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating, evidence emission, LLM token usage tracking, and **per-turn model routing**, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
+This document explains the Agent Platform's runtime kernel and middleware system that coordinates agent execution, request context propagation, and cross-cutting concerns such as observability, security, and performance. It covers how the kernel composes middlewares for permission gating, evidence emission, LLM token usage tracking, **per-turn model routing**, and **per-role toolkit narrowing**, how request IDs flow through tracing, and how metrics are collected. It also provides guidance for implementing custom middleware, extending the request pipeline, debugging runtime issues, and scaling for high-throughput scenarios.
 
-**Updated** The runtime kernel now features sophisticated per-turn model routing capabilities through ModelRouterMiddleware integration, enabling dynamic model selection based on content classification while maintaining strict precedence rules (request > pinned > routed > default). The kernel includes enhanced _build_middlewares() method with routing support, candidate management for multiple model options, cache key splitting for routed vs non-routed agents, and comprehensive response attribution tracking. Additionally, the kernel maintains per-stream delivery buffers for gated secret delivery workflows, integrates the CompressContext tool as a kernel-local operation, and incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking.
+**Updated** The runtime kernel now features sophisticated per-role toolkit narrowing capabilities through the `_narrow_for_role()` method, enabling role-based authority restriction while maintaining strict subtractive-only semantics. The kernel includes role-scoped cache keys that split toolkit caching by `(token, role)` tuples, staged-by-role provenance tracking on parked confirmations, and fail-closed authority enforcement that ensures unknown roles result in empty toolkits. Additionally, the kernel maintains per-stream delivery buffers for gated secret delivery workflows, integrates the CompressContext tool as a kernel-local operation, incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking, and adds comprehensive per-turn model routing capabilities through ModelRouterMiddleware integration.
 
 ## Project Structure
 The runtime kernel lives under the agent-service package and is composed of:
-- A central kernel orchestrating agent lifecycle, toolkit caching, model switching, per-turn routing, and streaming turns.
-- A middleware stack that enforces permissions, emits evidence frames, tracks LLM token usage, and handles model routing.
+- A central kernel orchestrating agent lifecycle, toolkit caching, model switching, per-turn routing, per-role toolkit narrowing, and streaming turns.
+- A middleware stack that enforces permissions, emits evidence frames, tracks LLM token usage, handles model routing, and supports role-based authority restriction.
 - Cross-cutting services for request context resolution, telemetry (OpenTelemetry), and Prometheus metrics.
-- Configuration via environment-driven runtime settings including routing candidates and classifier models.
+- Configuration via environment-driven runtime settings including routing candidates, role vocabulary, and classifier models.
 
 ```mermaid
 graph TB
@@ -65,6 +67,7 @@ ROUTES["API Routes<br/>routes.py"]
 BUF["Delivery Buffers<br/>STREAM_PENDING_DELIVERIES<br/>PENDING_RELEASE_DELIVERIES"]
 COMP["CompressContext Tool<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED"]
 ROUTER["ModelRouterMiddleware<br/>Per-turn Routing"]
+ROLE["AgentRole System<br/>agent_role.py"]
 end
 APP --> RC
 APP --> MET
@@ -76,6 +79,7 @@ KERNEL --> SET
 KERNEL --> BUF
 KERNEL --> COMP
 KERNEL --> ROUTER
+KERNEL --> ROLE
 RC --> TEL
 ```
 
@@ -88,6 +92,7 @@ RC --> TEL
 - [metrics.py:52-73](file://products/agent-platform/src/agent_service/core/metrics.py#L52-L73)
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
 - [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
 
 **Section sources**
 - [app.py:49-76](file://products/agent-platform/src/agent_service/app.py#L49-L76)
@@ -98,13 +103,15 @@ RC --> TEL
 - [metrics.py:52-73](file://products/agent-platform/src/agent_service/core/metrics.py#L52-L73)
 - [runtime_settings.py:136-184](file://products/agent-platform/src/agent_service/runtime_settings.py#L136-L184)
 - [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
 
 ## Core Components
-- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, evidence persistence, and **per-turn model routing**. **Updated** Now includes per-stream delivery buffers for gated secret delivery workflows, CompressContext tool integration, and ModelRouterMiddleware integration with candidate management.
+- AgentKernel: Builds and caches agents per session, composes the middleware stack, manages toolkit discovery and caching per delegated token, handles model switching, structured output, streaming events, evidence persistence, **per-turn model routing**, and **per-role toolkit narrowing**. **Updated** Now includes per-stream delivery buffers for gated secret delivery workflows, CompressContext tool integration, ModelRouterMiddleware integration with candidate management, and role-scoped toolkit narrowing via `_narrow_for_role()`.
 - GatewayPermissionMiddleware: Enforces a platform allow-list for auto-approved read-only tools, always allows kernel-local task tools, and routes other tool invocations to explicit ASK for operator confirmation; supports browser flow unlock for approved mutating flows. **Updated** Outbound HTTP requests now require explicit operator confirmation by default. **Updated** CompressContext tool is registered as kernel-local and always allowed.
 - ToolEvidenceMiddleware: Emits tool_call and tool_result evidence frames for gateway-backed tools during streaming, with bounded data summaries and optional full payloads, and redacts sensitive parameters. **Updated** Now intercepts secrets.generate_password calls and implements deferred delivery mechanism using per-stream buffers.
 - **TokenUsageMiddleware**: Records provider-reported LLM token usage as a metric via the `on_model_call` hook, always-on with no opt-in knob, streaming-aware, and pure observation without cost calculation.
 - **ModelRouterMiddleware**: Provides per-turn model routing capabilities, classifying user input to select from configured candidate models while respecting precedence rules.
+- **AgentRole System**: Provides closed vocabulary for role-based authority restriction with three values (diagnostician, executor, orchestrator), process-local context management, and fail-closed validation.
 - Request Context: Resolves x-request-id by preferring inbound header, then current OTel trace_id, then generating a UUID.
 - Telemetry: Optional OpenTelemetry push pipeline for traces, metrics, and logs; integrates FastAPI and HTTPX instrumentation.
 - Metrics: Always-on Prometheus surface with RED middleware and /metrics endpoint; includes counters/gauges for sessions, chat requests, store backends, evidence writes, audit emissions, model discovery, and LLM token usage.
@@ -114,9 +121,12 @@ RC --> TEL
 - [runtime_kernel.py:212-235](file://products/agent-platform/src/agent_service/runtime_kernel.py#L212-L235)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 - [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
 - [kernel_middleware.py:151-193](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L151-L193)
 - [kernel_middleware.py:282-398](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L282-L398)
 - [kernel_middleware.py:636-741](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L636-L741)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [agent_role.py:70-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L120)
 - [request_context.py:8-19](file://products/agent-platform/src/agent_service/core/request_context.py#L8-L19)
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
 - [metrics.py:23-73](file://products/agent-platform/src/agent_service/core/metrics.py#L23-L73)
@@ -125,7 +135,7 @@ RC --> TEL
 - [runtime_settings.py:265-278](file://products/agent-platform/src/agent_service/runtime_settings.py#L265-L278)
 
 ## Architecture Overview
-The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions, emit evidence frames, track LLM token usage, and handle per-turn model routing. Observability is enabled via optional OTel and always-on Prometheus metrics. **Updated** The architecture now includes per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics, CompressContext tool integration for optional context compression, TokenUsageMiddleware for streaming-aware LLM token tracking, and ModelRouterMiddleware for intelligent model selection based on content classification.
+The runtime kernel sits at the center of agent execution. Requests enter FastAPI, where logging and metrics are recorded, and request IDs are resolved. The kernel builds or reuses an Agent instance per session, composes middlewares, and executes turns either as blocking replies or streaming events. Middlewares enforce permissions, emit evidence frames, track LLM token usage, handle per-turn model routing, and support per-role toolkit narrowing. Observability is enabled via optional OTel and always-on Prometheus metrics. **Updated** The architecture now includes per-stream delivery buffers that enable gated secret delivery workflows with reveal-on-commit semantics, CompressContext tool integration for optional context compression, TokenUsageMiddleware for streaming-aware LLM token tracking, ModelRouterMiddleware for intelligent model selection based on content classification, and AgentRole system for role-based authority restriction with process-local context management.
 
 ```mermaid
 sequenceDiagram
@@ -133,6 +143,7 @@ participant Client as "Client"
 participant App as "FastAPI app<br/>app.py"
 participant Routes as "API Routes<br/>routes.py"
 participant RC as "Request Context<br/>request_context.py"
+participant Role as "AgentRole System"
 participant Kernel as "AgentKernel<br/>runtime_kernel.py"
 participant Perm as "GatewayPermissionMiddleware"
 participant Evidence as "ToolEvidenceMiddleware"
@@ -147,7 +158,10 @@ Routes->>RC : resolve_request_id(x-request-id)
 Routes->>Routes : _resolve_model(model, session.model)
 Routes->>Routes : Determine routing_allowed
 Routes->>Kernel : stream_events / reply_text + routing_allowed
+Kernel->>Role : current_agent_role()
+Role-->>Kernel : role value or None
 Kernel->>Kernel : ensure_agent(session_id, bearer_token, model_id, routing_allowed)
+Kernel->>Kernel : _ensure_toolkit() with role-scoped cache key
 Kernel->>Perm : on_check_permission(tool)
 Perm-->>Kernel : ALLOW or ASK
 Kernel->>Evidence : on_acting(tool_call)
@@ -170,18 +184,21 @@ Routes-->>Client : SSE or response + model_selected_by
 - [routes.py:358-411](file://products/agent-platform/src/agent_service/api/v2/routes.py#L358-L411)
 - [request_context.py:8-19](file://products/agent-platform/src/agent_service/core/request_context.py#L8-L19)
 - [runtime_kernel.py:662-697](file://products/agent-platform/src/agent_service/runtime_kernel.py#L662-L697)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
 - [kernel_middleware.py:195-279](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L195-L279)
 - [kernel_middleware.py:309-388](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L309-L388)
 - [kernel_middleware.py:683-696](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L683-L696)
+- [agent_role.py:88-100](file://products/agent-platform/src/agent_service/services/agent_role.py#L88-L100)
 
 ## Detailed Component Analysis
 
 ### AgentKernel
 Responsibilities:
 - Agent lifecycle: build, cache, and reuse per session; LRU-bounded cache; serializes concurrent creation to avoid memory loss.
-- Toolkit management: discovers tools from the tool-gateway per delegated token; caches per token; filters mutating tools when HITL bridging is disabled; supports read-only toolkits for automated diagnostics.
+- Toolkit management: discovers tools from the tool-gateway per delegated token; caches per token; filters mutating tools when HITL bridging is disabled; supports read-only toolkits for automated diagnostics; **narrowing per role** via `_narrow_for_role()`.
 - Model switching: resolves model id via catalog; rebuilds agent when bound model changes; restores persisted state.
 - **Per-turn model routing**: manages routing configuration, candidate models, and effective model attribution; splits cache keys for routed vs non-routed agents; tracks routed candidate names and maps them back to catalog model ids.
+- **Per-role toolkit narrowing**: applies role-based restrictions to discovered toolsets; diagnostician sees only read-level tools; executor sees full set; orchestrator sees no gateway tools; unknown roles fail closed to empty toolkit.
 - Streaming and evidence: sets request-scoped evidence sink around streamed turns; persists evidence frames best-effort; flushes streaming prose redactor tails on terminal events. **Updated** Manages per-stream delivery buffers for gated secret delivery workflows and CompressContext tool integration.
 - Structured output: passes schema to agent and returns validated structured output when requested.
 - Observability integration: records metrics for evidence writes and agent state errors; emits audit events via configured service.
@@ -198,6 +215,7 @@ Key behaviors verified by tests:
 - **Updated** Per-stream delivery buffer management for gated secret delivery workflows.
 - **Updated** CompressContext tool registration and configuration via ContextConfig.compression_tool_enabled.
 - **Updated** Per-turn model routing with candidate management, cache key splitting, and response attribution.
+- **Updated** Per-role toolkit narrowing with role-scoped cache keys and subtractive-only semantics.
 
 ```mermaid
 flowchart TD
@@ -230,6 +248,7 @@ DrainDeliveries --> End
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
 - [runtime_kernel.py:560-686](file://products/agent-platform/src/agent_service/runtime_kernel.py#L560-L686)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
 - [test_runtime_kernel.py:219-298](file://products/agent-platform/tests/test_runtime_kernel.py#L219-L298)
 - [test_runtime_kernel.py:301-552](file://products/agent-platform/tests/test_runtime_kernel.py#L301-L552)
 - [test_runtime_kernel.py:652-683](file://products/agent-platform/tests/test_runtime_kernel.py#L652-L683)
@@ -540,6 +559,104 @@ RestoreModel --> Attribute["Attribute turn to effective model"]
 - [test_model_router.py:1-200](file://products/agent-platform/tests/test_model_router.py#L1-L200)
 - [test_model_router.py:349-412](file://products/agent-platform/tests/test_model_router.py#L349-L412)
 
+### Per-Role Toolkit Narrowing
+**New Section** The enhanced runtime kernel implements sophisticated per-role toolkit narrowing capabilities through the `_narrow_for_role()` method, enabling role-based authority restriction while maintaining strict subtractive-only semantics.
+
+Key components:
+- **AgentRole System**: Closed vocabulary with exactly three values: `diagnostician`, `executor`, `orchestrator`
+- **Process-Local Context**: Role binding via `AGENT_ROLE` ContextVar, never part of durable snapshots or wire protocols
+- **Role-Scoped Cache Keys**: Toolkit caching splits by `(token, role)` tuples while maintaining backward compatibility for unscoped turns
+- **Subtractive-Only Semantics**: Role toolkits are always subsets of unscoped toolkits, never widening authority
+- **Fail-Closed Enforcement**: Unknown roles result in empty toolkits, never wider postures
+
+Role behaviors:
+- **Diagnostician**: Read-level tools only (reuses `_filter_read_only`)
+- **Executor**: Full discovered set (mutating tools still park on HITL)
+- **Orchestrator**: No direct gateway tools (delegates, invokes nothing)
+- **Unknown Roles**: Empty toolkit (fail-closed to most restrictive posture)
+
+Configuration and usage:
+- Process-local context via `agent_role_scope()` context manager
+- Role binding mirrors `DELEGATED_TOKEN` pattern
+- Phase 2 ships inert: no orchestration caller binds a role
+- Backward compatible: unscoped turns keep byte-identical behavior
+
+```mermaid
+flowchart TD
+ToolkitDiscovery["Discover Tools"] --> FilterMutating["_filter_mutating_for_hitl()"]
+FilterMutating --> FilterReadOnly{"read_only flag?"}
+FilterReadOnly --> |Yes| ApplyReadOnly["_filter_read_only()"]
+FilterReadOnly --> |No| CheckRole{"role bound?"}
+ApplyReadOnly --> CheckRole
+CheckRole --> |Yes| NarrowForRole["_narrow_for_role()"]
+CheckRole --> |No| BuildToolkit["Build Toolkit"]
+NarrowForRole --> Diagnostician{"role == DIAGNOSTICIAN?"}
+Diagnostician --> |Yes| ReadOnlyTools["Read-level tools only"]
+Diagnostician --> |No| Executor{"role == EXECUTOR?"}
+Executor --> |Yes| FullTools["Full discovered set"]
+Executor --> |No| Orchestrator{"role == ORCHESTRATOR?"}
+Orchestrator --> |Yes| NoTools["Empty toolkit"]
+Orchestrator --> |No| FailClosed["Empty toolkit (fail-closed)"]
+ReadOnlyTools --> BuildToolkit
+FullTools --> BuildToolkit
+NoTools --> BuildToolkit
+FailClosed --> BuildToolkit
+```
+
+**Diagram sources**
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+
+**Section sources**
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [agent_role.py:70-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L120)
+- [test_agent_role.py:129-193](file://products/agent-platform/tests/test_agent_role.py#L129-L193)
+- [test_agent_role.py:276-299](file://products/agent-platform/tests/test_agent_role.py#L276-L299)
+
+### Staged-by-Role Provenance Tracking
+**New Section** The enhanced runtime kernel implements staged-by-role provenance tracking on parked confirmations for authority attribution while maintaining contract compatibility.
+
+Key components:
+- **PendingConfirmation.staged_by_role**: Optional field storing the plain agent-role string that staged this parked mutation
+- **Process-Local Capture**: Role provenance captured from `current_agent_role_value()` at park time
+- **Kernel-Internal Only**: Never persisted to durable card records, never added to wire schemas, never exposed in phase 2 contracts
+- **Backward Compatible**: Defaults to `None` for unscoped single-agent path, maintaining byte-identical behavior
+
+Provenance characteristics:
+- **Ephemeral Storage**: Lives only in memory during confirmation lifecycle
+- **Plain String Values**: Uses simple strings ("diagnostician", "executor", "orchestrator") rather than enum types
+- **Unscoped Default**: Unscoped parks leave `staged_by_role` as `None`
+- **Contract Safety**: No changes to `execution-request.schema.json` or `agent-stream-event.schema.json`
+
+Implementation details:
+- Field added to `PendingConfirmation` dataclass with `repr=False` to exclude from debug output
+- Captured via `current_agent_role_value()` when role is bound
+- Never passed to `make_record()` function, keeping durable records unchanged
+- Tests verify contract schemas remain unchanged and no role fields appear in JSON serialization
+
+```mermaid
+flowchart TD
+ParkTime["At Park Time"] --> CheckRole{"Role bound?"}
+CheckRole --> |Yes| CaptureRole["Capture current_agent_role_value()"]
+CheckRole --> |No| LeaveNone["Leave staged_by_role = None"]
+CaptureRole --> SetField["Set PendingConfirmation.staged_by_role"]
+LeaveNone --> MemoryOnly["Memory-only field<br/>Never persisted"]
+SetField --> MemoryOnly
+MemoryOnly --> ContractSafe["Contract-safe:<br/>No schema changes"]
+```
+
+**Diagram sources**
+- [hitl_confirmations.py:101-111](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L111)
+- [agent_role.py:93-100](file://products/agent-platform/src/agent_service/services/agent_role.py#L93-L100)
+
+**Section sources**
+- [hitl_confirmations.py:101-111](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L111)
+- [agent_role.py:93-100](file://products/agent-platform/src/agent_service/services/agent_role.py#L93-L100)
+- [test_agent_role.py:234-270](file://products/agent-platform/tests/test_agent_role.py#L234-L270)
+
 ### Request Context and Tracing Integration
 - Request ID resolution prefers inbound x-request-id, falls back to current OTel trace_id when tracing is enabled, otherwise generates a UUID.
 - Telemetry setup initializes providers and instrumentations when OTEL_ENABLED is true; fail-open on setup errors.
@@ -598,6 +715,7 @@ The kernel depends on:
 - Stores for agent state, evidence, execution records, confirmations, and approvals.
 - Audit emitter for durable audit trail.
 - Middleware base classes from AgentScope for permission, acting, model call hooks, and **model routing**.
+- **AgentRole system** for process-local role context and closed vocabulary validation.
 
 ```mermaid
 graph LR
@@ -611,6 +729,7 @@ Kernel --> DeliveryBuffers["Delivery Buffers"]
 Kernel --> CompressContext["CompressContext Tool"]
 Kernel --> TokenTracking["TokenUsageMiddleware"]
 Kernel --> ModelRouter["ModelRouterMiddleware"]
+Kernel --> AgentRole["AgentRole System"]
 ```
 
 **Diagram sources**
@@ -619,6 +738,7 @@ Kernel --> ModelRouter["ModelRouterMiddleware"]
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [kernel_middleware.py:30-37](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L30-L37)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
 
 **Section sources**
 - [runtime_kernel.py:9-67](file://products/agent-platform/src/agent_service/runtime_kernel.py#L9-L67)
@@ -626,10 +746,12 @@ Kernel --> ModelRouter["ModelRouterMiddleware"]
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
 - [kernel_middleware.py:30-37](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L30-L37)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
 
 ## Performance Considerations
 - Agent cache: LRU-bounded per-session cache reduces rebuild overhead; concurrent access serialized to prevent memory loss.
 - Toolkit caching: Per-delegated-token caching avoids repeated discovery; empty discovery results intentionally not cached to recover from transient failures.
+- **Role-scoped toolkit caching**: Splits cache by `(token, role)` tuples only when role is bound; unscoped turns maintain single cache entry for byte-identical behavior.
 - Evidence framing: Bounded data_summary and optional full data prevent large payloads from degrading streams; oversized payloads omitted from frames.
 - Streaming redaction: Terminal event flushing ensures complete text delivery without buffering artifacts.
 - Observability overhead: OTel push pipeline is opt-in; Prometheus metrics use bounded labels and lightweight counters/histograms.
@@ -639,6 +761,7 @@ Kernel --> ModelRouter["ModelRouterMiddleware"]
 - **Updated** CompressContext tool: Optional context compression reduces memory usage for long conversations; disabled by default to maintain backward compatibility; when enabled, operates efficiently without external network calls.
 - **Updated** TokenUsageMiddleware: Pure observation middleware with minimal overhead; streaming-aware design ensures accurate token counting without impacting stream performance; bounded label cardinality prevents metric explosion.
 - **Updated** Model routing: Opt-in feature with minimal overhead when disabled; classifier calls are separate from agent model calls; cache key splitting prevents unnecessary agent duplication; fail-soft operation ensures routing errors don't impact turn completion.
+- **Updated** Role narrowing: Subtractive-only filtering adds minimal overhead; role-scoped cache keys prevent toolkit leakage while maintaining single-entry behavior for unscoped turns; fail-closed unknown roles result in empty toolkits without additional computation.
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
@@ -653,21 +776,24 @@ Common issues and diagnostics:
 - **Updated** CompressContext configuration issues: Verify AGENTSCOPE_COMPRESS_CONTEXT_ENABLED is set correctly and AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2; check for startup validation errors indicating invalid configuration.
 - **Updated** Token usage tracking issues: Verify agent_llm_tokens_total metrics are appearing on /metrics endpoint; check that provider/model labels are bounded and no high-cardinality identifiers are leaking.
 - **Updated** Model routing issues: Check AGENTSCOPE_MODEL_ROUTER_ENABLED, AGENTSCOPE_MODEL_ROUTER_MODEL, and AGENTSCOPE_MODEL_ROUTER_CANDIDATES configuration; verify routing precedence (request > pinned > routed > default); monitor effective model attribution in logs.
+- **Updated** Role toolkit narrowing issues: Verify role context is properly bound via `agent_role_scope()`; check that role-scoped cache keys are working correctly; monitor that unknown roles result in empty toolkits (fail-closed); ensure subtractive-only semantics are maintained.
 - Telemetry misconfiguration: OTel setup failures are logged but do not block requests; verify OTEL_ENABLED and endpoint configuration.
 
 **Section sources**
 - [runtime_kernel.py:236-289](file://products/agent-platform/src/agent_service/runtime_kernel.py#L236-L289)
 - [runtime_kernel.py:539-582](file://products/agent-platform/src/agent_service/runtime_kernel.py#L539-L582)
 - [runtime_kernel.py:627-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L627-660)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
 - [kernel_middleware.py:195-279](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L195-L279)
 - [kernel_middleware.py:636-741](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L636-L741)
+- [agent_role.py:70-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L120)
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
 - [metrics.py:156-185](file://products/agent-platform/src/agent_service/core/metrics.py#L156-L185)
 
 ## Conclusion
-The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, LLM token usage tracking, **per-turn model routing**, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads), resilience (best-effort persistence, fail-open telemetry), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
+The runtime kernel provides a robust, configurable foundation for agent execution with strong separation of concerns: permission gating, evidence emission, LLM token usage tracking, **per-turn model routing**, **per-role toolkit narrowing**, request context propagation, and observability. Its design emphasizes safety (deny-by-default permissions, bounded payloads, subtractive-only role narrowing), resilience (best-effort persistence, fail-open telemetry, fail-closed role enforcement), and scalability (per-session caching, per-token toolkit caching, streaming). Operators can tune behavior via environment-driven settings and extend the pipeline through supported middleware hooks.
 
-**Updated** The enhanced runtime kernel now includes sophisticated per-stream delivery buffers that enable secure gated secret delivery workflows with reveal-on-commit semantics, integrates the CompressContext tool as a kernel-local operation for optional context compression, incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking, and adds comprehensive per-turn model routing capabilities through ModelRouterMiddleware integration. The model routing system provides intelligent model selection based on content classification while maintaining strict precedence rules (request > pinned > routed > default), fail-soft operation that never hard-fails turns on routing errors, and precise response attribution tracking. The TokenUsageMiddleware provides pure observation of provider-reported token usage via the `on_model_call` hook, recording `agent_llm_tokens_total{provider,model,direction}` metrics with bounded label cardinality and streaming-aware usage extraction from terminal chunks. The CompressContext tool provides agent-driven context summarization while maintaining strict safety guarantees: it never parks on the ASK gate, performs no external access, and requires explicit opt-in via AGENTSCOPE_COMPRESS_CONTEXT_ENABLED with validation ensuring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2. The enhanced default system prompt significantly improves operational request handling by ensuring models consult skills.search FIRST for any request to act on named systems, accounts, or targets. This prevents anti-fabrication refusals and promotes better operational workflows by prioritizing skill-based guidance over model-generated procedures. The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
+**Updated** The enhanced runtime kernel now includes sophisticated per-stream delivery buffers that enable secure gated secret delivery workflows with reveal-on-commit semantics, integrates the CompressContext tool as a kernel-local operation for optional context compression, incorporates TokenUsageMiddleware as part of the default always-on middlewares for streaming-aware LLM token tracking, adds comprehensive per-turn model routing capabilities through ModelRouterMiddleware integration, and implements per-role toolkit narrowing via the `_narrow_for_role()` method. The model routing system provides intelligent model selection based on content classification while maintaining strict precedence rules (request > pinned > routed > default), fail-soft operation that never hard-fails turns on routing errors, and precise response attribution tracking. The TokenUsageMiddleware provides pure observation of provider-reported token usage via the `on_model_call` hook, recording `agent_llm_tokens_total{provider,model,direction}` metrics with bounded label cardinality and streaming-aware usage extraction from terminal chunks. The CompressContext tool provides agent-driven context summarization while maintaining strict safety guarantees: it never parks on the ASK gate, performs no external access, and requires explicit opt-in via AGENTSCOPE_COMPRESS_CONTEXT_ENABLED with validation ensuring AGENTSCOPE_CONTEXT_TRIGGER_RATIO > 0.2. The per-role toolkit narrowing system provides role-based authority restriction with three closed values (diagnostician, executor, orchestrator), process-local context management, role-scoped cache keys that split by `(token, role)` tuples, staged-by-role provenance tracking on parked confirmations, and fail-closed enforcement that ensures unknown roles result in empty toolkits. The subtractive-only semantics guarantee that role toolkits are always subsets of unscoped toolkits, never widening authority. The enhanced default system prompt significantly improves operational request handling by ensuring models consult skills.search FIRST for any request to act on named systems, accounts, or targets. This prevents anti-fabrication refusals and promotes better operational workflows by prioritizing skill-based guidance over model-generated procedures. The security posture has been strengthened with hardened defaults that require explicit operator confirmation for outbound HTTP requests, providing defense-in-depth against potential SSRF vulnerabilities while maintaining operational flexibility through additive configuration.
 
 ## Appendices
 
@@ -684,6 +810,7 @@ Guidance grounded in existing patterns:
 - **Updated** For kernel-local tools like CompressContext, register them in KERNEL_LOCAL_TOOL_NAMES to ensure they're always allowed and don't park on the ASK gate.
 - **Updated** For model interaction observation, follow TokenUsageMiddleware pattern using on_model_call hook with streaming-aware response handling.
 - **Updated** For model routing, consider ModelRouterMiddleware integration for intelligent model selection based on content classification.
+- **Updated** For role-based authority restriction, use the AgentRole system with `agent_role_scope()` context manager and `_narrow_for_role()` method for subtractive-only toolkit narrowing.
 
 **Section sources**
 - [kernel_middleware.py:151-193](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L151-L193)
@@ -691,6 +818,8 @@ Guidance grounded in existing patterns:
 - [kernel_middleware.py:490-544](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L490-L544)
 - [kernel_middleware.py:636-741](file://products/agent-platform/src/agent_service/services/kernel_middleware.py#L636-L741)
 - [runtime_kernel.py:462-496](file://products/agent-platform/src/agent_service/runtime_kernel.py#L462-L496)
+- [agent_role.py:103-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L103-L120)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
 
 ### Extending the Request Pipeline
 - Add HTTP-level middleware in the FastAPI app for logging, metrics, or auth before routing.
@@ -700,11 +829,13 @@ Guidance grounded in existing patterns:
 - **Updated** Consider kernel-local tool patterns for internal operations that should never park on the ASK gate.
 - **Updated** Utilize on_model_call hook for observing model interactions similar to TokenUsageMiddleware implementation.
 - **Updated** Integrate ModelRouterMiddleware for intelligent model selection based on content classification while respecting precedence rules.
+- **Updated** Use AgentRole system for role-based authority restriction with process-local context management and subtractive-only toolkit narrowing.
 
 **Section sources**
 - [app.py:55-76](file://products/agent-platform/src/agent_service/app.py#L55-L76)
 - [request_context.py:8-19](file://products/agent-platform/src/agent_service/core/request_context.py#L8-L19)
 - [telemetry.py:69-117](file://products/agent-platform/src/agent_service/core/telemetry.py#L69-L117)
+- [agent_role.py:103-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L103-L120)
 
 ### Debugging Runtime Issues
 - Inspect runtime_metadata and configuration_hint to validate provider and model configuration.
@@ -715,6 +846,7 @@ Guidance grounded in existing patterns:
 - **Updated** For CompressContext issues: Check AGENTSCOPE_COMPRESS_CONTEXT_ENABLED and AGENTSCOPE_CONTEXT_TRIGGER_RATIO configuration, verify startup validation passes, and ensure the tool is registered as kernel-local.
 - **Updated** For token usage tracking issues: Verify agent_llm_tokens_total metrics appear on /metrics endpoint, check provider/model label cardinality, and ensure streaming responses are properly handled.
 - **Updated** For model routing issues: Check AGENTSCOPE_MODEL_ROUTER_ENABLED, AGENTSCOPE_MODEL_ROUTER_MODEL, and AGENTSCOPE_MODEL_ROUTER_CANDIDATES configuration; verify routing precedence is working correctly; monitor effective model attribution in logs and responses.
+- **Updated** For role toolkit narrowing issues: Verify role context is properly bound via `agent_role_scope()`, check role-scoped cache keys are working correctly, monitor that unknown roles result in empty toolkits (fail-closed), and ensure subtractive-only semantics are maintained.
 
 **Section sources**
 - [runtime_kernel.py:236-289](file://products/agent-platform/src/agent_service/runtime_kernel.py#L236-L289)
@@ -723,6 +855,8 @@ Guidance grounded in existing patterns:
 - [test_kernel_middleware.py:161-360](file://products/agent-platform/tests/test_kernel_middleware.py#L161-L360)
 - [test_kernel_middleware.py:508-736](file://products/agent-platform/tests/test_kernel_middleware.py#L508-L736)
 - [test_kernel_middleware.py:1396-1530](file://products/agent-platform/tests/test_kernel_middleware.py#L1396-L1530)
+- [agent_role.py:70-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L120)
+- [test_agent_role.py:129-193](file://products/agent-platform/tests/test_agent_role.py#L129-L193)
 
 ### Managing the Auto-Allow List
 
@@ -927,3 +1061,82 @@ export AGENTSCOPE_MODEL_ROUTER_ENABLED=false
 - [routes.py:378-384](file://products/agent-platform/src/agent_service/api/v2/routes.py#L378-L384)
 - [test_model_router.py:1-200](file://products/agent-platform/tests/test_model_router.py#L1-L200)
 - [test_model_router.py:349-412](file://products/agent-platform/tests/test_model_router.py#L349-L412)
+
+### Per-Role Toolkit Narrowing Configuration Reference
+**New Section** Configuration and behavior reference for the per-role toolkit narrowing system:
+
+**Role Vocabulary:**
+- **diagnostician**: Read-level tools only (reuses `_filter_read_only`)
+- **executor**: Full discovered set (mutating tools still park on HITL)
+- **orchestrator**: No direct gateway tools (delegates, invokes nothing)
+- **unknown roles**: Empty toolkit (fail-closed to most restrictive posture)
+
+**Process-Local Context Management:**
+- **agent_role_scope()**: Context manager for binding roles around turns
+- **AGENT_ROLE**: ContextVar holding current role (default: None for unscoped)
+- **current_agent_role()**: Returns current role or None
+- **current_agent_role_value()**: Returns plain string value or None
+
+**Cache Key Strategy:**
+- **Role-scoped keys**: `(token, role)` tuples for separate toolkit caching
+- **Backward compatible**: Unscoped turns maintain single cache entry
+- **Subtractive-only**: Role toolkits are always subsets of unscoped toolkits
+
+**Behavioral Characteristics:**
+- **Subtractive-only semantics**: Role narrowing never widens authority
+- **Fail-closed enforcement**: Unknown roles result in empty toolkits
+- **Process-local scope**: Role context never part of durable snapshots or wire protocols
+- **Phase 2 inertness**: No orchestration caller binds roles in deployed code
+
+**Usage Pattern:**
+```python
+from agent_service.services.agent_role import agent_role_scope, AgentRole
+
+with agent_role_scope(AgentRole.DIAGNOSTICIAN):
+    # Toolkit will contain only read-level tools
+    toolkit = await kernel._ensure_toolkit(bearer_token)
+    
+with agent_role_scope(AgentRole.EXECUTOR):
+    # Toolkit will contain full discovered set
+    toolkit = await kernel._ensure_toolkit(bearer_token)
+```
+
+**Section sources**
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [agent_role.py:70-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L120)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
+- [test_agent_role.py:129-193](file://products/agent-platform/tests/test_agent_role.py#L129-L193)
+- [test_agent_role.py:276-299](file://products/agent-platform/tests/test_agent_role.py#L276-L299)
+
+### Staged-by-Role Provenance Reference
+**New Section** Configuration and behavior reference for the staged-by-role provenance tracking system:
+
+**Field Characteristics:**
+- **PendingConfirmation.staged_by_role**: Optional string field storing role provenance
+- **Memory-only storage**: Never persisted to durable card records
+- **Kernel-internal only**: Never added to wire schemas or contract definitions
+- **Backward compatible**: Defaults to None for unscoped single-agent path
+
+**Provenance Capture:**
+- **Capture point**: At park time via `current_agent_role_value()`
+- **Value format**: Plain string ("diagnostician", "executor", "orchestrator")
+- **Unscoped default**: Unscoped parks leave field as None
+- **Contract safety**: No changes to `execution-request.schema.json` or `agent-stream-event.schema.json`
+
+**Behavioral Guarantees:**
+- **Ephemeral storage**: Lives only in memory during confirmation lifecycle
+- **No persistence**: Never written to database or transmitted over network
+- **Schema compatibility**: Existing contract schemas remain unchanged
+- **Phase 2 inertness**: No orchestration caller binds roles, so field remains None
+
+**Testing Verification:**
+- Field defaults to None and is settable
+- Unscoped parks leave staged_by_role as None
+- Durable records never carry role provenance
+- Contract schemas remain unchanged with no role fields
+
+**Section sources**
+- [hitl_confirmations.py:101-111](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L111)
+- [agent_role.py:93-100](file://products/agent-platform/src/agent_service/services/agent_role.py#L93-L100)
+- [test_agent_role.py:234-270](file://products/agent-platform/tests/test_agent_role.py#L234-L270)

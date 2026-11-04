@@ -28,16 +28,21 @@
 - [authorization_transaction_store.py](file://products/tool-gateway/src/tool_gateway/services/authorization_transaction_store.py)
 - [authorization_service.py](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py)
 - [oauth_client.py](file://products/tool-gateway/src/tool_gateway/tools/oauth_client.py)
+- [agent_role.py](file://products/agent-platform/src/agent_service/services/agent_role.py)
+- [test_agent_role.py](file://products/agent-platform/tests/test_agent_role.py)
+- [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
+- [0017-bounded-read-only-multi-agent-orchestration.md](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md)
+- [SPEC-073-role-scoped-agent-identity/spec.md](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for user-delegated outbound identity capabilities via per-user OAuth authorization-code flows
-- Documented new trust boundaries between machine identities (service accounts) and human identities (per-user delegation)
-- Added detailed coverage of the encrypted Postgres credential store for per-user refresh tokens
-- Updated authorization flow diagrams to show both inbound service-to-service delegation and outbound user-delegated execution
-- Enhanced audit trail documentation with `delegation_mode` field supporting `user_delegated` and `acting_service` attribution
-- Added configuration guidance for OAuth target registration, PKCE enforcement, and first-use authorization workflows
+- Added comprehensive documentation for the role-scoped authority model with closed vocabulary (diagnostician/orchestrator/executor)
+- Documented same-token identity preservation where all roles ride the same delegated token without creating new principals
+- Added detailed coverage of subtractive-only narrowing principles that prevent role-based authority widening
+- Included phase boundaries for multi-agent orchestration foundation showing inert substrate delivery
+- Enhanced toolkit narrowing mechanisms at the agent platform layer while preserving existing policy enforcement
+- Updated HITL confirmation tracking with role provenance labels for executor-staged mutations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -54,14 +59,14 @@
 ## Introduction
 This document explains the Luban AIOPS platform's multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. 
 
-The platform now supports two distinct identity planes: **inbound service-to-service delegation** using broker-mediated tokens that preserve human attribution internally, and **outbound user-delegated execution** where tools act as the requesting human against external targets using per-user OAuth credentials. This dual-plane approach maintains strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts.
+The platform now supports two distinct identity planes: **inbound service-to-service delegation** using broker-mediated tokens that preserve human attribution internally, and **outbound user-delegated execution** where tools act as the requesting human against external targets using per-user OAuth credentials. Additionally, the platform implements a **role-scoped authority model** that narrows agent capabilities within the same delegated token context, supporting bounded read-only multi-agent orchestration while maintaining strict isolation between machine identities (service accounts) and human identities (per-user delegation).
 
 ## Project Structure
 Security is enforced at multiple boundaries:
 - Identity broker authenticates users and issues short-lived delegated tokens for service-to-service calls.
 - Platform gateway validates tokens, normalizes identity, evaluates policy-as-code, and bridges HITL approvals.
 - Tool gateway executes tools under strict admission control, applies deterministic redaction, emits durable audit events, and manages per-user OAuth credential acquisition.
-- Agent platform orchestrates sessions, parks risky tool calls for human confirmation, and propagates identity into execution context.
+- Agent platform orchestrates sessions, parks risky tool calls for human confirmation, and propagates identity into execution context with role-scoped authority narrowing.
 - Audit service persists tamper-evident-enough audit trails with retention and bounded growth, including delegation mode attribution.
 
 ```mermaid
@@ -69,7 +74,8 @@ graph TB
 User["Operator / Developer"] --> Portal["Portal (OIDC login)"]
 Portal --> Gateway["Platform Gateway<br/>Token validation + Policy"]
 Gateway --> Broker["Identity Broker<br/>Delegated token exchange"]
-Gateway --> Agent["Agent Platform<br/>Session + HITL parking"]
+Gateway --> Agent["Agent Platform<br/>Session + HITL parking + Role-scoped authority"]
+Agent --> Toolkit["Role-scoped toolkit narrowing<br/>(diagnostician/orchestrator/executor)"]
 Agent --> ToolGW["Tool Gateway<br/>Admission + Redaction + User Delegation"]
 ToolGW --> ExternalTargets["External Targets<br/>(Per-user OAuth)"]
 ToolGW --> Tools["Internal Tools / Systems"]
@@ -83,6 +89,8 @@ Broker --> Audit
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
@@ -94,8 +102,9 @@ Broker --> Audit
 - Authentication and identity federation via Keycloak OIDC, with normalized roles and environment scopes passed downstream.
 - Policy-as-code engine that evaluates action authorization with deny-by-default semantics and explicit approval tiers.
 - Token delegation through a broker-mediated exchange to propagate user identity to downstream services without elevating roles.
+- **New**: Role-scoped authority model with closed vocabulary (diagnostician/orchestrator/executor) that narrows agent capabilities at the toolkit layer while preserving the same delegated token.
 - **New**: User-delegated outbound identity via per-user OAuth authorization-code flows, maintaining strict separation from machine grants.
-- HITL approval workflow that parks mutating tool calls until a designated approver confirms or denies them.
+- HITL approval workflow that parks mutating tool calls until a designated approver confirms or denies them, with role provenance tracking for executor-staged mutations.
 - Deterministic output redaction at the tool gateway choke point to prevent credential leakage.
 - Durable, permission-scoped audit trail with retention, bounded growth, and delegation mode attribution.
 
@@ -103,16 +112,19 @@ Broker --> Audit
 - [identity-and-authorization-design.md:121-166](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L121-L166)
 - [policy-engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 
 ## Architecture Overview
-The platform enforces least privilege end-to-end across two distinct identity planes:
+The platform enforces least privilege end-to-end across two distinct identity planes with an additional role-scoped authority dimension:
 
 **Inbound Plane (Service-to-Service)**: The portal authenticates via Keycloak OIDC; the gateway validates tokens and forwards trusted identity. The policy engine evaluates actions against a versioned bundle with deny-by-default and approval outcomes. Mutating tool calls are parked and require tiered approval before execution. Service-to-service calls use broker-mediated delegated tokens bound to target audiences; roles are never elevated.
 
 **Outbound Plane (User-Delegated)**: For external targets requiring per-user RBAC, the tool gateway acquires OAuth 2.x authorization-code credentials on behalf of the requesting user. These target-issued tokens carry the user's identity and authority, allowing external systems to enforce their own RBAC. The platform custodies encrypted refresh tokens but never elevates beyond the user's target-side authority.
+
+**Role-Scoped Authority Model**: Within the agent platform, a closed vocabulary of roles (diagnostician/orchestrator/executor) narrows toolkit access at the agent layer while every role rides the same delegated token. This enables bounded read-only multi-agent orchestration without creating new principals or identity edges.
 
 ```mermaid
 sequenceDiagram
@@ -136,6 +148,8 @@ G->>T : Execute with confirmer's delegated token
 else allow
 G->>T : Execute with requester's delegated token
 end
+A->>A : Apply role-scoped toolkit narrowing
+Note over A : diagnostician=readonly, executor=full,<br/>orchestrator=no direct tools
 T->>T : Check if user-delegated required
 alt user-delegated needed
 T->>E : First-use OAuth authorization redirect
@@ -155,6 +169,8 @@ G->>S : Emit policy/session events
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
 - [user_delegated_client.py:485-506](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L485-L506)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
@@ -203,6 +219,58 @@ IB-->>GW : access_token (aud=target, roles copied, act=caller)
 - [exchange_service.py:1-43](file://products/identity-broker/src/identity_service/services/exchange_service.py#L1-L43)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
+
+### Role-Scoped Authority Model and Multi-Agent Orchestration Foundation
+**Updated** Added comprehensive documentation for the new role-scoped authority model that enables bounded read-only multi-agent orchestration while preserving single-edge identity.
+
+The platform now implements a closed vocabulary of agent roles that narrow toolkit access at the agent platform layer while every role rides the same delegated token:
+
+**Closed Role Vocabulary**: Three platform-owned roles with strict semantics:
+- **Diagnostician**: Read-only toolkit access, reuses existing `_filter_read_only` logic
+- **Executor**: Full toolkit access including mutating tools, but still requires HITL approval
+- **Orchestrator**: No direct gateway tools - delegates to other roles but cannot invoke tools directly
+
+**Same-Token Identity Preservation**: All roles operate on the same gateway-forwarded delegated token - no per-role broker minting, no new identity edges, no separate principals. The human requester's identity (`sub`, `namespace`, `subject`) remains unchanged across role transitions.
+
+**Subtractive-Only Narrowing**: Role-based toolkit restrictions are always subsets of the underlying token's permissions - they can never grant capabilities that the token doesn't already possess. This maintains the existing gateway policy as the authoritative enforcement boundary.
+
+**Phase Boundaries**: Phase 2 delivers an inert substrate with no active orchestration caller - the deployed single-agent path remains byte-identical. Future phases will add policy role axis, audit attribution, and bounded autonomous diagnosis.
+
+```mermaid
+sequenceDiagram
+participant O as "Orchestrator"
+participant D as "Diagnostician"
+participant X as "Executor"
+participant K as "Kernel"
+participant T as "Toolkit Cache"
+Note over O,D,X : Same delegated token, different toolkit access
+O->>K : _ensure_toolkit(token)
+K->>K : current_agent_role() = orchestrator
+K->>T : cache_key = token : : orchestrator
+T-->>K : Empty toolkit (no direct tools)
+D->>K : _ensure_toolkit(token)
+K->>K : current_agent_role() = diagnostician
+K->>T : cache_key = token : : diagnostician
+T-->>K : Read-only toolkit
+X->>K : _ensure_toolkit(token)
+K->>K : current_agent_role() = executor
+K->>T : cache_key = token : : executor
+T-->>K : Full toolkit (may include mutators)
+Note over X : Mutating tools still park on HITL
+```
+
+**Diagram sources**
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
+- [test_agent_role.py:148-171](file://products/agent-platform/tests/test_agent_role.py#L148-L171)
+
+**Section sources**
+- [agent_role.py:1-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L1-L120)
+- [runtime_kernel.py:502-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L660)
+- [test_agent_role.py:68-171](file://products/agent-platform/tests/test_agent_role.py#L68-L171)
+- [0017-bounded-read-only-multi-agent-orchestration.md:73-81](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L73-L81)
+- [SPEC-073-role-scoped-agent-identity/spec.md:65-77](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L65-L77)
 
 ### User-Delegated Outbound Identity and Per-User OAuth Flows
 **Updated** Added comprehensive documentation for the new user-delegated outbound identity capabilities that enable tools to act as the requesting human against external targets.
@@ -416,6 +484,35 @@ Event3 --> Audit
 - [SPEC-013-durable-audit-trail/spec.md:86-104](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L86-L104)
 - [authorization_service.py:240-243](file://products/tool-gateway/src/tool_gateway/services/authorization_service.py#L240-L243)
 
+### Role Provenance Tracking in HITL Confirmations
+**Updated** Added role provenance tracking for executor-staged mutations in the HITL confirmation system.
+
+The platform now tracks which agent role staged a mutation for audit and attribution purposes:
+
+- **Staged By Role**: Pending confirmations carry a `staged_by_role` field indicating whether the mutation was staged by an `executor` role agent
+- **Kernel-Internal Only**: Role provenance stays kernel-internal in phase 2 - it's recorded on the confirmation object but not persisted to durable records or wire schemas
+- **Executor-Only Staging**: Only `executor` role agents can stage mutations; `diagnostician` and `orchestrator` roles have no mutating toolkit access
+- **Human Approval Required**: Even executor-staged mutations require distinct human approval through the existing HITL workflow
+
+```mermaid
+flowchart TD
+ExecutorCall["Executor role tool call"] --> Stage["Stage mutation in HITL confirmation"]
+Stage --> Record["Record staged_by_role='executor'"]
+Record --> Park["Park confirmation card"]
+Park --> HumanApproval["Distinct human approves"]
+HumanApproval --> Dispatch["Dispatch through signed worker"]
+Dispatch --> Audit["Emit audit event with role provenance"]
+```
+
+**Diagram sources**
+- [hitl_confirmations.py:101-111](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L111)
+- [test_agent_role.py:240-245](file://products/agent-platform/tests/test_agent_role.py#L240-L245)
+
+**Section sources**
+- [hitl_confirmations.py:101-111](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L101-L111)
+- [test_agent_role.py:240-245](file://products/agent-platform/tests/test_agent_role.py#L240-L245)
+- [SPEC-073-role-scoped-agent-identity/spec.md:173-193](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L173-L193)
+
 ### Secret Delivery Audit Events
 **Updated** Enhanced audit trail with `secret_delivered` events for tracking secret delivery completion.
 
@@ -451,6 +548,7 @@ Event2 --> Audit
 ## Dependency Analysis
 - Platform gateway depends on the policy engine and policy bundle to enforce action authorization and approval requirements.
 - Identity broker provides delegated tokens to platform gateway; roles are copied, never elevated.
+- Agent platform integrates role-scoped authority model that narrows toolkit access while preserving the same delegated token.
 - Tool gateway depends on policy actions for admission, applies deterministic redaction before emitting audit events, and manages per-user OAuth credential acquisition.
 - Audit service depends on emitters to forward events and provides a policy-gated query API with delegation mode filtering.
 
@@ -459,7 +557,10 @@ graph LR
 PolicyBundle["Policy Bundle"] --> PolicyEngine["Policy Engine"]
 PolicyEngine --> Gateway["Platform Gateway"]
 Broker["Identity Broker"] --> Gateway
-Gateway --> ToolGW["Tool Gateway"]
+Gateway --> Agent["Agent Platform"]
+Agent --> RoleModel["Role-Scoped Authority Model"]
+RoleModel --> ToolkitNarrowing["Toolkit Narrowing"]
+Agent --> ToolGW["Tool Gateway"]
 ToolGW --> UserDelegated["User-Delegated Client"]
 UserDelegated --> CredentialStore["Encrypted Credential Store"]
 ToolGW --> Audit["Audit Service"]
@@ -470,6 +571,8 @@ Broker --> Audit
 **Diagram sources**
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
@@ -477,6 +580,8 @@ Broker --> Audit
 **Section sources**
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
@@ -485,6 +590,7 @@ Broker --> Audit
 - Policy evaluation is lightweight and operates on an in-memory bundle; ensure bundles remain concise and prioritized to minimize matching overhead.
 - Redaction walks serialized results; keep tool outputs bounded to avoid excessive traversal and potential overflow rejections.
 - Audit ingestion is fire-and-forget with timeouts; configure appropriate backends and retention to avoid storage pressure.
+- **New**: Role-scoped toolkit caching uses per-role cache keys `(token, role)` to maintain separate toolkits per role while avoiding redundant discovery calls.
 - **New**: User-delegated OAuth acquisition uses process-local LRU-bounded access token caching with single-flight coordination to minimize redundant token exchanges while maintaining security boundaries.
 - **New**: Encrypted credential store operations are bounded and coordinated across replicas; rotation and revocation must be tested for performance impact.
 
@@ -495,19 +601,22 @@ Broker --> Audit
 - Redaction overflow: if tool output is withheld due to high credential density, tighten parameters or scope inputs to reduce sensitive content.
 - Audit ingestion issues: confirm emitter URLs and service identities; check audit service health and retention configuration.
 - Secret delivery failures: verify email channel configuration, recipient allowlists, and SMTP connectivity; check for UPSTREAM_ERROR responses.
+- **New**: Role-scoped authority issues: verify that role values are from the closed enum (diagnostician/orchestrator/executor), check that toolkit narrowing is subtractive-only, and confirm that unknown roles fail closed to empty toolkit.
 - **New**: User-delegated OAuth failures: check target client registration, callback URI configuration, PKCE S256 support, and refresh token rotation; verify that failed acquisitions fail closed without falling back to machine grants.
 
 **Section sources**
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
+- [agent_role.py:70-85](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L85)
+- [runtime_kernel.py:654-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L654-L660)
 - [user_delegated_client.py:87-100](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L87-L100)
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 ## Conclusion
 Luban AIOPS enforces least privilege through a layered model: OIDC-based authentication, policy-as-code authorization with explicit approval tiers, broker-mediated token delegation preserving human attribution, deterministic redaction of tool outputs, and a durable audit trail with retention. The authorization matrix defines clear permissions per role and environment, while the policy engine ensures consistent enforcement.
 
-The platform now supports two distinct identity planes: inbound service-to-service delegation using broker-mediated tokens, and outbound user-delegated execution using per-user OAuth credentials. This dual-plane approach maintains strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts. Operators can configure security settings, extend policies, add OAuth target integrations, and implement additional controls while maintaining separation of duties and auditability.
+The platform now supports three complementary security dimensions: inbound service-to-service delegation using broker-mediated tokens, outbound user-delegated execution using per-user OAuth credentials, and role-scoped authority narrowing within the same delegated token context. The role-scoped authority model enables bounded read-only multi-agent orchestration while maintaining strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts. Operators can configure security settings, extend policies, add OAuth target integrations, and implement additional controls while maintaining separation of duties and auditability.
 
 ## Appendices
 
@@ -543,6 +652,21 @@ The platform now supports two distinct identity planes: inbound service-to-servi
 - [authorization-matrix.md:183-265](file://docs/agentic-aiops-platform/authorization-matrix.md#L183-L265)
 - [approval-and-hitl.md:190-215](file://docs/guides/approval-and-hitl.md#L190-L215)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
+
+### Configuring Role-Scoped Authority Model
+**New** Added configuration guidance for the role-scoped authority model implementation.
+
+- The role-scoped authority model is currently inert in phase 2 - no orchestration caller binds roles yet
+- When future phases activate role binding, ensure that role values come from the closed enum (diagnostician/orchestrator/executor)
+- Verify that toolkit narrowing follows subtractive-only principles - roles can only restrict, never expand, toolkit access
+- Monitor that unknown or malformed roles fail closed to empty toolkit rather than being coerced to wider postures
+- Ensure that role provenance tracking captures executor-staged mutations for audit attribution in future phases
+
+**Section sources**
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
+- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
+- [test_agent_role.py:93-104](file://products/agent-platform/tests/test_agent_role.py#L93-L104)
+- [SPEC-073-role-scoped-agent-identity/spec.md:113-130](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L113-L130)
 
 ### Configuring Secret Delivery Security
 **Updated** Added configuration guidance for secret delivery security controls.
