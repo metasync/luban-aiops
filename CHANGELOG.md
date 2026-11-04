@@ -13,6 +13,67 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.54.0 — 2026-11-04
+
+[SPEC-073](docs/specs/SPEC-073-role-scoped-agent-identity/spec.md) role-scoped
+agent identity and authority — phase 2 of the phased multi-agent SPEC series
+[ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
+(`accepted` 2026-11-03) and the first substrate the accepted ADR unblocks. Ships
+an **inert** role-scoped authority substrate in `products/agent-platform` only: a
+closed, platform-owned **agent-role** vocabulary — `diagnostician`, `orchestrator`,
+`executor` — that narrows a sub-agent's toolkit authority while every role rides the
+**same** gateway-forwarded delegated token (ADR-0004), with no per-role broker
+identity, no second identity edge, no new principal, and “on whose behalf” preserved
+end-to-end. There is **no orchestration caller** in phase 2, so the deployed
+single-agent turn is byte-identical, and there is **no contract, gateway, or policy
+change** (`execution-request.schema.json` and `agent-stream-event.schema.json`
+byte-unchanged). This release delivers R-1…R-6 and marks SPEC-073 `delivered`.
+
+### Added
+
+- **Closed agent-role vocabulary** (`agent-platform`). A new `services/agent_role.py`
+  defines the three-value `AgentRole` enum, the process-local `AGENT_ROLE` contextvar
+  (default `None` = today's unscoped single-agent turn), a fail-closed
+  `coerce_agent_role`, and the `agent_role_scope` bracket that binds a role for one
+  turn and touches **only** `AGENT_ROLE` — never `DELEGATED_TOKEN` or the SPEC-070
+  `REQUESTER_IDENTITY`/`DECIDER_IDENTITY`. No agentscope type appears in any role
+  representation (SPEC-018 gate point 4).
+- **Per-role toolkit narrowing** (`agent-platform`). `_ensure_toolkit` generalizes its
+  `read_only` seam: a bound role joins the cache key (`::{role}`) and
+  `_narrow_for_role` restricts the discovered toolkit — `diagnostician` → read-level
+  tools only, `executor` → the full set (a mutating tool still parks on the existing
+  HITL confirmation), `orchestrator` → no direct gateway tools. Narrowing is
+  **subtractive only**: a role's toolkit is always a subset of the unscoped toolkit
+  for the same token, so it never grants a tool the token's `roles` could not reach.
+- **Kernel-internal role provenance** (`agent-platform`). A parked confirmation
+  records the staging role as `staged_by_role` (the ADR-0010 “provenance rides the
+  fact” pattern), captured from `AGENT_ROLE` at park time. It is ephemeral — never
+  persisted to the durable card record and never added to any contract schema; the
+  audit/wire projection is deferred to phases 4/6.
+- **Role-scoped authority design** (`docs`). The
+  [identity-and-authorization design](docs/agentic-aiops-platform/identity-and-authorization-design.md)
+  gains a “Role-Scoped Agent Authority (SPEC-073, phase 2)” section: the role model,
+  the same-token invariant, subtractive-only narrowing, no-agent-self-approval, and
+  the phase 3–6 boundaries.
+
+### Verification
+
+- Full `agent-platform` suite **1710 passed**, including 29 new
+  `tests/test_agent_role.py` tests (closed-enum fail-closed, per-role narrowing +
+  subset, same-token identity preservation, kernel-internal provenance, inertness,
+  and a no-orchestration-caller reachability guard) plus all `execution_*`, HITL, and
+  confirmation-record regressions.
+- Root `make verify` green through every target — version lockstep (0.53.0 → 0.54.0),
+  overlays, dashboards, policy, secret-vocabulary, portal, audit-contract, and the
+  four delegated custody/runtime/multiproc/edge proofs over real docker + TLS —
+  **except** the long-running SPEC-063 `execution-failure-test` campaign, which
+  exceeds the local harness timeout (executed to ~36%, all-passing, zero failures)
+  and is recorded in the spec as **deferred to a local completion run**; the substrate
+  is inert on every deployed path, so the campaign is unaffected.
+- Phase-2 inertness confirmed: no orchestration caller wired, the deployed
+  single-agent path is byte-identical, and there is no contract, gateway, or policy
+  change.
+
 ## 0.53.0 — 2026-11-02
 
 [SPEC-072](docs/specs/SPEC-072-auto-routing-and-platform-feature-flags/spec.md)

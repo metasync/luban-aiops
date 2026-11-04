@@ -302,6 +302,37 @@ The agent session should store:
 
 This lets the planner and policy layer reason about allowed behavior without trusting arbitrary user text.
 
+### Role-Scoped Agent Authority (SPEC-073, phase 2)
+
+When a turn is decomposed across sub-agents (the bounded read-only orchestration
+[ADR-0017](../adr/0017-bounded-read-only-multi-agent-orchestration.md) gates), authority is
+narrowed **per agent-role on the same delegated token** — never by minting a second identity.
+
+- **A closed, platform-owned role vocabulary.** Exactly three roles: `diagnostician`
+  (read-level tools only, autonomous), `orchestrator` (decomposes/delegates/synthesizes, holds
+  **no** direct gateway tools), and `executor` (may see mutating tools, which still park on the
+  existing HITL confirmation). A role is a platform fact fixed at agent-construction time —
+  never model-chosen, never promoted in place, and an unknown/absent role fails closed to the
+  most restrictive posture.
+- **One identity edge is preserved (ADR-0004).** Every role rides the **same**
+  gateway-forwarded delegated token (`sub`=user, `act`=agent-platform). A role is an
+  authority-narrowing **label beside** the token — process-local context, never a JWT claim, a
+  forwarded header, a per-role broker mint, a new principal, or any wire field. "On whose behalf"
+  is unchanged across a delegation hop: a member acts *as the same human* with a narrower toolkit.
+- **Narrowing is subtractive only.** A role's toolkit is always a subset of what the underlying
+  token's `roles` already permit at the gateway. Phase 2 narrows the **toolkit** (what an agent
+  sees) at the existing `_ensure_toolkit` seam; it never *grants* a tool the token could not reach.
+- **No agent approves another agent's mutation.** An `executor`-staged mutation still parks on the
+  governed HITL path and dispatches only through the signed at-most-one-dispatch worker with a
+  **distinct human** approver. The staging role is recorded as kernel-internal provenance
+  (`staged_by_role`, the ADR-0010 "provenance rides the fact" pattern) and is **not** persisted to
+  the durable card record or added to any contract schema in phase 2.
+- **Phase boundaries.** Phase 2 ships this substrate **inert** — no orchestration caller binds a
+  role, so the deployed single-agent turn is byte-identical. Later phases own the rest: the
+  gateway **policy role axis** (phase 3), **multi-agent audit & attribution** — the wire/audit
+  projection of role provenance (phase 4), the **bounded autonomous diagnosis** loop that actually
+  binds roles (phase 5), and the **v2 multi-agent contract** (phase 6).
+
 ### Propagation Into Approvals
 
 Approval requests should include:

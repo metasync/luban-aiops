@@ -12,6 +12,7 @@ from agent_service.core.metrics import (
 )
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.services.agent_role import AgentRole, current_agent_role, current_agent_role_value
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.audit_emitter import (
     build_audit_event,
@@ -511,8 +512,21 @@ class AgentKernel:
 
         ``read_only`` selects a separate cache entry whose toolkit is
         restricted to read-level tools (automated diagnostic turns).
+
+        A bound ``AGENT_ROLE`` (SPEC-073 R-2) selects a further separate cache
+        entry whose toolkit is narrowed per role — subtractive only, never
+        wider than the unscoped toolkit for the same token. An unscoped turn
+        (no role bound — the only case in phase 2, which wires no orchestration
+        caller) keeps today's exact key and one cache entry, byte-identical.
         """
+        # SPEC-073 R-2: a bound agent-role joins the cache key so a role-scoped
+        # toolkit never leaks into an unscoped (or differently-scoped) turn,
+        # mirroring ``read_only``. Read once so the key and the narrowing below
+        # agree across the discovery await.
+        role = current_agent_role()
         cache_key = (bearer_token or "") + ("::read-only" if read_only else "")
+        if role is not None:
+            cache_key = f"{cache_key}::{role.value}"
         cached = self._toolkits.get(cache_key)
         if cached is not None:
             return cached
@@ -547,6 +561,8 @@ class AgentKernel:
                         )
                     if definitions and read_only:
                         definitions = self._filter_read_only(definitions)
+                    if definitions and role is not None:
+                        definitions = self._narrow_for_role(definitions, role)
                     if definitions:
                         toolkit = build_gateway_toolkit(
                             definitions,
@@ -609,6 +625,39 @@ class AgentKernel:
                 excluded,
             )
         return kept
+
+    def _narrow_for_role(
+        self, definitions: list[dict], role: AgentRole
+    ) -> list[dict]:
+        """Narrow discovered tools to a role's toolkit (SPEC-073 R-2/R-5).
+
+        Subtractive only: the result is always a subset of the unscoped toolkit
+        for the same token, so a role can never grant a tool the underlying
+        token's ``roles`` could not already reach at the gateway (the real
+        deny-by-default enforcement edge, unchanged in phase 2).
+
+        - ``diagnostician``: read-level tools only (reuses ``_filter_read_only``).
+        - ``executor``: the full discovered set — a mutating tool still parks on
+          the existing HITL confirmation (R-4) and dispatches only through the
+          signed at-most-one-dispatch path with a distinct human approver.
+        - ``orchestrator``: no direct gateway tools — it delegates, it does not
+          itself invoke tools.
+        - anything else: fail closed to the most restrictive posture (empty),
+          never a wider one.
+        """
+        if role is AgentRole.DIAGNOSTICIAN:
+            return self._filter_read_only(definitions)
+        if role is AgentRole.EXECUTOR:
+            return definitions
+        if role is AgentRole.ORCHESTRATOR:
+            return []
+        # Defensive: the closed enum plus the fail-closed bind make this
+        # unreachable, but an unrecognized role must never widen authority.
+        LOGGER.warning(
+            "unrecognized agent role %r; failing closed to no gateway tools",
+            role,
+        )
+        return []
 
     def _build_task_tools(self) -> list:
         """Built-in agentscope task tools, opt-in (SPEC-018 R-5).
@@ -1835,6 +1884,12 @@ class AgentKernel:
 
         pending.requester_delegated_token = generation_bearer_token()
         pending.requester_identity = REQUESTER_IDENTITY.get()
+        # SPEC-073 R-4: label which agent-role staged this parked mutation, from
+        # the process-local AGENT_ROLE contextvar. Kernel-internal provenance only
+        # (ephemeral like the requester token above — never persisted to the
+        # durable record below, never a contract/wire field in phase 2). ``None``
+        # on the unscoped single-agent path, so today's park is byte-identical.
+        pending.staged_by_role = current_agent_role_value()
         pending.email_recipient_allowlist = self.settings.email_recipient_allowlist
         # SPEC-062 R-3 reveal-on-commit: attach this stream's held portal_copy
         # deliveries so they ride the park across resume and are released only

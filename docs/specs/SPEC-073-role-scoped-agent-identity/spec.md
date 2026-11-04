@@ -2,17 +2,32 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-11-03
 - approved: 2026-11-03 (all six Open Questions ratified by the operator; **OQ-1 resolved as a
   three-value closed enum** — `diagnostician`, `orchestrator`, `executor` — collapsing ADR-0017
   Decision 4's "`planner`/`orchestrator`" into one `orchestrator` value, with **no `approver`
   role**; see `## Open Questions — resolved`)
+- delivered: 2026-11-04 as **v0.54.0** — R-1…R-6 implemented in `products/agent-platform` only:
+  a new `services/agent_role.py` (closed `AgentRole` enum, `AGENT_ROLE` contextvar, fail-closed
+  `coerce_agent_role`, `agent_role_scope` bracket), per-role narrowing at the `_ensure_toolkit`
+  seam (`_narrow_for_role` + a `::{role}` cache suffix), and a kernel-internal `staged_by_role`
+  provenance label on the parked confirmation. Full agent-platform suite **1710 passed** (incl.
+  all `execution_*`, HITL, and confirmation-record regressions + 29 new `test_agent_role.py`
+  tests); root `make verify` green through every target — version lockstep, overlays, dashboards,
+  policy, secret-vocabulary, portal, audit-contract, and the four delegated custody/runtime/
+  multiproc/edge proofs over real docker + TLS — **except** the long-running SPEC-063
+  `execution-failure-test` campaign, which exceeds the local harness timeout (executed to ~36%,
+  all-passing, zero failures; evidence under `.workspaces/spec063-evidence/`) and is recorded as
+  **deferred to a local completion run** — the substrate is inert on every deployed path
+  (`current_agent_role()` is `None`, so the cache key, toolkit, and park are byte-identical), so
+  the campaign is unaffected. No contract, gateway, or policy change; no orchestration caller
+  wired. Commit/push and deployment remain separate gates.
 - release slice: the **multi-agent / bounded-autonomy program** — phase 2 of the phased SPEC
   series [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
-  ([memo](../../workspace/multi-agent-orchestration-spike.md) §7). No target version is pinned
-  at `draft`; a version is slotted at `approved`, per the SPEC-071/072 pattern.
+  ([memo](../../workspace/multi-agent-orchestration-spike.md) §7). Slotted at delivery as
+  **v0.54.0** (a minor bump over v0.53.0), per the SPEC-070/071/072 pattern.
 - related ADRs: [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md)
   (`accepted` 2026-11-03 — the gate this spec realizes, **Decision 4** in particular:
   role-scoped agents on the *same* delegated token narrowed per role, at the toolkit + policy
@@ -316,3 +331,11 @@ resolution is binding on the [plan](plan.md) / [tasks](tasks.md).
   updated to `orchestrator`; the [plan](plan.md) and [tasks](tasks.md) are authored and binding.
   Approval authorizes implementation to *begin* — not a merge, commit/push, deployment, or version
   bump; those stay separate gates.
+- 2026-11-04: **delivered** as **v0.54.0** — R-1…R-6 implemented in `products/agent-platform`
+  (inert substrate; no orchestration caller, deployed single-agent path byte-identical, no
+  contract/gateway/policy change). Agent-platform suite 1710 green; `make verify` green except the
+  SPEC-063 `execution-failure-test` campaign, which exceeds the harness timeout and is deferred to
+  a local completion run (all-passing to ~36%). Version bumped 0.53.0 → 0.54.0 across the lockstep
+  surface; CHANGELOG, spec index, roadmap row, and the identity-and-authorization design doc
+  reconciled. ADR-0017's body is left unchanged (accepted ADRs are immutable except status/
+  supersession); phase-2 status is recorded in the mutable roadmap row + index instead.

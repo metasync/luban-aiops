@@ -98,6 +98,17 @@ class PendingConfirmation:
     run_id: str | None = None
     requester_delegated_token: str | None = field(default=None, repr=False)
     requester_identity: VerifiedHuman | None = field(default=None, repr=False)
+    # SPEC-073 R-4: the plain agent-role string (``diagnostician`` /
+    # ``orchestrator`` / ``executor``) that staged this parked mutation, captured
+    # from the process-local ``AGENT_ROLE`` contextvar at park time. Kernel-internal
+    # authority-provenance label only (the ADR-0010 "provenance rides the fact"
+    # pattern): it is NEVER persisted to the durable card record below, NEVER
+    # added to ``execution-request.schema.json``, and NEVER a wire field in phase 2
+    # — the audit/contract projection of role provenance is phase 4/6. ``None`` on
+    # the unscoped single-agent path (today's only caller), so the deployed park is
+    # byte-identical. A mutating tool is only reachable from an ``executor``
+    # toolkit (R-2), so a non-``None`` value is always ``"executor"`` in practice.
+    staged_by_role: str | None = field(default=None, repr=False)
     # SPEC-062 R-3 reveal-on-commit: portal_copy secret deliveries generated in
     # the turn that parked this card, held opaquely as ``{delivery_id, channel,
     # expires_at}`` dicts (never the plaintext) so they ride the park across
