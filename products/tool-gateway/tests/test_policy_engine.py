@@ -26,6 +26,9 @@ CONTRACTS_DIR = REPO_ROOT / "shared" / "shared-contracts"
 SHARED_BUNDLE = CONTRACTS_DIR / "policies" / "policy-default.yaml"
 RULE_SCHEMA = CONTRACTS_DIR / "schemas" / "policy-rule.schema.json"
 DECISION_SCHEMA = CONTRACTS_DIR / "schemas" / "policy-decision.schema.json"
+# SPEC-074: the synthetic agent-role demonstration bundle (the canonical bundle
+# stays byte-unchanged, OQ-4), shared with the scenario harness.
+FIXTURE_BUNDLE = CONTRACTS_DIR / "policies" / "fixtures" / "agent-role-demo.yaml"
 
 
 def _settings(**overrides) -> GatewaySettings:
@@ -445,6 +448,296 @@ class RequireApprovalLoadTests(unittest.TestCase):
         del bad["decision"]["approval"]
         with self.assertRaises(PolicyLoadError):
             self._load([bad])
+
+
+class AgentRoleAxisSemanticsTests(unittest.TestCase):
+    """SPEC-074 R-2: the optional agent-role axis on the tool-gateway engine."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.bundle_path = Path(self.id().split(".")[-1] + "-bundle.yaml")
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        self.bundle_path.unlink(missing_ok=True)
+
+    def _write_bundle(self, rules: list[dict]) -> GatewaySettings:
+        self.bundle_path.write_text(
+            yaml.safe_dump({"version": 1, "rules": rules}), encoding="utf-8"
+        )
+        return _settings(policy_path=str(self.bundle_path))
+
+    @staticmethod
+    def _scoped_allow(
+        rule_id: str,
+        agent_roles: list[str],
+        *,
+        roles: list[str] | None = None,
+        action: str = "tools:invoke",
+        priority: int = 100,
+    ) -> dict:
+        return {
+            "id": rule_id,
+            "domain": "action_authz",
+            "description": rule_id,
+            "priority": priority,
+            "enabled": True,
+            "match": {
+                "roles_any": roles or ["operator"],
+                "actions_any": [action],
+                "agent_roles_any": agent_roles,
+            },
+            "decision": {"outcome": "allow"},
+        }
+
+    def test_canonical_bundle_ignores_the_agent_role_axis(self) -> None:
+        # R-5 no-diff/inertness: no canonical rule carries agent_roles_any
+        # (OQ-4), so the agent_role argument never changes an outcome — every
+        # deployed evaluation is byte-identical with the axis present.
+        settings = _settings()
+        human_roles = [
+            "platform-admin", "approver", "operator", "developer",
+            "read-only-observer", "auditor",
+        ]
+        for role in human_roles:
+            for action in sorted(PROTECTED_ACTIONS):
+                baseline = evaluate(settings, [role], action)
+                for agent_role in (None, "diagnostician", "orchestrator", "executor"):
+                    scoped = evaluate(settings, [role], action, agent_role)
+                    self.assertEqual(
+                        scoped.decision, baseline.decision, f"{role}/{action}/{agent_role}"
+                    )
+                    self.assertEqual(
+                        scoped.matched_rule_ids, baseline.matched_rule_ids,
+                        f"{role}/{action}/{agent_role}",
+                    )
+
+    def test_scoped_rule_matches_only_its_agent_role(self) -> None:
+        settings = self._write_bundle([self._scoped_allow("diag-read", ["diagnostician"])])
+        self.assertEqual(
+            evaluate(settings, ["operator"], "tools:invoke", "diagnostician").decision, "allow"
+        )
+        self.assertEqual(
+            evaluate(settings, ["operator"], "tools:invoke", "executor").decision, "deny"
+        )
+        self.assertEqual(
+            evaluate(settings, ["operator"], "tools:invoke", "orchestrator").decision, "deny"
+        )
+
+    def test_scoped_rule_never_matches_an_unscoped_call(self) -> None:
+        # Fail-closed: an agent-role-scoped grant cannot be satisfied by a turn
+        # carrying no role (mirrors SPEC-073 R-5).
+        settings = self._write_bundle([self._scoped_allow("diag-read", ["diagnostician"])])
+        decision = evaluate(settings, ["operator"], "tools:invoke")
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.matched_rule_ids, [])
+
+    def test_agent_role_composes_conjunctively_with_the_human_axis(self) -> None:
+        settings = self._write_bundle([self._scoped_allow("exec-read", ["executor"])])
+        # Both axes must hold: the human role AND the agent-role.
+        self.assertEqual(
+            evaluate(settings, ["operator"], "tools:invoke", "executor").decision, "allow"
+        )
+        self.assertEqual(
+            evaluate(settings, ["auditor"], "tools:invoke", "executor").decision, "deny"
+        )
+        self.assertEqual(
+            evaluate(settings, ["operator", "auditor"], "tools:invoke", "executor").decision,
+            "allow",
+        )
+
+    def test_scoped_allow_never_overrides_a_human_deny(self) -> None:
+        # R-5 subtractive-only: the axis can only remove authority the token
+        # already grants; a scoped allow cannot override an explicit human deny.
+        deny = {
+            "id": "deny-mutate",
+            "domain": "action_authz",
+            "description": "deny",
+            "priority": 1000,
+            "enabled": True,
+            "match": {"roles_any": ["operator"], "actions_any": ["tools:mutate"]},
+            "decision": {"outcome": "deny"},
+        }
+        scoped_allow = self._scoped_allow(
+            "exec-mutate", ["executor"], action="tools:mutate", priority=100
+        )
+        settings = self._write_bundle([deny, scoped_allow])
+        decision = evaluate(settings, ["operator"], "tools:mutate", "executor")
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.matched_rule_ids, ["deny-mutate"])
+
+    def test_scoped_grant_cannot_widen_an_ungranted_human_role(self) -> None:
+        # A human role the token does not hold is never satisfied by the axis.
+        settings = self._write_bundle(
+            [self._scoped_allow("exec-mutate", ["executor"], action="tools:mutate")]
+        )
+        self.assertEqual(
+            evaluate(settings, ["developer"], "tools:mutate", "executor").decision, "deny"
+        )
+
+
+class AgentRoleLoadValidationTests(unittest.TestCase):
+    """SPEC-074 R-2: fail-closed load validation of the agent-role axis."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.bundle_path = Path(self.id().split(".")[-1] + "-bundle.yaml")
+
+    def tearDown(self) -> None:
+        reset_policy_state()
+        self.bundle_path.unlink(missing_ok=True)
+
+    def _load(self, agent_roles_any):
+        rule = {
+            "id": "scoped",
+            "domain": "action_authz",
+            "description": "scoped",
+            "priority": 100,
+            "enabled": True,
+            "match": {
+                "roles_any": ["operator"],
+                "actions_any": ["tools:invoke"],
+                "agent_roles_any": agent_roles_any,
+            },
+            "decision": {"outcome": "allow"},
+        }
+        self.bundle_path.write_text(
+            yaml.safe_dump({"version": 1, "rules": [rule]}), encoding="utf-8"
+        )
+        settings = _settings(policy_path=str(self.bundle_path))
+        load_bundle(settings)
+        return settings
+
+    def test_out_of_vocabulary_agent_role_rejected(self) -> None:
+        for bad in (["summarizer"], ["EXECUTOR"], ["planner"], ["approver"], ["operator"]):
+            reset_policy_state()
+            with self.assertRaises(PolicyLoadError, msg=str(bad)):
+                self._load(bad)
+
+    def test_non_list_agent_roles_rejected(self) -> None:
+        with self.assertRaises(PolicyLoadError):
+            self._load("executor")
+
+    def test_empty_list_is_unconstrained_and_loads(self) -> None:
+        # An explicit empty list behaves like absent (matches any call).
+        settings = self._load([])
+        decision = evaluate(settings, ["operator"], "tools:invoke")
+        self.assertEqual(decision.decision, "allow")
+
+    def test_valid_vocabulary_loads(self) -> None:
+        settings = self._load(["diagnostician", "orchestrator", "executor"])
+        rules = load_bundle(settings)
+        self.assertEqual(
+            rules[0].agent_roles_any, ("diagnostician", "orchestrator", "executor")
+        )
+
+
+class AgentRoleSchemaContractTests(unittest.TestCase):
+    """SPEC-074 R-1/R-6: the v2->v3 schema revision is additive and closed."""
+
+    def setUp(self) -> None:
+        reset_policy_state()
+        self.schema = json.loads(RULE_SCHEMA.read_text(encoding="utf-8"))
+
+    def test_title_is_v3(self) -> None:
+        self.assertEqual(self.schema["title"], "Policy Rule (v3)")
+
+    def test_agent_roles_any_is_optional_not_required(self) -> None:
+        match = self.schema["properties"]["match"]
+        # Additive: the new key is a property but NOT in match.required, so a
+        # v2 rule (no agent_roles_any) still validates and evaluates unchanged.
+        self.assertIn("agent_roles_any", match["properties"])
+        self.assertEqual(match["required"], ["roles_any", "actions_any"])
+        self.assertFalse(match["additionalProperties"])
+
+    def test_agent_roles_any_enum_is_the_closed_vocabulary(self) -> None:
+        items = self.schema["properties"]["match"]["properties"]["agent_roles_any"]["items"]
+        self.assertEqual(set(items["enum"]), {"diagnostician", "orchestrator", "executor"})
+
+    def test_engine_vocabulary_matches_schema_enum(self) -> None:
+        # The engine's local AGENT_ROLES is kept in lockstep with the schema.
+        items = self.schema["properties"]["match"]["properties"]["agent_roles_any"]["items"]
+        self.assertEqual(set(policy_engine.AGENT_ROLES), set(items["enum"]))
+
+    def test_canonical_rules_carry_no_axis_and_still_validate(self) -> None:
+        data = yaml.safe_load(SHARED_BUNDLE.read_text(encoding="utf-8"))
+        for rule in data["rules"]:
+            self.assertNotIn("agent_roles_any", rule["match"])
+            validate(instance=rule, schema=self.schema)
+
+    def test_out_of_vocabulary_axis_fails_schema_validation(self) -> None:
+        from jsonschema import ValidationError
+
+        bad_rule = {
+            "id": "x", "domain": "action_authz", "description": "x",
+            "priority": 100, "enabled": True,
+            "match": {
+                "roles_any": ["operator"], "actions_any": ["tools:invoke"],
+                "agent_roles_any": ["summarizer"],
+            },
+            "decision": {"outcome": "allow"},
+        }
+        with self.assertRaises(ValidationError):
+            validate(instance=bad_rule, schema=self.schema)
+
+    def test_demo_fixture_rules_validate_against_v3(self) -> None:
+        # The synthetic demonstration bundle (R-3/R-6) is v3-conformant and
+        # actually exercises the axis.
+        data = yaml.safe_load(FIXTURE_BUNDLE.read_text(encoding="utf-8"))
+        scoped = sum(1 for rule in data["rules"] if "agent_roles_any" in rule["match"])
+        for rule in data["rules"]:
+            validate(instance=rule, schema=self.schema)
+        self.assertGreaterEqual(scoped, 1)
+
+
+class AgentRoleDisjointnessGuardTests(unittest.TestCase):
+    """SPEC-074 R-3: an agent-role is never a human role nor an approver decider."""
+
+    def test_agent_role_vocabulary_disjoint_from_human_roles_and_deciders(self) -> None:
+        data = yaml.safe_load(SHARED_BUNDLE.read_text(encoding="utf-8"))
+        agent_roles = {"diagnostician", "orchestrator", "executor"}
+        human_roles: set[str] = set()
+        deciders: set[str] = set()
+        for rule in data["rules"]:
+            human_roles.update(rule["match"].get("roles_any", []))
+            approval = rule.get("decision", {}).get("approval")
+            if approval:
+                deciders.update(approval.get("decided_by_roles", []))
+        # No agent-role is ever a human platform role ...
+        self.assertEqual(agent_roles & human_roles, set())
+        # ... and no agent-role is ever an approver decider (an agent never
+        # approves — the executor->human-approver invariant, now a test).
+        self.assertEqual(agent_roles & deciders, set())
+        self.assertIn("approver", deciders)  # the human decider vocabulary is real
+
+
+class AgentRoleReachabilityGuardTests(unittest.TestCase):
+    """SPEC-074 R-5: the axis has no live producer in phase 3."""
+
+    def test_no_deployed_caller_threads_a_non_none_agent_role(self) -> None:
+        # Policy-side mirror of the SPEC-073 R-5 reachability guard: scan the
+        # deployed gateway package. Outside policy_engine.py (which *defines*
+        # the vocabulary and the axis), no source may thread a concrete
+        # agent-role literal or pass agent_role= by keyword — proving every
+        # deployed evaluation forwards the inert default None.
+        product_src = Path(policy_engine.__file__).resolve().parents[1]
+        literals = {
+            '"diagnostician"', "'diagnostician'",
+            '"orchestrator"', "'orchestrator'",
+            '"executor"', "'executor'",
+        }
+        offenders: list[str] = []
+        for path in product_src.rglob("*.py"):
+            if path.name == "policy_engine.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            rel = str(path.relative_to(product_src))
+            for literal in literals:
+                if literal in text:
+                    offenders.append(f"{rel}: agent-role literal {literal}")
+            if "agent_role=" in text:
+                offenders.append(f"{rel}: agent_role= keyword pass")
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

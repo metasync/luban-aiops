@@ -152,6 +152,39 @@ Restrictions:
 - should not automatically bypass operational approval controls
 - should use a separate operational role if they also act as an operator
 
+## Agent-Role Axis (SPEC-074, phase 3)
+
+The six roles above are **human platform roles** carried in the delegated
+token's `roles`. Orthogonal to them is a closed **agent-role** vocabulary that
+narrows authority *within* a single delegated turn when it is decomposed across
+sub-agents ([ADR-0017](../adr/0017-bounded-read-only-multi-agent-orchestration.md)).
+An agent-role is never a human role, never a JWT claim or wire field, and never
+an approver — it is an authority-narrowing label on the **same** token.
+
+| Agent-role | Posture | Sees mutating tools | Approves |
+|---|---|---|---|
+| `diagnostician` | read-level tools, autonomous | no | never |
+| `orchestrator` | decomposes / delegates / synthesizes; holds **no** direct gateway tools | no | never |
+| `executor` | may see mutating tools | yes — still parks on HITL | never |
+
+- **Subtractive only.** The axis composes **conjunctively** with the human
+  `roles_any` matrix dimension and can only *remove* authority the token
+  already grants: an agent-role-scoped grant never widens a human role the
+  token does not hold and never overrides an explicit `deny`.
+- **Fail-closed.** A rule scoped to an agent-role **never matches an unscoped
+  (`None`) call**, and an unknown or absent role falls back to the most
+  restrictive posture.
+- **`executor` → human approver.** An `executor`-staged mutation still requires
+  an approval decided by a **distinct human** role (`decided_by_roles`); no
+  agent-role is ever an approver decider. This invariant is encoded as policy
+  and guarded by test.
+- **Inert in phase 3.** The axis is a *model* dimension only — an optional,
+  additive `agent_roles_any` field in `policy-rule.schema.json` (v2→v3). The
+  canonical `policy-default.yaml` carries no such rule and every deployed
+  evaluation forwards `agent_role=None`, so all outcomes are byte-identical
+  (reachability and no-diff guards enforce this). A producer first binding a
+  role, and the canonical rule landing, are deferred to **phase 5**.
+
 ## Feature Access Matrix
 
 | Feature | read-only-observer | operator | developer | approver | auditor | platform-admin |

@@ -332,6 +332,17 @@ narrowed **per agent-role on the same delegated token** — never by minting a s
   gateway **policy role axis** (phase 3), **multi-agent audit & attribution** — the wire/audit
   projection of role provenance (phase 4), the **bounded autonomous diagnosis** loop that actually
   binds roles (phase 5), and the **v2 multi-agent contract** (phase 6).
+- **Phase 3 delivered (SPEC-074, policy role axis).** The gateway authorization *model* now
+  carries this same closed vocabulary as an **optional, additive, inert** `agent_roles_any` match
+  dimension (`policy-rule.schema.json` v2→v3) on both policy engines. A rule may scope a
+  grant/denial to one or more agent-roles, composing **conjunctively** with the human `roles_any`
+  axis and **never matching an unscoped (`None`) call** (fail-closed), so — exactly like the
+  phase-2 toolkit seam — it can only *subtract* authority the token already grants. The
+  `executor`→**human**-approver invariant is now encoded as policy and guarded (an agent-role is
+  never a `decided_by_roles` decider nor a human `roles_any` value). Phase 3 stays **inert**: the
+  canonical `policy-default.yaml` is byte-unchanged (no rule carries the axis) and every deployed
+  evaluation forwards `agent_role=None`, enforced by reachability and no-diff guards. A producer
+  first binding a role, and the canonical rule landing, remain deferred to phase 5.
 
 ### Propagation Into Approvals
 

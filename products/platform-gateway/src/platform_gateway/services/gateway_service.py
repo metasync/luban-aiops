@@ -269,13 +269,19 @@ def enforce_policy(
     identity: IdentityContext,
     action: str,
     request_id: str,
+    agent_role: str | None = None,
 ) -> None:
     """Evaluate the action against the policy bundle; raise 403 on deny (R-3/R-4).
 
     Verified and synthetic identities take the identical path — the developer
     role is granted access by policy, never by bypass.
+
+    SPEC-074: ``agent_role`` is the optional agent-role axis forwarded to
+    ``evaluate()``. It defaults to ``None`` and **no deployed route passes a
+    non-``None`` value in phase 3** — the axis is inert until a producer exists
+    (phase 5); a reachability guard test enforces this.
     """
-    decision = evaluate(settings, identity.roles, action)
+    decision = evaluate(settings, identity.roles, action, agent_role)
     record_policy_decision(action, decision.decision)
     log_extra = {
         "request_id": request_id,

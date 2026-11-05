@@ -17,10 +17,11 @@
   all `execution_*`, HITL, and confirmation-record regressions + 29 new `test_agent_role.py`
   tests); root `make verify` green through every target — version lockstep, overlays, dashboards,
   policy, secret-vocabulary, portal, audit-contract, and the four delegated custody/runtime/
-  multiproc/edge proofs over real docker + TLS — **except** the long-running SPEC-063
-  `execution-failure-test` campaign, which exceeds the local harness timeout (executed to ~36%,
-  all-passing, zero failures; evidence under `.workspaces/spec063-evidence/`) and is recorded as
-  **deferred to a local completion run** — the substrate is inert on every deployed path
+  multiproc/edge proofs over real docker + TLS. The long-running SPEC-063
+  `execution-failure-test` campaign exceeds the local harness timeout, so it was run to completion
+  as a separate local run: **795 passed, 2 deselected, exit 0** in 0:39:03 (zero failures/errors/
+  skips; evidence `.workspaces/spec063-evidence/20261104T160000Z-75c2fb2fb40d`), closing the
+  ship-gate deferral — the substrate is inert on every deployed path
   (`current_agent_role()` is `None`, so the cache key, toolkit, and park are byte-identical), so
   the campaign is unaffected. No contract, gateway, or policy change; no orchestration caller
   wired. Commit/push and deployment remain separate gates.
@@ -339,3 +340,8 @@ resolution is binding on the [plan](plan.md) / [tasks](tasks.md).
   surface; CHANGELOG, spec index, roadmap row, and the identity-and-authorization design doc
   reconciled. ADR-0017's body is left unchanged (accepted ADRs are immutable except status/
   supersession); phase-2 status is recorded in the mutable roadmap row + index instead.
+- 2026-11-04: **ship-gate deferral closed** — the SPEC-063 `execution-failure-test` campaign
+  (which exceeds the local harness timeout and was deferred at delivery) was run to completion in a
+  separate local run: **795 passed, 2 deselected, exit 0** in 0:39:03 (zero failures/errors/skips;
+  evidence `.workspaces/spec063-evidence/20261104T160000Z-75c2fb2fb40d`). v0.54.0 is therefore
+  green through the full `make verify` gate including the campaign.

@@ -1,0 +1,73 @@
+# SPEC-074 agent-role demonstration bundle (synthetic — NOT deployed).
+#
+# The canonical `policy-default.yaml` stays byte-unchanged in phase 3 (OQ-4):
+# with no caller threading an agent-role, any `agent_roles_any` rule would be
+# inert anyway, and adding one to the canonical bundle would force a hash
+# change + four-replica re-sync for zero deployed effect. This fixture exists
+# only so `policy-scenarios.yaml`'s `agent_role` section can pin the axis's
+# matching semantics against the real engine, and so a unit test can prove an
+# `agent_roles_any` rule validates against the v3 `policy-rule.schema.json`.
+# The canonical rule lands at phase 5, when a producer first binds a role.
+#
+# `version: 1` is the bundle *format* version (the schema revision
+# validate_policy.py accepts), not a rule-revision counter — same discipline as
+# the canonical bundle. It is deliberately NOT synced by `make sync-policy` and
+# is NOT one of the four byte-identical replicas.
+#
+# Semantics demonstrated (evaluated by the gateway engines, never here):
+#   - absent `agent_roles_any` = unconstrained (matches any call, incl. unscoped)
+#   - a scoped rule matches only a call carrying one of its agent-roles
+#   - a scoped rule NEVER matches an unscoped (`agent_role=None`) call — fail-closed
+#   - the agent-role axis composes conjunctively with the human `roles_any` axis
+#   - an `executor`-scoped mutation parks on a *human* approver (never an agent)
+version: 1
+rules:
+  # Unconstrained baseline: no agent_roles_any, so every call matches on the
+  # human axis alone regardless of the agent-role it carries (including none).
+  - id: demo-baseline-chat
+    domain: action_authz
+    description: An operator may chat regardless of agent-role (absent axis is unconstrained).
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["operator"]
+      actions_any: ["chat"]
+    decision:
+      outcome: allow
+
+  # The executor->human-approver invariant (memo §4.2, ADR-0007): a mutation
+  # proposed by an `executor` still requires a tier-2 approval decided by a
+  # *distinct human* role. On the platform-gateway (api) this evaluates to
+  # require_approval; the tool-gateway (tools) skips require_approval at load
+  # (SPEC-030 R-2), so the same rule yields deny-by-default there — the
+  # deliberate engine non-parity, asserted per engine in the scenario table.
+  # A diagnostician/orchestrator-scoped or unscoped call never matches this
+  # rule, so it can never reach the mutating grant (fail-closed).
+  - id: demo-executor-mutate-approval
+    domain: action_authz
+    description: An executor-scoped operator mutation requires tier-2 approval by a distinct human.
+    priority: 200
+    enabled: true
+    match:
+      roles_any: ["operator"]
+      actions_any: ["tools:mutate"]
+      agent_roles_any: ["executor"]
+    decision:
+      outcome: require_approval
+      approval:
+        tier: tier_2
+        decided_by_roles: ["approver", "platform-admin"]
+
+  # A read grant scoped to the diagnostician: only a diagnostician-scoped call
+  # on the human operator role matches; executor/orchestrator/unscoped do not.
+  - id: demo-diagnostician-invoke
+    domain: action_authz
+    description: A diagnostician-scoped operator may invoke read tools; no other agent-role reaches it.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["operator"]
+      actions_any: ["tools:invoke"]
+      agent_roles_any: ["diagnostician"]
+    decision:
+      outcome: allow

@@ -71,6 +71,13 @@ OUTCOME_DENY = "deny"
 OUTCOME_REQUIRE_APPROVAL = "require_approval"
 VALID_OUTCOMES = frozenset({OUTCOME_ALLOW, OUTCOME_DENY, OUTCOME_REQUIRE_APPROVAL})
 
+# SPEC-074: the closed agent-role vocabulary — an optional, additive match axis
+# (policy-rule.schema.json v3 ``agent_roles_any``). It mirrors SPEC-073's
+# ``AgentRole`` enum and the platform-gateway engine's identical set; defined
+# locally because the gateway engines cannot import agent-platform's enum across
+# the product boundary. Absent on a rule means unconstrained.
+AGENT_ROLES = frozenset({"diagnostician", "orchestrator", "executor"})
+
 # Module-level bundle singleton, keyed on the configured path.
 _bundle: list[PolicyRule] | None = None
 _configured_path: str | None = None
@@ -120,6 +127,9 @@ class PolicyRule:
     actions_any: tuple[str, ...]
     outcome: str
     approval: ApprovalSpec | None = None
+    # SPEC-074: optional agent-role axis. Empty tuple = unconstrained (matches
+    # regardless of the call's agent-role), so a v2 rule is byte-identical here.
+    agent_roles_any: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -253,6 +263,24 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
                     f"rule {rule_id!r} in '{source}': approval block is only valid on "
                     "require_approval outcomes"
                 )
+            # SPEC-074: parse the optional agent-role axis. Absent = () =
+            # unconstrained; a present value must lie in the closed vocabulary
+            # (fail-closed at load, mirroring the schema enum).
+            raw_agent_roles = match.get("agent_roles_any", [])
+            if not isinstance(raw_agent_roles, list) or not all(
+                isinstance(item, str) and item for item in raw_agent_roles
+            ):
+                raise PolicyLoadError(
+                    f"rule {rule_id!r} in '{source}': match.agent_roles_any must be a "
+                    "list of agent-role names"
+                )
+            unknown_agent_roles = set(raw_agent_roles) - AGENT_ROLES
+            if unknown_agent_roles:
+                raise PolicyLoadError(
+                    f"rule {rule_id!r} in '{source}': match.agent_roles_any contains "
+                    f"values outside the closed agent-role vocabulary "
+                    f"{sorted(AGENT_ROLES)}: {sorted(unknown_agent_roles)}"
+                )
             rules.append(
                 PolicyRule(
                     id=rule_id,
@@ -262,6 +290,7 @@ def _parse_rules(text: str, source: str) -> list[PolicyRule]:
                     actions_any=tuple(match["actions_any"]),
                     outcome=outcome,
                     approval=approval,
+                    agent_roles_any=tuple(raw_agent_roles),
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -316,7 +345,12 @@ def bundle_sha256() -> str:
     return _bundle_hash
 
 
-def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> PolicyDecision:
+def evaluate(
+    settings: GatewaySettings,
+    roles: list[str],
+    action: str,
+    agent_role: str | None = None,
+) -> PolicyDecision:
     """Evaluate an action against the loaded bundle.
 
     Semantics: deny by default; explicit deny overrides require_approval and
@@ -324,6 +358,12 @@ def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> Policy
     wins within an outcome class; disabled rules are ignored (SPEC-030 R-2).
     require_approval rules never load on this gateway, so admission stays the
     SPEC-021 allow/deny gate.
+
+    SPEC-074: ``agent_role`` is the optional agent-role axis, composing
+    conjunctively with the human ``roles``; a rule that sets ``agent_roles_any``
+    never matches an unscoped call (``agent_role is None``), so the axis is
+    fail-closed and subtractive-only. The default ``None`` path is byte-identical
+    to the pre-v3 evaluation.
     """
     rules = load_bundle(settings)
     role_set = set(roles)
@@ -334,6 +374,10 @@ def evaluate(settings: GatewaySettings, roles: list[str], action: str) -> Policy
         if rule.enabled
         and action in rule.actions_any
         and (role_set & set(rule.roles_any))
+        and (
+            not rule.agent_roles_any
+            or (agent_role is not None and agent_role in rule.agent_roles_any)
+        )
     ]
 
     if any(rule.outcome == OUTCOME_DENY for rule in matched):

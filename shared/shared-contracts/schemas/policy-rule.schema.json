@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://metasync.github.io/luban-aiops/schemas/policy-rule.schema.json",
-  "title": "Policy Rule (v2)",
-  "description": "A single action-authorization rule. Strict subset of the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md): action_authz domain only, allow/deny/require_approval outcomes. v2 (SPEC-030) activates the previously reserved require_approval outcome with an explicit approval tier: tier_1 keeps the decision with the session operator (destructive-but-routine), tier_2 requires a designated approver distinct from the requester (critical destructive). allow_with_conditions and conditions remain reserved for a future schema revision.",
+  "title": "Policy Rule (v3)",
+  "description": "A single action-authorization rule. Strict subset of the Tier-1 policy specification (docs/agentic-aiops-platform/policy-specification.md): action_authz domain only, allow/deny/require_approval outcomes. v2 (SPEC-030) activated the previously reserved require_approval outcome with an explicit approval tier: tier_1 keeps the decision with the session operator (destructive-but-routine), tier_2 requires a designated approver distinct from the requester (critical destructive). v3 (SPEC-074) adds an optional agent-role axis to the match block: agent_roles_any narrows a rule to the closed SPEC-073 agent-role vocabulary (diagnostician/orchestrator/executor) and composes conjunctively with roles_any (the human token roles). The revision is additive and inert — absent agent_roles_any means unconstrained, so every v2 rule validates and evaluates byte-identically under v3, and no deployed caller threads an agent-role until a later phase. allow_with_conditions and conditions remain reserved for a future schema revision.",
   "type": "object",
   "required": ["id", "domain", "description", "priority", "enabled", "match", "decision"],
   "properties": {
@@ -40,6 +40,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Rule matches if the requested action is one of these."
+        },
+        "agent_roles_any": {
+          "type": "array",
+          "items": {"enum": ["diagnostician", "orchestrator", "executor"]},
+          "description": "Optional agent-role axis (SPEC-074, v3). Rule matches only if the call carries one of these SPEC-073 agent-roles; composes conjunctively with roles_any. Absent means unconstrained (the rule matches regardless of agent-role), so every v2 rule is byte-identical under v3. A rule that sets this key never matches an unscoped call carrying no agent-role (fail-closed). The axis narrows only — it can never widen what the human token roles already permit."
         }
       },
       "additionalProperties": false

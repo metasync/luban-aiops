@@ -13,6 +13,95 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.55.0 — 2026-11-05
+
+[SPEC-074](docs/specs/SPEC-074-policy-role-axis/spec.md) policy role axis — phase 3
+of the phased multi-agent SPEC series
+[ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
+(`accepted` 2026-11-03) and the **policy-layer** half of Decision 4 that
+[SPEC-073](docs/specs/SPEC-073-role-scoped-agent-identity/spec.md) (v0.54.0) built
+the toolkit half of and explicitly deferred. Lands the closed SPEC-073 agent-role
+vocabulary — `diagnostician`, `orchestrator`, `executor` — as an explicit,
+**additive and inert** axis in the deny-by-default authorization *model*: an
+optional `agent_roles_any` in the `policy-rule.schema.json` `match` block (v2 → v3,
+absent = unconstrained) and an optional `agent_role: str | None = None` input on
+**both** gateway `evaluate()` engines composing conjunctively with the human
+`roles_any` axis, so a scoped rule never matches an unscoped call (fail-closed) and
+can only ever *narrow* what the human token roles already permit. The
+`executor`→**human**-approver invariant is encoded as policy: the agent-role
+vocabulary is provably disjoint from every approver `decided_by_roles` and every
+human platform role. Ships **inert** — no deployed caller threads a non-`None`
+agent-role (the producer is phase 5), the role still crosses no wire field
+(SPEC-073's invariant; the contract field is phase 6), the canonical
+`policy-default.yaml` stays byte-unchanged, and every live evaluation is
+byte-identical. **No** agent-platform, identity-broker, audit, execution, or portal
+change; `agent-stream-event.schema.json` and `execution-request.schema.json` stay
+byte-unchanged. This release delivers R-1…R-6 and marks SPEC-074 `delivered`.
+
+### Added
+
+- **Optional agent-role axis in the policy rule schema (v2 → v3)**
+  (`shared-contracts`). `policy-rule.schema.json` gains an optional
+  `agent_roles_any` array in the `match` block, `enum`-closed to the three SPEC-073
+  agent-roles, **not** in `match.required`, with `additionalProperties` still
+  `false`. The revision is additive: absent `agent_roles_any` means unconstrained,
+  so every v2 rule validates and evaluates byte-identically under v3, and a rule
+  that sets it never matches an unscoped (`None`) call. `allow_with_conditions` and
+  `conditions` remain reserved for a future revision.
+- **Agent-role input on both gateway policy engines** (`platform-gateway`,
+  `tool-gateway`). `PolicyRule` carries `agent_roles_any: tuple[str, ...] = ()`,
+  `_parse_rules` rejects an out-of-vocabulary value with `PolicyLoadError`, and
+  `evaluate()` takes `agent_role: str | None = None`, extending the match to compose
+  conjunctively with `roles_any` (the deny > require_approval > allow precedence is
+  unchanged). The tool-gateway engine keeps skipping `require_approval` at load per
+  SPEC-030. The optional default is threaded through the `enforce_policy` /
+  admission call-site **signatures only** — no route passes a non-`None` value.
+- **The `executor`→human-approver invariant encoded as policy**
+  (`platform-gateway`, `tool-gateway`, `shared-contracts`). A guard test proves the
+  agent-role vocabulary is disjoint from every `decided_by_roles` and `roles_any`
+  value in the canonical bundle — an agent-role is never an approver decider nor a
+  human platform role — and `policy-scenarios.yaml` demonstrates an
+  `executor`-scoped `tools:mutate` rule → `require_approval` with a human decider,
+  with a `diagnostician`/`orchestrator` context unable to reach a mutating grant
+  (via the new `policies/fixtures/agent-role-demo.yaml`; the canonical
+  `policy-default.yaml` stays byte-unchanged per OQ-4).
+- **Agent-role axis in the authorization-model documentation** (`docs`). The
+  [authorization matrix](docs/agentic-aiops-platform/authorization-matrix.md) gains
+  an “Agent-Role Axis (SPEC-074, phase 3)” section beside the six human roles; the
+  [Tier-1 policy specification](docs/agentic-aiops-platform/policy-specification.md)
+  adds `principal.agent_role` to the input object, `agent_roles_any` to the
+  rule-match model, and a v1/v2/v3 schema revision-history table; and the
+  [identity-and-authorization design](docs/agentic-aiops-platform/identity-and-authorization-design.md)
+  records phase 3 delivered.
+
+### Verification
+
+- Both gateway policy suites green with the axis present — **platform-gateway 55
+  passed**, **tool-gateway 47 passed** — including five new SPEC-074 test classes
+  mirrored byte-identically across both engines: inertness (every deployed
+  evaluation byte-identical for `agent_role ∈ {None, diagnostician, orchestrator,
+  executor}`), scoped-match + fail-closed-on-unscoped semantics, conjunctive
+  composition with the human axis, subtractive-only (a scoped allow never overrides
+  a human deny), load-time vocabulary validation, the v3 schema contract, the
+  disjointness guard, and a **reachability guard** asserting no deployed caller
+  threads a non-`None` agent-role.
+- No-diff confirmed across the full gateway suites — **platform-gateway 500
+  passed**, **tool-gateway 1085 passed** — and all-product `make test` **4028
+  passed**; `validate-policy` (21 canonical rules against v3) and
+  `validate-policy-scenarios` green.
+- Root `make verify` green end-to-end through every target — version lockstep
+  (0.54.0 → 0.55.0), overlays, dashboards, policy, policy-scenarios,
+  secret-vocabulary, password-policy, portal (**546 passed**), audit-contract, and
+  the four delegated custody/runtime/multiproc/edge proofs over real docker + TLS —
+  including the long-running SPEC-063 `execution-failure-test` campaign run to
+  completion: **795 passed, 0 failures/errors/skips, exit 0** in 0:37:24 (evidence
+  `.workspaces/spec063-evidence/20261105T051334Z-b7762f6ba712`). Total 42m02s,
+  exit 0.
+- Phase-3 inertness confirmed: no caller threads a non-`None` agent-role, the
+  canonical `policy-default.yaml` is byte-unchanged, every deployed evaluation is
+  byte-identical, and no contract field beyond the additive v3
+  `policy-rule.schema.json` revision changed.
+
 ## 0.54.0 — 2026-11-04
 
 [SPEC-073](docs/specs/SPEC-073-role-scoped-agent-identity/spec.md) role-scoped
@@ -65,11 +154,13 @@ byte-unchanged). This release delivers R-1…R-6 and marks SPEC-073 `delivered`.
   confirmation-record regressions.
 - Root `make verify` green through every target — version lockstep (0.53.0 → 0.54.0),
   overlays, dashboards, policy, secret-vocabulary, portal, audit-contract, and the
-  four delegated custody/runtime/multiproc/edge proofs over real docker + TLS —
-  **except** the long-running SPEC-063 `execution-failure-test` campaign, which
-  exceeds the local harness timeout (executed to ~36%, all-passing, zero failures)
-  and is recorded in the spec as **deferred to a local completion run**; the substrate
-  is inert on every deployed path, so the campaign is unaffected.
+  four delegated custody/runtime/multiproc/edge proofs over real docker + TLS. The
+  long-running SPEC-063 `execution-failure-test` campaign exceeds the local harness
+  timeout, so it was run to completion as a separate local run: **795 passed,
+  2 deselected, exit 0** in 0:39:03 (zero failures/errors/skips; evidence
+  `.workspaces/spec063-evidence/20261104T160000Z-75c2fb2fb40d`), closing the deferral
+  recorded at the ship gate; the substrate is inert on every deployed path, so the
+  campaign is unaffected.
 - Phase-2 inertness confirmed: no orchestration caller wired, the deployed
   single-agent path is byte-identical, and there is no contract, gateway, or policy
   change.

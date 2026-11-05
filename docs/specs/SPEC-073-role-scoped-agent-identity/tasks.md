@@ -73,9 +73,11 @@ caller and no change to the deployed single-agent path.
 ## Delivery Gate
 
 - [x] all acceptance criteria in `spec.md` verified (R-1…R-6) — agent-platform suite **1710 green**;
-      `make verify` green except the SPEC-063 `execution-failure-test` campaign (exceeds the harness
-      timeout, all-passing to ~36%, zero failures), deferred to a local completion run and recorded
-      in the `spec.md` delivery annotation
+      `make verify` green through every target. The SPEC-063 `execution-failure-test` campaign
+      (exceeds the harness timeout) was run to completion in a separate local run: **795 passed,
+      2 deselected, exit 0** in 0:39:03 (evidence
+      `.workspaces/spec063-evidence/20261104T160000Z-75c2fb2fb40d`), closing the ship-gate
+      deferral recorded in the `spec.md` delivery annotation
 - [x] living state docs updated (see spec `Impact` section)
 - [x] `CHANGELOG.md` entry added referencing SPEC-073
 - [x] spec index in `docs/specs/README.md` updated

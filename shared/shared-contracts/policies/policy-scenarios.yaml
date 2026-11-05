@@ -271,3 +271,93 @@ tools:
   - role: ghost-role
     action: tools:invoke
     expect: deny
+
+# SPEC-074 agent-role axis demonstration. The canonical bundle above stays
+# byte-unchanged (OQ-4 — no agent_roles_any rule, no deployed producer until
+# phase 5), so these expectations run against a *synthetic* demonstration
+# bundle that carries scoped rules. They pin the matching semantics the axis
+# adds: absent = unconstrained, a scoped rule matches only its agent-role and
+# never an unscoped call (fail-closed), the axis composes conjunctively with
+# the human roles_any, and an executor-scoped mutation parks on a *human*
+# approver. The harness validates this section for the current --engine.
+agent_role:
+  bundle: fixtures/agent-role-demo.yaml
+
+  # platform-gateway: require_approval is honored (the confirm path bridges it).
+  api:
+    # Absent agent_roles_any = unconstrained: matches unscoped and any role.
+    - role: operator
+      action: chat
+      expect: allow
+    - role: operator
+      action: chat
+      agent_role: executor
+      expect: allow
+    - role: operator
+      action: chat
+      agent_role: diagnostician
+      expect: allow
+    # executor-scoped mutation => require_approval by a distinct HUMAN (tier_2).
+    - role: operator
+      action: tools:mutate
+      agent_role: executor
+      expect: require_approval
+      approval_tier: tier_2
+    # A scoped rule never matches an unscoped call, and diagnostician /
+    # orchestrator cannot reach the mutating grant (fail-closed).
+    - role: operator
+      action: tools:mutate
+      expect: deny
+    - role: operator
+      action: tools:mutate
+      agent_role: diagnostician
+      expect: deny
+    - role: operator
+      action: tools:mutate
+      agent_role: orchestrator
+      expect: deny
+    # The human axis still applies conjunctively: auditor is not an operator,
+    # so even the right agent-role cannot reach the grant.
+    - role: auditor
+      action: tools:mutate
+      agent_role: executor
+      expect: deny
+    # A diagnostician-scoped read grant matches only the diagnostician.
+    - role: operator
+      action: tools:invoke
+      agent_role: diagnostician
+      expect: allow
+    - role: operator
+      action: tools:invoke
+      agent_role: executor
+      expect: deny
+    - role: operator
+      action: tools:invoke
+      expect: deny
+
+  # tool-gateway: require_approval rules are skipped at load (SPEC-030 R-2), so
+  # the executor-scoped mutation rule never loads and admission stays allow/deny
+  # — the deliberate engine non-parity, asserted here.
+  tools:
+    - role: operator
+      action: chat
+      agent_role: executor
+      expect: allow
+    # The scoped require_approval rule is skipped at load, so an executor-scoped
+    # mutation falls through to deny-by-default on this engine.
+    - role: operator
+      action: tools:mutate
+      agent_role: executor
+      expect: deny
+    # A diagnostician-scoped read grant matches only the diagnostician.
+    - role: operator
+      action: tools:invoke
+      agent_role: diagnostician
+      expect: allow
+    - role: operator
+      action: tools:invoke
+      agent_role: orchestrator
+      expect: deny
+    - role: operator
+      action: tools:invoke
+      expect: deny

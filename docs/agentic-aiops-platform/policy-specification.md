@@ -113,10 +113,21 @@ Every request should be normalized into a policy input object.
 
 - `principal.tenant_id`
 - `principal.team_id`
+- `principal.agent_role`
 - `request.service_criticality`
 - `request.tool_name`
 - `request.connector_name`
 - `request.execution_mode`
+
+> **Platform status (SPEC-074, phase 3):** `principal.agent_role` is a
+> reserved, **process-local** authority-narrowing label drawn from the closed
+> vocabulary `diagnostician` / `orchestrator` / `executor`
+> ([ADR-0017](../adr/0017-bounded-read-only-multi-agent-orchestration.md)). It
+> is never a JWT claim or a wire field, and it is orthogonal to — and can only
+> subtract from — `principal.platform_roles`. In phase 3 no deployed caller
+> supplies it: every evaluation forwards `agent_role=None`, so the axis is
+> inert and all outcomes stay byte-identical. A producer first binding a role
+> lands at phase 5.
 
 ## Policy Domains
 
@@ -205,8 +216,20 @@ Each rule should contain:
 - `risk_tiers_any`
 - `approval_tiers_any`
 - `service_criticality_any`
+- `agent_roles_any`
 
 All match fields are optional, but a rule should include enough specificity to be safe and understandable.
+
+> **Platform status (SPEC-074, phase 3):** `agent_roles_any` is the shipped
+> agent-role match dimension (`policy-rule.schema.json` v2→v3), `enum`-closed
+> to `diagnostician` / `orchestrator` / `executor`. It composes
+> **conjunctively** with `roles_any` and is **fail-closed** — a rule that sets
+> it never matches an unscoped (`agent_role=None`) call — so it can only
+> narrow, never widen, the authority the human roles already grant, and it
+> never overrides an explicit `deny`. The field is **additive and optional**
+> (absent = unconstrained), so every v2 rule validates and evaluates
+> byte-identically under v3; the canonical `policy-default.yaml` carries no
+> `agent_roles_any` rule and stays byte-unchanged.
 
 ## Condition Schema
 
@@ -552,6 +575,22 @@ POST /policy/evaluate
   "reason": "Production restart requires approval."
 }
 ```
+
+## Policy Rule Schema Revision History
+
+The canonical rule schema
+(`shared/shared-contracts/schemas/policy-rule.schema.json`) is versioned
+**additively**: every revision keeps prior bundles valid and byte-unchanged,
+proven by contract test and gated by `make validate-policy` /
+`make validate-policy-scenarios` on both engines.
+
+| Title | Change | Spec |
+|---|---|---|
+| Policy Rule (v1) | baseline `action_authz` rule model: `match` = `{roles_any, actions_any}`, `additionalProperties: false`; outcomes `allow` / `deny` (with `require_approval` and `allow_with_conditions` reserved) | SPEC-004 |
+| Policy Rule (v2) | activated the reserved `require_approval` outcome with an explicit `decision.approval` block (`tier`, `decided_by_roles`, `allow_self_approval`) | SPEC-030 |
+| Policy Rule (v3) | added the optional `match.agent_roles_any` axis, `enum`-closed to `diagnostician` / `orchestrator` / `executor`; **not** in `match.required`, additive and **inert** in phase 3 (no canonical rule carries it, every deployed call forwards `agent_role=None`) | SPEC-074 |
+
+`allow_with_conditions` and `conditions` remain reserved for a future revision.
 
 ## Final Recommendation
 
