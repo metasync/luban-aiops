@@ -1,0 +1,4 @@
+- Each spec directory ships a `plan.md` / `spec.md` / `tasks.md` triad, with `spec.md` carrying Status, Summary, Requirements (numbered R-N with Acceptance criteria), Non-Goals, Impact, Open Questions, and Changelog sections.
+- Specs declare their relationship to prior work via `extends:` metadata (e.g. SPEC-027 extends SPEC-026, which extends SPEC-024) so evolution is traceable without re-stating inherited behavior.
+- New capabilities are introduced through environment-scoped kustomize profiles (e.g. `mutating-dev`) layered over a deny-by-default base, with the root Makefile and `dev-k8s/kustomization.yaml` as the single visible decision point.
+- Failure modes are expressed as explicit non-goals or risks tables, and any backward-compatibility path (legacy id aliases, force-included default model) is captured as a numbered requirement with acceptance criteria.

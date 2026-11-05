@@ -1,0 +1,1 @@
+FastAPI lifespan tasks for background refresh (SPEC-027), Kustomize profiles for deployment posture (SPEC-022/026), Postgres `model_discovery_cache(provider, models, updated_at)` table for persistence (SPEC-027), OpenAI-compatible `/models` endpoint for live discovery.

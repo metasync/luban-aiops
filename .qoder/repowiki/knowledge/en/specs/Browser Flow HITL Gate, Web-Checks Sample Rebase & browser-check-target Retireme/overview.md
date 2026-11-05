@@ -1,0 +1,1 @@
+Three delivered SPECs that enforce one HITL gate per mutating browser flow, rebase the web-checks samples onto the stateful acme-admin target, and retire the obsolete browser-check-target mock.

@@ -1,0 +1,5 @@
+- Each spec directory ships a fixed triple of `plan.md`, `spec.md`, `tasks.md`, with `spec.md` carrying structured metadata fields (`status`, `owner`, `created`, `approved`, `delivered`, `release slice`, `related ADRs`, `lineage`).
+- Requirements are numbered `R-N:` with verbatim Acceptance Criteria subsections, and Non-Goals explicitly enumerate what is deferred rather than implied.
+- Contract changes are additive only: new fields are optional on existing schemas, stream-schema versions bump incrementally, and consumers that ignore unknown fields retain prior behavior.
+- Specs declare their architectural lineage as a comma-separated chain of predecessor SPECs and ADRs in the `lineage:` field, making the dependency graph auditable within the document itself.
+- Trust-model decisions that span multiple products or specs are elevated to ADRs (e.g., ADR-0010 for signed envelope provenance, ADR-0011 for composition authority) rather than encoded inline in the spec.

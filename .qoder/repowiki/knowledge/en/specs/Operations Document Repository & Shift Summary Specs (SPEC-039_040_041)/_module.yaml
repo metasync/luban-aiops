@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/operations_document_repository
+title: Operations Document Repository & Shift Summary Specs (SPEC-039/040/041)
+scope:
+    - docs/specs/SPEC-039-operations-document-repository/
+    - docs/specs/SPEC-040-shift-summary-handover-narrative/
+    - docs/specs/SPEC-041-documents-readability-and-digest-reference/
+source_files: []
+depends_on: []
+related_to: []

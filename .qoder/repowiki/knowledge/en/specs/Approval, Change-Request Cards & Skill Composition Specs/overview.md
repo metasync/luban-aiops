@@ -1,0 +1,1 @@
+Three delivered product specs documenting the evolution from bounded mutating actions through action-level HITL approval cards to validated multi-target skill compositions.

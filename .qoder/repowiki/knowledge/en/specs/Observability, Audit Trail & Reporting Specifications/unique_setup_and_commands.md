@@ -1,0 +1,1 @@
+Each spec directory carries its own `plan.md` / `spec.md` / `tasks.md` triad; delivery status is tracked inline via the `status:` field (`draft` → `approved` → `delivered`) and the per-spec Changelog. Implementation verification across the three products runs via the repo-wide `make verify` target (coverage counts are cited in each spec's changelog entry).

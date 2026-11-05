@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/browser_http_and_external_tools
+title: Browser, HTTP & Sample-App Specification Suite
+scope:
+    - docs/specs/SPEC-049-browser-web-check-tools/
+    - docs/specs/SPEC-058-http-service-check-tools/
+    - docs/specs/SPEC-059-acme-admin-sample-app-and-skill-suite/
+source_files: []
+depends_on: []
+related_to: []

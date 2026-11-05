@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/mcp_ingestion_pilots_and_integrations
+title: mcp_ingestion_pilots_and_integrations
+scope:
+    - docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/
+    - docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/
+    - docs/specs/SPEC-050-browser-tools-expansion-and-samples/
+source_files: []
+depends_on: []
+related_to: []

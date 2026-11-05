@@ -1,0 +1,1 @@
+Specification documents defining runtime LLM model switching, a self-hosted `luban` provider adapter, and opt-in per-turn AgentScope `ModelRouterMiddleware` routing.

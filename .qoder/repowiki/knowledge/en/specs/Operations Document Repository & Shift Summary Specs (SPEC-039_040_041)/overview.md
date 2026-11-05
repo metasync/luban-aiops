@@ -1,0 +1,1 @@
+Specification trio defining the typed operations document repository, shift-summary handover narrative with Markdown export, and digest readability improvements for the operator portal.

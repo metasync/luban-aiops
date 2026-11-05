@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/action_approval_and_change_request_card
+title: Approval, Change-Request Cards & Skill Composition Specs
+scope:
+    - docs/specs/SPEC-021-bounded-mutating-actions/
+    - docs/specs/SPEC-054-action-approval-and-change-request-card/
+    - docs/specs/SPEC-057-skill-composition-runbooks/
+source_files: []
+depends_on: []
+related_to: []

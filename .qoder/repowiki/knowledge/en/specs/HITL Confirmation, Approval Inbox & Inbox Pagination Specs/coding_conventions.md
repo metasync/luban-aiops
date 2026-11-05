@@ -1,0 +1,4 @@
+- Each requirement block carries testable acceptance criteria written as concrete state transitions (e.g., 'parking writes a pending record before the frame reaches the client', 'concurrent decisions resolve exactly once') rather than implementation notes.
+- New capabilities follow the deny-by-default policy pattern: a new action name (`chat:confirm`, `approvals:list`) is added to `policy-default.yaml` with explicit role grants and observer exclusion, then synced via `make sync-policy`.
+- Cross-product changes are declared up front in an Impact section enumerating products touched, shared contracts bumped, identity/policy/audit implications, and living-state docs to update.
+- Live-check deviations and post-delivery hardening are recorded chronologically in a Changelog section at the bottom of each spec, preserving the original requirements while documenting real-world corrections.

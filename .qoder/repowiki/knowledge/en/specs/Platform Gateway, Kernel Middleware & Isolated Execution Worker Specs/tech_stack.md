@@ -1,0 +1,1 @@
+Python FastAPI services following the workspace's per-product layout convention; AgentScope 2.0.6 `MiddlewareBase` hooks (`on_check_permission`, `on_acting`); OpenTelemetry via the existing OTLP pipeline; Kustomize overlays under `shared/platform-ops/gitops/dev-k8s`; signing via `execution_signing.verify_envelope` with keys from `execution-signing-secret`.

@@ -33,16 +33,17 @@
 - [hitl_confirmations.py](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py)
 - [0017-bounded-read-only-multi-agent-orchestration.md](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md)
 - [SPEC-073-role-scoped-agent-identity/spec.md](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md)
+- [SPEC-074-policy-role-axis/spec.md](file://docs/specs/SPEC-074-policy-role-axis/spec.md)
+- [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the role-scoped authority model with closed vocabulary (diagnostician/orchestrator/executor)
-- Documented same-token identity preservation where all roles ride the same delegated token without creating new principals
-- Added detailed coverage of subtractive-only narrowing principles that prevent role-based authority widening
-- Included phase boundaries for multi-agent orchestration foundation showing inert substrate delivery
-- Enhanced toolkit narrowing mechanisms at the agent platform layer while preserving existing policy enforcement
-- Updated HITL confirmation tracking with role provenance labels for executor-staged mutations
+- Enhanced authorization model with additive agent-role axis that composes conjunctively with human roles without changing deployed caller behavior
+- Updated policy engine implementation to support optional `agent_roles_any` field in v3 schema
+- Added comprehensive documentation for the inert phase 3 implementation where no live producer threads agent-roles
+- Updated policy specification to document the new agent-role dimension as a reserved future expansion
+- Enhanced authorization matrix with agent-role × capability section showing subtractive-only relationship
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -60,6 +61,8 @@
 This document explains the Luban AIOPS platform's multi-layered security model: authentication via Keycloak OIDC, authorization through policy-as-code evaluation, and workload identity propagation between services. It documents the authorization matrix across roles and capabilities, the policy engine architecture and rule evaluation process, approval workflows for sensitive operations, token delegation mechanisms, service-to-service authentication, least-privilege enforcement, and security considerations for tool execution, data redaction, and audit trail integrity. 
 
 The platform now supports two distinct identity planes: **inbound service-to-service delegation** using broker-mediated tokens that preserve human attribution internally, and **outbound user-delegated execution** where tools act as the requesting human against external targets using per-user OAuth credentials. Additionally, the platform implements a **role-scoped authority model** that narrows agent capabilities within the same delegated token context, supporting bounded read-only multi-agent orchestration while maintaining strict isolation between machine identities (service accounts) and human identities (per-user delegation).
+
+**Updated** The platform now includes an enhanced authorization model with an additive agent-role axis that composes conjunctively with human roles without changing deployed caller behavior. This phase 3 implementation provides the policy-layer foundation for multi-agent orchestration while maintaining backward compatibility.
 
 ## Project Structure
 Security is enforced at multiple boundaries:
@@ -87,7 +90,7 @@ Broker --> Audit
 **Diagram sources**
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
@@ -102,6 +105,7 @@ Broker --> Audit
 - Authentication and identity federation via Keycloak OIDC, with normalized roles and environment scopes passed downstream.
 - Policy-as-code engine that evaluates action authorization with deny-by-default semantics and explicit approval tiers.
 - Token delegation through a broker-mediated exchange to propagate user identity to downstream services without elevating roles.
+- **Enhanced**: Additive agent-role axis in policy model that composes conjunctively with human roles without changing deployed behavior
 - **New**: Role-scoped authority model with closed vocabulary (diagnostician/orchestrator/executor) that narrows agent capabilities at the toolkit layer while preserving the same delegated token.
 - **New**: User-delegated outbound identity via per-user OAuth authorization-code flows, maintaining strict separation from machine grants.
 - HITL approval workflow that parks mutating tool calls until a designated approver confirms or denies them, with role provenance tracking for executor-staged mutations.
@@ -110,7 +114,7 @@ Broker --> Audit
 
 **Section sources**
 - [identity-and-authorization-design.md:121-166](file://docs/agentic-aiops-platform/identity-and-authorization-design.md#L121-L166)
-- [policy-engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy-engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
@@ -118,13 +122,15 @@ Broker --> Audit
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 
 ## Architecture Overview
-The platform enforces least privilege end-to-end across two distinct identity planes with an additional role-scoped authority dimension:
+The platform enforces least privilege end-to-end across two distinct identity planes with an additional role-scoped authority dimension and enhanced policy-layer agent-role axis:
 
 **Inbound Plane (Service-to-Service)**: The portal authenticates via Keycloak OIDC; the gateway validates tokens and forwards trusted identity. The policy engine evaluates actions against a versioned bundle with deny-by-default and approval outcomes. Mutating tool calls are parked and require tiered approval before execution. Service-to-service calls use broker-mediated delegated tokens bound to target audiences; roles are never elevated.
 
 **Outbound Plane (User-Delegated)**: For external targets requiring per-user RBAC, the tool gateway acquires OAuth 2.x authorization-code credentials on behalf of the requesting user. These target-issued tokens carry the user's identity and authority, allowing external systems to enforce their own RBAC. The platform custodies encrypted refresh tokens but never elevates beyond the user's target-side authority.
 
 **Role-Scoped Authority Model**: Within the agent platform, a closed vocabulary of roles (diagnostician/orchestrator/executor) narrows toolkit access at the agent layer while every role rides the same delegated token. This enables bounded read-only multi-agent orchestration without creating new principals or identity edges.
+
+**Enhanced Policy Layer**: Phase 3 adds an additive agent-role axis to the deny-by-default authorization model. The optional `agent_roles_any` field in policy rules composes conjunctively with human roles, providing fail-closed semantics where agent-role-scoped rules never match unscoped calls. This maintains byte-identical behavior for all existing deployments while enabling future multi-agent orchestration scenarios.
 
 ```mermaid
 sequenceDiagram
@@ -140,7 +146,7 @@ U->>P : Login (Keycloak OIDC)
 P->>G : API call with user JWT
 G->>B : Exchange subject_token -> delegated token
 B-->>G : Delegated token (aud=target, roles copied)
-G->>G : Evaluate policy (deny-by-default, approval tiers)
+G->>G : Evaluate policy (deny-by-default, approval tiers, agent-role axis)
 alt require_approval
 G->>A : Park tool call for HITL
 U->>G : Approve/deny (chat : confirm)
@@ -167,7 +173,7 @@ G->>S : Emit policy/session events
 **Diagram sources**
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
@@ -220,8 +226,42 @@ IB-->>GW : access_token (aud=target, roles copied, act=caller)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [delegation_client.py:81-104](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L81-L104)
 
+### Enhanced Authorization Model with Additive Agent-Role Axis
+**Updated** Added comprehensive documentation for the enhanced authorization model with additive agent-role axis that composes conjunctively with human roles without changing deployed caller behavior.
+
+Phase 3 of the multi-agent SPEC series delivers an inert model axis that extends the deny-by-default authorization model with an optional agent-role dimension. This implementation provides the policy-layer foundation for multi-agent orchestration while maintaining complete backward compatibility.
+
+**Additive Schema Extension**: The `policy-rule.schema.json` has been extended from v2 to v3 with an optional `agent_roles_any` array in the match block. This field is drawn from the closed SPEC-073 vocabulary (`diagnostician`, `orchestrator`, `executor`) and composes conjunctively with the existing `roles_any` dimension.
+
+**Conjunctive Composition**: Agent roles compose conjunctively with human roles within each rule. A rule matches only if the principal holds a `roles_any` human role AND (the rule carries no `agent_roles_any`, or the call's `agent_role` is in the set). This ensures that agent-role-scoped rules never override human-role denials.
+
+**Fail-Closed Semantics**: Rules that set `agent_roles_any` never match unscoped calls (`agent_role=None`). This fail-closed behavior ensures that unknown or absent agent-roles fall back to the most restrictive posture, preventing accidental privilege escalation.
+
+**Inert Implementation**: No deployed caller threads a non-None agent-role across the process boundary. Every live evaluation passes `agent_role=None`, making all outcomes byte-identical to pre-v3 behavior. The canonical `policy-default.yaml` remains unchanged, and reachability guards ensure no production path uses the new axis.
+
+```mermaid
+flowchart TD
+RuleMatch["Policy Rule Match"] --> HumanRoles{"Human roles match?"}
+HumanRoles -- No --> Deny["Deny (no match)"]
+HumanRoles -- Yes --> AgentRoles{"Agent roles match?"}
+AgentRoles -- Unscoped (None) --> Deny["Deny (fail-closed)"]
+AgentRoles -- Scoped match --> Allow["Allow/Deny/Require Approval"]
+AgentRoles -- Scoped mismatch --> Deny["Deny (no match)"]
+```
+
+**Diagram sources**
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
+- [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)
+
+**Section sources**
+- [SPEC-074-policy-role-axis/spec.md:63-74](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L63-L74)
+- [SPEC-074-policy-role-axis/spec.md:108-144](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L108-L144)
+- [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
+- [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)
+
 ### Role-Scoped Authority Model and Multi-Agent Orchestration Foundation
-**Updated** Added comprehensive documentation for the new role-scoped authority model that enables bounded read-only multi-agent orchestration while preserving single-edge identity.
+**Updated** Enhanced documentation for the role-scoped authority model that works in conjunction with the additive agent-role axis.
 
 The platform now implements a closed vocabulary of agent roles that narrow toolkit access at the agent platform layer while every role rides the same delegated token:
 
@@ -234,7 +274,7 @@ The platform now implements a closed vocabulary of agent roles that narrow toolk
 
 **Subtractive-Only Narrowing**: Role-based toolkit restrictions are always subsets of the underlying token's permissions - they can never grant capabilities that the token doesn't already possess. This maintains the existing gateway policy as the authoritative enforcement boundary.
 
-**Phase Boundaries**: Phase 2 delivers an inert substrate with no active orchestration caller - the deployed single-agent path remains byte-identical. Future phases will add policy role axis, audit attribution, and bounded autonomous diagnosis.
+**Phase Boundaries**: Phase 2 delivered an inert substrate with no active orchestration caller - the deployed single-agent path remains byte-identical. Future phases will add policy role axis, audit attribution, and bounded autonomous diagnosis.
 
 ```mermaid
 sequenceDiagram
@@ -324,13 +364,17 @@ TG->>AT : Emit audit event with delegation_mode=user_delegated
 - [user_delegated_client.py:1-33](file://products/tool-gateway/src/tool_gateway/tools/user_delegated_client.py#L1-L33)
 
 ### Policy Engine and Rule Evaluation
-- The policy engine loads a versioned YAML bundle and evaluates actions with deny-by-default semantics. Outcomes include allow, deny, and require_approval with explicit tiers.
-- Precedence: explicit deny wins; require_approval overrides allow; higher priority wins within an outcome class; disabled rules are ignored.
-- The live permission matrix is derived from the same evaluate path, ensuring transparency matches enforcement.
+**Updated** Enhanced policy engine to support the additive agent-role axis while maintaining backward compatibility.
+
+The policy engine loads a versioned YAML bundle and evaluates actions with deny-by-default semantics. Outcomes include allow, deny, and require_approval with explicit tiers. Precedence: explicit deny wins; require_approval overrides allow; higher priority wins within an outcome class; disabled rules are ignored.
+
+**Enhanced Matching Logic**: Both platform-gateway and tool-gateway policy engines now support the optional `agent_role` parameter that composes conjunctively with human roles. Rules with `agent_roles_any` never match unscoped calls (`agent_role=None`), ensuring fail-closed semantics.
+
+**Byte-Identical Behavior**: All existing evaluations pass `agent_role=None`, making the enhanced policy engine completely backward compatible. The canonical policy bundle remains unchanged, and no deployed caller threads a non-None agent-role.
 
 ```mermaid
 flowchart TD
-Load["Load policy bundle"] --> Match["Match enabled rules by role/action"]
+Load["Load policy bundle"] --> Match["Match enabled rules by role/action/agent-role"]
 Match --> DenyCheck{"Any explicit deny?"}
 DenyCheck -- Yes --> Deny["Return deny"]
 DenyCheck -- No --> ApprovalCheck{"Any require_approval?"}
@@ -341,18 +385,30 @@ AllowCheck -- No --> DefaultDeny["Return deny (no match)"]
 ```
 
 **Diagram sources**
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [policy_matrix.py:1-35](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L35)
 
 **Section sources**
 - [policy-specification.md:61-87](file://docs/agentic-aiops-platform/policy-specification.md#L61-L87)
-- [policy-engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy-engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [policy_matrix.py:1-35](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L35)
 
 ### Authorization Matrix and Role Permissions
-- Roles include read-only-observer, operator, developer, approver, auditor, and platform-admin. Environment scopes include dev, test, staging, prod. Action tiers range from tier 0 (read-only) to tier 3 (high-risk production).
-- Feature access, environment eligibility, and action permissions are defined per role and environment. Approval matrices define who may request and approve at each tier.
-- The shipped default bundle encodes these permissions as rules, including mutation gating and approval requirements.
+**Updated** Enhanced authorization matrix with agent-role × capability section showing the subtractive-only relationship to human roles.
+
+Roles include read-only-observer, operator, developer, approver, auditor, and platform-admin. Environment scopes include dev, test, staging, prod. Action tiers range from tier 0 (read-only) to tier 3 (high-risk production). Feature access, environment eligibility, and action permissions are defined per role and environment. Approval matrices define who may request and approve at each tier.
+
+**Agent-Role Matrix**: The authorization matrix now includes a dedicated section for agent roles alongside the six human platform roles:
+
+| Agent-role | Posture | Sees mutating tools | Approves |
+|---|---|---|---|
+| `diagnostician` | read-level tools, autonomous | no | never |
+| `orchestrator` | decomposes / delegates / synthesizes; holds **no** direct gateway tools | no | never |
+| `executor` | may see mutating tools | yes — still parks on HITL | never |
+
+**Subtractive-Only Relationship**: The agent-role axis composes conjunctively with the human `roles_any` matrix dimension and can only remove authority the token already grants. An agent-role-scoped grant never widens a human role the token does not hold and never overrides an explicit `deny`.
+
+The shipped default bundle encodes these permissions as rules, including mutation gating and approval requirements.
 
 ```mermaid
 classDiagram
@@ -362,6 +418,12 @@ class Role {
 +bool can_request(action)
 +bool can_approve(tier, env)
 }
+class AgentRole {
++string value
++bool is_readonly()
++bool can_mutate()
++bool can_approve()
+}
 class Action {
 +string name
 +string tier
@@ -370,18 +432,20 @@ class Action {
 class PolicyBundle {
 +version int
 +rules list
-+evaluate(role, action) Decision
++evaluate(role, action, agent_role) Decision
 }
 Role --> PolicyBundle : "evaluated by"
+AgentRole --> PolicyBundle : "composes with"
 Action --> PolicyBundle : "matched by"
 ```
 
 **Diagram sources**
-- [authorization-matrix.md:155-265](file://docs/agentic-aiops-platform/authorization-matrix.md#L155-L265)
+- [authorization-matrix.md:164-186](file://docs/agentic-aiops-platform/authorization-matrix.md#L164-L186)
 - [policy-default.yaml:53-152](file://shared/shared-contracts/policies/policy-default.yaml#L53-L152)
 
 **Section sources**
 - [authorization-matrix.md:16-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L16-L60)
+- [authorization-matrix.md:164-186](file://docs/agentic-aiops-platform/authorization-matrix.md#L164-L186)
 - [authorization-matrix.md:155-265](file://docs/agentic-aiops-platform/authorization-matrix.md#L155-L265)
 - [policy-default.yaml:53-152](file://shared/shared-contracts/policies/policy-default.yaml#L53-L152)
 
@@ -569,7 +633,7 @@ Broker --> Audit
 ```
 
 **Diagram sources**
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
@@ -578,7 +642,7 @@ Broker --> Audit
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 **Section sources**
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
 - [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 - [runtime_kernel.py:502-580](file://products/agent-platform/src/agent_service/runtime_kernel.py#L502-L580)
@@ -590,7 +654,8 @@ Broker --> Audit
 - Policy evaluation is lightweight and operates on an in-memory bundle; ensure bundles remain concise and prioritized to minimize matching overhead.
 - Redaction walks serialized results; keep tool outputs bounded to avoid excessive traversal and potential overflow rejections.
 - Audit ingestion is fire-and-forget with timeouts; configure appropriate backends and retention to avoid storage pressure.
-- **New**: Role-scoped toolkit caching uses per-role cache keys `(token, role)` to maintain separate toolkits per role while avoiding redundant discovery calls.
+- **Enhanced**: Role-scoped toolkit caching uses per-role cache keys `(token, role)` to maintain separate toolkits per role while avoiding redundant discovery calls.
+- **Enhanced**: Policy engine matching now includes agent-role axis evaluation, but since no deployed caller threads non-None agent-roles, this adds negligible overhead.
 - **New**: User-delegated OAuth acquisition uses process-local LRU-bounded access token caching with single-flight coordination to minimize redundant token exchanges while maintaining security boundaries.
 - **New**: Encrypted credential store operations are bounded and coordinated across replicas; rotation and revocation must be tested for performance impact.
 
@@ -601,12 +666,12 @@ Broker --> Audit
 - Redaction overflow: if tool output is withheld due to high credential density, tighten parameters or scope inputs to reduce sensitive content.
 - Audit ingestion issues: confirm emitter URLs and service identities; check audit service health and retention configuration.
 - Secret delivery failures: verify email channel configuration, recipient allowlists, and SMTP connectivity; check for UPSTREAM_ERROR responses.
-- **New**: Role-scoped authority issues: verify that role values are from the closed enum (diagnostician/orchestrator/executor), check that toolkit narrowing is subtractive-only, and confirm that unknown roles fail closed to empty toolkit.
+- **Enhanced**: Agent-role axis issues: verify that `agent_roles_any` values come from the closed enum (diagnostician/orchestrator/executor), check that rules with agent-role scoping never match unscoped calls, and confirm that unknown agent-roles fail closed.
 - **New**: User-delegated OAuth failures: check target client registration, callback URI configuration, PKCE S256 support, and refresh token rotation; verify that failed acquisitions fail closed without falling back to machine grants.
 
 **Section sources**
 - [exchange_service.py:148-195](file://products/identity-broker/src/identity_service/services/exchange_service.py#L148-L195)
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 - [gateway_service.py:307-334](file://products/tool-gateway/src/tool_gateway/services/gateway_service.py#L307-L334)
 - [agent_role.py:70-85](file://products/agent-platform/src/agent_service/services/agent_role.py#L70-L85)
 - [runtime_kernel.py:654-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L654-L660)
@@ -616,7 +681,7 @@ Broker --> Audit
 ## Conclusion
 Luban AIOPS enforces least privilege through a layered model: OIDC-based authentication, policy-as-code authorization with explicit approval tiers, broker-mediated token delegation preserving human attribution, deterministic redaction of tool outputs, and a durable audit trail with retention. The authorization matrix defines clear permissions per role and environment, while the policy engine ensures consistent enforcement.
 
-The platform now supports three complementary security dimensions: inbound service-to-service delegation using broker-mediated tokens, outbound user-delegated execution using per-user OAuth credentials, and role-scoped authority narrowing within the same delegated token context. The role-scoped authority model enables bounded read-only multi-agent orchestration while maintaining strict isolation between machine identities (service accounts) and human identities (per-user delegation), ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts. Operators can configure security settings, extend policies, add OAuth target integrations, and implement additional controls while maintaining separation of duties and auditability.
+**Enhanced** The platform now supports four complementary security dimensions: inbound service-to-service delegation using broker-mediated tokens, outbound user-delegated execution using per-user OAuth credentials, role-scoped authority narrowing within the same delegated token context, and an additive agent-role axis in the policy model that composes conjunctively with human roles without changing deployed behavior. The phase 3 implementation provides the policy-layer foundation for multi-agent orchestration while maintaining complete backward compatibility, ensuring that external systems can enforce their own RBAC on individual users rather than shared service accounts. Operators can configure security settings, extend policies, add OAuth target integrations, and implement additional controls while maintaining separation of duties and auditability.
 
 ## Appendices
 
@@ -634,14 +699,18 @@ The platform now supports three complementary security dimensions: inbound servi
 - [SPEC-013-durable-audit-trail/spec.md:52-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L52-L73)
 
 ### Defining Custom Policies
+**Updated** Enhanced guidance for defining custom policies with the new agent-role axis.
+
 - Add or modify rules in the policy bundle with clear id, domain, priority, match criteria, decision, and conditions.
 - Use require_approval with explicit tiers for sensitive actions; ensure decided_by_roles excludes synthetic identities where appropriate.
+- **New**: Optionally use `agent_roles_any` in the match block to scope rules to specific agent roles (diagnostician/orchestrator/executor). Remember that this composes conjunctively with human roles and never matches unscoped calls.
 - Test precedence and deny-by-default behavior; use policy diff and scenario tests before rollout.
+- **New**: When adding agent-role scoping, verify that rules with `agent_roles_any` never accidentally match unscoped calls and that the fail-closed semantics work as expected.
 
 **Section sources**
 - [policy-specification.md:158-255](file://docs/agentic-aiops-platform/policy-specification.md#L158-L255)
 - [policy-default.yaml:53-152](file://shared/shared-contracts/policies/policy-default.yaml#L53-L152)
-- [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
 
 ### Implementing Additional Authorization Controls
 - Introduce new actions (e.g., resource-specific verbs) and map them to roles and environments in the bundle.
@@ -653,20 +722,20 @@ The platform now supports three complementary security dimensions: inbound servi
 - [approval-and-hitl.md:190-215](file://docs/guides/approval-and-hitl.md#L190-L215)
 - [policy-default.yaml:130-152](file://shared/shared-contracts/policies/policy-default.yaml#L130-L152)
 
-### Configuring Role-Scoped Authority Model
-**New** Added configuration guidance for the role-scoped authority model implementation.
+### Configuring the Enhanced Authorization Model
+**New** Added configuration guidance for the enhanced authorization model with additive agent-role axis.
 
-- The role-scoped authority model is currently inert in phase 2 - no orchestration caller binds roles yet
-- When future phases activate role binding, ensure that role values come from the closed enum (diagnostician/orchestrator/executor)
-- Verify that toolkit narrowing follows subtractive-only principles - roles can only restrict, never expand, toolkit access
-- Monitor that unknown or malformed roles fail closed to empty toolkit rather than being coerced to wider postures
-- Ensure that role provenance tracking captures executor-staged mutations for audit attribution in future phases
+- The phase 3 implementation is inert - no deployed caller threads non-None agent-roles yet, so all evaluations remain byte-identical.
+- When future phases activate agent-role binding, ensure that `agent_roles_any` values come from the closed enum (diagnostician/orchestrator/executor).
+- Verify that agent-role scoping follows conjunctive composition principles - rules with `agent_roles_any` never match unscoped calls.
+- Monitor that the fail-closed semantics work correctly - unknown or absent agent-roles should fall back to the most restrictive posture.
+- Ensure that the canonical policy bundle remains byte-unchanged unless you intentionally add agent-role-scoped rules.
+- Test that agent-role-scoped rules compose correctly with human roles and don't override explicit denials.
 
 **Section sources**
-- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
-- [runtime_kernel.py:629-660](file://products/agent-platform/src/agent_service/runtime_kernel.py#L629-L660)
-- [test_agent_role.py:93-104](file://products/agent-platform/tests/test_agent_role.py#L93-L104)
-- [SPEC-073-role-scoped-agent-identity/spec.md:113-130](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L113-L130)
+- [SPEC-074-policy-role-axis/spec.md:108-144](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L108-L144)
+- [policy_engine.py:430-499](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L430-L499)
+- [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)
 
 ### Configuring Secret Delivery Security
 **Updated** Added configuration guidance for secret delivery security controls.

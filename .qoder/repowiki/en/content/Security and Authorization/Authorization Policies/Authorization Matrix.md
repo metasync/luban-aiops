@@ -5,9 +5,9 @@
 - [authorization-matrix.md](file://docs/agentic-aiops-platform/authorization-matrix.md)
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
-- [policy-matrix.schema.json](file://shared/shared-contracts/schemas/policy-matrix.schema.json)
+- [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
-- [policy_matrix.py](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py)
+- [agent_role.py](file://products/agent-platform/src/agent_service/services/agent_role.py)
 - [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
 - [identity_service.py](file://products/identity-broker/src/identity_service/services/identity_service.py)
 - [token_service.py](file://products/identity-broker/src/identity_service/services/token_service.py)
@@ -19,10 +19,10 @@
 
 ## Update Summary
 **Changes Made**
-- Updated Feature Access Matrix to include Platform feature-flag transparency
-- Added runtime:flags action to Complete Permission Matrix section
-- Enhanced Administrative Functions section with runtime:flags details
-- Updated Policy Engine Integration section to reflect new protected action
+- Added Agent-Role Axis section documenting three agent-roles (diagnostician, orchestrator, executor), their postures, fail-closed semantics, and executor→human-approver invariant
+- Updated Policy Engine Integration section to reflect the new agent-role dimension
+- Enhanced Role Hierarchy section with agent-role vs human role distinction
+- Added comprehensive documentation for the agent-role vocabulary and its relationship to the authorization model
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -77,18 +77,20 @@ IdentityBroker --> Keycloak["Keycloak / AD"]
 - [api.py:209-226](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L209-L226)
 
 ## Core Components
-- Roles: read-only-observer, operator, developer, approver, auditor, platform-admin.
-- Environments: dev, test, staging, prod.
+- **Human Roles**: read-only-observer, operator, developer, approver, auditor, platform-admin.
+- **Agent Roles**: diagnostician, orchestrator, executor (closed, platform-owned vocabulary).
+- **Environments**: dev, test, staging, prod.
 - Action categories and risk tiers: tier 0 (read-only), tier 1 (low-risk non-production), tier 2 (low-risk production), tier 3 (high-risk production).
 - Outcomes: allow, deny, request-only, approve-only, request-and-approve.
 - Enforcement: deny-by-default; explicit deny wins; require_approval overrides allow; higher priority wins within an outcome class; disabled rules ignored.
 
-Role definitions and default permissions are documented in the authorization matrix. The policy bundle implements the concrete grants for today's surface.
+The agent-role axis is additive and inert — it narrows authority but never widens what the human token already permits. The three agent-roles represent different levels of autonomy: diagnostician (read-only), orchestrator (delegation without direct tools), and executor (may propose mutations requiring human approval).
 
 **Section sources**
 - [authorization-matrix.md:18-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L18-L60)
 - [authorization-matrix.md:61-154](file://docs/agentic-aiops-platform/authorization-matrix.md#L61-L154)
-- [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
 
 ## Architecture Overview
 The authorization flow evaluates identity, roles, environment scope, requested action, and risk tier against the loaded policy bundle. For mutating tool execution, a tier_2 approval is required before execution proceeds under the confirmer's delegated token.
@@ -105,7 +107,7 @@ U->>P : Sign in
 P->>I : Exchange OIDC token
 I-->>P : Token with roles/groups
 P->>G : Request with token
-G->>E : evaluate(roles, action)
+G->>E : evaluate(roles, action, agent_role=None)
 E->>B : Load bundle
 B-->>E : Rules
 E-->>G : Decision (allow/deny/require_approval)
@@ -126,27 +128,73 @@ G-->>P : Result
 ## Detailed Component Analysis
 
 ### Role Hierarchy and Mapping
-- Fixed role vocabulary: read-only-observer, operator, developer, approver, auditor, platform-admin.
+- **Human role vocabulary**: read-only-observer, operator, developer, approver, auditor, platform-admin.
+- **Agent role vocabulary**: diagnostician, orchestrator, executor (closed, platform-owned enum).
 - Group-to-role mapping occurs in the identity broker. If no mapping matches, the user receives read-only-observer by default.
-- Tokens carry roles and groups; downstream services rely on normalized roles for policy evaluation.
+- Tokens carry human roles and groups; downstream services rely on normalized roles for policy evaluation.
+- Agent roles are process-local context beside the delegated token, not part of JWT claims or wire fields.
 
 ```mermaid
 flowchart TD
 A["Keycloak groups"] --> B["Identity Broker ROLE_MAPPINGS"]
-B --> C["Normalized roles"]
+B --> C["Normalized human roles"]
 C --> D["Token claims"]
 D --> E["Gateway policy evaluation"]
+F["Agent construction context"] --> G["Process-local AGENT_ROLE"]
+G --> H["Toolkit narrowing"]
 ```
 
 **Diagram sources**
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
 - [token_service.py:110-126](file://products/identity-broker/src/identity_service/services/token_service.py#L110-L126)
 - [policy_engine.py:390-444](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L444)
+- [agent_role.py:64-67](file://products/agent-platform/src/agent_service/services/agent_role.py#L64-L67)
 
 **Section sources**
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
 - [token_service.py:110-126](file://products/identity-broker/src/identity_service/services/token_service.py#L110-L126)
 - [user-and-role-administration.md:7-39](file://docs/guides/user-and-role-administration.md#L7-L39)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+
+### Agent-Role Axis
+The platform introduces a closed, platform-owned agent-role vocabulary that narrows a sub-agent's toolkit authority while every role rides the same gateway-forwarded delegated token. The three agent-roles are:
+
+- **Diagnostician**: Read-only access, reuses `_filter_read_only` (`risk_level == "read"`). Can observe and analyze but cannot mutate anything.
+- **Orchestrator**: No direct tool authority. Delegates to member agents but does not invoke tools directly. Collapses ADR-0017's "planner/orchestrator" into one role.
+- **Executor**: May see mutating tools but still parks mutations on existing HITL confirmation. Requires distinct human approver — no agent self-approval.
+
+**Posture Semantics:**
+- Fail-closed: unknown or absent roles yield empty-or-read-only toolkit, never wider authority.
+- Subtractive only: agent-role toolkit ⊆ unscoped toolkit for same token.
+- Immutable: once bound, cannot be changed by any in-process API reachable from model output.
+- Process-local: role is ContextVar beside `DELEGATED_TOKEN`, not part of resumable snapshot or wire fields.
+
+**Executor→Human-Approver Invariant:**
+- An executor-staged mutation requires a distinct human approver.
+- No agent-role can appear as a `decided_by_roles` decider.
+- The agent-role vocabulary is disjoint from human platform roles.
+- Self-approval block still fires for role-staged mutations.
+
+```mermaid
+flowchart TD
+D["Diagnostician"] --> R["Read-only tools"]
+O["Orchestrator"] --> N["No direct tools"]
+E["Executor"] --> M["May propose mutations"]
+M --> H["Requires human approval"]
+H --> S["Distinct human approver"]
+```
+
+**Diagram sources**
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
+- [SPEC-073 spec.md:114-153](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L114-L153)
+
+**Section sources**
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
+- [agent_role.py:64-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L64-L120)
+- [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
+- [SPEC-073 spec.md:114-204](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L114-L204)
+- [SPEC-074 spec.md:146-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L146-L163)
 
 ### Feature Access Matrix
 Feature access is governed by both UI visibility and backend action grants. The following summarizes defaults derived from the authorization matrix and the policy bundle:
@@ -183,7 +231,8 @@ The authorization matrix documents default environment eligibility and environme
 - [authorization-matrix.md:170-241](file://docs/agentic-aiops-platform/authorization-matrix.md#L170-L241)
 
 ### Relationship Between Roles, Features, Actions, and Risk Tiers
-- Roles define who may act.
+- **Human roles** define who may act at the platform level.
+- **Agent roles** narrow toolkit authority for sub-agents operating under the same delegated token.
 - Features define UI surfaces and capabilities.
 - Actions define enforceable operations (e.g., tools:invoke, tools:mutate, session:create, incident:triage, runtime:flags).
 - Risk tiers determine approval requirements:
@@ -194,13 +243,14 @@ The authorization matrix documents default environment eligibility and environme
 
 Mutating tool execution is bridged through chat:confirm and requires tier_2 approval by approver or platform-admin. The `runtime:flags` action is a tier 0 read operation requiring no approval but restricted to the operational trio.
 
-**Updated** Added runtime:flags as a tier 0 read operation for the operational trio.
+**Updated** Added agent-role axis as a first-class dimension in the authorization model, composing conjunctively with human roles.
 
 **Section sources**
 - [authorization-matrix.md:34-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L34-L60)
 - [authorization-matrix.md:517-536](file://docs/agentic-aiops-platform/authorization-matrix.md#L517-L536)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
+- [policy_engine.py:428-447](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L428-L447)
 
 ### Complete Permission Matrix
 The authoritative, enforced matrix is exposed by the platform gateway and rendered in the portal Permissions view. It includes:
@@ -216,7 +266,7 @@ Tests assert many grant postures for actions like approvals:list, documents:crea
 
 **Section sources**
 - [api.py:209-226](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L209-L226)
-- [policy-matrix.schema.json:1-85](file://shared/shared-contracts/schemas/policy-matrix.schema.json#L1-L85)
+- [policy-rule.schema.json:1-110](file://shared/shared-contracts/schemas/policy-rule.schema.json#L1-L110)
 - [test_policy_matrix.py:152-194](file://products/platform-gateway/tests/test_policy_matrix.py#L152-L194)
 - [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
 
@@ -298,11 +348,13 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 - Tier 1: self-approval allowed by default for session operators when policy permits.
 - Tier 2: designated approver distinct from requester; self-approval blocked.
 - Production high-risk actions require stronger controls; destructive actions denied by default.
+- **Agent-role invariant**: executor-staged mutations require distinct human approver; no agent-role can be a decider.
 
 **Section sources**
 - [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [authorization-matrix.md:266-281](file://docs/agentic-aiops-platform/authorization-matrix.md#L266-L281)
+- [SPEC-074 spec.md:146-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L146-L163)
 
 ## Dependency Analysis
 Roles flow from directory groups through the identity broker into tokens. The platform gateway loads the policy bundle and evaluates each protected action. The portal renders the effective matrix for transparency.
@@ -314,6 +366,7 @@ Broker --> Token["JWT with roles/groups"]
 Token --> Gateway["Platform Gateway"]
 Gateway --> Engine["Policy Engine"]
 Engine --> Bundle["Policy Bundle"]
+Engine --> AgentRole["Agent Role Context"]
 Gateway --> Matrix["Live Permission Matrix"]
 Matrix --> Portal["Operator Portal"]
 ```
@@ -322,18 +375,17 @@ Matrix --> Portal["Operator Portal"]
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
 - [token_service.py:110-126](file://products/identity-broker/src/identity_service/services/token_service.py#L110-L126)
 - [policy_engine.py:334-387](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L334-L387)
-- [policy_matrix.py:1-35](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L35)
-- [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
+- [agent_role.py:64-67](file://products/agent-platform/src/agent_service/services/agent_role.py#L64-L67)
 
 **Section sources**
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
 - [policy_engine.py:334-387](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L334-L387)
-- [policy_matrix.py:1-35](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L1-L35)
 
 ## Performance Considerations
 - Policy bundle loading is cached per configured path; evaluation is fast and deterministic.
 - Live matrix derivation reuses the same evaluate() path, ensuring consistency without extra logic.
 - Avoid frequent bundle reloads; changes take effect on next load cycle.
+- Agent-role axis is optional and inert by default — no performance impact when `agent_role=None`.
 
 [No sources needed since this section provides general guidance]
 
@@ -344,8 +396,9 @@ Common issues and resolutions:
 - Login fails outright: check OIDC flow configuration and network connectivity.
 - Permissions mismatch: confirm the deployed bundle version and source via the portal Permissions view; compare SHA-256 fingerprint with canonical file.
 - **Feature-flag transparency unavailable**: verify user has platform-admin, approver, or operator role; the runtime:flags action is denied by default for developer, read-only-observer, and auditor roles.
+- **Agent-role authorization failures**: ensure the agent-role vocabulary is correctly scoped; remember that agent-roles narrow authority and never widen it beyond human token permissions.
 
-**Updated** Added troubleshooting guidance for the new runtime:flags capability.
+**Updated** Added troubleshooting guidance for the new agent-role axis and runtime:flags capability.
 
 **Section sources**
 - [user-and-role-administration.md:118-137](file://docs/guides/user-and-role-administration.md#L118-L137)
@@ -353,7 +406,7 @@ Common issues and resolutions:
 - [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
 
 ## Conclusion
-The platform's authorization model combines a fixed role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime. The addition of runtime:flags provides operational teams with safe visibility into platform configuration without exposing sensitive values.
+The platform's authorization model combines a fixed human role vocabulary, a closed agent-role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime. The addition of runtime:flags provides operational teams with safe visibility into platform configuration without exposing sensitive values. The agent-role axis adds a powerful new dimension for controlling sub-agent authority while preserving the single-token identity model.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -363,28 +416,33 @@ The platform's authorization model combines a fixed role vocabulary, environment
 The schema defines the structure of the live permission matrix response, including version, source, fingerprint, scope, roles, actions, boolean matrix, and approval_requirements for require_approval outcomes.
 
 **Section sources**
-- [policy-matrix.schema.json:1-85](file://shared/shared-contracts/schemas/policy-matrix.schema.json#L1-L85)
+- [policy-rule.schema.json:1-110](file://shared/shared-contracts/schemas/policy-rule.schema.json#L1-L110)
 - [api.py:209-226](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L209-L226)
 
 ### Role Assignment and Custom Roles
-- Assign roles by adding users to appropriate Keycloak groups; the identity broker maps them to platform roles.
+- Assign human roles by adding users to appropriate Keycloak groups; the identity broker maps them to platform roles.
 - To change what a role may do, edit the policy bundle and deploy it; verify via the portal Permissions view.
-- Adding a new role requires code changes to role mappings, bundle rules, and a spec due to trust model impact. Prefer adjusting actions on existing roles for different permission mixes.
+- Adding a new human role requires code changes to role mappings, bundle rules, and a spec due to trust model impact. Prefer adjusting actions on existing roles for different permission mixes.
+- **Agent roles** are closed and platform-owned — they cannot be customized. They represent predefined autonomy levels (diagnostician, orchestrator, executor) that narrow toolkit authority.
 
 **Section sources**
 - [user-and-role-administration.md:74-102](file://docs/guides/user-and-role-administration.md#L74-L102)
 - [identity_service.py:24-38](file://products/identity-broker/src/identity_service/services/identity_service.py#L24-L38)
+- [agent_role.py:30-50](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L50)
 
 ### Integration With Broader Policy Engine
 - The platform gateway's policy engine implements the action_authz slice of the Tier-1 policy specification.
 - It supports deny, allow, and require_approval outcomes with explicit tiers and decider roles.
 - Bridged actions (currently tools:mutate) are enforced through the chat:confirm flow with tier_2 approval.
 - **Protected actions now include runtime:flags** as a tier 0 read operation for the operational trio.
+- **Agent-role axis**: The policy engine now accepts an optional `agent_role` parameter that composes conjunctively with human roles. Rules with `agent_roles_any` never match unscoped calls (fail-closed), ensuring subtractive-only authority narrowing.
 
-**Updated** Added runtime:flags to the list of protected actions in the policy engine integration.
+**Updated** Added agent-role axis integration and runtime:flags to the list of protected actions in the policy engine integration.
 
 **Section sources**
 - [policy_engine.py:1-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L127)
 - [policy_engine.py:93-98](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L93-L98)
+- [policy_engine.py:428-447](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L428-L447)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
+- [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)

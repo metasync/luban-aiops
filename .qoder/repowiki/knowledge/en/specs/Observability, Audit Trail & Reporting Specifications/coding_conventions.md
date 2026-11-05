@@ -1,0 +1,5 @@
+- Specs follow a fixed tri-file layout (`plan.md`, `spec.md`, `tasks.md`) with an inline Status block and a running Changelog that records every state transition and implementation deviation.
+- Requirements are numbered R-N with explicit Acceptance criteria, and Non-Goals are enumerated separately to bound scope against future roadmap items.
+- Cross-product contracts live in `shared/shared-contracts` (schemas under `schemas/`, policies under `policies/`) and are versioned independently of the implementing services; changes to a contract require updating the spec's Impact section.
+- New capabilities are gated by environment variables with documented defaults (e.g. `OTEL_ENABLED=false`, `AUDIT_STORE_BACKEND=memory`, `AUDIT_RETENTION_DAYS=30`, `AUDIT_EXPORT_MAX_ROWS=10000`) rather than feature flags or config files.
+- Service-to-service authentication reuses the existing broker-mediated service-identity mechanisms (SPEC-008/009) instead of introducing a second credential scheme, and ingestion is fire-and-forget so emitter failures degrade to structured logs without blocking user requests.

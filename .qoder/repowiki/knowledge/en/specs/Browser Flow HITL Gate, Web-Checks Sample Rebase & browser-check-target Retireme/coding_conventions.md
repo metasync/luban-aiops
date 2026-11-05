@@ -1,0 +1,5 @@
+- Each SPEC directory ships a triad of plan.md, spec.md, and tasks.md, with spec.md carrying a standardized Status block (status, owner, created/approved/delivered dates, release slice, related ADRs, lineage) followed by Summary/Motivation/Requirements/Non-Goals/Impact/Open Questions/Changelog sections.
+- Every Requirement is numbered (R-N) and paired with explicit Acceptance Criteria bullet points that are verifiable via repo grep, make targets, or live cluster runs rather than prose claims.
+- Delivered specs record their full lifecycle in a running Changelog section at the bottom of spec.md, with dated entries marking draft → approved → delivered transitions and any later reversal (e.g., SPEC-060's changelog noting SPEC-061 reverses its keep decision).
+- Cross-SPEC dependencies are documented in the Status line's `lineage:` field, tracing each spec back through prior SPECs and ADRs rather than relying on file-level links.
+- Impact sections enumerate products touched, shared paths touched, samples/docs touched, contracts touched, identity/policy/audit impact, and living-state docs to update on delivery, keeping blast-radius explicit.

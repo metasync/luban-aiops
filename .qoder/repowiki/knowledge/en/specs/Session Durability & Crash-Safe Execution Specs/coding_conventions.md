@@ -1,0 +1,5 @@
+- Each spec follows a fixed file triad of `spec.md` (requirements + status + changelog), `plan.md` (implementation plan), and `tasks.md` (criterion-to-test traceability).
+- Requirements are numbered R-1..R-N with sub-items (e.g. R-1a, R-1b) carrying testable acceptance criteria tied to concrete identifiers for traceability.
+- Backend selection is environment-driven via a `*_BACKEND` variable (`SESSION_STORE_BACKEND`) with a factory function returning the active implementation, preserving caller-facing API stability.
+- Graceful fallback to an in-memory store on startup connectivity failure is the default resilience pattern, logged at WARNING and surfaced via Prometheus counters and `/health` readiness fields.
+- Specs record their lifecycle through a YAML-like Status block (status, owner, created, approved, delivered, release slice) plus a chronological Changelog section instead of relying solely on commit metadata.

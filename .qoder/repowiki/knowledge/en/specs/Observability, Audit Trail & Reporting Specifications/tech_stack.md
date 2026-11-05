@@ -1,0 +1,1 @@
+Prometheus exposition format via `prometheus-client` (with manual RED middleware due to starlette incompatibility with `prometheus-fastapi-instrumentator`); OpenTelemetry SDK + FastAPI auto-instrumentation pushing OTLP to Elastic APM; PostgreSQL with JSONB columns and WAL durability for the audit store; RFC-4180 CSV streaming for exports.

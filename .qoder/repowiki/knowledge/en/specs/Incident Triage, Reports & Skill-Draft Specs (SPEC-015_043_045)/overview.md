@@ -1,0 +1,1 @@
+Specification documents defining the R3 incident triage pipeline and the R5 follow-ups that add incident-report documents and incident-anchored skill drafts.

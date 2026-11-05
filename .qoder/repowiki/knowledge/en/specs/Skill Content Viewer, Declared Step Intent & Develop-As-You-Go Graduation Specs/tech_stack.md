@@ -1,0 +1,1 @@
+Markdown-based spec documents consumed by the ADR-0008 delivery traceability gate; implementation spans Python services (skills-hub, tool-gateway, agent-platform), TypeScript React UI (operator-portal), JSON Schema contracts (`skill.schema.json`, `agent-stream-event.schema.json`, `agent-session.schema.json`), and Postgres/InMemory dual backends.

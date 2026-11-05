@@ -1,0 +1,1 @@
+Python `redis>=6.2,<7.0` client for the Redis session backend; synchronous `psycopg[binary]` for the Postgres session backend; Postgres used as the shared cluster database for audit/incidents/skills/session state.

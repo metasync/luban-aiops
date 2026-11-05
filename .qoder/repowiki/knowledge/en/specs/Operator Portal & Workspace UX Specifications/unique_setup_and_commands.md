@@ -1,0 +1,1 @@
+Delivery gates referenced across specs include `make sync-policy`, `make validate-policy`, `make verify`, `npm ci` + `npm run build` in `products/operator-portal/web-ui/`, and `make validate-version` asserting `PLATFORM_VERSION` injected at build time from the root `VERSION` file.

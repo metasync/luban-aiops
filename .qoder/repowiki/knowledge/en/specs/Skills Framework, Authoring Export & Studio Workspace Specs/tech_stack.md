@@ -1,0 +1,1 @@
+FastAPI-based `skills-hub` service with psycopg v3 Postgres store and JSON-schema-backed Pydantic models; Python Markdown skills with YAML frontmatter validated against `skill.schema.json`; SSE-driven portal chat reused across operation/development modes.

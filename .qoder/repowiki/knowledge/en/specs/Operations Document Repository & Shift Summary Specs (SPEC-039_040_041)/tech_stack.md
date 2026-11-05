@@ -1,0 +1,1 @@
+Operator portal uses antd dark-theme conventions; documents are persisted via memory and Postgres backends behind the existing `AGENT_STATE_STORE_BACKEND`/`AGENT_STATE_DB_URL` knobs, with 20-per-owner cap and 30-day TTL aligned to inbox history window.

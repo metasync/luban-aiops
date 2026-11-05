@@ -1,0 +1,1 @@
+Three delivered product specs governing agentscope adoption (context compression), operator-facing auto-routing model selection with a feature-flag inventory, and skill-retrieval ranking fidelity across in-memory and Postgres backends.

@@ -1,0 +1,1 @@
+React + Ant Design X + TypeScript built via Vite for the rebuilt portal; SSE streaming over `fetch` + `ReadableStream` (never `EventSource`); nginx static serving with immutable content-hashed assets; Keycloak OIDC for authentication.

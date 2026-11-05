@@ -4,6 +4,7 @@
 **Referenced Files in This Document**
 - [policy-scenarios.yaml](file://shared/shared-contracts/policies/policy-scenarios.yaml)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
+- [agent-role-demo.yaml](file://shared/shared-contracts/policies/fixtures/agent-role-demo.yaml)
 - [validate_policy_scenarios.py](file://shared/shared-contracts/scripts/validate_policy_scenarios.py)
 - [policy_diff.py](file://shared/shared-contracts/scripts/policy_diff.py)
 - [Makefile](file://Makefile)
@@ -13,7 +14,16 @@
 - [test_policy_engine.py (tool-gateway)](file://products/tool-gateway/tests/test_policy_engine.py)
 - [policy_engine.py (platform-gateway)](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [SPEC-048 spec.md](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md)
+- [SPEC-074 spec.md](file://docs/specs/SPEC-074-policy-role-axis/spec.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the agent-role axis test coverage introduced by SPEC-074
+- Updated scenario validation to include agent-role demonstration scenarios with synthetic bundles
+- Enhanced testing pipeline documentation to cover agent-role axis validation across both engines
+- Added new sections covering agent-role axis semantics, load validation, and reachability guards
+- Updated examples to include agent-role scoped scenarios alongside existing human role scenarios
 
 ## Table of Contents
 1. Introduction
@@ -21,17 +31,20 @@
 3. Core Components
 4. Architecture Overview
 5. Detailed Component Analysis
-6. Dependency Analysis
-7. Performance Considerations
-8. Troubleshooting Guide
-9. Conclusion
-10. Appendices
+6. Agent-Role Axis Testing
+7. Dependency Analysis
+8. Performance Considerations
+9. Troubleshooting Guide
+10. Conclusion
+11. Appendices
 
 ## Introduction
 This document explains how the Luban AIOPS platform tests policies and validates scenario outcomes across its two policy engines: the API engine (platform-gateway) and the tools engine (tool-gateway). It covers the scenario file format, the four required test types (unit rule matching, precedence for conflicting rules, regression approval paths, deny-by-default), the automated verification pipeline, writing new scenarios, validating changes with the policy diff tool, and debugging failing tests while maintaining coverage as policies evolve.
 
+**Updated** The platform now includes comprehensive agent-role axis testing that validates the optional `agent_roles_any` dimension in policy rules, ensuring fail-closed behavior and subtractive-only semantics for agent-scoped authorization.
+
 ## Project Structure
-Policy testing is centered around a shared canonical bundle and a curated scenario table that both engines validate against their own semantics. The root Makefile orchestrates validation targets that run under each product’s environment to ensure engine parity and correct evaluation.
+Policy testing is centered around a shared canonical bundle and a curated scenario table that both engines validate against their own semantics. The root Makefile orchestrates validation targets that run under each product's environment to ensure engine parity and correct evaluation.
 
 ```mermaid
 graph TB
@@ -41,8 +54,9 @@ B --> D["validate_policy_scenarios.py"]
 C --> E["policy_diff.py"]
 D --> F["policy-default.yaml"]
 D --> G["policy-scenarios.yaml"]
+D --> H["agent-role-demo.yaml"]
 E --> F
-E --> H["Candidate bundle (CANDIDATE)"]
+E --> I["Candidate bundle (CANDIDATE)"]
 ```
 
 **Diagram sources**
@@ -68,9 +82,11 @@ Key behaviors enforced by the engine:
 - Higher priority wins within an outcome class.
 - Disabled rules are ignored.
 
+**Updated** The engine now supports an optional agent-role axis that composes conjunctively with human roles, providing fail-closed behavior where agent-scoped rules never match unscoped calls.
+
 **Section sources**
 - [policy-default.yaml:14-24](file://shared/shared-contracts/policies/policy-default.yaml#L14-L24)
-- [policy_engine.py:408-443](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L408-L443)
+- [policy_engine.py:440-470](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L440-L470)
 - [validate_policy_scenarios.py:50-97](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L50-L97)
 - [policy_diff.py:68-84](file://shared/shared-contracts/scripts/policy_diff.py#L68-L84)
 
@@ -90,8 +106,8 @@ Dev->>MK : Run make verify
 MK->>VP : --engine api --bundle PB
 VP->>PE_API : load_bundle(PB)
 VP->>SC : read expectations(api)
-loop For each (role, action)
-VP->>PE_API : evaluate([role], action)
+loop For each (role, action, agent_role)
+VP->>PE_API : evaluate([role], action, agent_role)
 PE_API-->>VP : decision(decision, matched_rule_ids, approval_tier?)
 VP->>VP : compare decision vs expect
 end
@@ -99,8 +115,8 @@ VP->>VP : enforce coverage invariant
 MK->>VP : --engine tools --bundle PB
 VP->>PE_TOOLS : load_bundle(PB)
 VP->>SC : read expectations(tools)
-loop For each (role, action)
-VP->>PE_TOOLS : evaluate([role], action)
+loop For each (role, action, agent_role)
+VP->>PE_TOOLS : evaluate([role], action, agent_role)
 PE_TOOLS-->>VP : decision(decision, matched_rule_ids, approval_tier?)
 VP->>VP : compare decision vs expect
 end
@@ -123,13 +139,17 @@ VP-->>MK : exit 0 if all pass
   - action or actions (list — cross product)
   - expect: one of allow, deny, require_approval
   - approval_tier: optional, only valid on require_approval expectations
+  - agent_role: optional, for agent-role axis testing
 - Coverage invariant: Every granted (role, action) pair produced by enabled rules must appear in at least one expectation; otherwise the harness fails.
+
+**Updated** The scenario format now supports an optional `agent_role` field that enables testing of the agent-role axis. Agent-role scenarios are validated separately from the main coverage invariant since they use synthetic bundles rather than the canonical deployment bundle.
 
 Example categories present in the scenarios:
 - Read operations allowed for operational and observer roles.
 - Approval workflows requiring tier_2 for mutating tool execution.
 - Named denials for auditor, observer, developer, operator where appropriate.
 - Deny-by-default floor for ungranted roles/actions.
+- Agent-role scoped scenarios demonstrating fail-closed behavior and executor→human-approver invariant.
 
 **Section sources**
 - [policy-scenarios.yaml:1-238](file://shared/shared-contracts/policies/policy-scenarios.yaml#L1-L238)
@@ -145,6 +165,7 @@ Example categories present in the scenarios:
 - Scenario validation:
   - Runs once under products/platform-gateway with --engine api
   - Runs once under products/tool-gateway with --engine tools
+  - Validates agent-role demonstration scenarios against synthetic bundles
 - Policy diff:
   - Requires CANDIDATE=<path>
   - Reports per-(role, action) transitions between canonical and candidate for both engines
@@ -156,7 +177,8 @@ Tests --> Overlays["Validate overlays"]
 Overlays --> Schema["Validate policy schema"]
 Schema --> ScenAPI["Scenario validation (--engine api)"]
 ScenAPI --> ScenTools["Scenario validation (--engine tools)"]
-ScenTools --> Version["Validate version lockstep"]
+ScenTools --> AgentRole["Agent-role demo validation"]
+AgentRole --> Version["Validate version lockstep"]
 Version --> SecretVocab["Validate secret vocabulary"]
 SecretVocab --> End(["Gate passes/fails"])
 ```
@@ -183,13 +205,21 @@ SecretVocab --> End(["Gate passes/fails"])
 - Deny-by-default tests:
   - Confirm that ungranted roles or empty roles result in deny.
 
+**Updated** Agent-role axis tests now include:
+- Load validation tests ensuring out-of-vocabulary agent roles are rejected
+- Disjointness guard tests verifying agent roles cannot be human approvers
+- Reachability guard tests proving no deployed caller threads non-None agent roles
+- Fail-closed behavior tests ensuring agent-scoped rules never match unscoped calls
+
 Evidence in tests:
 - Platform-gateway tests assert deny-by-default, precedence, disabled rules, and require_approval semantics.
 - Tool-gateway tests assert deny-by-default and precedence behavior consistent with its engine semantics.
+- Both engines now include comprehensive agent-role axis validation with 593+ new lines of test coverage.
 
 **Section sources**
 - [test_policy_engine.py (platform-gateway):68-167](file://products/platform-gateway/tests/test_policy_engine.py#L68-L167)
 - [test_policy_engine.py (platform-gateway):352-479](file://products/platform-gateway/tests/test_policy_engine.py#L352-L479)
+- [test_policy_engine.py (platform-gateway):728-893](file://products/platform-gateway/tests/test_policy_engine.py#L728-L893)
 - [test_policy_engine.py (tool-gateway):71-98](file://products/tool-gateway/tests/test_policy_engine.py#L71-L98)
 
 ### Writing New Policy Scenarios
@@ -198,17 +228,27 @@ Steps:
 2. Add entries under the appropriate section (api or tools) in the scenario file.
 3. Use cross-product lists for roles and actions to cover combinations.
 4. Set expect to allow, deny, or require_approval; include approval_tier only for require_approval.
-5. Ensure every newly granted (role, action) pair has at least one scenario entry; the harness enforces this.
-6. Run make verify to confirm scenarios pass under both engines.
+5. For agent-role axis testing, add entries in the separate `agent_role` section with a synthetic bundle reference.
+6. Ensure every newly granted (role, action) pair has at least one scenario entry; the harness enforces this.
+7. Run make verify to confirm scenarios pass under both engines.
+
+**Updated** Agent-role scenarios require special handling:
+- Use the `agent_role` section in policy-scenarios.yaml
+- Reference a synthetic bundle via the `bundle` field
+- Include agent_role field in each scenario entry
+- Agent-role scenarios don't participate in the main coverage invariant
+- Synthetic bundles demonstrate axis semantics without affecting deployment
 
 Guidance:
 - Honor engine non-parity: the tools engine skips require_approval rules at load, so outcomes differ from the API engine for those cases.
 - Keep scenarios concise but complete on grants; named denials should explicitly call out intentional restrictions.
+- For agent-role axis, remember it's subtractive-only and fail-closed: agent-scoped rules can only narrow authority, never grant it.
 
 **Section sources**
 - [policy-scenarios.yaml:17-19](file://shared/shared-contracts/policies/policy-scenarios.yaml#L17-L19)
+- [policy-scenarios.yaml:275-359](file://shared/shared-contracts/policies/policy-scenarios.yaml#L275-L359)
 - [validate_policy_scenarios.py:50-75](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L50-L75)
-- [validate_policy_scenarios.py:131-149](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L131-L149)
+- [validate_policy_scenarios.py:180-227](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L180-L227)
 
 ### Validating Policy Changes with the Policy Diff Tool
 Use the diff tool to review impact before merging:
@@ -235,6 +275,12 @@ Best practices:
 - Keep approval tiers stable for sensitive actions unless explicitly reviewed; tier changes are visible in diff output.
 - Update scenarios alongside policy changes to keep the coverage invariant intact.
 
+**Updated** Agent-role axis compatibility requirements:
+- Agent-role axis is additive and inert: absent `agent_roles_any` means unconstrained matching
+- Unscoped evaluations remain byte-identical to pre-v3 behavior
+- Agent-scoped rules never override human-role denies (subtractive-only)
+- No deployed caller threads non-None agent roles in phase 3
+
 **Section sources**
 - [policy-default.yaml:14-24](file://shared/shared-contracts/policies/policy-default.yaml#L14-L24)
 - [policy-scenarios.yaml:132-197](file://shared/shared-contracts/policies/policy-scenarios.yaml#L132-L197)
@@ -254,14 +300,62 @@ Best practices:
   - Operator denied governance surfaces.
   - Ungranted roles/actions denied by default.
 
+**Updated** Agent-role axis examples:
+- Absent `agent_roles_any` = unconstrained: matches unscoped and any agent-role
+- Executor-scoped mutation requires tier_2 approval by distinct human roles
+- Diagnostician-scoped read grants only match diagnostician agent-role
+- Orchestrator-scoped rules never match other agent-roles
+- Scoped rules never match unscoped (`agent_role=None`) calls
+
 These examples are defined in the scenario table and validated by the harness.
 
 **Section sources**
 - [policy-scenarios.yaml:21-197](file://shared/shared-contracts/policies/policy-scenarios.yaml#L21-L197)
 - [policy-scenarios.yaml:199-238](file://shared/shared-contracts/policies/policy-scenarios.yaml#L199-L238)
+- [policy-scenarios.yaml:275-359](file://shared/shared-contracts/policies/policy-scenarios.yaml#L275-L359)
+
+## Agent-Role Axis Testing
+
+### Agent-Role Axis Semantics
+The agent-role axis introduces an optional `agent_roles_any` dimension to policy rules that composes conjunctively with human roles. Key semantics:
+
+- **Additive and inert**: The axis is optional; absent `agent_roles_any` means unconstrained matching
+- **Fail-closed**: Agent-scoped rules never match unscoped calls (`agent_role=None`)
+- **Subtractive-only**: Agent-scoped rules can only narrow authority, never grant it
+- **Conjunctive composition**: A rule matches only if human roles AND agent roles both match
+- **Closed vocabulary**: Only `diagnostician`, `orchestrator`, `executor` are valid agent roles
+
+### Load Validation and Schema Enforcement
+The agent-role axis includes comprehensive load validation:
+
+- Out-of-vocabulary agent roles are rejected during bundle loading
+- Schema validation ensures `agent_roles_any` values come from the closed vocabulary
+- The v2→v3 schema revision is additive-only, maintaining backward compatibility
+- Engine vocabulary stays synchronized with schema enum values
+
+### Reachability Guards
+Phase 3 includes reachability guards to ensure the axis remains inert:
+
+- No deployed gateway routes thread non-None agent roles
+- Code scanning prevents literal agent-role usage outside policy_engine.py
+- Keyword argument detection prevents accidental agent-role threading
+- These guards prove the axis has no live producer in phase 3
+
+### Executor→Human-Approver Invariant
+The axis encodes critical security invariants:
+
+- Executor-scoped mutations require human approver approval
+- Agent roles can never be approver deciders
+- The agent-role vocabulary is disjoint from human role vocabulary
+- Synthetic bundles demonstrate proper executor→human-approver flow
+
+**Section sources**
+- [SPEC-074 spec.md:108-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L108-L163)
+- [test_policy_engine.py (platform-gateway):728-893](file://products/platform-gateway/tests/test_policy_engine.py#L728-L893)
+- [agent-role-demo.yaml:1-74](file://shared/shared-contracts/policies/fixtures/agent-role-demo.yaml#L1-L74)
 
 ## Dependency Analysis
-The scenario harness and diff tool depend on the real policy engines to guarantee semantic parity. Each product’s uv environment provides the correct engine module for evaluation.
+The scenario harness and diff tool depend on the real policy engines to guarantee semantic parity. Each product's uv environment provides the correct engine module for evaluation.
 
 ```mermaid
 graph LR
@@ -271,6 +365,7 @@ PD["policy_diff.py"] --> PGE_API
 PD --> PGE_TOOLS
 VPS --> PB["policy-default.yaml"]
 VPS --> PS["policy-scenarios.yaml"]
+VPS --> ARD["agent-role-demo.yaml"]
 PD --> PB
 PD --> CAND["candidate bundle"]
 ```
@@ -285,11 +380,10 @@ PD --> CAND["candidate bundle"]
 - [policy_diff.py:48-58](file://shared/shared-contracts/scripts/policy_diff.py#L48-L58)
 
 ## Performance Considerations
-- Scenario validation evaluates each (role, action) pair once per engine; complexity scales with the number of scenarios and the size of PROTECTED_ACTIONS.
+- Scenario validation evaluates each (role, action, agent_role) tuple once per engine; complexity scales with the number of scenarios and the size of PROTECTED_ACTIONS.
 - Policy diff computes outcomes for the union of roles and actions declared by both bundles plus PROTECTED_ACTIONS; large role/action spaces increase runtime.
-- Both tools reuse the engine’s loaded bundle state; resetting state between evaluations ensures correctness.
-
-[No sources needed since this section provides general guidance]
+- Both tools reuse the engine's loaded bundle state; resetting state between evaluations ensures correctness.
+- Agent-role demo scenarios are validated separately and don't affect the main coverage invariant performance.
 
 ## Troubleshooting Guide
 Common failures and remedies:
@@ -298,9 +392,9 @@ Common failures and remedies:
   - Action: Check which rule matched and adjust either the policy or the scenario expectation accordingly.
 - Missing approval tier:
   - Symptom: require_approval expectation with approval_tier mismatch.
-  - Action: Align the policy’s approval tier with the scenario or update the scenario to reflect the new tier.
+  - Action: Align the policy's approval tier with the scenario or update the scenario to reflect the new tier.
 - Coverage gap:
-  - Symptom: “granted by the bundle but has no scenario”.
+  - Symptom: "granted by the bundle but has no scenario".
   - Action: Add a scenario entry covering the newly granted (role, action) pair.
 - Bundle load errors:
   - Symptom: PolicyLoadError during load.
@@ -309,18 +403,31 @@ Common failures and remedies:
   - Symptom: Hard error on missing/unparseable candidate.
   - Action: Provide a valid candidate path and ensure it parses correctly.
 
+**Updated** Agent-role axis troubleshooting:
+- Out-of-vocabulary agent role:
+  - Symptom: PolicyLoadError with message about invalid agent role.
+  - Action: Ensure agent_role values are from the closed vocabulary: diagnostician, orchestrator, executor.
+- Agent-role demo bundle not found:
+  - Symptom: Error reporting agent_role demo bundle not found.
+  - Action: Verify the bundle path referenced in policy-scenarios.yaml exists and is accessible.
+- Fail-closed violation:
+  - Symptom: Agent-scoped rule unexpectedly matches unscoped call.
+  - Action: Check that the rule has agent_roles_any set and the call includes the matching agent_role.
+
 Self-tests:
-- Each product’s scenario self-tests verify that the harness passes on the canonical bundle and fails on a deliberately flipped grant, ensuring the guard remains effective.
+- Each product's scenario self-tests verify that the harness passes on the canonical bundle and fails on a deliberately flipped grant, ensuring the guard remains effective.
+- Agent-role axis tests include reachability guards proving no deployed code threads non-None agent roles.
 
 **Section sources**
 - [validate_policy_scenarios.py:129-160](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L129-L160)
+- [validate_policy_scenarios.py:180-227](file://shared/shared-contracts/scripts/validate_policy_scenarios.py#L180-L227)
 - [test_policy_scenarios.py (platform-gateway):31-59](file://products/platform-gateway/tests/test_policy_scenarios.py#L31-L59)
 - [test_policy_scenarios.py (tool-gateway):32-55](file://products/tool-gateway/tests/test_policy_scenarios.py#L32-L55)
 
 ## Conclusion
 The Luban AIOPS platform enforces policy safety through a combination of a curated scenario table, engine-backed validation, and a review-time diff tool. By following the documented workflow—edit policy, sync copies, run make verify, review policy-diff output, commit, deploy, and confirm provenance—you can confidently evolve policies while preserving deny-by-default guarantees, approval workflows, and backward compatibility.
 
-[No sources needed since this section summarizes without analyzing specific files]
+**Updated** The addition of comprehensive agent-role axis testing provides strong guarantees for multi-agent authorization patterns, ensuring fail-closed behavior, subtractive-only semantics, and proper separation between agent and human authorization dimensions.
 
 ## Appendices
 
@@ -338,6 +445,8 @@ The Luban AIOPS platform enforces policy safety through a combination of a curat
 
 ### Appendix B: Specification References
 - SPEC-048 defines the rollout controls, scenario harness, diff tool, and provenance exposure.
+- SPEC-074 defines the agent-role axis implementation, including schema changes, engine modifications, and comprehensive test coverage.
 
 **Section sources**
 - [SPEC-048 spec.md:19-111](file://docs/specs/SPEC-048-policy-testing-rollout-controls/spec.md#L19-L111)
+- [SPEC-074 spec.md:1-315](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L1-L315)

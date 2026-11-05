@@ -1,0 +1,1 @@
+Specification documents for the R4 approval-gated bounded-actions train: kernel HITL confirmation bridging, durable approval inbox with persistent cards, and server-side inbox pagination with seeded transcript reveal.
