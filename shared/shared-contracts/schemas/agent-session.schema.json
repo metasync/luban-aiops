@@ -85,6 +85,10 @@
           "request_id": {
             "type": "string"
           },
+          "agent_role": {
+            "type": "string",
+            "enum": ["diagnostician", "orchestrator", "executor"]
+          },
           "created_at": {
             "type": "string"
           },

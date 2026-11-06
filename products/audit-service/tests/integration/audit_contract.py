@@ -110,6 +110,34 @@ async def prove(db_url):
     assert not (await second.query(AuditQuery(delegation_mode="acting_service", outcome="success",
                                               username="carol"), None, 50)).events
     assert (await second.summarize(AuditQuery(event_type="target_authorization"))).total_events == 1
+    # SPEC-075 (plan line 156): the durable Postgres round-trip also covers the
+    # additive agent_role attribution dimension — stored, filtered by ?agent_role=,
+    # and returned verbatim — while a legacy row reads back agent_role is None. A
+    # distinct owner ("dave") keeps the delegation_mode loop and the four-event
+    # pagination above unaffected.
+    spec075 = [
+        AuditEvent(event_id=f"evt-role-{role}", occurred_at="2030-01-01T00:00:00Z",
+                   event_type="execution_requested", service="agent-platform", request_id=f"req-role-{role}",
+                   username="dave", subject="issuer:dave", actor="platform-gateway",
+                   outcome="success", agent_role=role, details={"target": "Automation"})
+        for role in ("diagnostician", "orchestrator", "executor")
+    ]
+    assert await second.add(spec075) == 3
+    assert await second.add(spec075) == 0  # event_id primary key dedupes a re-delivery.
+    for event in spec075:
+        filters = AuditQuery(agent_role=event.agent_role, username="dave")
+        page = await second.query(filters, None, 1)
+        assert page.events == [event] and page.next_cursor is None
+        assert page.events[0].agent_role == event.agent_role  # returned verbatim
+        summary = await second.summarize(filters)
+        assert summary.total_events == 1
+        assert summary.window == {"agent_role": event.agent_role, "username": "dave"}
+    # A role filter never crosses owners, and the pre-SPEC-075 legacy row still
+    # reads back agent_role is None (backward compatibility).
+    assert not (await second.query(AuditQuery(agent_role="executor", username="alice"), None, 50)).events
+    everything = (await second.query(AuditQuery(), None, 50)).events
+    legacy_row = next(e for e in everything if e.event_id == "legacy")
+    assert legacy_row.agent_role is None
     await second.close()
 
 

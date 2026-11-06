@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 __all__ = [
     "AgentChatRequest",
@@ -22,6 +22,7 @@ __all__ = [
     "AgentSessionList",
     "AgentSessionCreateRequest",
     "SessionType",
+    "EvidenceAgentRole",
     "AgentModelInfo",
     "AgentModelCatalog",
     "AgentRuntimeMetadata",
@@ -219,6 +220,16 @@ class AgentStreamEvent(BaseModel):
 # rejected a new audit ``event_type`` at ingest once already.
 SessionType = Literal["operation", "development"]
 
+# SPEC-075 (OQ-3): the closed agent-role vocabulary for evidence-turn
+# attribution — the same three values the SPEC-073 ``AgentRole`` enum and the
+# session-evidence / audit-event schema ``agent_role`` enums carry, held in
+# lockstep by a contract-parity drift guard (the ``SessionType`` precedent: a
+# named alias so the guard reads the vocabulary off one symbol, since a
+# property-name parity test cannot see an enum value drift). Descriptive
+# attribution only — it narrows no authority (the prescriptive axis is
+# SPEC-074) and never becomes a new principal, claim, or identity edge.
+EvidenceAgentRole = Literal["diagnostician", "orchestrator", "executor"]
+
 
 class EvidenceTurn(BaseModel):
     """Persisted tool-evidence group for one assistant turn (SPEC-025 R-2).
@@ -231,8 +242,22 @@ class EvidenceTurn(BaseModel):
 
     turn_index: int = Field(ge=0)
     request_id: str
+    # SPEC-075 (OQ-3): which agent-role acted on this turn, from the closed
+    # SPEC-073 vocabulary. Unset until phase 5 binds a role; never inferred
+    # from frames. Omitted (not null) when unscoped so a legacy turn replays
+    # byte-identically with no empty artifact.
+    agent_role: EvidenceAgentRole | None = None
     created_at: str | None = None
     frames: list[dict[str, Any]] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _omit_unscoped_agent_role(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict:
+        payload = handler(self)
+        if self.agent_role is None:
+            payload.pop("agent_role", None)
+        return payload
 
 
 class ExecutionRecoveryModel(BaseModel):

@@ -343,6 +343,22 @@ narrowed **per agent-role on the same delegated token** — never by minting a s
   canonical `policy-default.yaml` is byte-unchanged (no rule carries the axis) and every deployed
   evaluation forwards `agent_role=None`, enforced by reachability and no-diff guards. A producer
   first binding a role, and the canonical rule landing, remain deferred to phase 5.
+- **Phase 4 delivered (SPEC-075, multi-agent audit & attribution).** The same closed
+  vocabulary now rides the **durable audit trail** as an optional, additive, **inert**
+  top-level `agent_role` field on `audit-event.schema.json` (and the `session_evidence`
+  turn), answering *which role acted* beside `subject`/`username` (on whose behalf) and
+  `delegation_mode` (under which delegation, SPEC-070) — the completed attribution
+  triple. It is **descriptive only**: it narrows no authority (the prescriptive axis
+  stays phase 3), never becomes a new principal, claim, or identity edge, and is a
+  plain string enum, so no agentscope type reaches the v2 contract. The field is
+  **omitted when absent** (never null), exactly like `delegation_mode`, and the
+  agent-platform emitter seam threads SPEC-073's `current_agent_role_value()` — `None`
+  on every deployed turn — so every unscoped event and evidence turn audits
+  **byte-identically** (reachability, no-diff, and an enum-lockstep guard enforce
+  this). Phase 4 stays inert: no producer binds a role, there is no portal filter or
+  summary facet (consumerless until data exists), and the transcript-turn projection
+  is deferred. A producer first binding a role, and the wire/multi-agent contract,
+  remain deferred to phase 5/6.
 
 ### Propagation Into Approvals
 

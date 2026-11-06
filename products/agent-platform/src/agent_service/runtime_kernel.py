@@ -999,6 +999,11 @@ class AgentKernel:
                 turn_index,
                 prepared,
                 self.settings.evidence_session_max_bytes,
+                # SPEC-075: attribute the turn's evidence to the acting
+                # agent-role. Inert today — AGENT_ROLE is unscoped (None) on
+                # every deployed turn, so the store omits it and a legacy turn
+                # replays byte-identically with no empty artifact.
+                agent_role=current_agent_role_value(),
             )
             record_evidence_write("ok")
         except Exception as exc:
@@ -2758,6 +2763,10 @@ class AgentKernel:
             subject=decider_user_id,
             username=decider_user_id,
             session_id=session_id,
+            # SPEC-075: attribute the execution to the acting agent-role. Inert
+            # today — AGENT_ROLE is unscoped (None) on every deployed turn, so
+            # the emitter omits the field and the event stays byte-identical.
+            agent_role=current_agent_role_value(),
         )
         emit_audit_event(self.settings, event)
 

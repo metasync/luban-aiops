@@ -185,6 +185,47 @@ an approver — it is an authority-narrowing label on the **same** token.
   (reachability and no-diff guards enforce this). A producer first binding a
   role, and the canonical rule landing, are deferred to **phase 5**.
 
+## Agent-Role Attribution in the Audit Trail (SPEC-075, phase 4)
+
+The agent-role axis above is **prescriptive** — it narrows authority (SPEC-074).
+Phase 4 adds a **descriptive** sibling: the durable audit trail can record *which
+role acted*, completing the attribution triple beside the two legs that already
+existed as top-level audit-event fields.
+
+| Attribution leg | Audit-event field | Answers | Landed |
+|---|---|---|---|
+| on whose behalf | `subject` / `username` | which human the action is attributed to | SPEC-013 |
+| under which delegation | `delegation_mode` | how outbound authority was acquired | SPEC-070 |
+| which role acted | `agent_role` | which sub-agent role performed the turn | **SPEC-075** |
+
+- **Descriptive, never prescriptive.** `agent_role` records provenance only; it
+  narrows no authority and grants nothing. The prescriptive axis is the SPEC-074
+  policy `agent_roles_any` dimension above — the two are orthogonal and share one
+  closed vocabulary (`diagnostician` / `orchestrator` / `executor`), so attribution
+  can never drift from the identity/policy vocabulary.
+- **One vocabulary, three contracts.** The same closed enum is pinned across
+  `audit-event.schema.json`, `session-evidence.schema.json`, and the
+  `evidence_turns` item of `agent-session.schema.json`, and equals the SPEC-073
+  producer vocabulary — an enum-lockstep guard fails the build on any drift.
+- **Additive and inert.** The field is optional and **omitted when absent** (never
+  null, never an empty string), exactly like `delegation_mode`, so every event from
+  today's unscoped single-agent path audits **byte-identically** and a legacy row
+  reads back `agent_role is None`. The agent-platform emitter seam is wired to
+  SPEC-073's `current_agent_role_value()`, which returns `None` on every deployed
+  turn — no producer binds a role until phase 5 (reachability and no-diff guards
+  enforce this). It is a plain string enum on the v2 contract: no agentscope type
+  leaks and no new principal, claim, or identity edge. Four-point gate: audit
+  **strengthened**; identity, read-only posture, and no-agentscope **unchanged**.
+- **Evidence-turn attribution.** The same optional `agent_role` rides a persisted
+  `session_evidence` turn, so a scoped turn records which role produced its
+  evidence and a legacy turn replays with no empty artifact.
+- **Deferred (no consumer yet).** Per OQ-4 there is **no portal filter or column**
+  (`delegation_mode` has none either) and per OQ-5 **no summary facet** — both are
+  consumerless until a producer binds roles in phase 5. Per OQ-6 the field is
+  additive **within audit-event v1** (no title bump, no new ADR), the
+  `delegation_mode` precedent. Per OQ-3 the transcript-turn projection and any
+  concurrent-multi-agent transcript re-modelling stay deferred to phase 5/6.
+
 ## Feature Access Matrix
 
 | Feature | read-only-observer | operator | developer | approver | auditor | platform-admin |

@@ -623,6 +623,7 @@ Execution workers should use:
 Audit records should capture:
 
 - who initiated the request
+- which agent-role acted on it — a descriptive attribution dimension (SPEC-075), never an authority grant
 - what context and evidence were retrieved
 - what tool calls were proposed
 - what policy decision was made

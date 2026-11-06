@@ -13,6 +13,119 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+## 0.56.0 — 2026-11-05
+
+[SPEC-075](docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md) multi-agent
+audit & attribution — phase 4 of the phased multi-agent SPEC series
+[ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
+(`accepted` 2026-11-03), realizing the **audit-&-attribution** leg (memo §4.3, §7
+step 4) that [SPEC-073](docs/specs/SPEC-073-role-scoped-agent-identity/spec.md)
+(v0.54.0) and [SPEC-074](docs/specs/SPEC-074-policy-role-axis/spec.md) (v0.55.0)
+both explicitly deferred to this phase. Adds the missing *which role acted* leg of the
+attribution triple — beside `subject`/`username` (on whose behalf, SPEC-013) and
+`delegation_mode` (under which delegation, SPEC-070) — as an **additive and inert**
+optional `agent_role` dimension on the durable audit-event envelope, `enum`-closed to
+the SPEC-073 vocabulary (`diagnostician`, `orchestrator`, `executor`) and **omitted
+when absent** (never null), so every unscoped single-agent event audits
+**byte-identically**. It is a deliberate clone of SPEC-070's `delegation_mode`
+mechanism and rides the exact same machinery. Per OQ-3 an additive `agent_role` also
+lands on the SPEC-025 evidence turn, so a persisted tool-evidence group is
+self-attributing and a member's tool calls stay reconstructable. Completes the
+attribution record **before** phase 5 binds roles and fans out concurrent members, so
+the four-point gate's point 1 (“audit preserved”) holds by construction rather than
+being retro-fitted onto a running loop. Ships **inert** — no deployed caller binds a
+non-`None` `AGENT_ROLE` (the producer is phase 5), so `current_agent_role_value()`
+returns `None` on every live path and the field is never emitted. The `event_type`
+enum stays **closed** (a dimension on existing events, not new types); **no**
+authorization decision keys on it (the prescriptive axis is SPEC-074), and there is
+**no** portal filter, wire field, or new principal/claim/edge;
+`agent-stream-event.schema.json` and `execution-request.schema.json` stay
+byte-unchanged. This delivery implements R-1…R-6, marks SPEC-075 `delivered`, and is
+released as **v0.56.0** (2026-11-05); the push remains a separate gate.
+
+### Added
+
+- **Optional `agent_role` dimension in the audit-event contract** (`shared-contracts`).
+  `audit-event.schema.json` gains an optional top-level `agent_role` string,
+  `enum`-closed to the three SPEC-073 agent-roles, **not** in `required`, with
+  `additionalProperties` still `false` and the title unchanged (“(v1)”, OQ-6) — an
+  additive field within the existing version, mirroring `delegation_mode`'s
+  omission-when-absent semantics. An enum-lockstep guard (with a drift-sensitivity
+  companion) proves the audit `agent_role` enum is **exactly** the SPEC-073 vocabulary
+  across all three contracts that carry it — `audit-event`, `session-evidence`, and the
+  `agent-session` evidence-turn item — so the attribution dimension cannot drift from
+  the identity/policy vocabulary.
+- **Audit-service model, store, and query dimension** (`audit-service`). `AuditEvent`
+  and `AuditQuery` gain `agent_role: AgentRole | None = None`; the `model_serializer`
+  pops it when `None` (mirroring `_omit_unknown_delegation`); the store adds the
+  `agent_role` column and `idx_audit_agent_role` index (`ADD COLUMN`/`CREATE INDEX IF
+  NOT EXISTS`), threads it through the INSERT columns/values, `_ROW_COLUMNS`, the
+  row→model mapping, and the JSON insert path, and filters on it in both the in-memory
+  and SQL WHERE clauses (composing with the existing `username`/`session_id`/
+  `event_type`/`outcome`/`delegation_mode` filters; empty = unconstrained). The query
+  API accepts `?agent_role=` and rejects an out-of-vocabulary value exactly as
+  `delegation_mode=invalid` is rejected, and the summary `window_echo` echoes it. A
+  legacy row reads back `agent_role is None`; an event stored without it returns with
+  the field **absent** (never null).
+- **Emitter parity across the six audit-emitting services** (`agent-platform`,
+  `execution-runtime`, `identity-broker`, `platform-gateway`, `skills-hub`,
+  `tool-gateway`). `build_audit_event` gains `agent_role: str | None = None` and
+  `("agent_role", agent_role)` joins the omit-when-`None` tuple beside
+  `("delegation_mode", delegation_mode)`, replicated byte-for-byte across the family;
+  `AuditEmitterParityTest` and each service's “optional fields omitted when absent”
+  test assert the unscoped payload stays byte-identical. (`incident-service` is a
+  distinct triage `AuditConnector` with no `build_audit_event` — never a parity-family
+  member, never carried `delegation_mode` — and stays untouched.)
+- **Evidence-turn attribution** (`shared-contracts`, `agent-platform`).
+  `session-evidence.schema.json` and the `evidence_turns` item in
+  `agent-session.schema.json` gain an optional enum-closed `agent_role`; the v2
+  `EvidenceTurn` model carries it behind a `model_serializer` that omits it when
+  `None`, and the kernel's `_persist_evidence` threads `current_agent_role_value()`
+  into the evidence-store `save_turn`. A turn stored without it is byte-identical, and
+  a legacy turn replays with no empty artifact. Per OQ-3 the transcript-turn projection
+  and any concurrent-multi-agent transcript re-modelling stay **deferred to phase 5/6**.
+- **The inert producer seam** (`agent-platform`). Per OQ-2 the audit-emitter call sites
+  pass `agent_role=current_agent_role_value()` (SPEC-073) — byte-identical today
+  because `AGENT_ROLE` defaults to `None` on every deployed unscoped turn. A
+  reachability guard proves no deployed path binds a non-`None` role, and a no-diff
+  test proves an unscoped event's key set is byte-identical before/after.
+- **Agent-role attribution in the documentation** (`docs`). The
+  [authorization matrix](docs/agentic-aiops-platform/authorization-matrix.md) gains an
+  “Agent-Role Attribution in the Audit Trail (SPEC-075, phase 4)” section documenting
+  the completed attribution triple and its **descriptive**-never-prescriptive nature
+  (the prescriptive axis is SPEC-074); the
+  [identity-and-authorization design](docs/agentic-aiops-platform/identity-and-authorization-design.md)
+  records phase 4 delivered; the
+  [reference architecture](docs/agentic-aiops-platform/part-2-reference-architecture.md)
+  audit-requirements list names the agent-role dimension; and the
+  [delivery roadmap](docs/agentic-aiops-platform/delivery-roadmap.md) multi-agent
+  program row records phase 4. The OQ-4 (no portal filter — `delegation_mode` has
+  none), OQ-5 (no summary facet — consumerless until data exists), and OQ-6 (additive
+  field within audit-event v1, no new ADR) deferrals are recorded.
+
+### Verification
+
+- Full agent-platform suite **1716 passed** — including five new
+  `TestSpec075AuditAttribution` guards: enum-lockstep across the three contracts (+ a
+  drift-sensitivity companion), the `EvidenceTurn` omission serializer, the emitter-seam
+  threading of the inert seed, and a byte-identical unscoped-event no-diff.
+- Audit-service suite **149 passed** (the new field/filter round-trips; a legacy row
+  reads back `None`); no-diff confirmed across the six emitter suites and all-product
+  `make test` **4036 passed**; `validate-version` green (lockstep bumped to 0.56.0 for release).
+- Root `make verify` green end-to-end through every target — overlays, dashboards,
+  policy, policy-scenarios (11 api + 5 tools agent-role demo scenarios), version,
+  secret-vocabulary, password-policy, portal (**546 passed**), the audit-contract
+  Postgres round-trip (proving the `agent_role` filter + `window_echo` against real
+  Postgres), and the four delegated custody/runtime/multiproc/edge proofs over real
+  docker + TLS — including the long-running SPEC-063 `execution-failure-test` campaign
+  run to completion: **795 passed, 2 deselected, exit 0** in 0:38:11 (evidence
+  `.workspaces/spec063-evidence/20261106T055752Z-99a3b014cb75`).
+- Phase-4 inertness confirmed: no deployed emitter threads a non-`None` `agent_role`,
+  every unscoped audit event and evidence turn is byte-identical, the `event_type` enum
+  is unchanged (closed), and no contract field beyond the additive `agent_role`
+  dimension (audit-event + session-evidence) changed. `agent-stream-event.schema.json`
+  and `execution-request.schema.json` stay byte-unchanged.
+
 ## 0.55.0 — 2026-11-05
 
 [SPEC-074](docs/specs/SPEC-074-policy-role-axis/spec.md) policy role axis — phase 3

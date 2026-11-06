@@ -79,7 +79,16 @@ class BuildAuditEventTests(unittest.TestCase):
 
     def test_optional_fields_omitted_when_absent(self) -> None:
         event = audit_emitter.build_audit_event("skills_synced", "req-1", "error")
-        for key in ("subject", "username", "actor", "roles", "session_id"):
+        # SPEC-075: agent_role joins the omitted-when-absent set, so an unscoped
+        # event stays byte-identical (never a null, never a new key).
+        for key in (
+            "subject",
+            "username",
+            "actor",
+            "roles",
+            "session_id",
+            "agent_role",
+        ):
             self.assertNotIn(key, event)
         jsonschema.validate(event, _load_schema("audit-event.schema.json"))
 

@@ -97,6 +97,7 @@ class EvidenceStore(Protocol):
         turn_index: int,
         frames: list[dict[str, Any]],
         session_max_bytes: int,
+        agent_role: str | None = None,
     ) -> None: ...
 
     def load_turns(self, session_id: str) -> list[dict[str, Any]]: ...
@@ -122,6 +123,7 @@ class _BaseEvidenceStore:
         turn_index: int,
         frames: list[dict[str, Any]],
         session_max_bytes: int,
+        agent_role: str | None = None,
     ) -> None:
         if not frames:
             return
@@ -139,6 +141,9 @@ class _BaseEvidenceStore:
                     "frame": frame,
                     "payload_bytes": len(payload),
                     "created_at": created_at,
+                    # SPEC-075: the acting agent-role for this turn (None until
+                    # phase 5 scopes one); denormalized per row like request_id.
+                    "agent_role": agent_role,
                 }
             )
         self._insert_rows(rows)
@@ -174,6 +179,11 @@ class _BaseEvidenceStore:
                     "frames": [],
                 },
             )
+            # SPEC-075: attach the acting agent-role only when the turn was
+            # scoped with one, so a legacy (unscoped) turn replays with no
+            # empty artifact and stays byte-identical.
+            if row.get("agent_role") is not None:
+                group["agent_role"] = row["agent_role"]
             group["frames"].append(row["frame"])
         return [
             groups[index] for index in sorted(groups)
@@ -256,6 +266,7 @@ class InMemoryEvidenceStore(_BaseEvidenceStore):
                 "request_id": r["request_id"],
                 "frame": r["frame"],
                 "created_at": r.get("created_at", ""),
+                "agent_role": r.get("agent_role"),
             }
             for r in sorted(
                 rows, key=lambda r: (r["turn_index"], r["frame_index"])
@@ -291,6 +302,7 @@ CREATE TABLE IF NOT EXISTS session_evidence (
 );
 CREATE INDEX IF NOT EXISTS idx_session_evidence_updated
     ON session_evidence (updated_at);
+ALTER TABLE session_evidence ADD COLUMN IF NOT EXISTS agent_role TEXT;
 """
 
 _NEXT_FRAME_INDEX = """
@@ -301,10 +313,11 @@ SELECT COALESCE(MAX(frame_index), -1) + 1
 
 _INSERT_ROW = """
 INSERT INTO session_evidence
-    (session_id, turn_index, frame_index, request_id, frame, payload_bytes)
+    (session_id, turn_index, frame_index, request_id, frame, payload_bytes,
+     agent_role)
 VALUES
     (%(session_id)s, %(turn_index)s, %(frame_index)s, %(request_id)s,
-     %(frame)s, %(payload_bytes)s)
+     %(frame)s, %(payload_bytes)s, %(agent_role)s)
 ON CONFLICT (session_id, turn_index, frame_index) DO NOTHING
 """
 
@@ -339,7 +352,8 @@ UPDATE session_evidence
    SET updated_at = now()
  WHERE session_id = %(session_id)s
 RETURNING turn_index, frame_index, request_id, frame,
-          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+          agent_role
 """
 
 _DELETE_ROWS = """
@@ -465,7 +479,7 @@ class PostgresEvidenceStore(_BaseEvidenceStore):
                 rows = cur.fetchall()
             conn.commit()
         loaded = []
-        for turn_index, frame_index, request_id, frame, created_at in rows:
+        for turn_index, frame_index, request_id, frame, created_at, agent_role in rows:
             loaded.append(
                 {
                     "turn_index": turn_index,
@@ -473,6 +487,7 @@ class PostgresEvidenceStore(_BaseEvidenceStore):
                     "request_id": request_id,
                     "frame": frame if isinstance(frame, dict) else json.loads(frame),
                     "created_at": created_at or "",
+                    "agent_role": agent_role,
                 }
             )
         loaded.sort(key=lambda r: (r["turn_index"], r["frame_index"]))

@@ -16,6 +16,11 @@
       "type": "string",
       "description": "Request that produced the evidence; correlates with the audit trail tool_invoked events."
     },
+    "agent_role": {
+      "type": "string",
+      "enum": ["diagnostician", "orchestrator", "executor"],
+      "description": "SPEC-075 (OQ-3): which agent-role acted on this turn, from the closed SPEC-073 vocabulary. Omitted when absent — no deployed caller binds a role until phase 5 — so a legacy turn is byte-identical and replays with no empty artifact. Attribution only; narrows no authority."
+    },
     "created_at": {
       "type": "string",
       "description": "Persistence timestamp assigned by the evidence store."

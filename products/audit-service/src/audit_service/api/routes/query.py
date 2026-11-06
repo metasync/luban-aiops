@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from audit_service.core.config import get_settings
 from audit_service.core.metrics import record_query, record_rejected
 from audit_service.core.observability import log_event
-from audit_service.schemas.audit import AuditQuery, DelegationMode, Outcome
+from audit_service.schemas.audit import AgentRole, AuditQuery, DelegationMode, Outcome
 from audit_service.services.audit_store import StoreError, decode_cursor
 from audit_service.services.ingest_auth import (
     IngestAuthError,
@@ -42,6 +42,7 @@ async def query_events(
     service: str | None = None,
     outcome: Outcome | None = None,
     delegation_mode: DelegationMode | None = None,
+    agent_role: AgentRole | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
     cursor: str | None = None,
@@ -71,6 +72,7 @@ async def query_events(
         service=service,
         outcome=outcome,
         delegation_mode=delegation_mode,
+        agent_role=agent_role,
         since=since,
         until=until,
     )

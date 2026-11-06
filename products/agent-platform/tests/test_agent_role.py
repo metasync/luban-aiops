@@ -14,6 +14,7 @@ import pytest
 
 from agent_service.runtime_kernel import AgentKernel
 from agent_service.runtime_settings import RuntimeSettings
+from agent_service.schemas.v2 import EvidenceAgentRole, EvidenceTurn
 from agent_service.services.agent_role import (
     AGENT_ROLE,
     AgentRole,
@@ -296,3 +297,119 @@ class TestFailClosedAndInertness:
             if "agent_role_scope(" in text or "AGENT_ROLE.set(" in text:
                 offenders.append(str(path.relative_to(src_root)))
         assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# SPEC-075 (phase 4): audit & attribution — the inert ``agent_role`` dimension
+# ---------------------------------------------------------------------------
+class TestSpec075AuditAttribution:
+    """Phase-4 guards for the additive ``agent_role`` attribution dimension.
+
+    A deliberate clone of SPEC-070's ``delegation_mode``: one closed vocabulary
+    shared by the audit-event and session-evidence contracts and the SPEC-073
+    seed, wired into the emitter seam yet **inert** — no deployed caller binds a
+    role until phase 5, so every unscoped event/turn audits byte-identically.
+
+    Four-point-gate mapping (plan R-5): **point 1 (audit) strengthened** — the
+    trail gains a which-role-acted dimension; **point 2 (identity) unchanged** —
+    the role is a label beside the one delegated token, never a new
+    principal/claim/identity edge; **point 3 (read-only posture) unchanged** —
+    attribution narrows no authority (the prescriptive axis is SPEC-074);
+    **point 4 (no agentscope types) unchanged** — a plain string enum on the v2
+    contract.
+    """
+
+    def test_agent_role_enum_lockstep_across_contracts(self):
+        # The attribution dimension cannot drift from the identity/policy
+        # vocabulary: the SPEC-073 enum, the evidence-turn Literal, and every
+        # contract schema carrying agent_role enumerate exactly one closed set.
+        expected = {r.value for r in AgentRole}
+        assert expected == {"diagnostician", "orchestrator", "executor"}
+        assert (
+            set(getattr(EvidenceAgentRole, "__args__", EvidenceAgentRole)) == expected
+        )
+
+        audit_event = json.loads((_SCHEMA_DIR / "audit-event.schema.json").read_text())
+        assert set(audit_event["properties"]["agent_role"]["enum"]) == expected
+
+        session_evidence = json.loads(
+            (_SCHEMA_DIR / "session-evidence.schema.json").read_text()
+        )
+        assert set(session_evidence["properties"]["agent_role"]["enum"]) == expected
+
+        agent_session = json.loads(
+            (_SCHEMA_DIR / "agent-session.schema.json").read_text()
+        )
+        turn_item = agent_session["properties"]["evidence_turns"]["items"]
+        assert set(turn_item["properties"]["agent_role"]["enum"]) == expected
+
+    def test_agent_role_enum_lockstep_guard_fires_on_drift(self):
+        # Sensitivity: prove the lockstep assertion is not vacuously true. A
+        # contract that grew a value the vocabulary lacks ("planner"/"approver"
+        # are explicitly not roles — OQ-1) or dropped one is the drift it catches.
+        expected = {r.value for r in AgentRole}
+        audit_event = json.loads((_SCHEMA_DIR / "audit-event.schema.json").read_text())
+        contract = set(audit_event["properties"]["agent_role"]["enum"])
+        assert contract == expected
+        assert contract | {"planner"} != expected
+        assert contract - {"executor"} != expected
+
+    def test_evidence_turn_omits_agent_role_when_unscoped(self):
+        # The evidence-turn serializer mirrors AuditEvent._omit_unknown_delegation:
+        # an unscoped turn drops the key entirely (never null), so a legacy turn
+        # replays byte-identically; a scoped turn projects the role verbatim.
+        unscoped = EvidenceTurn(turn_index=0, request_id="req-1", frames=[])
+        assert unscoped.agent_role is None
+        assert "agent_role" not in unscoped.model_dump()
+        assert "agent_role" not in json.loads(unscoped.model_dump_json())
+
+        scoped = EvidenceTurn(
+            turn_index=0, request_id="req-1", agent_role="executor", frames=[]
+        )
+        assert scoped.model_dump()["agent_role"] == "executor"
+        assert json.loads(scoped.model_dump_json())["agent_role"] == "executor"
+
+    def test_emitter_seam_threads_the_inert_seed(self):
+        # R-5 seam (OQ-2): the deployed agent-platform audit call sites thread
+        # current_agent_role_value() into the envelope. Composed with
+        # test_no_orchestration_caller_is_wired (nothing binds a role), the seed
+        # is None on every deployed path — the reachability guarantee, audit-side.
+        src_root = Path(__file__).resolve().parents[1] / "src" / "agent_service"
+        wired = [
+            str(path.relative_to(src_root))
+            for path in src_root.rglob("*.py")
+            if "agent_role=current_agent_role_value()" in path.read_text()
+        ]
+        assert wired, "expected the emitter seam to thread current_agent_role_value()"
+
+    def test_unscoped_emitter_event_is_byte_identical(self):
+        # No-diff (plan L154): fed the unscoped seed, build_audit_event yields
+        # exactly the historical envelope — no agent_role key — while a scoped role
+        # would project, proving the seam is live yet never bound today.
+        from agent_service.services import audit_emitter
+
+        assert current_agent_role_value() is None
+        event = audit_emitter.build_audit_event(
+            "execution_requested",
+            "req-1",
+            "success",
+            agent_role=current_agent_role_value(),
+        )
+        assert "agent_role" not in event
+        assert set(event) == {
+            "event_id",
+            "occurred_at",
+            "event_type",
+            "service",
+            "request_id",
+            "outcome",
+            "details",
+        }
+        with agent_role_scope(AgentRole.EXECUTOR):
+            scoped = audit_emitter.build_audit_event(
+                "execution_requested",
+                "req-1",
+                "success",
+                agent_role=current_agent_role_value(),
+            )
+        assert scoped["agent_role"] == "executor"

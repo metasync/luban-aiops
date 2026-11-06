@@ -315,6 +315,7 @@ def _audit_execution_rejected(
     context = EXECUTION_AUDIT_CONTEXT.get()
     if not context:
         return
+    from agent_service.services.agent_role import current_agent_role_value
     from agent_service.services.audit_emitter import (
         build_audit_event,
         emit_audit_event,
@@ -333,6 +334,8 @@ def _audit_execution_rejected(
         subject=context.get("decider_user_id"),
         username=context.get("decider_user_id"),
         session_id=context.get("session_id"),
+        # SPEC-075: inert — AGENT_ROLE is unscoped on every deployed turn.
+        agent_role=current_agent_role_value(),
     )
     emit_audit_event(context.get("settings"), event)
 

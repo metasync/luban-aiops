@@ -1035,10 +1035,14 @@ class FakeEvidenceStore:
         self.fail = fail
         self.saved: list[tuple] = []
 
-    def save_turn(self, session_id, request_id, turn_index, frames, budget):
+    def save_turn(
+        self, session_id, request_id, turn_index, frames, budget, agent_role=None
+    ):
         if self.fail:
             raise RuntimeError("evidence store down")
-        self.saved.append((session_id, request_id, turn_index, frames, budget))
+        self.saved.append(
+            (session_id, request_id, turn_index, frames, budget, agent_role)
+        )
 
 
 def _evidence_frames():
@@ -1088,13 +1092,16 @@ class TestEvidencePersistenceHook:
         kernel._persist_evidence("ses-1", "req-1", 3, _evidence_frames())
 
         assert len(store.saved) == 1
-        session_id, request_id, turn_index, frames, budget = store.saved[0]
+        session_id, request_id, turn_index, frames, budget, agent_role = store.saved[0]
         assert (session_id, request_id, turn_index) == ("ses-1", "req-1", 3)
         assert [frame["type"] for frame in frames] == [
             "tool_call",
             "tool_result",
         ]
         assert budget == kernel.settings.evidence_session_max_bytes
+        # SPEC-075: the kernel threads the inert seed — an unscoped turn
+        # (AGENT_ROLE=None on every deployed path) persists no agent-role.
+        assert agent_role is None
 
     def test_persist_evidence_applies_entry_cap(self, monkeypatch):
         import agent_service.runtime_kernel as rk

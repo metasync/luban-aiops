@@ -74,6 +74,10 @@ def window_echo(filters: AuditQuery) -> dict[str, str]:
         echo["outcome"] = filters.outcome
     if filters.delegation_mode:
         echo["delegation_mode"] = filters.delegation_mode
+    # SPEC-075: echo the additive agent_role filter exactly like delegation_mode,
+    # so a ?agent_role= narrow is visible in the summary window.
+    if filters.agent_role:
+        echo["agent_role"] = filters.agent_role
     if filters.since:
         echo["since"] = filters.since.isoformat()
     if filters.until:

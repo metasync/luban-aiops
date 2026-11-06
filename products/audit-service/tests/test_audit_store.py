@@ -169,6 +169,25 @@ class InMemoryStoreTests(unittest.TestCase):
         combined = AuditQuery(delegation_mode="user_delegated", username="bob")
         self.assertEqual(_run(self.store.query(combined, None, 50)).events, [])
 
+    def test_agent_role_filter_distinguishes_legacy_from_explicit(self) -> None:
+        # SPEC-075: the additive agent_role dimension filters verbatim like
+        # delegation_mode — a legacy event (no role bound) is never matched by a
+        # role filter, the window echoes the applied role, and it composes with
+        # the other envelope filters.
+        events = [_event("legacy"), _event("diag", agent_role="diagnostician"),
+                  _event("orch", agent_role="orchestrator"),
+                  _event("exec", agent_role="executor", username="alice")]
+        _run(self.store.add(events))
+        self.assertEqual(len(_run(self.store.query(AuditQuery(), None, 50)).events), 4)
+        for event in events[1:]:
+            filters = AuditQuery(agent_role=event.agent_role)
+            self.assertEqual(_run(self.store.query(filters, None, 50)).events, [event])
+            summary = _run(self.store.summarize(filters))
+            self.assertEqual(summary.total_events, 1)
+            self.assertEqual(summary.window, {"agent_role": event.agent_role})
+        combined = AuditQuery(agent_role="executor", username="bob")
+        self.assertEqual(_run(self.store.query(combined, None, 50)).events, [])
+
     def test_filters_by_session_and_request_id(self) -> None:
         _run(
             self.store.add(
@@ -418,6 +437,7 @@ def _pg_row(event: AuditEvent) -> tuple:
         event.outcome,
         event.details,
         event.delegation_mode,
+        event.agent_role,
     )
 
 

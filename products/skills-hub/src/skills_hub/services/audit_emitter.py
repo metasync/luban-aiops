@@ -38,6 +38,7 @@ def build_audit_event(
     roles: list[str] | None = None,
     session_id: str | None = None,
     delegation_mode: str | None = None,
+    agent_role: str | None = None,
 ) -> dict:
     """Build an envelope matching shared-contracts audit-event.schema.json.
 
@@ -63,6 +64,7 @@ def build_audit_event(
         ("roles", roles),
         ("session_id", session_id),
         ("delegation_mode", delegation_mode),
+        ("agent_role", agent_role),
     ):
         if value is not None:
             event[key] = value

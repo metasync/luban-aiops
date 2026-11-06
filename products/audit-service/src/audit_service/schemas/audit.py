@@ -51,6 +51,11 @@ EventType = Literal[
 
 Outcome = Literal["allow", "deny", "success", "error"]
 DelegationMode = Literal["user_delegated", "acting_service", "none"]
+# SPEC-075: the closed agent-role vocabulary, held in lockstep with the SPEC-073
+# ``AgentRole`` enum and the audit-event.schema.json ``agent_role`` enum by a
+# contract-parity guard. Descriptive attribution only — it narrows no authority
+# (the prescriptive axis is SPEC-074).
+AgentRole = Literal["diagnostician", "orchestrator", "executor"]
 
 
 class AuditEvent(BaseModel):
@@ -69,6 +74,9 @@ class AuditEvent(BaseModel):
     outcome: Outcome
     # Unset on legacy envelopes; never infer verified delegation from details.
     delegation_mode: DelegationMode | None = None
+    # SPEC-075: which agent-role acted, from the closed SPEC-073 vocabulary.
+    # Unset until phase 5 binds a role; never infer a role from details.
+    agent_role: AgentRole | None = None
     details: dict = Field(default_factory=dict)
 
     @model_serializer(mode="wrap")
@@ -76,6 +84,10 @@ class AuditEvent(BaseModel):
         payload = handler(self)
         if self.delegation_mode is None:
             payload.pop("delegation_mode", None)
+        # SPEC-075: omitted (never null) when unscoped, so an event from today's
+        # single-agent path audits byte-identically to before.
+        if self.agent_role is None:
+            payload.pop("agent_role", None)
         return payload
 
 
@@ -100,5 +112,6 @@ class AuditQuery(BaseModel):
     service: str | None = None
     outcome: Outcome | None = None
     delegation_mode: DelegationMode | None = None
+    agent_role: AgentRole | None = None
     since: datetime | None = None
     until: datetime | None = None

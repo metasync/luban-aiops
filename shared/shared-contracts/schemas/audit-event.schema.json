@@ -76,6 +76,11 @@
       "enum": ["user_delegated", "acting_service", "none"],
       "description": "SPEC-070: verified acquisition mode. Omitted for legacy events; absence is not an assertion of none. Authorization lifecycle outcomes remain in details.authorization_outcome; no credential or provider URL belongs in either field."
     },
+    "agent_role": {
+      "type": "string",
+      "enum": ["diagnostician", "orchestrator", "executor"],
+      "description": "SPEC-075: which agent-role acted, drawn from the closed SPEC-073 vocabulary. Omitted when absent (no deployed caller binds a role until phase 5); absence is not an assertion. A descriptive attribution dimension beside delegation_mode and subject/username — it narrows no authority (the prescriptive axis is SPEC-074) and never becomes a new principal, claim, or identity edge."
+    },
     "roles": {
       "type": "array",
       "items": {"type": "string"},

@@ -208,6 +208,20 @@ class TestInMemoryEvidenceStore:
         store.save_turn("ses-1", "req-1", 0, [_tool_call(), _tool_result()], 1 << 30)
         assert _persisted_count() == before + 2
 
+    def test_agent_role_round_trips_and_legacy_turn_omits_it(self):
+        # SPEC-075 (R-4): a turn scoped with an agent-role carries it back on
+        # replay; an unscoped (legacy) turn — every turn today — replays with
+        # no agent_role artifact at all, so it stays byte-identical.
+        store = InMemoryEvidenceStore()
+        store.save_turn(
+            "ses-1", "req-1", 0, [_tool_call()], 1 << 30, agent_role="executor"
+        )
+        store.save_turn("ses-1", "req-2", 1, [_tool_call()], 1 << 30)
+
+        turns = store.load_turns("ses-1")
+        assert turns[0]["agent_role"] == "executor"
+        assert "agent_role" not in turns[1]
+
 
 # ---------------------------------------------------------------------------
 # Redaction regression (SPEC-009 choke point inherited by construction)
@@ -314,8 +328,8 @@ class TestPostgresEvidenceStore:
     def test_load_rows_refreshes_ttl_and_groups(self):
         calls: list[dict] = []
         rows = [
-            (0, 0, "req-1", _tool_call(), "2026-08-23T10:00:00Z"),
-            (0, 1, "req-1", _tool_result(), "2026-08-23T10:00:00Z"),
+            (0, 0, "req-1", _tool_call(), "2026-08-23T10:00:00Z", None),
+            (0, 1, "req-1", _tool_result(), "2026-08-23T10:00:00Z", None),
         ]
         store = self._store(calls, rows=rows)
         turns = store.load_turns("ses-1")

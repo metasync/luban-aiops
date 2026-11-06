@@ -121,6 +121,34 @@ class AuditEventContractTests(unittest.TestCase):
             with self.assertRaises(jsonschema.ValidationError):
                 jsonschema.validate({**payload, "delegation_mode": invalid}, schema)
 
+    def test_agent_role_vocabulary_omission_and_rejection(self) -> None:
+        # SPEC-075: the additive attribution dimension mirrors delegation_mode —
+        # a closed vocabulary in lockstep with the contract, omitted (never
+        # null) when unscoped so today's single-agent events audit byte-
+        # identically, and rejected fail-closed on any out-of-set value.
+        from audit_service.schemas.audit import AgentRole, AuditQuery
+
+        schema = _load_schema(self.schema_name)
+        self.assertEqual(set(AgentRole.__args__),
+                         set(schema["properties"]["agent_role"]["enum"]))
+        self.assertNotIn("agent_role", _event().model_dump(exclude_none=True))
+        for event in (_event(), _event(agent_role=None)):
+            self.assertNotIn("agent_role", event.model_dump(mode="json"))
+            self.assertNotIn("agent_role", json.loads(event.model_dump_json()))
+            self.assertNotIn("agent_role", IngestRequest(events=[event]).model_dump()["events"][0])
+            self.assertIsNone(event.model_dump()["subject"])  # Existing optional fields unchanged.
+        for role in ("diagnostician", "orchestrator", "executor"):
+            payload = _event(agent_role=role).model_dump(mode="json", exclude_none=True)
+            jsonschema.validate(payload, schema)
+            self.assertEqual(AuditQuery(agent_role=role).agent_role, role)
+        for invalid in ("planner", "", 1):
+            with self.assertRaises(ValidationError):
+                _event(agent_role=invalid)
+            with self.assertRaises(ValidationError):
+                AuditQuery(agent_role=invalid)
+            with self.assertRaises(jsonschema.ValidationError):
+                jsonschema.validate({**payload, "agent_role": invalid}, schema)
+
     def test_session_deleted_event_validates(self) -> None:
         # SPEC-022 R-1: the gateway emits session_deleted on workspace
         # deletes; the model must accept it like the contract does.
