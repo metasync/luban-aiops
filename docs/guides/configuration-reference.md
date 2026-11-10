@@ -528,6 +528,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/agent-platform/runtime
 | `AGENT_AUTHORING_TRACE_MAX_STEPS` | Per-session authoring-trace step cap (SPEC-055 R-1); capture beyond the cap is dropped best-effort rather than letting one long session grow an unbounded trace. Must be `>= 1` | `100` | code default |
 | `AGENT_AUTHORING_TRACE_IDLE_DAYS` | Idle window after which a still-`draft` authoring trace is reclaimed (SPEC-055 R-1 / OQ-1), at startup and opportunistically on write. Lifecycle-bound — deliberately **not** the 30-day `execution_records` sweep, so a session authored now stays graduable after its signed receipts are gone, and a terminal (`graduated`/`discarded`) trace is never swept. `0` disables the idle-GC. Must be `>= 0` | `180` | code default |
 | `AGENT_SKILL_GRADUATION_MAX_STEPS` | Blast-radius step bound re-checked at graduation (SPEC-055 R-4): a trace longer than this is refused as not-graduable (409) rather than exported as a flow that would die part-way through mutating. A deliberate twin of the tool-gateway's `GATEWAY_BROWSER_FLOW_MAX_STEPS` replay budget, and tunable because that one is — raise the two together or graduation refuses flows that would have replayed. Not skills-hub's `MAX_STEPS` ingestion ceiling (`200`), which is a resource limit rather than a policy bound. Must be `>= 1` | `20` | code default |
+| `AGENT_ORCHESTRATION_MAX_STEPS` | Total member read-step bound for one bounded read-only diagnosis fan-out (SPEC-076 R-1/OQ-2): caps the **whole orchestration** (not per member), so the loop cannot grow unbounded regardless of member count. On exhaustion the loop **fails closed** to a budget-limited partial diagnosis and never widens to a mutating step to “finish”. A deliberate twin of `GATEWAY_BROWSER_FLOW_MAX_STEPS` / `AGENT_SKILL_GRADUATION_MAX_STEPS`; composed with the per-turn `AGENTSCOPE_MAX_ITERS` it gives a two-level bound (per member turn × total steps). Must be `>= 1` | `20` | code default |
 | `TOOL_GATEWAY_URL` | Upstream tool-gateway URL | `http://tool-gateway:8000` | runtime-config |
 
 ### execution-runtime
@@ -580,6 +581,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runti
 | `IDENTITY_TOKEN_ISSUER` | Expected JWT issuer | `http://identity-service:8000` | derived |
 | `IDENTITY_JWKS_CACHE_SECONDS` | JWKS key cache TTL | `300` | code default |
 | `CHAT_RESPONSE_TIMEOUT_SECONDS` | Upstream chat timeout | `30` | code default |
+| `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` | Upstream `/api/v1/diagnose` proxy timeout (SPEC-076 R-7): a bounded read-only diagnosis fans out up to `AGENT_ORCHESTRATION_MAX_STEPS` member turns plus a synthesis, so it needs a longer proxy budget than a single chat turn (mirrors the incident-triage long-read class, not chat's `30`) | `120` | code default |
 | `PLATFORM_GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `platform-gateway` | runtime-config |
 | `PLATFORM_GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |

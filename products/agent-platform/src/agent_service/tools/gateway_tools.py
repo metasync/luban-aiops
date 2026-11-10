@@ -334,7 +334,8 @@ def _audit_execution_rejected(
         subject=context.get("decider_user_id"),
         username=context.get("decider_user_id"),
         session_id=context.get("session_id"),
-        # SPEC-075: inert — AGENT_ROLE is unscoped on every deployed turn.
+        # SPEC-075/076: live on the orchestration path (a bound role projects);
+        # the unscoped single-agent turn stays byte-identical (field omitted).
         agent_role=current_agent_role_value(),
     )
     emit_audit_event(context.get("settings"), event)

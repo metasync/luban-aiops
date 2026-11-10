@@ -359,6 +359,39 @@ narrowed **per agent-role on the same delegated token** — never by minting a s
   summary facet (consumerless until data exists), and the transcript-turn projection
   is deferred. A producer first binding a role, and the wire/multi-agent contract,
   remain deferred to phase 5/6.
+- **Phase 5 delivered (SPEC-076, bounded autonomous diagnosis).** A producer first binds
+  the roles **in-process**: a platform-owned bounded read-only orchestration loop
+  (`services/orchestration.py`) fans out read-only `diagnostician` members from an
+  `orchestrator` over the **same** delegated token (R-3 — no second broker mint, the
+  requester `VerifiedHuman` unchanged across every hop), each member's toolkit narrowed at
+  the phase-2 `_ensure_toolkit` seam and each turn bracketed by `agent_role_scope()`,
+  bounded by `AGENT_ORCHESTRATION_MAX_STEPS` and **failing closed** to a budget-limited
+  partial diagnosis (never widening to a mutating step to “finish”). It synthesizes a
+  read-only diagnosis; a separate `executor`-scoped `stage_remediation(...)` mechanism is
+  **delivered and unit-proven** (it parks a proposal on the existing SPEC-020/030/031 HITL
+  card with the phase-2 `staged_by_role` provenance for a **distinct human** to approve and
+  the signed at-most-one-dispatch worker, SPEC-037/038/063, to run, and fails closed for a
+  diagnosis-only profile) but is **not wired to a production trigger** in phase 5 — the
+  operator-initiated diagnose→act bridge is the named follow-up **`FU-076-b`** (Decision 2;
+  autonomous resolve stays deferred, no new gate/worker/claim/schema). **The phase-2
+  in-process binding and the phase-4 attribution substrate go live**; the **phase-3 policy
+  axis stays ready-but-inert**: a minimal canonical `agent_roles_any` rule pair is synced
+  across all four replicas and its engine semantics are proven, but R-3 keeps the bound role
+  **off every wire field**, so no deployed gateway `evaluate()` threads a non-`None` role and
+  the rules never match on the live path — the **live** read-only control is in-process
+  toolkit narrowing + the loop's `read_only=True` admission (R-8 point 3 / OQ-4), and the
+  phase-4 attribution dimension **is populated** per participant. The deployed **unscoped**
+  single-agent path stays **byte-identical** — only the orchestration frame binds a role, so
+  the phase-2 (in-process binding) and phase-4 (attribution) reachability guards move from
+  “no caller binds a role” to “**only** the orchestration frame binds a role”, while the
+  phase-3 gateway-axis guard is **unchanged** and still asserts no deployed caller threads a
+  role (the axis fires only once the phase-6 wire contract, or the `FU-076-c` in-process
+  evaluation point, threads one). No agentscope orchestration surface is constructed
+  (Decision 5) and the diagnosis rides **existing** frames, so
+  `agent-stream-event`/`execution-request` stay byte-unchanged (the v2 multi-agent contract
+  remains phase 6). The trigger is **operator-invoked** (`POST /api/v2/diagnose`, proxied at
+  the gateway `/api/v1/diagnose`, gated by the existing `chat` action); unattended
+  machine-trigger ingestion is the named follow-up **`FU-076`**.
 
 ### Propagation Into Approvals
 

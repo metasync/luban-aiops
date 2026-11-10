@@ -44,6 +44,11 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/chat/stream"),
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.
     ("POST", "/api/v1/chat/confirm"),
+    # Bounded autonomous diagnosis trigger (SPEC-076 R-7): operator-invoked
+    # read-only fan-out over a declared runbook profile. Admitted at the reused
+    # ``chat`` action — no new policy vocabulary; the orchestration frame inside
+    # the loop is the only agent-role binder.
+    ("POST", "/api/v1/diagnose"),
     ("GET", "/api/v1/audit/events"),
     # Audit reporting surfaces (SPEC-046 R-3): summary aggregates and the
     # bounded CSV export ride the same audit:read gate as the raw trail.

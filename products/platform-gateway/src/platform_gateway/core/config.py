@@ -36,6 +36,11 @@ class PlatformGatewaySettings:
     dev_user: str = "dev.operator"
     policy_path: str = ""
     chat_response_timeout_seconds: float = 30.0
+    # SPEC-076 R-7: a bounded read-only diagnosis fans out up to
+    # AGENT_ORCHESTRATION_MAX_STEPS member turns plus a synthesis, so it needs a
+    # longer proxy budget than a single chat turn (mirrors the incident-triage
+    # long-read class, not chat's 30s).
+    diagnose_response_timeout_seconds: float = 120.0
     require_auth: bool = True
     target_authorization_enabled: bool = False
     authorization_workload_token_path: str = ""
@@ -94,6 +99,9 @@ class PlatformGatewaySettings:
             policy_path=os.getenv("PLATFORM_GATEWAY_POLICY_PATH", ""),
             chat_response_timeout_seconds=float(
                 os.getenv("CHAT_RESPONSE_TIMEOUT_SECONDS", "30")
+            ),
+            diagnose_response_timeout_seconds=float(
+                os.getenv("PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS", "120")
             ),
             require_auth=os.getenv("PLATFORM_GATEWAY_REQUIRE_AUTH", "true")
             .strip()

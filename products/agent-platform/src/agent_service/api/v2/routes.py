@@ -24,6 +24,7 @@ from agent_service.schemas.v2 import (
     AgentChatConfirmRequest,
     AgentChatRequest,
     AgentChatResponse,
+    AgentDiagnoseRequest,
     AgentFeatureFlags,
     AgentHealth,
     AgentModelCatalog,
@@ -85,6 +86,8 @@ from agent_service.services.operation_documents import (
     OPERATION_DOCUMENT_STORE,
     make_document,
 )
+from agent_service.services.orchestration import run_bounded_diagnosis
+from agent_service.services.runbooks import get_profile
 from agent_service.services.runtime_dependencies import (
     get_confirmation_registry,
     get_runtime_kernel,
@@ -402,6 +405,83 @@ async def chat(
         content=content,
         structured_output=structured_output,
         model=effective_model,
+    )
+
+
+@router.post("/diagnose", response_model=AgentChatResponse)
+async def diagnose(
+    body: AgentDiagnoseRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
+) -> AgentChatResponse:
+    """Operator-invoked bounded read-only diagnosis (SPEC-076 R-7).
+
+    The phase-5 trigger: a human operator names a declared runbook ``profile``
+    and a ``goal``; this runs **one** bounded read-only orchestration
+    (``run_bounded_diagnosis``) and returns the synthesized diagnosis. It is the
+    *only* entry that reaches the orchestration frame, and the frame inside the
+    loop is the *only* role-binder (SPEC-073/074/075 R-5) — this route binds no
+    ``agent_role`` itself and the request body carries none.
+
+    The diagnosis surfaces through the **existing** ``AgentChatResponse`` (a
+    normal assistant turn), so no new frame is added (OQ-5) and
+    ``agent-stream-event``/``execution-request`` stay byte-unchanged. A
+    budget-limited partial diagnosis (R-1 fail-closed) reports ``status="partial"``;
+    the member provenance rides the SPEC-025 evidence / SPEC-075 audit record
+    (R-6), never the response frame. The loop is read-only and cannot mutate: a
+    profile that declares a remediation is *staged* separately by an executor
+    onto the existing HITL card (R-4) — never dispatched here.
+    """
+    user_id = _user_id(x_user_id)
+    request_id = x_request_id or "untracked"
+    record_chat_request()
+    # Fail closed on an unknown profile: never coerce to a wider runbook.
+    profile = get_profile(body.profile)
+    if profile is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown diagnosis profile: {body.profile}",
+        )
+    requester = await _verified_requester(authorization, user_id)
+    session = ensure_session(
+        body.session_id, user_id, **({"requester": requester} if requester else {})
+    )
+    await _reject_if_parked(session.session_id, session.model)
+    resolved_model, _selected_by = _resolve_model(
+        body.model, session.model, get_runtime_kernel().routing_available()
+    )
+    goal = body.goal
+    if body.incident_id:
+        # Anchor the goal on an existing incident record (spec R-7). The anchor
+        # is context only — never a wire role, never a widening of the read.
+        goal = f"{goal} (incident {body.incident_id})"
+    LOGGER.info(
+        "bounded diagnosis started",
+        extra={
+            "request_id": request_id,
+            "session_id": session.session_id,
+            "profile": profile.name,
+            "model": resolved_model,
+            "incident_id": body.incident_id,
+        },
+    )
+    mark_session_turn(session.session_id, goal)
+    result = await run_bounded_diagnosis(
+        get_runtime_kernel(),
+        profile=profile,
+        goal=goal,
+        session_id=session.session_id,
+        user_name=user_id,
+        bearer_token=_bearer_token(authorization),
+        model_id=resolved_model,
+    )
+    return AgentChatResponse(
+        session_id=session.session_id,
+        request_id=request_id,
+        status="partial" if result.budget_limited else "ok",
+        content=result.diagnosis,
+        model=resolved_model,
     )
 
 

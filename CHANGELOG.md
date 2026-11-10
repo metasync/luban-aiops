@@ -11,7 +11,157 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## Unreleased
+## 0.57.0 — 2026-11-10
+
+[SPEC-076](docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md) bounded
+autonomous diagnosis — phase 5 of the phased multi-agent SPEC series
+[ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
+(`accepted` 2026-11-03), and the **producer** that first *binds* the agent-roles
+[SPEC-073](docs/specs/SPEC-073-role-scoped-agent-identity/spec.md) (v0.54.0),
+[SPEC-074](docs/specs/SPEC-074-policy-role-axis/spec.md) (v0.55.0), and
+[SPEC-075](docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md) (v0.56.0) each
+landed **inert**. Adds a platform-owned **bounded read-only orchestration loop**
+(`services/orchestration.py`) — no agentscope `TeamPipeline`/`GoalPipeline`/`A2AAgent`
+surface is constructed (Decision 5): an `orchestrator` fans out read-only
+`diagnostician` members over the **same** delegated token, each turn bracketed by
+SPEC-073's `agent_role_scope()` and each toolkit narrowed at the existing
+`_ensure_toolkit(read_only=True)` seam, bounded by the new
+`AGENT_ORCHESTRATION_MAX_STEPS` budget (default `20`) and **failing closed** to a
+budget-limited partial diagnosis rather than ever widening to a mutating step. It
+realizes the **diagnose-before-act** ceiling (Decision 2). The loop synthesizes a
+read-only diagnosis; a separate `executor`-scoped `stage_remediation(...)` mechanism is
+**delivered and unit-proven** — it parks a proposal on the **existing** SPEC-020/030/031
+HITL card (carrying the SPEC-073 `staged_by_role` provenance) for a **distinct human** to
+approve and the signed at-most-one-dispatch worker (SPEC-037/038/063) to run, and fails
+closed for a diagnosis-only profile — but it is **not wired to a production trigger** in
+phase 5 (`run_bounded_diagnosis` never calls it; `POST /api/v2/diagnose` is
+diagnosis-only), so the operator-initiated diagnose→act bridge is the named follow-up
+**`FU-076-b`**. **Zero new mutation-path code**; autonomous *resolve* stays **deferred**.
+The SPEC-074 policy axis + a minimal canonical `agent_roles_any` rule pair (a
+`diagnostician` read posture + an `executor`→`require_approval` encoding, synced
+byte-identically across all four policy replicas) land **ready-but-inert**: SPEC-073 R-3
+keeps the bound role **off every wire field**, so no deployed gateway `evaluate()` threads
+a non-`None` role and the rules never match on the live path. The **live** read-only
+control is in-process SPEC-073 toolkit narrowing + the loop's `read_only=True` admission
+(spec R-8 point 3 / OQ-4) — non-spoofable, because the role never crosses the wire. The
+SPEC-075 audit/evidence `agent_role` dimension **is populated** per participant (that seam
+is live). Per OQ-5 the diagnosis rides **existing**
+frames only (a normal assistant turn, SPEC-025 evidence frames, a SPEC-031 card), so
+`agent-stream-event.schema.json` and `execution-request.schema.json` stay
+**byte-unchanged** (the v2 multi-agent contract remains phase 6). The deployed
+**unscoped** single-agent path (`/api/v2/chat`, `/chat/stream`) stays
+**byte-identical** — only the orchestration frame binds a role, so the
+SPEC-073/074/075 reachability guards move from “no caller binds a role” to “**only**
+the orchestration frame binds a role”. The phase-5 trigger is **operator-invoked**
+(`POST /api/v2/diagnose` + the gateway `POST /api/v1/diagnose` proxy, gated by the
+**existing** `chat` action, returning the **existing** `AgentChatResponse` with
+`status="partial"` when budget-limited); the capability is built once,
+**runbook-agnostic**, and validated against the operator's four named first workflows
+(ServiceNow-incident, observability-alert, post-deploy-verify, k8s-pod-degradation —
+two driven end-to-end, all four scenario-tested). Per OQ-3, **unattended
+machine-trigger ingestion** (webhook/alert auto-fire, dedup, storm control) is
+recorded as the **named follow-up `FU-076`** (a future spec, not dropped scope). This
+delivery implements R-1…R-8, marks SPEC-076 `delivered`, and is released as
+**v0.57.0** (2026-11-10); the push remains a separate gate.
+
+### Added
+
+- **Bounded read-only orchestration loop** (`agent-platform`).
+  `services/orchestration.py` drives `run_bounded_diagnosis(...)` — a bounded fan-out
+  of read-only `diagnostician` member turns over the existing `reply_text(...,
+  read_only=True)` seam, synthesizing as `orchestrator`; the orchestrator consumes
+  only member **summaries** (member intermediate steps stay out of the leader's
+  context but remain reconstructable via the SPEC-025 evidence record). A separate
+  `stage_remediation(...)` binds `executor` (`read_only=False`) to park a proposal on
+  the HITL card — `run_bounded_diagnosis` **never** calls it, so the trigger is
+  read-only **by construction**.
+- **`AGENT_ORCHESTRATION_MAX_STEPS` knob** (`agent-platform`, default `20`, validated
+  `>= 1`) — a deliberate twin of `GATEWAY_BROWSER_FLOW_MAX_STEPS` /
+  `AGENT_SKILL_GRADUATION_MAX_STEPS`, bounding **total member read steps per
+  orchestration** (OQ-2); composed with the per-turn `AGENTSCOPE_MAX_ITERS` it gives a
+  two-level bound. On exhaustion the loop **fails closed** to a budget-limited partial
+  diagnosis.
+- **Four declared runbook profiles** (`agent-platform`). `services/runbooks.py`
+  expresses each workflow as pure data (trigger + read-tier families + proposed
+  remediation shape): `servicenow-incident` and `observability-alert` are
+  diagnosis-only; `post-deploy-verify` (rollback) and `k8s-pod-degradation`
+  (remediation) can stage a proposal. The declared read families are **documentation of
+  intent** — a `diagnostician_read_families()` union with no production caller: the live
+  toolkit is narrowed by **risk tier + token `roles`** (SPEC-073 R-2, read-only), not
+  selected by runbook family, so adding a runbook does not by itself widen any member's
+  tools; the module constructs no agentscope type and binds no role.
+- **Live in-process role binding + reachability-guard update** (`agent-platform`). The
+  orchestration frame brackets orchestrator/diagnostician/executor turns in
+  `agent_role_scope()`, keeping the role **process-local** (never in the SPEC-017
+  snapshot, never a JWT claim/header/wire field); a park/resume re-derives it per turn.
+  The **in-process** SPEC-073 R-5 guard (`test_only_the_orchestration_frame_binds_a_role`)
+  and the SPEC-075 R-5 audit-attribution guard move from “no caller binds a role” to
+  “**only** the orchestration frame binds a role”; the **gateway** SPEC-074 R-5 guard
+  (`test_no_deployed_caller_threads_a_non_none_agent_role`) is **unchanged** and still
+  passes with zero offenders, because R-3 keeps the role off the wire. The unscoped turn
+  stays byte-identical (no-diff).
+- **Canonical agent-role policy axis, ready-but-inert** (`platform-gateway`,
+  `tool-gateway`, `shared-contracts`). Both gateway `evaluate()` engines **accept** an
+  `agent_role` axis (subtractive-only, fail-closed — proven by unit test), and
+  `policy-default.yaml` gains the minimal `deny-diagnostician-tools-mutate` +
+  `require-approval-executor-tools-mutate` rules, synced byte-identically across all four
+  replicas; `policy-scenarios.yaml` gains orchestration-path expectations. They land
+  **inert in deployment**: SPEC-073 R-3 keeps the bound role **off every wire field**, so
+  no deployed gateway caller threads a non-`None` `agent_role` and the rules never match
+  on the live path — the axis becomes live only via the phase-6 wire contract or the
+  `FU-076-c` in-process evaluation point. The **live** read-only control is in-process
+  SPEC-073 toolkit narrowing + the loop's `read_only=True` admission (R-8 point 3 / OQ-4).
+- **Operator-invoked diagnosis trigger** (`agent-platform`, `platform-gateway`).
+  `POST /api/v2/diagnose` (+ the gateway `POST /api/v1/diagnose` proxy with a longer
+  `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` budget, default `120`) is gated by the
+  **existing** `chat` action (no new policy vocabulary) and returns the **existing**
+  `AgentChatResponse`; the gateway route inventory registers the new route.
+- **Contract-parity + four-point-gate mapping** (`agent-platform`).
+  `tests/test_contract_parity.py` records the SPEC-018 four-point-gate mapping and
+  asserts the no-new-frame boundary: both frozen schemas carry no multi-agent
+  vocabulary, the stream-event frame enum is unchanged, the `execution-request`
+  replicas stay byte-identical, and the diagnose response validates against the
+  existing chat frame.
+- **Gated live-cluster read-only check** (`platform-ops`, `agent-platform`).
+  `e2e/diagnosis-livecheck.sh` (`--local` mocked / `--live` gated) proves the two
+  routes are deployed, drives the three live-wired runbooks read-only, and asserts the
+  point-1 `chat_completed` attribution lands with **zero** `execution_requested`
+  events (point-3 read-only); `tests/test_diagnosis_livecheck.py` exercises the
+  `--live` pipeline's assertion + secret-free failure logic across a scenario matrix
+  with kubectl/HTTP mocked (no cluster, no paid call). Wired into `make
+  diagnosis-livecheck` + `make e2e`.
+- **Living documentation** (`docs`). The
+  [identity-and-authorization design](docs/agentic-aiops-platform/identity-and-authorization-design.md)
+  records phase 5 delivered (the loop is live); the
+  [authorization matrix](docs/agentic-aiops-platform/authorization-matrix.md) gains an
+  “Agent-Role Binding (SPEC-076, phase 5) — live in-process, policy axis
+  ready-but-inert” section; the
+  [configuration reference](docs/guides/configuration-reference.md) documents
+  `AGENT_ORCHESTRATION_MAX_STEPS` + `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS`; and
+  the [delivery roadmap](docs/agentic-aiops-platform/delivery-roadmap.md) multi-agent
+  row records phase 5 + `FU-076`.
+
+### Verification
+
+- Full agent-platform suite **1774 passed** — including the new `test_orchestration.py`
+  (the bounded loop, budget-limited fail-closed, all four runbook profiles driven
+  read-only with no human approving any read, two of them driven end-to-end, and
+  the executor-stages-never-dispatches proof), `test_diagnose_route.py`,
+  `test_contract_parity.py` (8), and `test_diagnosis_livecheck.py` (6);
+  platform-gateway **503 passed** (the diagnose proxy + route inventory).
+- Root `make verify` green across all sixteen legs — the all-product `test` suites,
+  overlays, dashboards, policy, policy-scenarios, version, secret-vocabulary,
+  password-policy, secret-delivery-demo, portal (**546 passed**), the audit-contract
+  Postgres round-trip, and the four delegated custody/runtime/multiproc/edge proofs
+  over real docker + TLS — including the long-running SPEC-063
+  `execution-failure-test` campaign run to completion: **795 passed, 2 deselected,
+  exit 0** in 0:38:20 (evidence
+  `.workspaces/spec063-evidence/20261108T111345Z-9c8f362be386`).
+- Phase-5 boundary confirmed: the unscoped single-agent path binds no role and is
+  byte-identical, the only reachable role-binder is the orchestration frame,
+  `agent-stream-event`/`execution-request` stay byte-unchanged, no mutation dispatches
+  without a **distinct human** approver (the SPEC-030 self-approval block fires
+  unchanged), and autonomous resolve remains deferred.
 
 ## 0.56.0 — 2026-11-05
 

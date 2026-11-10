@@ -31,6 +31,28 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
+class DiagnoseRequest(BaseModel):
+    """Operator-invoked bounded read-only diagnosis trigger (SPEC-076 R-7).
+
+    Relayed verbatim to agent-service ``POST /api/v2/diagnose``. Carries **no**
+    ``agent_role``: the role is process-local to the orchestration frame and is
+    never a wire field (SPEC-073 R-3). ``incident_id`` optionally anchors the
+    goal on an existing incident record; it is context only and never widens the
+    read. Unattended machine-trigger ingestion is the deferred ``FU-076`` (OQ-3).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    session_id: str | None = None
+    # Metadata only — never changes policy, the read-only posture, or HITL.
+    model: str | None = None
+    # Length-bounded because agent-service folds it into the goal text; the edge
+    # refuses an oversized anchor with a clean 422 rather than proxying it.
+    incident_id: str | None = Field(default=None, max_length=200)
+
+
 class ChatConfirmRequest(BaseModel):
     """Mirror of `shared-contracts/schemas/chat-confirm.schema.json` (SPEC-020)."""
 

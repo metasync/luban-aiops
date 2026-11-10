@@ -74,6 +74,62 @@ class AgentChatRequest(BaseModel):
     )
 
 
+class AgentDiagnoseRequest(BaseModel):
+    """Body for ``POST /api/v2/diagnose`` — the operator-invoked trigger for a
+    bounded read-only diagnosis (SPEC-076 R-7).
+
+    A human operator names a declared runbook ``profile`` and the diagnosis
+    ``goal``; the platform runs one bounded read-only orchestration over it. The
+    role stays process-local — it is **never** a request field, a claim, or a
+    forwarded header (SPEC-073 R-3), so this body carries no ``agent_role``. The
+    optional ``incident_id`` anchors the goal on an existing incident record
+    (spec R-7: "operator-invoked … or anchored on an existing incident record");
+    it is context only and never widens authority. Unattended machine-trigger
+    ingestion is the deferred follow-up ``FU-076`` (OQ-3), not this surface.
+    """
+
+    # ``extra="forbid"`` makes the "carries no ``agent_role``" contract above
+    # enforced, not merely documented: an unknown field (a smuggled role, a
+    # misspelt key) is refused 4xx rather than silently ignored — the same
+    # fail-closed posture as the gateway's inbound ``DiagnoseRequest``.
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = Field(
+        min_length=1,
+        description=(
+            "A declared runbook profile name (one of the four in "
+            "services.runbooks: servicenow-incident, observability-alert, "
+            "post-deploy-verify, k8s-pod-degradation). An unknown name is "
+            "refused with 4xx (fail-closed) — never coerced to a wider runbook."
+        ),
+    )
+    goal: str = Field(
+        min_length=1,
+        description="The diagnosis goal the bounded read-only fan-out pursues.",
+    )
+    session_id: str | None = None
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Optional model id resolved request > pinned > default by the same "
+            "precedence as POST /api/v2/chat (SPEC-024 R-3); metadata only — it "
+            "never changes policy, the read-only posture, or HITL outcomes. "
+            "Unlike chat, the resolved concrete model is threaded to every "
+            "member turn as-is: per-turn auto-routing does not fire on this "
+            "route, so the bounded fan-out runs on one resolved model."
+        ),
+    )
+    incident_id: str | None = Field(
+        default=None,
+        max_length=200,
+        description=(
+            "Optional incident anchor for the goal (spec R-7), length-bounded "
+            "because the route folds it into the goal text. Context only: it "
+            "never becomes a wire role and never widens the read."
+        ),
+    )
+
+
 class AuthorizationRequired(BaseModel):
     """Opaque gateway challenge, never model-authored execution authority."""
 

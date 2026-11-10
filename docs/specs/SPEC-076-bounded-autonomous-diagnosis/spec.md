@@ -229,6 +229,17 @@ Acceptance criteria:
   propose-remediation step parks and returns control to the human; a test asserts no signed dispatch
   occurs without an approval event.
 
+> **Delivery resolution (v0.57.0).** Phase 5 delivers and unit-proves the `executor`-scoped
+> `stage_remediation(...)` **mechanism** — it binds `executor` (`read_only=False`), parks a proposal on
+> the existing SPEC-020/030/031 HITL card carrying `staged_by_role="executor"`, fails closed for a
+> diagnosis-only profile, and upholds the self-approval block + distinct-human requirement. It wires
+> **no production trigger**: `run_bounded_diagnosis` never calls it and `POST /api/v2/diagnose` is
+> diagnosis-only. Phase 5 therefore ships the read-only loop, the R-4 ceiling holds **by
+> construction** (the live trigger cannot reach a mutation), and the operator-initiated diagnose→act
+> bridge that would call `stage_remediation` is the named follow-up **`FU-076-b`** (recorded in
+> Non-Goals + the roadmap). The staging acceptance above is met at **unit** scope and activated in
+> production by `FU-076-b`.
+
 ### R-5: Live policy enforcement + the canonical agent-role rule (activates SPEC-074)
 
 Phase 5 is "when a producer exists" (SPEC-074 OQ-1/OQ-4): thread the bound `agent_role` into **both**
@@ -248,6 +259,21 @@ Acceptance criteria:
   `make validate-policy` / `validate-policy-scenarios` / the bundle-parity check are green.
 - The `executor`→**human**-approver disjointness invariant (SPEC-074 R-3) holds on the live path: no
   agent-role ever appears as an approver decider.
+
+> **Delivery resolution (v0.57.0) — reconciles R-5 with R-3 via OQ-4.** The `agent_role` **axis** and
+> the two minimal canonical `agent_roles_any` rules (`deny-diagnostician-tools-mutate`,
+> `require-approval-executor-tools-mutate`) are landed in `policy-default.yaml` (synced byte-identically
+> across all four replicas, `make validate-policy`/`validate-policy-scenarios` green) and their engine
+> semantics are **unit-proven** (subtractive-only, fail-closed; an unscoped call and a role the rules do
+> not name evaluate byte-identically to the pre-axis baseline). Per **OQ-4** — ratified: "SPEC-073
+> toolkit narrowing already restricts *what each role sees* … the policy axis likely stays action-based"
+> — the existing action axis **plus** in-process SPEC-073 narrowing **suffice** as the live read-only
+> control. Because **R-3 keeps the bound role off every wire field**, no deployed gateway caller threads
+> a non-`None` `agent_role`, so the canonical rules stay **ready-but-inert** on the live path. The
+> orchestration-path threading acceptance above is therefore met **at the engine layer** (proven by
+> test), not by a deployed wire thread; the axis goes live in deployment only via the phase-6 wire
+> contract or a deliberately-designed in-process evaluation point (**`FU-076-c`**, recorded in
+> Non-Goals + the roadmap). R-5 and R-3 are reconciled by OQ-4, not contradicted.
 
 ### R-6: Live attribution — the audit/evidence record populated (activates SPEC-075)
 
@@ -293,7 +319,8 @@ Acceptance criteria:
 ### R-8: Four-point-gate parity, the no-new-frame contract boundary, and documentation
 
 Re-affirm SPEC-018's four-point gate for the new control flow and keep the contract untouched (OQ-5):
-**(1)** deny-by-default policy **+ audit** preserved (now *live*, strengthened — R-5/R-6); **(2)**
+**(1)** deny-by-default policy **+ audit** preserved (audit now *live*-attributed — R-6; the R-5
+policy axis lands ready-but-inert — see its resolution note); **(2)**
 identity carried only by the one gateway-forwarded delegated token (R-3); **(3)** the read-only
 posture enforced by toolkit narrowing + the loop's read-only admission (R-1/R-2); **(4)** no
 agentscope type leaks through the v2 contract — the loop is platform-owned and the diagnosis
@@ -309,9 +336,9 @@ Acceptance criteria:
 - Root `make verify` is green (incl. `validate-version`, `validate-policy`, the emitter-parity and
   contract-parity checks, and the SPEC-063 `execution-failure-test` campaign).
 - Living docs updated: `identity-and-authorization-design.md` (phase-5 boundary note — the loop is
-  live), `authorization-matrix.md` (the agent-role axis now enforced, not just modelled),
-  `configuration-reference.md` (the new orchestration-budget knob + any trigger knob), the roadmap
-  multi-agent row (phase 5), and `CHANGELOG.md`.
+  live), `authorization-matrix.md` (the agent-role binding: live in-process, policy axis
+  ready-but-inert), `configuration-reference.md` (the new orchestration-budget knob + any trigger
+  knob), the roadmap multi-agent row (phase 5), and `CHANGELOG.md`.
 
 ## Non-Goals
 
@@ -338,6 +365,21 @@ Acceptance criteria:
   [tasks](tasks.md) Delivery-Gate item so it is **not skipped**. Phase 5 lands the operator-invoked
   entry plus the autonomous read-only loop; `FU-076` (a future spec, not dropped scope) adds the
   unattended machine trigger with its own alert-storm / dedup / backpressure safety design.
+- **The operator-initiated diagnose→act bridge (`FU-076-b`)** — the production trigger that would call
+  the delivered `executor`-scoped `stage_remediation(...)` mechanism (R-4). Phase 5 ships the mechanism
+  **unit-proven but unwired** (`run_bounded_diagnosis` never calls it; `POST /api/v2/diagnose` is
+  diagnosis-only), so the read-only ceiling holds by construction. Wiring the mutation-adjacent
+  diagnose→act bridge is a distinct, evidence-backed increment (its own portal entry, park/resume UX,
+  and HITL routing), recorded in the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md)
+  and [tasks](tasks.md) so it is **not skipped** — not dropped scope.
+- **A live in-process policy-evaluation point for the agent-role axis (`FU-076-c`)** — the deliberate
+  design that would make the SPEC-074 `agent_roles_any` rules fire **in-process** (where R-3 keeps the
+  role) rather than across the wire. Phase 5 lands the axis + canonical rules **ready-but-inert**
+  (engine-proven; no deployed caller threads a role, R-3), with in-process SPEC-073 toolkit narrowing as
+  the live read-only control per OQ-4. Making the policy axis itself live — either via the phase-6 wire
+  contract or a new in-process evaluation seam — is recorded in the
+  [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md) and [tasks](tasks.md) so it is
+  **not skipped** — not dropped scope.
 
 ## Impact
 
@@ -346,9 +388,10 @@ Acceptance criteria:
   `agent_role_scope()` around orchestrator/diagnostician/executor turns, the existing
   `read_only=True` diagnostic-turn path it generalizes, and the `executor` staging path (which reuses
   the SPEC-020/030/031 park + SPEC-037/038/063 dispatch). `products/platform-gateway` +
-  `products/tool-gateway` — thread `agent_role` into `evaluate()` on the orchestration path (R-5);
-  the canonical `policy-default.yaml` (+ its three byte-identical replicas) **only if** OQ-4 lands a
-  rule. Portal — a minimal operator-invoked "diagnose" entry **only if** OQ-3 lands it.
+  `products/tool-gateway` — add the `agent_role` axis to `evaluate()` (unit-proven; **ready-but-inert**
+  in deployment because R-3 keeps the role off the wire — see the R-5 resolution note); the canonical
+  `policy-default.yaml` (+ its three byte-identical replicas) gains the minimal `agent_roles_any` rule
+  pair OQ-4 ratified. Portal — a minimal operator-invoked "diagnose" entry **only if** OQ-3 lands it.
   `products/audit-service` — **no schema change** (the SPEC-075 dimension is populated, not
   extended). **No** identity-broker, execution-runtime, or skills-hub behavior change.
 - contracts touched: **none** if OQ-5 holds — `agent-stream-event.schema.json` and
@@ -358,16 +401,19 @@ Acceptance criteria:
   revision (the SPEC-074 v3 policy-rule axis and the SPEC-075 audit dimension already exist).
 - identity / policy / audit / execution safety impact: **identity** — the one delegated token is
   preserved across the fan-out; no new principal, edge, claim, or broker mint (R-3). **policy** — the
-  SPEC-074 agent-role axis goes **live** (enforcement, not just model); subtractive-only and
-  fail-closed preserved. **audit** — the SPEC-075 dimension is **populated**; member activity is
-  reconstructable and role-attributed; the `event_type` enum stays closed. **execution safety** —
+  SPEC-074 agent-role axis + canonical rules land **ready-but-inert** (engine semantics unit-proven; no
+  deployed caller threads a role per R-3, and OQ-4 resolves in-process SPEC-073 narrowing as the live
+  read-only control); subtractive-only and fail-closed preserved. **audit** — the SPEC-075 dimension is
+  **populated**; member activity is reconstructable and role-attributed; the `event_type` enum stays
+  closed. **execution safety** —
   the loop is the controlled ADR-0011 Decision 3 relaxation: bounded and **read-only-only**; every
   mutation still parks on HITL and dispatches through the signed worker with a **distinct human**
   approver; autonomous resolve stays deferred.
 - living state docs to update on delivery: `docs/specs/README.md` (index row → `delivered`),
   `docs/agentic-aiops-platform/delivery-roadmap.md` (the multi-agent program row, phase 5),
   `docs/agentic-aiops-platform/identity-and-authorization-design.md` (phase-5 boundary note),
-  `docs/agentic-aiops-platform/authorization-matrix.md` (live role enforcement),
+  `docs/agentic-aiops-platform/authorization-matrix.md` (agent-role binding — live in-process, policy
+  axis ready-but-inert),
   `docs/guides/configuration-reference.md` (the new orchestration-budget + any trigger knob), and
   `CHANGELOG.md`.
 

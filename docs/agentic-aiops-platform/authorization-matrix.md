@@ -226,6 +226,49 @@ existed as top-level audit-event fields.
   `delegation_mode` precedent. Per OQ-3 the transcript-turn projection and any
   concurrent-multi-agent transcript re-modelling stay deferred to phase 5/6.
 
+## Agent-Role Binding (SPEC-076, phase 5) — live in-process, policy axis ready-but-inert
+
+Phase 3 modelled the agent-role axis and phase 4 attributed it; **phase 5 binds the
+role in-process and populates the attribution**, while the **gateway policy axis stays
+ready-but-inert**. A producer — the bounded read-only orchestration loop
+([ADR-0017](../adr/0017-bounded-read-only-multi-agent-orchestration.md) Decision 3's
+controlled relaxation) — brackets each turn in `agent_role_scope()`, so the closed
+vocabulary is **bound** and the attribution dimension is **populated**; but SPEC-073 R-3
+keeps the role **off every wire field**, so it never reaches the separate-process
+gateway `evaluate()`.
+
+- **The in-process postures are live.** An `orchestrator` fans out read-only
+  `diagnostician` members and holds **no** direct gateway tools itself; a
+  `diagnostician` reads **autonomously — no human approves any read**, its toolkit
+  narrowed at the `_ensure_toolkit` seam by **risk tier + token `roles`** (not by
+  runbook family — `read_families` is declarative documentation only); an `executor`
+  *would* see mutating tools but only to **stage** a proposal onto the existing HITL
+  card (which still dispatches solely through the signed worker with a **distinct
+  human** approver) — and in phase 5 the executor-staging mechanism is delivered +
+  unit-proven but **not wired to a trigger** (`FU-076-b`). No agent-role ever approves.
+- **The live read-only control is in-process narrowing, not the gateway axis.** A
+  `diagnostician` cannot reach a mutating grant because `_narrow_for_role` gives it no
+  mutating tool (risk tier) and the loop admits only `read_only=True` turns — non-spoofable,
+  since the role never crosses the wire (R-3). The **minimal** canonical `agent_roles_any`
+  rule pair (a `diagnostician` read posture + an `executor`→`require_approval` encoding)
+  landed in `policy-default.yaml`, synced byte-identically across all four replicas, and its
+  **engine** semantics are proven — but the rules stay **inert in deployment** (no deployed
+  caller threads a non-`None` role) until the phase-6 wire contract, or the `FU-076-c`
+  in-process evaluation point, threads one. The tool-name/family axis stays deferred (OQ-4:
+  narrowing already suffices).
+- **Subtractive-only and fail-closed are preserved.** The axis still composes
+  conjunctively with the human `roles_any` matrix, never widens a human role, never
+  overrides a `deny`, and never matches an unscoped (`None`) call.
+- **The unscoped path is byte-identical.** Only the orchestration frame binds a role;
+  the deployed single-agent turn forwards `agent_role=None` and every outcome audits and
+  authorizes exactly as before (the reachability guards now read “**only** the
+  orchestration frame binds a role”).
+- **Bounded and read-only by construction.** The loop is capped by
+  `AGENT_ORCHESTRATION_MAX_STEPS` (default `20`, `>= 1`) and fails closed to a partial
+  diagnosis; the operator-invoked trigger (`POST /api/v2/diagnose`, gateway
+  `/api/v1/diagnose`, gated by the existing `chat` action) never dispatches a mutation.
+  Unattended machine-trigger ingestion is the named follow-up **`FU-076`**.
+
 ## Feature Access Matrix
 
 | Feature | read-only-observer | operator | developer | approver | auditor | platform-admin |

@@ -194,8 +194,11 @@ def enforce_policy(
 
     SPEC-074: ``agent_role`` is the optional agent-role axis forwarded to
     ``evaluate()``. It defaults to ``None`` and **no deployed caller passes a
-    non-``None`` value in phase 3** — the axis is inert until a producer exists
-    (phase 5); a reachability guard test enforces this.
+    non-``None`` value**: SPEC-073 R-3 keeps the bound role off every wire field,
+    so even with the SPEC-076 phase-5 in-process producer the axis stays
+    ready-but-inert — it goes live only via the phase-6 wire contract or the
+    ``FU-076-c`` in-process evaluation point. A reachability guard test enforces
+    the zero-offender invariant.
     """
     decision = evaluate(settings, identity.roles, action, agent_role)
     record_policy_decision(action, decision.decision)

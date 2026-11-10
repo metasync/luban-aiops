@@ -369,6 +369,17 @@ class RuntimeSettings:
     # Deliberately *not* skills-hub's ingestion ceiling (``MAX_STEPS``, 200),
     # which is a resource limit rather than a policy bound.
     skill_graduation_max_steps: int = 20
+    # Bounded orchestration budget (SPEC-076 R-1/OQ-2): the total member read
+    # steps per bounded autonomous diagnosis. A deliberate twin of the
+    # tool-gateway's replay budget (``GATEWAY_BROWSER_FLOW_MAX_STEPS``, default
+    # 20) and validated ``>= 1`` at startup like
+    # ``AGENT_SKILL_GRADUATION_MAX_STEPS``. It bounds the fan-out
+    # **per orchestration** (not per member), so the loop cannot grow unbounded
+    # regardless of member count; on exhaustion the loop **fails closed** to a
+    # budget-limited partial diagnosis and never widens to a mutating step to
+    # "finish". Composed with the per-turn ``AGENTSCOPE_MAX_ITERS`` it gives a
+    # two-level bound (per member turn x total steps).
+    orchestration_max_steps: int = 20
 
     @staticmethod
     def default_provider_options(provider: RuntimeProvider) -> RuntimeProviderOptions:
@@ -518,6 +529,11 @@ class RuntimeSettings:
         # Graduation blast-radius bound validation (SPEC-055 R-4).
         if self.skill_graduation_max_steps < 1:
             raise ValueError("AGENT_SKILL_GRADUATION_MAX_STEPS must be >= 1.")
+        # Bounded orchestration budget validation (SPEC-076 R-1/OQ-2): a
+        # non-positive budget fails startup rather than licensing an unbounded
+        # (or zero-step) read-only fan-out.
+        if self.orchestration_max_steps < 1:
+            raise ValueError("AGENT_ORCHESTRATION_MAX_STEPS must be >= 1.")
         try:
             from zoneinfo import ZoneInfo
 
@@ -732,6 +748,9 @@ class RuntimeSettings:
             ),
             skill_graduation_max_steps=int(
                 os.getenv("AGENT_SKILL_GRADUATION_MAX_STEPS", "20")
+            ),
+            orchestration_max_steps=int(
+                os.getenv("AGENT_ORCHESTRATION_MAX_STEPS", "20")
             ),
         )
 

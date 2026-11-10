@@ -99,6 +99,44 @@ api:
     action: tools:list
     expect: allow
 
+  # SPEC-076 orchestration-path (agent-role axis on the real canonical bundle).
+  # Phase 5 lands the minimal agent_roles_any rules. These pin the *deployed*
+  # bundle's ENGINE semantics directly (the harness threads an agent_role into
+  # evaluate(); the synthetic demo at the foot of this file pins the same matching
+  # against a fixture): the axis fires where a role IS threaded and is
+  # byte-identical where it is not. In DEPLOYMENT no caller threads a role yet
+  # (SPEC-073 R-3 keeps it off the wire), so these rules stay ready-but-inert on
+  # the live path — the live read-only control is in-process toolkit narrowing
+  # (R-8 point 3 / OQ-4). A read-only diagnostician member invokes read tools but
+  # can never reach a mutating grant; an executor staging a remediation parks
+  # behind the same tier_2 human approval; an un-named role (orchestrator) and an
+  # unscoped call stay byte-identical to the tools:mutate baseline above
+  # (subtractive-only, fail-closed).
+  - role: operator
+    action: tools:invoke
+    agent_role: diagnostician
+    expect: allow
+  - role: operator
+    action: tools:mutate
+    agent_role: diagnostician
+    expect: deny
+  - role: operator
+    action: tools:mutate
+    agent_role: executor
+    expect: require_approval
+    approval_tier: tier_2
+  - role: operator
+    action: tools:mutate
+    agent_role: orchestrator
+    expect: require_approval
+    approval_tier: tier_2
+  # The human axis still gates conjunctively: auditor holds no tools:mutate grant,
+  # so even the right agent-role cannot reach it (deny-by-default floor).
+  - role: auditor
+    action: tools:mutate
+    agent_role: executor
+    expect: deny
+
   # allow-auditors-audit-read: governance roles only.
   - roles: ["auditor", "platform-admin"]
     action: audit:read
@@ -267,19 +305,40 @@ tools:
     action: tools:list
     expect: allow
 
+  # SPEC-076 orchestration-path (agent-role axis on the real canonical bundle).
+  # This engine skips require_approval rules at load (SPEC-030 R-2), so the
+  # executor-scoped tier_2 rule never loads here and the diagnostician deny is
+  # the only live divergence — the deliberate engine non-parity, pinned on the
+  # deployed bundle. The diagnostician read posture is preserved; an executor
+  # mutation falls through to the human-axis allow exactly as an unscoped call
+  # does (the tier_2 gate lives on the platform-gateway confirm path, above).
+  - role: operator
+    action: tools:invoke
+    agent_role: diagnostician
+    expect: allow
+  - role: operator
+    action: tools:mutate
+    agent_role: diagnostician
+    expect: deny
+  - role: operator
+    action: tools:mutate
+    agent_role: executor
+    expect: allow
+
   # Deny-by-default floor.
   - role: ghost-role
     action: tools:invoke
     expect: deny
 
-# SPEC-074 agent-role axis demonstration. The canonical bundle above stays
-# byte-unchanged (OQ-4 — no agent_roles_any rule, no deployed producer until
-# phase 5), so these expectations run against a *synthetic* demonstration
-# bundle that carries scoped rules. They pin the matching semantics the axis
-# adds: absent = unconstrained, a scoped rule matches only its agent-role and
-# never an unscoped call (fail-closed), the axis composes conjunctively with
-# the human roles_any, and an executor-scoped mutation parks on a *human*
-# approver. The harness validates this section for the current --engine.
+# SPEC-074 agent-role axis demonstration (SPEC-076 phase 5). The canonical
+# bundle now carries the minimal agent_roles_any rules and the orchestration-path
+# expectations above pin them on the *deployed* bundle; this section complements
+# them by running against a *synthetic* demonstration bundle that isolates the
+# axis's matching semantics on a minimal grant surface: absent = unconstrained, a
+# scoped rule matches only its agent-role and never an unscoped call
+# (fail-closed), the axis composes conjunctively with the human roles_any, and an
+# executor-scoped mutation parks on a *human* approver. The harness validates
+# this section for the current --engine.
 agent_role:
   bundle: fixtures/agent-role-demo.yaml
 

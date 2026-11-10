@@ -971,8 +971,17 @@ class AgentKernel:
         """Drop ephemeral agents and literal knowledge after an owner deletion."""
         self._agents.pop(session_id, None)
         self._agents.pop(f"{session_id}::read-only", None)
+        # SPEC-076: a bounded-diagnosis run fans member turns out under derived
+        # "<session>::orch::<task>" / "::orch::synthesis" agent keys (each with a
+        # further "::read-only" variant). Drop the whole family so an owner
+        # deletion cannot orphan them in the LRU (m1 leak).
+        orch_prefix = f"{session_id}::orch::"
+        for key in [k for k in self._agents if k.startswith(orch_prefix)]:
+            self._agents.pop(key, None)
         # In-flight redactors retain their own reference until the turn ends.
         self._generated_literals.pop(session_id, None)
+        for key in [k for k in self._generated_literals if k.startswith(orch_prefix)]:
+            self._generated_literals.pop(key, None)
 
     def _persist_evidence(
         self,
@@ -999,9 +1008,11 @@ class AgentKernel:
                 turn_index,
                 prepared,
                 self.settings.evidence_session_max_bytes,
-                # SPEC-075: attribute the turn's evidence to the acting
-                # agent-role. Inert today — AGENT_ROLE is unscoped (None) on
-                # every deployed turn, so the store omits it and a legacy turn
+                # SPEC-075/076: attribute the turn's evidence to the acting
+                # agent-role. Live on the SPEC-076 orchestration path — a
+                # diagnostician member / orchestrator synthesis turn binds one,
+                # so its evidence row carries it verbatim. The unscoped single-
+                # agent turn binds none, so the store omits it and a legacy turn
                 # replays byte-identically with no empty artifact.
                 agent_role=current_agent_role_value(),
             )
@@ -1889,11 +1900,12 @@ class AgentKernel:
 
         pending.requester_delegated_token = generation_bearer_token()
         pending.requester_identity = REQUESTER_IDENTITY.get()
-        # SPEC-073 R-4: label which agent-role staged this parked mutation, from
-        # the process-local AGENT_ROLE contextvar. Kernel-internal provenance only
-        # (ephemeral like the requester token above — never persisted to the
-        # durable record below, never a contract/wire field in phase 2). ``None``
-        # on the unscoped single-agent path, so today's park is byte-identical.
+        # SPEC-073 R-4 / SPEC-076 R-4: label which agent-role staged this parked
+        # mutation, from the process-local AGENT_ROLE contextvar. Kernel-internal
+        # provenance only (ephemeral like the requester token above — never
+        # persisted to the durable record below, never a contract/wire field).
+        # Live on the SPEC-076 executor staging path (staged_by_role="executor");
+        # ``None`` on the unscoped single-agent path, so that park is byte-identical.
         pending.staged_by_role = current_agent_role_value()
         pending.email_recipient_allowlist = self.settings.email_recipient_allowlist
         # SPEC-062 R-3 reveal-on-commit: attach this stream's held portal_copy
@@ -2763,9 +2775,11 @@ class AgentKernel:
             subject=decider_user_id,
             username=decider_user_id,
             session_id=session_id,
-            # SPEC-075: attribute the execution to the acting agent-role. Inert
-            # today — AGENT_ROLE is unscoped (None) on every deployed turn, so
-            # the emitter omits the field and the event stays byte-identical.
+            # SPEC-075/076: attribute the execution to the acting agent-role.
+            # Live on the SPEC-076 orchestration path (a bound diagnostician /
+            # orchestrator role projects verbatim); the unscoped single-agent
+            # turn binds none, so the emitter omits the field and that event
+            # stays byte-identical.
             agent_role=current_agent_role_value(),
         )
         emit_audit_event(self.settings, event)

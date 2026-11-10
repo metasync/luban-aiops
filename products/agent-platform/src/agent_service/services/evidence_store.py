@@ -141,8 +141,9 @@ class _BaseEvidenceStore:
                     "frame": frame,
                     "payload_bytes": len(payload),
                     "created_at": created_at,
-                    # SPEC-075: the acting agent-role for this turn (None until
-                    # phase 5 scopes one); denormalized per row like request_id.
+                    # SPEC-075/076: the acting agent-role for this turn — bound
+                    # on the SPEC-076 orchestration path, None on the unscoped
+                    # single-agent turn; denormalized per row like request_id.
                     "agent_role": agent_role,
                 }
             )

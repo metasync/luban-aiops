@@ -8,6 +8,21 @@
 > gates). OQ-3's deferral is recorded as the named follow-up **`FU-076`** (unattended machine-trigger
 > ingestion) — see R-7 and the spec Non-Goals; it is tracked, not dropped.
 
+> **Delivery resolution (v0.57.0).** Two design points below were reconciled with the binding
+> requirements at delivery; the design text is preserved as the approved intent and this note records
+> the outcome (authoritative detail in [`spec.md`](spec.md) R-4/R-5 resolution notes):
+> **(1) R-5 policy axis — ready-but-inert, not wire-threaded.** SPEC-073 R-3 keeps the bound
+> `agent_role` off every wire field, so the "thread the role into both gateway `evaluate()` engines on
+> the orchestration path" approach is **architecturally precluded** for the separate-process gateways.
+> Per **OQ-4** (ratified: "toolkit narrowing already restricts what each role sees"), the axis +
+> canonical `agent_roles_any` rules are landed and **unit-proven** but stay **ready-but-inert** in
+> deployment; the **live** read-only control is in-process SPEC-073 toolkit narrowing + the loop's
+> `read_only=True` admission. Making the axis itself live is the named follow-up **`FU-076-c`**.
+> **(2) R-4 staging — mechanism delivered, trigger deferred.** `stage_remediation(...)` is delivered +
+> unit-proven but **not wired to a production trigger** (`run_bounded_diagnosis` never calls it;
+> `POST /api/v2/diagnose` is diagnosis-only); the operator-initiated diagnose→act bridge is the named
+> follow-up **`FU-076-b`**.
+
 ## Approach
 
 Phase 5 is the **producer** that makes three inert substrates live in a single wiring event. It adds

@@ -490,10 +490,15 @@ class AgentRoleAxisSemanticsTests(unittest.TestCase):
             "decision": {"outcome": "allow"},
         }
 
-    def test_canonical_bundle_ignores_the_agent_role_axis(self) -> None:
-        # R-5 no-diff/inertness: no canonical rule carries agent_roles_any
-        # (OQ-4), so the agent_role argument never changes an outcome — every
-        # deployed evaluation is byte-identical with the axis present.
+    def test_canonical_bundle_agent_role_axis_is_live_only_where_scoped(self) -> None:
+        # SPEC-076 R-5/OQ-4: phase 5 lands the minimal canonical agent_roles_any
+        # rules. This proves the ENGINE semantics — when a role IS threaded, the
+        # axis fires (fail-closed, subtractive-only): an unscoped call (agent_role
+        # None) and a role the rules do not name (orchestrator) evaluate
+        # byte-identically to the pre-axis baseline, while a diagnostician is
+        # denied a mutating grant. It stays INERT IN DEPLOYMENT because no deployed
+        # caller threads a role (R-3 keeps it off the wire) — see
+        # AgentRoleReachabilityGuardTests below.
         settings = _settings()
         human_roles = [
             "platform-admin", "approver", "operator", "developer",
@@ -502,7 +507,7 @@ class AgentRoleAxisSemanticsTests(unittest.TestCase):
         for role in human_roles:
             for action in sorted(PROTECTED_ACTIONS):
                 baseline = evaluate(settings, [role], action)
-                for agent_role in (None, "diagnostician", "orchestrator", "executor"):
+                for agent_role in (None, "orchestrator"):
                     scoped = evaluate(settings, [role], action, agent_role)
                     self.assertEqual(
                         scoped.decision, baseline.decision, f"{role}/{action}/{agent_role}"
@@ -511,6 +516,23 @@ class AgentRoleAxisSemanticsTests(unittest.TestCase):
                         scoped.matched_rule_ids, baseline.matched_rule_ids,
                         f"{role}/{action}/{agent_role}",
                     )
+        # The one live divergence: a diagnostician can never reach a mutating
+        # grant (the policy mirror of SPEC-073 toolkit narrowing).
+        operational = [
+            "platform-admin", "approver", "operator", "developer",
+            "read-only-observer",
+        ]
+        for role in operational:
+            decision = evaluate(settings, [role], "tools:mutate", "diagnostician")
+            self.assertEqual(decision.decision, "deny", role)
+            self.assertIn("deny-diagnostician-tools-mutate", decision.matched_rule_ids)
+            # The diagnostician read posture is preserved: read invocation stays
+            # allowed for every operational role.
+            self.assertEqual(
+                evaluate(settings, [role], "tools:invoke", "diagnostician").decision,
+                "allow",
+                role,
+            )
 
     def test_scoped_rule_matches_only_its_agent_role(self) -> None:
         settings = self._write_bundle([self._scoped_allow("diag-read", ["diagnostician"])])
@@ -659,11 +681,28 @@ class AgentRoleSchemaContractTests(unittest.TestCase):
         items = self.schema["properties"]["match"]["properties"]["agent_roles_any"]["items"]
         self.assertEqual(set(policy_engine.AGENT_ROLES), set(items["enum"]))
 
-    def test_canonical_rules_carry_no_axis_and_still_validate(self) -> None:
+    def test_canonical_rules_validate_and_carry_only_the_spec076_axis(self) -> None:
+        # SPEC-076 R-5/OQ-4: every canonical rule validates against the v3
+        # schema; exactly the two phase-5 rules carry agent_roles_any, and only
+        # over the closed vocabulary. Every other rule stays axis-free.
         data = yaml.safe_load(SHARED_BUNDLE.read_text(encoding="utf-8"))
+        axis_rules: dict[str, tuple[str, ...]] = {}
         for rule in data["rules"]:
-            self.assertNotIn("agent_roles_any", rule["match"])
             validate(instance=rule, schema=self.schema)
+            axis = rule["match"].get("agent_roles_any")
+            if axis is not None:
+                self.assertTrue(
+                    set(axis) <= {"diagnostician", "orchestrator", "executor"},
+                    rule["id"],
+                )
+                axis_rules[rule["id"]] = tuple(axis)
+        self.assertEqual(
+            axis_rules,
+            {
+                "deny-diagnostician-tools-mutate": ("diagnostician",),
+                "require-approval-executor-tools-mutate": ("executor",),
+            },
+        )
 
     def test_out_of_vocabulary_axis_fails_schema_validation(self) -> None:
         from jsonschema import ValidationError
@@ -712,7 +751,15 @@ class AgentRoleDisjointnessGuardTests(unittest.TestCase):
 
 
 class AgentRoleReachabilityGuardTests(unittest.TestCase):
-    """SPEC-074 R-5: the axis has no live producer in phase 3."""
+    """SPEC-074 R-5: the gateway agent-role axis has no deployed producer.
+
+    SPEC-076 (phase 5) binds the role in-process for toolkit narrowing + audit
+    attribution, but SPEC-073 R-3 keeps it off every wire field, so no deployed
+    gateway caller threads a non-None ``agent_role`` into ``evaluate()`` — the axis
+    stays ready-but-inert and this guard still passes. The canonical rules fire only
+    once a role IS threaded (the phase-6 wire contract, or the FU-076-c in-process
+    evaluation point), which this guard pins until then.
+    """
 
     def test_no_deployed_caller_threads_a_non_none_agent_role(self) -> None:
         # Policy-side mirror of the SPEC-073 R-5 reachability guard: scan the

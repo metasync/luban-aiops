@@ -197,6 +197,59 @@ rules:
         tier: tier_2
         decided_by_roles: ["approver", "platform-admin"]
 
+  # Bounded autonomous diagnosis (SPEC-076 R-5/OQ-4): the canonical agent-role
+  # axis encoding. Phase 5 binds the role IN-PROCESS (toolkit narrowing + audit
+  # attribution), but SPEC-073 R-3 keeps it OFF every wire field — so no deployed
+  # gateway evaluate() threads a non-None agent_role and these rules stay
+  # READY-BUT-INERT, never matching on the live orchestration path. The live
+  # read-only control is in-process SPEC-073 narrowing (a diagnostician gets no
+  # mutating tool) + the loop's read_only=True admission (R-8 point 3 / OQ-4:
+  # "narrowing already suffices"); this rule is the policy-layer mirror that fires
+  # only once a role IS threaded — the phase-6 wire contract, or the FU-076-c
+  # in-process evaluation point. Subtractive-only and fail-closed: agent_roles_any
+  # never matches an unscoped call (agent_role None), so every deployed evaluation
+  # without a bound role stays byte-identical. Deny overrides allow/require_approval,
+  # so this wins over the mutating grants above whenever a diagnostician role is
+  # threaded.
+  - id: deny-diagnostician-tools-mutate
+    domain: action_authz
+    description: A diagnostician agent-role can never execute a mutating tool (read-only orchestration loop, SPEC-076 R-5).
+    priority: 300
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer", "read-only-observer"]
+      actions_any: ["tools:mutate"]
+      agent_roles_any: ["diagnostician"]
+    decision:
+      outcome: deny
+
+  # An ``executor`` agent-role staging a remediation is the role-scoped encoding
+  # of the diagnose-before-act ceiling (SPEC-076 R-4). Phase 5 delivers + unit-proves
+  # the executor-staging MECHANISM (stage_remediation parks a proposal on the HITL
+  # card) but wires NO production trigger — the operator-initiated diagnose->act
+  # bridge is FU-076-b — so this rule is doubly inert in deployment: nothing threads
+  # an executor role (R-3 keeps it off the wire) and nothing stages yet. When wired,
+  # its mutation parks behind a tier_2 approval decided by a distinct human — never
+  # an agent (the executor->human-approver disjointness invariant, SPEC-074 R-3).
+  # Deliberately redundant with the human-axis require-approval-tools-mutate above so
+  # the outcome is identical whichever identity reaches the parked call. require_approval
+  # is enforced on the platform-gateway confirm path (the tool-gateway skips it at
+  # load, SPEC-030 R-2).
+  - id: require-approval-executor-tools-mutate
+    domain: action_authz
+    description: An executor agent-role staging a mutating tool requires tier-2 approval by a distinct human (SPEC-076 R-4/R-5).
+    priority: 200
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "approver", "operator", "developer"]
+      actions_any: ["tools:mutate"]
+      agent_roles_any: ["executor"]
+    decision:
+      outcome: require_approval
+      approval:
+        tier: tier_2
+        decided_by_roles: ["approver", "platform-admin"]
+
   - id: allow-operators-tools-list
     domain: action_authz
     description: Operational, developer, approver, and observer roles may list available tools.

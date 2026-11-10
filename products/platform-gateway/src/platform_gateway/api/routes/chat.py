@@ -7,13 +7,14 @@ from fastapi.responses import StreamingResponse
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
 from platform_gateway.core.request_context import resolve_request_id
-from platform_gateway.schemas.api import ChatConfirmRequest, ChatRequest
+from platform_gateway.schemas.api import ChatConfirmRequest, ChatRequest, DiagnoseRequest
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
     chat,
     chat_confirm,
     chat_stream,
+    diagnose,
     enforce_policy,
     resolve_request_identity,
 )
@@ -197,3 +198,81 @@ async def chat_confirm_route(
         delegated_token=delegated_token,
         recipient_warning_acknowledged=body.recipient_warning_acknowledged,
     )
+
+
+@router.post("/api/v1/diagnose")
+async def diagnose_route(
+    request: Request,
+    body: DiagnoseRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Operator-invoked bounded read-only diagnosis trigger (SPEC-076 R-7).
+
+    Gated by the **existing** ``chat`` action: an operator-invoked read-only
+    diagnosis is admitted at the same trust level as an operator chat turn, so
+    no new policy vocabulary is added (the canonical bundle change stays exactly
+    the SPEC-074 agent-role rule). Admission governs *starting* the loop only —
+    every tool call inside still rides ``tools:*`` enforcement plus the agent-role
+    axis at the gateways, and the loop is read-only: it cannot mutate without the
+    R-4 human gate. The one delegated token rides the whole fan-out (exactly one
+    broker exchange, R-3); no ``agent_role`` crosses the wire (SPEC-073 R-3).
+
+    The diagnosis surfaces through the existing chat-response shape (a normal
+    assistant turn), so the ``chat_completed`` audit type is reused with the
+    runbook ``profile`` in ``details`` — the ``event_type`` enum stays closed
+    (R-6) and the authoritative per-participant attribution rides the runtime's
+    SPEC-075 audit/evidence record.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, "chat", request_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,  # type: ignore[union-attr]
+        _bearer_token(request),
+    )
+    response = await diagnose(
+        settings,
+        request_id,
+        user_id,
+        body.profile,
+        body.goal,
+        body.session_id,
+        delegated_token,
+        body.model,
+        body.incident_id,
+    )
+    log_event(
+        LOGGER,
+        "diagnosis_completed",
+        request_id=request_id,
+        session_id=response.get("session_id"),
+        user_id=user_id,
+        profile=body.profile,
+        incident_id=body.incident_id,
+        status=response.get("status"),
+        model=response.get("model"),
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "chat_completed",
+            request_id,
+            "success",
+            details={
+                "profile": body.profile,
+                "diagnosis_status": response.get("status"),
+                "model": response.get("model"),
+            },
+            subject=identity.subject,  # type: ignore[union-attr]
+            username=user_id,
+            actor=identity.actor,  # type: ignore[union-attr]
+            roles=identity.roles,  # type: ignore[union-attr]
+            session_id=response.get("session_id"),
+        ),
+    )
+    return response

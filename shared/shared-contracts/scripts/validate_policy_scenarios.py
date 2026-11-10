@@ -152,8 +152,9 @@ def main() -> int:
     failures: list[str] = []
 
     # Expectation evaluation — the exact enforce_policy path. The agent_role
-    # axis (SPEC-074) is None for every canonical entry, so this is byte-
-    # identical to the pre-v3 evaluation.
+    # axis (SPEC-074) is None for every unscoped entry, so those evaluate byte-
+    # identically to the pre-axis baseline; SPEC-076 phase-5 orchestration-path
+    # entries name a role and pin the canonical agent_roles_any rules directly.
     for (role, action, agent_role), (expect, tier) in _sorted_keys(expectations):
         decision = policy_engine.evaluate(settings, [role], action, agent_role)
         label = f"{role} x {action}" + (f" (agent_role={agent_role})" if agent_role else "")
@@ -168,9 +169,10 @@ def main() -> int:
                 failures.append(f"{label}: expected approval_tier {tier}, got {got_tier}")
 
     # Coverage invariant — no human-axis grant may escape the table. Scoped
-    # (agent_role) entries are excluded: the canonical bundle carries no
-    # agent_roles_any rule (SPEC-074 OQ-4), so its granted (role, action) pairs
-    # are covered entirely by the agent_role-is-None slice.
+    # (agent_role) entries are excluded: the canonical agent_roles_any rules
+    # (SPEC-076 phase 5) only ever subtract from a human-role grant, so every
+    # granted (role, action) pair they name is already covered by the
+    # agent_role-is-None slice and the invariant stays a human-axis check.
     canonical_expected = {(role, action) for (role, action, ar) in expectations if ar is None}
     canonical_granted = _granted_pairs(policy_engine)
     uncovered = sorted(canonical_granted - canonical_expected)
@@ -178,8 +180,8 @@ def main() -> int:
         failures.append(f"{role} x {action}: granted by the bundle but has no scenario")
 
     # SPEC-074 agent-role demonstration — an optional section validated against
-    # a synthetic bundle (the canonical bundle is byte-unchanged, OQ-4), so it
-    # pins the axis's matching semantics without touching any deployed grant.
+    # a synthetic bundle on a minimal grant surface, so it isolates the axis's
+    # matching semantics independently of the deployed canonical grants.
     # No coverage invariant here: the demo is a targeted pin, not a complete
     # grant surface.
     demo_count = 0

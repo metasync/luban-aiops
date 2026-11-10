@@ -204,6 +204,43 @@ async def chat(
     return response.json()
 
 
+async def diagnose(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    profile: str,
+    goal: str,
+    session_id: str | None,
+    delegated_token: str | None = None,
+    model: str | None = None,
+    incident_id: str | None = None,
+) -> dict:
+    """Proxy the operator-invoked bounded diagnosis (SPEC-076 R-7).
+
+    Mirrors ``chat`` but targets ``POST /api/v2/diagnose`` and uses the longer
+    ``diagnose_response_timeout_seconds`` budget: a bounded fan-out runs up to
+    ``AGENT_ORCHESTRATION_MAX_STEPS`` member read turns plus a synthesis. The
+    delegated token is forwarded so the whole orchestration rides the *one*
+    broker exchange (R-3); no ``agent_role`` crosses the wire (SPEC-073 R-3).
+    """
+    timeout = httpx.Timeout(settings.diagnose_response_timeout_seconds, connect=5.0)
+    payload: dict[str, str] = {"profile": profile, "goal": goal}
+    if session_id:
+        payload["session_id"] = session_id
+    if model:
+        payload["model"] = model
+    if incident_id:
+        payload["incident_id"] = incident_id
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/diagnose",
+            json=payload,
+            headers=_headers(request_id, user_id, delegated_token),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def open_chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,

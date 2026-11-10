@@ -1,4 +1,4 @@
-"""Role-scoped agent authority (SPEC-073 phase 2 — inert substrate).
+"""Role-scoped agent authority (SPEC-073 substrate, bound live in-process by SPEC-076 phase 5).
 
 A closed, platform-owned **agent-role** vocabulary that narrows a sub-agent's
 toolkit authority while every role rides the **same** gateway-forwarded
@@ -12,9 +12,13 @@ part of the SPEC-017 resumable snapshot, and never becomes a JWT claim, a
 forwarded header, or any wire field in phase 2 (R-3, OQ-2). Like SPEC-070's
 ``VerifiedHuman`` it is deliberately ephemeral and re-derived per turn.
 
-Phase 2 ships **inert**: no orchestration caller binds a role, so the deployed
-single-agent turn stays byte-identical (R-5). The bounded read-only
-orchestration loop that actually binds roles is phase 5.
+SPEC-073 (phase 2) shipped this **inert**; SPEC-076 (phase 5) binds it live
+**in-process** — the bounded read-only orchestration loop brackets its
+orchestrator/diagnostician/executor turns in :func:`agent_role_scope`, while the
+deployed **unscoped** single-agent turn still binds no role and stays
+byte-identical (R-5). The bound role still never crosses the wire: SPEC-073 R-3
+keeps it off every JWT claim, forwarded header, and wire field, so it becomes a
+wire contract only in phase 6.
 
 No agentscope type appears anywhere in this module (SPEC-018 gate point 4).
 """
@@ -94,7 +98,8 @@ def current_agent_role_value() -> str | None:
     """The bound role's plain platform string, or ``None`` when unscoped.
 
     The serialized form used for kernel-internal provenance (R-4); never an
-    agentscope type and never a wire field in phase 2.
+    agentscope type and never a wire field (SPEC-073 R-3 — the wire contract is
+    phase 6).
     """
     role = AGENT_ROLE.get()
     return role.value if role is not None else None

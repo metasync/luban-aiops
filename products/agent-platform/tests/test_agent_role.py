@@ -284,19 +284,32 @@ class TestFailClosedAndInertness:
         assert AGENT_ROLE.get() is None
         assert current_agent_role() is None
 
-    def test_no_orchestration_caller_is_wired(self):
-        # Inertness/reachability guard: nothing in the deployed source binds a
-        # role. The only production writer of AGENT_ROLE is agent_role.py itself
-        # (the bracket); no handler/kernel path opens a scope in phase 2.
+    def test_only_the_orchestration_frame_binds_a_role(self):
+        # Reachability guard (SPEC-073 R-5, updated by SPEC-076 R-2): phase 2
+        # asserted *no* caller binds a role; phase 5 wires exactly one producer.
+        # The only sources that may open a role scope are agent_role.py (which
+        # *defines* the bracket) and services/orchestration.py (the bounded
+        # read-only orchestration frame). No other deployed path — chat, triage,
+        # documents, skills, the kernel turn runner — may bind a role, so the
+        # unscoped single-agent turn stays byte-identical and current_agent_role()
+        # is None everywhere off the orchestration path.
         src_root = Path(__file__).resolve().parents[1] / "src" / "agent_service"
+        allowed = {"agent_role.py", str(Path("services") / "orchestration.py")}
         offenders = []
+        binders = []
         for path in src_root.rglob("*.py"):
-            if path.name == "agent_role.py":
+            rel = str(path.relative_to(src_root))
+            if path.name in allowed or rel in allowed:
+                if path.name != "agent_role.py":
+                    binders.append(rel)
                 continue
             text = path.read_text()
             if "agent_role_scope(" in text or "AGENT_ROLE.set(" in text:
-                offenders.append(str(path.relative_to(src_root)))
+                offenders.append(rel)
         assert offenders == []
+        # The orchestration frame is wired (phase 5 is live), and it is the only
+        # non-definition binder.
+        assert binders == [str(Path("services") / "orchestration.py")]
 
 
 # ---------------------------------------------------------------------------
@@ -372,8 +385,9 @@ class TestSpec075AuditAttribution:
     def test_emitter_seam_threads_the_inert_seed(self):
         # R-5 seam (OQ-2): the deployed agent-platform audit call sites thread
         # current_agent_role_value() into the envelope. Composed with
-        # test_no_orchestration_caller_is_wired (nothing binds a role), the seed
-        # is None on every deployed path — the reachability guarantee, audit-side.
+        # test_only_the_orchestration_frame_binds_a_role, the seed is None on
+        # every path except the SPEC-076 orchestration frame — the reachability
+        # guarantee, audit-side (SPEC-075 goes live in phase 5, not before).
         src_root = Path(__file__).resolve().parents[1] / "src" / "agent_service"
         wired = [
             str(path.relative_to(src_root))
