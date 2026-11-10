@@ -9,6 +9,9 @@
 - [runbooks.py](file://products/agent-platform/src/agent_service/services/runbooks.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
+- [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [agent_client.py](file://products/platform-gateway/src/platform_gateway/services/agent_client.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [test_orchestration.py](file://products/agent-platform/tests/test_orchestration.py)
 - [test_diagnose_route.py](file://products/agent-platform/tests/test_diagnose_route.py)
 - [release-notes](file://docs/agentic-aiops-platform/release-notes/2026-11-10-spec-076-bounded-autonomous-diagnosis.md)
@@ -20,6 +23,7 @@
 - Enhanced API surface documentation with fully implemented `/api/v2/diagnose` endpoint
 - Added comprehensive testing coverage details including 1774+ test passes across agent-platform suite
 - Updated configuration settings documentation with validated `AGENT_ORCHESTRATION_MAX_STEPS` enforcement
+- Added development environment extended timeout configuration (300s) for live diagnosis operations against external LLM providers, addressing FU-076-b follow-up finding for timeout configuration
 - Added release verification details showing successful deployment and security review completion
 - Enhanced troubleshooting guide with production-specific scenarios and resolution paths
 
@@ -257,6 +261,23 @@ The runtime validation mirrors the in-loop validation: both raise `ValueError("A
 - [runtime_settings.py:752-754](file://products/agent-platform/src/agent_service/runtime_settings.py#L752-L754)
 - [orchestration.py:202-210](file://products/agent-platform/src/agent_service/services/orchestration.py#L202-L210)
 
+### Development Environment Extended Timeout Configuration
+**Updated** The development environment now supports an extended timeout of 300 seconds for live diagnosis operations against external LLM providers, addressing the FU-076-b follow-up finding for timeout configuration. This change specifically addresses scenarios where the bounded read-only diagnosis fans out against real remote LLM providers whose member turns plus context compression push legitimate diagnosis operations past the 120-second code default (observed ~140s).
+
+The extended timeout is configured in the platform-gateway's development runtime configuration:
+
+| Variable | Default | Dev Override | Purpose |
+|---|---:|---:|---|
+| `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` | `120` | `300` | Upstream `/api/v1/diagnose` proxy timeout for bounded read-only diagnosis operations |
+
+This configuration ensures that the platform-gateway proxy does not timeout before the agent-service completes the bounded orchestration loop when operating against external LLM providers in development environments. The code default remains at 120 seconds for production deployments, with the extended timeout being development-specific.
+
+**Section sources**
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
+- [config.py:43-43](file://products/platform-gateway/src/platform-gateway/core/config.py#L43-L43)
+- [config.py:103-104](file://products/platform-gateway/src/platform-gateway/core/config.py#L103-L104)
+- [agent_client.py:221-226](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L221-L226)
+
 ### Test Coverage
 The test suite in `test_orchestration.py` directly covers the following behaviors:
 
@@ -467,6 +488,7 @@ The bounded orchestration loop is designed around predictable resource consumpti
 | Summary size | The orchestrator receives only `MemberSummary.summary` | Intermediate tool-call traces do not inflate the orchestrator's context; they remain reconstructable via audit/evidence. |
 | Fail-closed exhaustion | On budget exhaustion, the loop stops and synthesizes a partial diagnosis | There is no retry, widening, or fallback to mutation to "finish" the diagnosis. |
 | API response time | Single synchronous call to bounded diagnosis | The endpoint blocks until diagnosis completes, then returns either `ok` or `partial` status. |
+| External LLM provider latency | Development environment extended timeout (300s) | Accommodates longer diagnosis operations against external LLM providers in development environments. |
 
 The default budget of `20` aligns with the tool-gateway's browser-flow replay budget, making it easier for operators to reason about bounded autonomous spend alongside other bounded flows.
 
@@ -498,6 +520,7 @@ The SPEC-076 implementation has undergone comprehensive testing and verification
 - Contract parity (byte-unchanged schemas)
 - Live-cluster read-only checks
 - Policy axis unit proofs
+- Development environment timeout configuration validation
 
 **Section sources**
 - [release-notes:168-195](file://docs/agentic-aiops-platform/release-notes/2026-11-10-spec-076-bounded-autonomous-diagnosis.md#L168-L195)
@@ -564,9 +587,18 @@ The SPEC-076 implementation has undergone comprehensive testing and verification
 - [orchestration.py:186-190](file://products/agent-platform/src/agent_service/services/orchestration.py#L186-L190)
 - [test_orchestration.py:405-443](file://products/agent-platform/tests/test_orchestration.py#L405-L443)
 
+### Symptom: Development environment diagnose operations timeout against external LLM providers
+**Likely cause:** The platform-gateway proxy timeout (default 120s) is insufficient for bounded diagnosis operations against external LLM providers in development environments.  
+**Resolution:** Set `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS=300` in the platform-gateway runtime configuration. This extended timeout accommodates legitimate diagnosis operations that exceed the 120-second default due to external LLM provider latency and context compression overhead.
+
+**Section sources**
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
+- [config.py:43-43](file://products/platform-gateway/src/platform-gateway/core/config.py#L43-L43)
+- [config.py:103-104](file://products/platform-gateway/src/platform-gateway/core/config.py#L103-L104)
+
 ## Conclusion
 SPEC-076 delivers the first live producer that binds the agent-role substrates introduced by SPEC-073, SPEC-074, and SPEC-075. Its core contribution is a platform-owned, bounded, read-only orchestration loop that fans out role-scoped diagnostician turns, preserves one delegated identity token, attributes actions through existing audit/evidence channels, and stages mutations exclusively through the existing HITL + signed-dispatch path. 
 
-The complete v0.57.0 implementation includes the orchestration engine, four operator-named runbook profiles (servicenow-incident, observability-alert, post-deploy-verify, k8s-pod-degradation), the `/api/v2/diagnose` API endpoint, orchestration budget configuration, and comprehensive test coverage. The implementation has passed 1774+ tests, security review, and production deployment verification. The implementation covers boundedness, read-only posture, role binding, identity preservation, and the no-agentscope constraint. Remaining binding work — canonical policy rules and gated live-cluster checks — is tracked in the plan and tasks without requiring new schema contracts.
+The complete v0.57.0 implementation includes the orchestration engine, four operator-named runbook profiles (servicenow-incident, observability-alert, post-deploy-verify, k8s-pod-degradation), the `/api/v2/diagnose` API endpoint, orchestration budget configuration, and comprehensive test coverage. The implementation has passed 1774+ tests, security review, and production deployment verification. The implementation covers boundedness, read-only posture, role binding, identity preservation, and the no-agentscope constraint. The development environment now supports extended timeout configuration (300s) for live diagnosis operations against external LLM providers, addressing the FU-076-b follow-up finding. Remaining binding work — canonical policy rules and gated live-cluster checks — is tracked in the plan and tasks without requiring new schema contracts.
 
 [No sources needed since this section summarizes without analyzing specific files]

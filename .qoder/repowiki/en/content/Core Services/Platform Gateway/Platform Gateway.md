@@ -12,20 +12,18 @@
 - [delegation_client.py](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py)
 - [audit_emitter.py](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py)
 - [target_authorization.py](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py)
-- [authorizations.py](file://products/platform-gateway/src/platform_gateway/api/routes/authorizations.py)
-- [authorization.py](file://products/platform-gateway/src/platform_gateway/schemas/authorization.py)
+- [agent_client.py](file://products/platform-gateway/src/platform_gateway/services/agent_client.py)
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
+- [runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env)
 - [policy-default.yaml](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml)
 - [SPEC-010-platform-gateway-extraction/spec.md](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive coverage of Owner-Scoped Target Authorization Routes with browser-bound OAuth flows
-- Enhanced security boundaries documentation for secure cookie handling and workload token validation
-- Updated configuration section to include new target authorization settings
-- Expanded architecture diagrams to show user-delegated identity flow integration with PKCE S256
-- Added detailed security analysis of browser cookie binding and challenge-response mechanisms
+- Updated development environment diagnosis proxy timeout configuration from 120 to 300 seconds for SPEC-076 bounded read-only diagnosis operations
+- Enhanced documentation of diagnosis proxy timeout configuration and its relationship to real LLM provider operations
+- Added context about the dev-overlay runtime configuration changes supporting longer-running diagnosis workflows
 
 ## Table of Contents
 1. Introduction
@@ -49,7 +47,7 @@ Key responsibilities:
 - Request/response proxying to backend services with robust error posture
 - Audit event emission for every policy decision and key operations
 - Transparency surfaces exposing the effective role-to-action matrix
-- **New**: Browser-bound owner-scoped target authorization routes with secure cookie binding, PKCE S256 support, and workload token validation for user-delegated identity flows
+- **Updated**: Development environment diagnosis proxy timeout increased to 300 seconds to support longer-running SPEC-076 bounded read-only diagnosis operations against real LLM providers
 
 **Section sources**
 - [SPEC-010-platform-gateway-extraction/spec.md:13-22](file://docs/specs/SPEC-010-platform-gateway-extraction/spec.md#L13-L22)
@@ -74,23 +72,27 @@ E["Token Verifier<br/>services/token_verifier.py"]
 F["Delegation Client<br/>services/delegation_client.py"]
 G["Audit Emitter<br/>services/audit_emitter.py"]
 H["Target Authorization<br/>services/target_authorization.py"]
-I["Config<br/>core/config.py"]
-J["Default Policy Bundle<br/>policies/policy-default.yaml"]
-K["Authorizations Routes<br/>api/routes/authorizations.py"]
-L["Authorization Schemas<br/>schemas/authorization.py"]
+I["Agent Client<br/>services/agent_client.py"]
+J["Config<br/>core/config.py"]
+K["Default Policy Bundle<br/>policies/policy-default.yaml"]
+L["Authorizations Routes<br/>api/routes/authorizations.py"]
+M["Authorization Schemas<br/>schemas/authorization.py"]
+N["Dev Runtime Config<br/>shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env"]
 end
 A --> B
 B --> C
-B --> K
-K --> H
+B --> L
 C --> D
 C --> E
 C --> F
 C --> G
-D --> J
 C --> I
-H --> I
-H --> L
+D --> K
+C --> J
+H --> J
+H --> M
+I --> J
+N --> J
 ```
 
 **Diagram sources**
@@ -101,10 +103,12 @@ H --> L
 - [delegation_client.py:190-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L190-L229)
 - [audit_emitter.py:30-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L30-L99)
 - [target_authorization.py:1-326](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L1-L326)
+- [agent_client.py:207-241](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L207-L241)
 - [authorizations.py:1-66](file://products/platform-gateway/src/platform_gateway/api/routes/authorizations.py#L1-L66)
 - [authorization.py:1-56](file://products/platform-gateway/src/platform_gateway/schemas/authorization.py#L1-L56)
 - [config.py:23-53](file://products/platform-gateway/src/platform_gateway/core/config.py#L23-L53)
 - [policy-default.yaml:1-52](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L1-L52)
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
 
 **Section sources**
 - [app.py:16-41](file://products/platform-gateway/src/platform_gateway/app.py#L16-L41)
@@ -117,28 +121,30 @@ H --> L
 - Policy enforcement: evaluate action against loaded bundle; emit audit; raise 403 on deny
 - Delegation: per-user cached delegated tokens exchanged with Identity Broker using workload token or static credentials
 - Proxies: session, chat, incident, document, model, skill, tool, and approval endpoints with consistent upstream error mapping
+- Diagnosis proxy: operator-invoked bounded read-only diagnosis endpoint with configurable timeout for SPEC-076 operations
 - Transparency: live permission matrix derived from the enforced bundle
-- **New**: Owner-scoped target authorization routes providing browser-bound OAuth coordination with secure cookie management, PKCE S256 support, and workload token validation for user-delegated identity acquisition
+- **Updated**: Development environment diagnosis proxy timeout increased to 300 seconds to accommodate longer-running bounded read-only diagnosis operations against real LLM providers
 
 **Section sources**
 - [app.py:16-41](file://products/platform-gateway/src/platform_gateway/app.py#L16-L41)
 - [gateway_service.py:204-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L204-L300)
+- [gateway_service.py:971-993](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L971-L993)
+- [agent_client.py:207-241](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L207-L241)
 - [delegation_client.py:190-229](file://products/platform-gateway/src/platform_gateway/services/delegation_client.py#L190-L229)
 - [policy_matrix.py:31-87](file://products/platform-gateway/src/platform_gateway/services/policy_matrix.py#L31-L87)
 - [target_authorization.py:1-326](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L1-L326)
 
 ## Architecture Overview
-The gateway sits between the operator portal and backend services. Every request is logged, authenticated, authorized, proxied, and audited. The new target authorization flow adds browser-bound OAuth coordination for user-delegated identity acquisition with PKCE S256 protection.
+The gateway sits between the operator portal and backend services. Every request is logged, authenticated, authorized, proxied, and audited. The diagnosis proxy path specifically handles SPEC-076 bounded read-only diagnosis operations with extended timeouts for real LLM provider interactions.
 
 ```mermaid
 sequenceDiagram
 participant Portal as "Operator Portal"
 participant GW as "Platform Gateway"
 participant ID as "Identity Broker"
-participant TG as "Tool-Gateway"
 participant AG as "Agent Platform"
 participant AUD as "Audit Service"
-Note over Portal,TG : Standard Flow
+Note over Portal,AG : Standard Flow
 Portal->>GW : HTTP request (Bearer JWT)
 GW->>GW : verify_token()
 alt Valid token
@@ -158,28 +164,22 @@ end
 else Missing/Invalid token
 GW-->>Portal : 401
 end
-Note over Portal,TG : Target Authorization Flow with PKCE S256
-Portal->>GW : POST /api/v1/targets/authorizations/{challenge_id}/start
-GW->>GW : human() + owned_status()
-GW->>TG : Internal POST /api/v2/targets/authorizations/{id}/start
-TG-->>GW : {start_token, expires_at}
-GW-->>Portal : Set __Host-luban-oauth-* cookies
-Portal->>GW : GET /api/v1/targets/authorizations/start/{start_token}
-GW->>TG : POST /api/v2/targets/authorizations/provider-url
-TG-->>GW : provider_url (with code_challenge_method=S256)
-GW-->>Portal : 302 redirect to provider
-Portal->>GW : GET /api/v1/targets/authorizations/callback?code=...
-GW->>TG : POST /api/v2/targets/authorizations/callback
-TG-->>GW : {status, return_url}
-GW-->>Portal : 302 redirect to safe return URL
+Note over Portal,AG : Diagnosis Flow with Extended Timeout
+Portal->>GW : POST /api/v1/diagnose (profile, goal)
+GW->>GW : verify_token() + enforce_policy("diagnosis : run")
+GW->>AG : POST /api/v2/diagnose (bounded read-only orchestration)
+Note over AG : Up to AGENT_ORCHESTRATION_MAX_STEPS member turns
+AG-->>GW : Synthesized diagnosis (may take >120s with real LLMs)
+GW->>AUD : Emit audit event
+GW-->>Portal : Diagnosis result
 ```
 
 **Diagram sources**
 - [token_verifier.py:52-89](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L52-L89)
 - [gateway_service.py:204-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L204-L300)
+- [gateway_service.py:971-993](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L971-L993)
+- [agent_client.py:207-241](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L207-L241)
 - [audit_emitter.py:30-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L30-L99)
-- [target_authorization.py:201-326](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L201-L326)
-- [authorizations.py:11-66](file://products/platform-gateway/src/platform_gateway/api/routes/authorizations.py#L11-L66)
 
 ## Detailed Component Analysis
 
@@ -243,61 +243,51 @@ HasAllow --> |No| DefaultDeny["Return deny (no matching rule)"]
 - [policy_engine.py:390-443](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L390-L443)
 - [policy-default.yaml:53-326](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L53-L326)
 
-### Owner-Scoped Target Authorization Routes
-**Updated** New owner-scoped authorization routes provide browser-bound OAuth coordination for user-delegated identity acquisition without retaining human tokens or performing tool dispatch. This implementation includes comprehensive security measures including PKCE S256 support and secure cookie handling.
+### Diagnosis Proxy and SPEC-076 Support
+**Updated** The diagnosis proxy handles operator-invoked bounded read-only diagnosis operations (SPEC-076 R-7). This proxy mirrors the chat functionality but targets the `/api/v2/diagnose` endpoint and uses the longer `diagnose_response_timeout_seconds` budget to accommodate the bounded fan-out of up to `AGENT_ORCHESTRATION_MAX_STEPS` member read turns plus synthesis.
 
-Key features:
-- **Browser Cookie Binding**: Uses `__Host-luban-oauth-*` prefixed cookies with UUID keys and cryptographically random secrets for challenge-response binding
-- **Owner Scoping**: Validates that the requesting user owns the authorization challenge through session verification
-- **Workload Token Validation**: Requires absolute path to workload token file with strict ASCII validation
-- **Secure Callback Handling**: Processes OAuth callbacks with bounded query parameters and validated denial codes
-- **PKCE S256 Support**: Integrates with Identity Broker's PKCE implementation for enhanced security
-- **Policy Enforcement**: Requires `targets:authorize` policy for start operations and `session:read` for status checks
+Key characteristics:
+- **Extended Timeout Configuration**: Development environment timeout increased from 120 to 300 seconds to support longer-running operations against real LLM providers
+- **Bounded Read-Only Orchestration**: Executes bounded fan-out of diagnostician member turns over the existing `read_only=True` seam
+- **Same-Token Identity Preservation**: All member turns ride the same delegated token without additional broker exchanges
+- **Real LLM Provider Support**: Accommodates observed ~140s operation times with context compression and multiple member turns
+- **Policy Enforcement**: Requires appropriate diagnosis permissions through the policy engine
 
 ```mermaid
 sequenceDiagram
-participant Browser as "User Browser"
+participant Operator as "Operator"
 participant GW as "Platform Gateway"
-participant TG as "Tool-Gateway"
-participant Provider as "OAuth Provider"
-Note over Browser,GW : Challenge Start with PKCE S256
-Browser->>GW : POST /api/v1/targets/authorizations/{challenge_id}/start
-GW->>GW : human() - verify JWT + policy
-GW->>GW : owned_status() - validate ownership
-GW->>TG : POST /{challenge_id}/start (workload token + browser_secret)
-TG-->>GW : {start_token, expires_at}
-GW-->>Browser : Set __Host-luban-oauth-{challenge_id}=secret cookie
-Note over Browser,Provider : Provider Navigation with PKCE
-Browser->>GW : GET /api/v1/targets/authorizations/start/{start_token}
-GW->>TG : POST /provider-url (workload token + browser_bindings + code_challenge_method=S256)
-TG-->>GW : {provider_url, expires_at}
-GW-->>Browser : 302 redirect to provider
-Note over Browser,Provider : OAuth Flow with PKCE Verification
-Browser->>Provider : Complete OAuth authorization (code_challenge_method=S256)
-Provider->>GW : GET /api/v1/targets/authorizations/callback?code=...
-GW->>TG : POST /callback (workload token + browser_bindings + code_verifier)
-TG-->>GW : {status, return_url}
-GW-->>Browser : 302 redirect to safe return URL
+participant AC as "Agent Client"
+participant AP as "Agent Platform"
+Note over Operator,AP : Diagnosis Request Flow
+Operator->>GW : POST /api/v1/diagnose {profile, goal}
+GW->>GW : verify_token() + enforce_policy("diagnosis : run")
+GW->>AC : diagnose(settings, profile, goal)
+AC->>AC : timeout = httpx.Timeout(diagnose_response_timeout_seconds, connect=5.0)
+AC->>AP : POST /api/v2/diagnose (bounded read-only orchestration)
+Note over AP : Fan out up to AGENT_ORCHESTRATION_MAX_STEPS member turns
+AP-->>AC : Synthesized diagnosis result
+AC-->>GW : Diagnosis response
+GW->>GW : Emit audit event
+GW-->>Operator : Diagnosis result
 ```
 
 **Diagram sources**
-- [target_authorization.py:253-326](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L253-L326)
-- [authorizations.py:11-66](file://products/platform-gateway/src/platform_gateway/api/routes/authorizations.py#L11-L66)
+- [gateway_service.py:971-993](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L971-L993)
+- [agent_client.py:207-241](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L207-L241)
 
-**Security Boundaries:**
-- Cookie values are bounded to 43-character Base64-like strings with UUID key validation
-- Maximum 8 cookies per request with duplicate name rejection
-- Query string parsing enforces strict field limits and character sets
-- Workload token files are read with size limits (16KB max) and ASCII-only validation
-- All internal requests to Tool-Gateway use bounded timeouts (10s) and response sizes (64KB)
-- No raw exceptions or provider values leak to responses
-- PKCE S256 ensures secure authorization code exchange with cryptographic proof
-- Browser bindings are validated as complete units before any operation proceeds
+**Development Environment Configuration:**
+- **Timeout Increase**: `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS=300` in dev-overlay runtime configuration
+- **Rationale**: Real LLM provider operations with context compression and multiple member turns can exceed the 120s code default (observed ~140s)
+- **Scope**: Development environment only; code default remains 120s as a follow-up finding
+- **Purpose**: Prevents ReadTimeout errors during legitimate bounded diagnosis operations
 
 **Section sources**
-- [target_authorization.py:1-326](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L1-L326)
-- [authorizations.py:1-66](file://products/platform-gateway/src/platform_gateway/api/routes/authorizations.py#L1-L66)
-- [authorization.py:1-56](file://products/platform-gateway/src/platform_gateway/schemas/authorization.py#L1-L56)
+- [gateway_service.py:971-993](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L971-L993)
+- [agent_client.py:207-241](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L207-L241)
+- [config.py:39-43](file://products/platform-gateway/src/platform_gateway/core/config.py#L39-L43)
+- [config.py:103-105](file://products/platform-gateway/src/platform_gateway/core/config.py#L103-L105)
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
 
 ### Authorization Matrix and Transparency
 - Builds a role x action matrix from the enforced bundle
@@ -450,44 +440,43 @@ Outcome --> |No| Continue["Continue to proxy"]
 - [gateway_service.py:267-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L267-L300)
 
 ## Configuration Options
-**Updated** The Platform Gateway now includes new configuration options for target authorization and enhanced delegation support:
+**Updated** The Platform Gateway includes configuration options for diagnosis proxy timeout and enhanced SPEC-076 support:
 
-### Target Authorization Settings
-- `PLATFORM_GATEWAY_TARGET_AUTHORIZATION_ENABLED`: Enable/disable owner-scoped target authorization routes (default: false)
-- `PLATFORM_GATEWAY_AUTHORIZATION_WORKLOAD_TOKEN_PATH`: Absolute path to workload token file for internal Tool-Gateway communication
+### Diagnosis Proxy Configuration
+- `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS`: Upstream `/api/v2/diagnose` proxy timeout (SPEC-076 R-7): a bounded read-only diagnosis fans out up to `AGENT_ORCHESTRATION_MAX_STEPS` member turns plus a synthesis, so it needs a longer proxy budget than a single chat turn (mirrors the incident-triage long-read class, not chat's `30`)
+- **Development Environment**: Set to `300` seconds to support longer-running operations against real LLM providers
+- **Code Default**: `120` seconds (maintained as baseline, dev override applied via runtime config)
 
-### Delegation Configuration
-- `PLATFORM_GATEWAY_DELEGATION_AUDIENCE`: Audience for delegated tokens (default: "tool-gateway")
-- `PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH`: Path to projected workload token for service-to-service authentication
+### Other Configuration Options
+- `CHAT_RESPONSE_TIMEOUT_SECONDS`: Upstream chat timeout (default: `30` seconds)
+- `PLATFORM_GATEWAY_INCIDENT_TRIAGE_TIMEOUT_SECONDS`: Triage proxy timeout (default: `120` seconds)
+- Target authorization and delegation settings remain unchanged
 
-### Environment Variables
+**Environment Variables:**
 ```bash
-# Target Authorization (optional)
-export PLATFORM_GATEWAY_TARGET_AUTHORIZATION_ENABLED=true
-export PLATFORM_GATEWAY_AUTHORIZATION_WORKLOAD_TOKEN_PATH=/var/run/secrets/workload-token
-
-# Delegation (existing)
-export PLATFORM_GATEWAY_DELEGATION_AUDIENCE=tool-gateway
-export PLATFORM_GATEWAY_WORKLOAD_TOKEN_PATH=/var/run/secrets/workload-token
+# Diagnosis timeout (development environment)
+export PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS=300
 
 # Service URLs
 export AGENT_SERVICE_URL=http://agent-service:8000
 export IDENTITY_SERVICE_URL=http://identity-service:8000
 export PLATFORM_GATEWAY_TOOL_GATEWAY_URL=https://tool-gateway.internal
+
+# Existing configuration variables...
 ```
 
 **Section sources**
-- [config.py:23-53](file://products/platform-gateway/src/platform_gateway/core/config.py#L23-L53)
-- [config.py:56-129](file://products/platform-gateway/src/platform_gateway/core/config.py#L56-L129)
-- [target_authorization.py:55-68](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L55-L68)
+- [config.py:39-43](file://products/platform-gateway/src/platform_gateway/core/config.py#L39-L43)
+- [config.py:103-105](file://products/platform-gateway/src/platform_gateway/core/config.py#L103-L105)
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
 
 ## Dependency Analysis
 - The gateway depends on:
   - Identity Broker for token exchange and JWKS
-  - Agent Platform for sessions, chat, incidents, documents, models, skills
+  - Agent Platform for sessions, chat, incidents, documents, models, skills, and diagnosis operations
   - Tool-Gateway for tool invocation (via delegated tokens) and target authorization coordination
   - Audit Service for durable audit ingestion
-- Configuration drives service URLs, audiences, and feature toggles
+- Configuration drives service URLs, audiences, and feature toggles including diagnosis timeout settings
 
 ```mermaid
 graph TB
@@ -518,33 +507,36 @@ GW --> AUD
 - Delegated tokens are cached per user subject with early refresh near expiry
 - Audit emission is asynchronous and non-blocking
 - Policy bundle is loaded once and cached per process; metadata includes version and SHA-256 fingerprint
-- **New**: Target authorization routes use bounded timeouts (10s) and response sizes (64KB) to prevent resource exhaustion
-- **New**: Browser cookie parsing validates complete cookie jars with strict bounds checking
-- **New**: PKCE S256 adds minimal overhead while significantly enhancing security posture
+- **Updated**: Diagnosis proxy timeout increased to 300 seconds in development environment to accommodate longer-running bounded read-only diagnosis operations against real LLM providers
+- **Updated**: Development environment configuration accounts for observed ~140s operation times with context compression and multiple member turns
+- **Updated**: Code default timeout remains 120 seconds as a baseline; development overlay provides necessary extension for real provider testing
 
 ## Troubleshooting Guide
 Common issues and diagnostics:
 - 401 Unauthorized: missing or malformed Authorization header; expired or invalid token; wrong issuer/audience
 - 403 Forbidden: explicit deny rule matched; no matching rule; require_approval not yet satisfied; target authorization disabled
-- 404 Not Found: invalid challenge ID format; expired authorization challenge; unauthorized access attempt
-- 409 Conflict: duplicate challenge cookie detected; terminal challenge state; insufficient browser bindings
-- 502 Bad Gateway: upstream service unavailable or returned 5xx; identity service unreachable during login flows; target authorization backend failure
+- 504 Gateway Timeout: diagnosis operation exceeded timeout threshold (check `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` setting)
+- 502 Bad Gateway: upstream agent-service unavailable or returned 5xx; identity service unreachable during login flows
 - 503 Service Unavailable: target authorization misconfigured; workload token path invalid; required dependencies missing
+
+**Diagnosis-Specific Issues:**
+- Diagnosis timeout errors in development: verify `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS=300` is set in runtime configuration
+- Real LLM provider slowness: the 300-second timeout accommodates observed ~140s operation times with context compression
+- Bounded diagnosis not completing: check if `AGENT_ORCHESTRATION_MAX_STEPS` budget is sufficient for the diagnosis complexity
 
 Operational checks:
 - Readiness endpoint exposes policy rule count and bundle SHA-256
 - Live status reports service name and version
 - Audit logs capture policy decisions and emit failures
-- **New**: Target authorization routes validate configuration on first request and return appropriate error codes for misconfiguration
-- **New**: Browser cookie validation failures are logged with sanitized error messages to prevent information leakage
+- Diagnosis operations are properly gated and authenticated
 
 **Section sources**
 - [gateway_service.py:57-88](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L57-L88)
 - [gateway_service.py:204-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L204-L300)
 - [audit_emitter.py:68-99](file://products/platform-gateway/src/platform_gateway/services/audit_emitter.py#L68-L99)
-- [target_authorization.py:55-68](file://products/platform-gateway/src/platform_gateway/services/target_authorization.py#L55-L68)
+- [runtime-config.env:23-29](file://shared/platform-ops/gitops/dev-k8s/base/platform-gateway/runtime-config.env#L23-L29)
 
 ## Conclusion
 The Platform Gateway centralizes security and policy enforcement for the operator portal. It authenticates via local JWT verification, delegates tokens for tool execution, evaluates a strict deny-by-default policy bundle, integrates approval workflows for mutating actions, proxies requests to backend services with robust error handling, and emits durable audit events. Transparency endpoints expose the effective permission matrix, ensuring operators can understand and validate their access.
 
-**Updated** The addition of owner-scoped target authorization routes extends the gateway's capabilities to coordinate browser-bound OAuth flows for user-delegated identity acquisition with PKCE S256 protection. These routes maintain strict security boundaries through cookie binding, workload token validation, and policy enforcement while providing seamless integration with the broader user-delegated identity ecosystem. The implementation ensures that sensitive OAuth state never leaks to the browser, that PKCE challenges are properly validated, and that all authorization decisions remain scoped to verified owners. The comprehensive input validation and bounded processing ensure resilience against malicious inputs while maintaining high performance for legitimate authorization flows.
+**Updated** The addition of extended diagnosis proxy timeout support enhances the gateway's capabilities for SPEC-076 bounded read-only diagnosis operations. The development environment timeout increase from 120 to 300 seconds accommodates longer-running operations against real LLM providers, accounting for context compression overhead and multiple member turns. This configuration change ensures that legitimate bounded diagnosis workflows complete successfully while maintaining the 120-second code default as a baseline for production environments. The implementation demonstrates careful consideration of operational requirements while preserving security boundaries and performance constraints.
