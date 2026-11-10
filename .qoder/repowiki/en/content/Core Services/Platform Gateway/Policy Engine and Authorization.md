@@ -25,15 +25,18 @@
 - [spec.md (SPEC-074)](file://docs/specs/SPEC-074-policy-role-axis/spec.md)
 - [plan.md (SPEC-074)](file://docs/specs/SPEC-074-policy-role-axis/plan.md)
 - [tasks.md (SPEC-074)](file://docs/specs/SPEC-074-policy-role-axis/tasks.md)
+- [spec.md (SPEC-076)](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md)
+- [plan.md (SPEC-076)](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md)
+- [tasks.md (SPEC-076)](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/tasks.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the SPEC-074 policy role axis implementation, including the `agent_roles_any` field support in the v3 schema extension.
-- Updated policy engine sections to reflect the new agent-role dimension that composes conjunctively with human roles.
-- Added detailed coverage of diagnostician/orchestrator/executor role semantics and their relationship to human authorization.
-- Enhanced test coverage documentation showing comprehensive validation of agent-role matching, reachability guards, and invariant enforcement.
-- Updated authorization matrix and policy specification sections to document the additive, inert nature of the agent-role axis.
+- Added comprehensive documentation for SPEC-076 bounded autonomous diagnosis policy enforcement, including the two canonical agent-role rules: `deny-diagnostician-tools-mutate` and `require-approval-executor-tools-mutate`.
+- Updated policy rule sections to document the ready-but-inert deployment status where no deployed caller threads non-None agent-role values.
+- Enhanced examples to show how the diagnostician deny rule overrides mutating grants and how executor staging requires tier_2 approval.
+- Added detailed coverage of the phase-5 delivery resolution where in-process SPEC-073 toolkit narrowing provides live read-only control while policy axis remains unit-proven but inert.
+- Updated authorization matrix and policy specification sections to document the canonical bundle changes and their byte-identical synchronization across all four replicas.
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,17 +45,18 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Authorization Contract Integration](#authorization-contract-integration)
 6. [Agent Role Axis Implementation](#agent-role-axis-implementation)
-7. [Detailed Component Analysis](#detailed-component-analysis)
-8. [Dependency Analysis](#dependency-analysis)
-9. [Performance Considerations](#performance-considerations)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Conclusion](#conclusion)
-12. [Appendices](#appendices)
+7. [SPEC-076 Bounded Autonomous Diagnosis Policy Enforcement](#spec-076-bounded-autonomous-diagnosis-policy-enforcement)
+8. [Detailed Component Analysis](#detailed-component-analysis)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Performance Considerations](#performance-considerations)
+11. [Troubleshooting Guide](#troubleshooting-guide)
+12. [Conclusion](#conclusion)
+13. [Appendices](#appendices)
 
 ## Introduction
 This document explains the Platform Gateway's policy engine and authorization system. It covers how incoming requests are evaluated against policy rules, how role-based permissions are enforced across endpoints and operations, how approval workflows integrate with policy decisions, and how policies are loaded and cached. It also documents the policy rule format, risk-tier evaluation, tool permission checks, the live policy matrix, conflict resolution, and audit logging. Finally, it describes integration points with the Identity Broker for user context and how decisions are recorded for auditing.
 
-**Updated** This document now includes the OQ-7 authorization contract integration and the SPEC-074 policy role axis implementation. The policy role axis adds an optional `agent_roles_any` field to the v3 schema, enabling agent-role-scoped authorization rules while maintaining backward compatibility. The axis is additive and inert in phase 3, meaning no deployed caller threads a non-None agent-role, ensuring byte-identical evaluation behavior.
+**Updated** This document now includes the OQ-7 authorization contract integration, the SPEC-074 policy role axis implementation, and the SPEC-076 bounded autonomous diagnosis policy enforcement. The policy role axis adds an optional `agent_roles_any` field to the v3 schema, enabling agent-role-scoped authorization rules while maintaining backward compatibility. The SPEC-076 implementation introduces two canonical rules that remain ready-but-inert since no deployed caller threads non-None agent-role values, with in-process SPEC-073 toolkit narrowing providing the live read-only control.
 
 ## Project Structure
 The policy system spans two gateways:
@@ -60,6 +64,7 @@ The policy system spans two gateways:
 - Tool Gateway: enforces tool invocation admission (read vs write/admin tools) and delegates approval enforcement to the platform gateway.
 - Authorization Contracts: define the OQ-7 handoff protocol shapes and transaction store interface without implementing OAuth flows.
 - Agent Role Axis: implements the SPEC-074 policy role dimension with closed vocabulary enforcement.
+- SPEC-076 Canonical Rules: implement bounded autonomous diagnosis policy enforcement with ready-but-inert deployment semantics.
 
 ```mermaid
 graph TB
@@ -85,6 +90,7 @@ AUTHZ["authorization-matrix.md"]
 POLSPEC["policy-specification.md"]
 OQ7["OQ-7 Handoff Contract"]
 SPEC074["SPEC-074 Policy Role Axis"]
+SPEC076["SPEC-076 Bounded Autonomy"]
 end
 POLY --> PGE
 TOLY --> TGE
@@ -100,6 +106,8 @@ PGE -.-> POLSPEC
 TGE -.-> POLSPEC
 PGE -.-> SPEC074
 TGE -.-> SPEC074
+PGE -.-> SPEC076
+TGE -.-> SPEC076
 ```
 
 **Diagram sources**
@@ -121,7 +129,7 @@ TGE -.-> SPEC074
 - Rule parser and validator: validates schema, outcomes, and approval blocks; enforces that require_approval is only valid on bridged actions in the platform gateway; validates agent_roles_any against closed vocabulary.
 - Evaluator: matches enabled rules by roles and actions, applies precedence deny > require_approval > allow, selects highest priority within an outcome class, and returns a structured decision. Now supports agent-role scoping.
 - Live matrix builder: derives a role × action boolean matrix plus an additive approval_requirements structure from the same evaluate() path used for enforcement.
-- Default bundles: define the canonical set of actions and grants for both gateways.
+- Default bundles: define the canonical set of actions and grants for both gateways, including SPEC-076 canonical rules.
 - Authorization transaction store: defines the Protocol interface for OQ-7 handoff state management without implementing storage backends.
 - Agent role vocabulary: closed set of diagnostician/orchestrator/executor roles with fail-closed validation.
 
@@ -133,6 +141,7 @@ Key behaviors:
 - Disabled rules are ignored.
 - Agent-role scoping composes conjunctively with human roles.
 - Authorization contracts are inert - they define shapes but don't register routes or enable OAuth flows.
+- SPEC-076 canonical rules remain ready-but-inert since no deployed caller threads non-None agent-role values.
 
 **Section sources**
 - [policy_engine.py:334-371](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L334-L371)
@@ -144,7 +153,7 @@ Key behaviors:
 ## Architecture Overview
 The platform gateway evaluates every protected action through the policy engine using normalized roles provided by the identity layer. The tool gateway enforces tool invocation admission based on the same rule vocabulary but does not enforce approvals itself; approvals are enforced on the platform gateway's confirmation path.
 
-**Updated** The OQ-7 authorization contract adds a separate flow for first-use target authorization. When tool execution requires user delegation, the system emits an authorization_required signal rather than executing the tool. This signal carries routing metadata that the portal uses to guide users through browser-based authorization without exposing secrets or enabling direct OAuth flows. The SPEC-074 policy role axis adds agent-role scoping that composes conjunctively with human roles.
+**Updated** The OQ-7 authorization contract adds a separate flow for first-use target authorization. When tool execution requires user delegation, the system emits an authorization_required signal rather than executing the tool. This signal carries routing metadata that the portal uses to guide users through browser-based authorization without exposing secrets or enabling direct OAuth flows. The SPEC-074 policy role axis adds agent-role scoping that composes conjunctively with human roles. The SPEC-076 bounded autonomy policy enforcement adds canonical rules that remain ready-but-inert in deployment.
 
 ```mermaid
 sequenceDiagram
@@ -419,12 +428,134 @@ F --> K["Phase 3 inertness"]
 **Diagram sources**
 - [test_policy_engine.py:698-725](file://products/platform-gateway/tests/test_policy_engine.py#L698-L725)
 - [test_policy_engine.py:842-861](file://products/platform-gateway/tests/test_policy_engine.py#L842-L861)
-- [test_policy_engine.py:863-890](file://products/platform-gateway/tests/test_policy_engine.py#L863-L890)
+- [test_policy_engine.py:863-890](file://products/platform-gateway/tests/test_policy_engine.py#L863-890)
 
 **Section sources**
 - [test_policy_engine.py:698-725](file://products/platform-gateway/tests/test_policy_engine.py#L698-L725)
 - [test_policy_engine.py:842-861](file://products/platform-gateway/tests/test_policy_engine.py#L842-L861)
-- [test_policy_engine.py:863-890](file://products/platform-gateway/tests/test_policy_engine.py#L863-L890)
+- [test_policy_engine.py:863-890](file://products/platform-gateway/tests/test_policy_engine.py#L863-890)
+
+## SPEC-076 Bounded Autonomous Diagnosis Policy Enforcement
+
+### Canonical Agent-Role Rules
+SPEC-076 introduces two canonical `agent_roles_any` rules that encode the bounded autonomous diagnosis policy:
+
+- **deny-diagnostician-tools-mutate**: Prevents diagnostician agent-roles from executing mutating tools (priority 300)
+- **require-approval-executor-tools-mutate**: Requires tier_2 approval for executor agent-roles staging mutations (priority 200)
+
+These rules are implemented as the minimal canonical encoding per OQ-4 resolution, keeping the existing action-based axis rather than adding a tool-family dimension.
+
+```mermaid
+flowchart TD
+A["tools:mutate request"] --> B{"agent_role == 'diagnostician'?"}
+B --> |Yes| C["deny-diagnostician-tools-mutate<br/>Priority 300 → DENY"]
+B --> |No| D{"agent_role == 'executor'?"}
+D --> |Yes| E["require-approval-executor-tools-mutate<br/>Priority 200 → require_approval"]
+D --> |No| F["Continue normal evaluation"]
+```
+
+**Diagram sources**
+- [policy-default.yaml:214-251](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L214-L251)
+- [policy-default.yaml:214-251](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml#L214-L251)
+
+### Ready-But-Inert Deployment Status
+The SPEC-076 canonical rules remain ready-but-inert in deployment because:
+
+- SPEC-073 R-3 keeps the bound `agent_role` off every wire field
+- No deployed gateway `evaluate()` calls thread a non-None `agent_role`
+- The live read-only control is provided by in-process SPEC-073 toolkit narrowing
+- The loop's `read_only=True` admission provides additional safety
+- Making the policy axis itself live is deferred to follow-up `FU-076-c`
+
+```mermaid
+flowchart TD
+A["Deployed System"] --> B{"agent_role threaded?"}
+B --> |No| C["Rules ready but inert<br/>Byte-identical to pre-SPEC-076"]
+B --> |Yes| D["Rules would fire<br/>Future: FU-076-c or phase-6 wire"]
+C --> E["Live control via:<br/>- SPEC-073 toolkit narrowing<br/>- Loop read_only=True admission"]
+D --> F["Phase-6 wire contract<br/>or in-process evaluation point"]
+```
+
+**Diagram sources**
+- [spec.md (SPEC-076):263-276](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L263-L276)
+- [plan.md (SPEC-076):14-24](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md#L14-L24)
+
+### Diagnostician Deny Rule Behavior
+The `deny-diagnostician-tools-mutate` rule ensures that diagnostician agent-roles can never execute mutating tools:
+
+- Matches all operational human roles (platform-admin, approver, operator, developer, read-only-observer)
+- Applies specifically to `tools:mutate` action
+- Targets only `diagnostician` agent-role
+- Has highest priority (300) among the canonical rules
+- Overrides any other allow rules for diagnostician mutations
+
+```mermaid
+flowchart TD
+A["Diagnostician mutation attempt"] --> B["Match roles_any: operational roles"]
+B --> C["Match actions_any: tools:mutate"]
+C --> D["Match agent_roles_any: diagnostician"]
+D --> E["Priority 300 → DENY"]
+```
+
+**Diagram sources**
+- [policy-default.yaml:214-225](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L214-L225)
+- [test_policy_engine.py:675-685](file://products/platform-gateway/tests/test_policy_engine.py#L675-L685)
+
+### Executor Require-Approval Rule Behavior
+The `require-approval-executor-tools-mutate` rule encodes the diagnose-before-act ceiling:
+
+- Matches mutating-capable human roles (platform-admin, approver, operator, developer)
+- Applies to `tools:mutate` action
+- Targets only `executor` agent-role
+- Requires tier_2 approval by distinct humans (approver, platform-admin)
+- Is deliberately redundant with human-axis rules for identical outcomes
+
+```mermaid
+flowchart TD
+A["Executor mutation staging"] --> B["Match roles_any: mutating-capable roles"]
+B --> C["Match actions_any: tools:mutate"]
+C --> D["Match agent_roles_any: executor"]
+D --> E["Priority 200 → require_approval"]
+E --> F["Tier 2 approval by approver/platform-admin"]
+```
+
+**Diagram sources**
+- [policy-default.yaml:238-251](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L238-L251)
+- [test_policy_engine.py:689-694](file://products/platform-gateway/tests/test_policy_engine.py#L689-L694)
+
+### Byte-Identical Bundle Synchronization
+The canonical rules are synchronized byte-identically across all four bundle replicas:
+
+- `products/platform-gateway/src/platform_gateway/policies/policy-default.yaml`
+- `products/tool-gateway/src/tool_gateway/policies/policy-default.yaml`
+- `shared/shared-contracts/policies/policy-default.yaml`
+- `shared/platform-ops/gitops/dev-k8s/base/shared/policy.yaml`
+
+The synchronization is enforced via `make sync-policy`, and bundle parity is verified by tests.
+
+```mermaid
+flowchart TD
+A["Canonical Rules"] --> B["Platform Gateway Bundle"]
+A --> C["Tool Gateway Bundle"]
+A --> D["Shared Contracts Bundle"]
+A --> E["GitOps Dev Bundle"]
+B --> F["make sync-policy"]
+C --> F
+D --> F
+E --> F
+F --> G["Bundle Parity Verification"]
+```
+
+**Diagram sources**
+- [tasks.md (SPEC-076):75-78](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/tasks.md#L75-L78)
+- [test_policy_engine.py:843-862](file://products/platform-gateway/tests/test_policy_engine.py#L843-L862)
+
+**Section sources**
+- [policy-default.yaml:200-251](file://products/platform-gateway/src/platform_gateway/policies/policy-default.yaml#L200-L251)
+- [policy-default.yaml:200-251](file://products/tool-gateway/src/tool_gateway/policies/policy-default.yaml#L200-L251)
+- [spec.md (SPEC-076):243-276](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L243-L276)
+- [plan.md (SPEC-076):110-123](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md#L110-L123)
+- [tasks.md (SPEC-076):69-88](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/tasks.md#L69-L88)
 
 ## Detailed Component Analysis
 
@@ -433,7 +564,7 @@ F --> K["Phase 3 inertness"]
 - Each rule includes id, domain, description, priority, enabled, match (roles_any, actions_any), and decision (outcome, optional approval).
 - The shared JSON Schema defines the contract for rules and decisions.
 - The platform gateway enforces that require_approval rules apply only to bridged actions (currently tools:mutate). The tool gateway skips require_approval rules entirely because it has no approval substrate.
-- **Updated** The v3 schema now supports optional `agent_roles_any` field with closed vocabulary validation.
+- **Updated** The v3 schema now supports optional `agent_roles_any` field with closed vocabulary validation. The SPEC-076 canonical rules demonstrate the proper usage pattern for agent-role scoping.
 
 ```mermaid
 flowchart TD
@@ -468,7 +599,7 @@ Cache --> End(["Ready for evaluate()"])
 - Risk tiers are part of the broader authorization model and influence default behavior and approval requirements.
 - In the platform gateway, mutating tool execution is gated via the tools:mutate action and requires tier_2 approval by designated approvers distinct from the requester.
 - In the tool gateway, read-only tool execution requires tools:invoke; write/admin tools additionally require tools:mutate. The tool gateway performs allow/deny admission only; approvals are enforced upstream.
-- **Updated** Tool execution may now trigger the OQ-7 authorization flow instead of immediate allow/deny. When a tool requires user delegation, the system returns an authorization_required signal rather than executing the tool directly.
+- **Updated** Tool execution may now trigger the OQ-7 authorization flow instead of immediate allow/deny. When a tool requires user delegation, the system returns an authorization_required signal rather than executing the tool directly. The SPEC-076 canonical rules provide additional agent-role-based restrictions on top of these existing mechanisms.
 
 ```mermaid
 flowchart TD
@@ -503,7 +634,7 @@ K --> |No| M["Deny"]
 - The live matrix is derived by evaluating every role × action pair through the same evaluate() function used for enforcement.
 - For platform-admin, the matrix shows all roles; for other identities, only their granted roles are shown.
 - Cells evaluating to require_approval appear as false in the boolean matrix and additionally include approval_requirements with tier and decider roles.
-- **Updated** The matrix currently remains human-role-only per OQ-5 resolution, with agent-role projection deferred to later phases.
+- **Updated** The matrix currently remains human-role-only per OQ-5 resolution, with agent-role projection deferred to later phases. The SPEC-076 canonical rules are included in the matrix evaluation but remain inert since no agent-role is threaded.
 
 ```mermaid
 classDiagram
@@ -537,7 +668,7 @@ PolicyMatrix --> PolicyEngine : "uses evaluate()"
 - The policy engine consumes normalized roles supplied by the identity layer. The platform gateway uses these roles to evaluate protected actions.
 - The tool gateway similarly uses normalized roles for tool invocation admission.
 - The design documentation outlines normalization and environment scoping expectations consumed by the policy engine.
-- **Updated** The authorization contract integration extends this pattern by adding owner-scoped identity binding for authorization transactions. Owner namespace and subject are recovered from authenticated server context, never from callback input.
+- **Updated** The authorization contract integration extends this pattern by adding owner-scoped identity binding for authorization transactions. Owner namespace and subject are recovered from authenticated server context, never from callback input. The SPEC-076 bounded autonomy maintains the same-token identity preservation across fan-out without introducing new identity edges.
 
 ```mermaid
 sequenceDiagram
@@ -565,7 +696,7 @@ Note over ATX : Owner namespace + subject binding
 - Mutating tool execution triggers a require_approval decision with tier_2 approval by designated approvers distinct from the requester.
 - The platform gateway parks the confirmation and coordinates approval; the tool gateway does not enforce approvals.
 - The authorization matrix documents the separation of duties and approval boundaries.
-- **Updated** The authorization contract provides an alternative flow for user delegation that doesn't involve traditional approval workflows. Instead, it guides users through browser-based authorization to obtain delegated credentials.
+- **Updated** The authorization contract provides an alternative flow for user delegation that doesn't involve traditional approval workflows. Instead, it guides users through browser-based authorization to obtain delegated credentials. The SPEC-076 executor staging mechanism reuses the existing HITL infrastructure for proposed remediations.
 
 ```mermaid
 sequenceDiagram
@@ -603,7 +734,7 @@ Note over Portal : Alternative flow for user delegation
 - Within the same outcome class, higher priority wins.
 - Disabled rules are ignored.
 - These semantics are enforced in the evaluator and documented in the policy specification.
-- **Updated** Agent-role scoping composes conjunctively with human roles and cannot override explicit denies.
+- **Updated** Agent-role scoping composes conjunctively with human roles and cannot override explicit denies. The SPEC-076 canonical rules demonstrate this with the diagnostician deny rule having priority 300 (highest) and the executor require_approval rule having priority 200.
 
 ```mermaid
 flowchart TD
@@ -630,7 +761,7 @@ AL --> |No| DEFAULT_DENY["Deny by default"]
 - Tool invocation: operational, developer, approver, and observer roles may invoke read-only tools.
 - Mutating tools: require tier_2 approval by approver or platform-admin distinct from requester.
 - Audit and transparency: auditors and platform admins may read audit trails; all roles may read policy and skills inventory.
-- **Updated** New authorization-related outcomes may include authorization_required signals that trigger the OQ-7 handoff flow instead of traditional allow/deny decisions.
+- **Updated** New authorization-related outcomes may include authorization_required signals that trigger the OQ-7 handoff flow instead of traditional allow/deny decisions. The SPEC-076 canonical rules provide concrete examples of agent-role-scoped policy enforcement.
 
 These examples are defined in the default bundles and validated by the schemas.
 
@@ -651,7 +782,7 @@ These examples are defined in the default bundles and validated by the schemas.
   - The default bundle for tool-related actions.
   - Shared schemas for validation.
   - Authorization transaction store interface for OQ-7 support.
-- **Updated** Both gateways now depend on the authorization contract definitions and the SPEC-074 agent-role vocabulary, though only the tool gateway implements the transaction store interface.
+- **Updated** Both gateways now depend on the authorization contract definitions, the SPEC-074 agent-role vocabulary, and the SPEC-076 canonical rules. Only the tool gateway implements the transaction store interface. The canonical rules are synchronized across all four bundle replicas.
 
 ```mermaid
 graph LR
@@ -666,6 +797,8 @@ AUTH_TX["Authorization Transaction Store"] --> AUTH_SCHEMA["Authorization Schema
 AUTH_SCHEMA --> TOOL_RESULT["tool-result.schema.json"]
 AGENT_ROLE["Agent Role Vocabulary"] --> PGW_PE
 AGENT_ROLE --> TGW_PE
+SPEC076_RULES["SPEC-076 Canonical Rules"] --> PGW_BUNDLE
+SPEC076_RULES --> TGW_BUNDLE
 ```
 
 **Diagram sources**
@@ -685,7 +818,7 @@ AGENT_ROLE --> TGW_PE
 - Evaluations scan enabled rules matching the requested action and intersecting caller roles; complexity is linear in the number of enabled rules.
 - The live matrix builds rows by evaluating each role × action pair; this is intentionally read-only and can be cached at the API layer if needed.
 - Authorization transactions are designed for bounded lifetimes (60 seconds start TTL, 600 seconds transaction TTL) to minimize storage overhead.
-- **Updated** Agent-role scoping adds minimal overhead since it's a simple tuple membership check that composes with existing role matching logic.
+- **Updated** Agent-role scoping adds minimal overhead since it's a simple tuple membership check that composes with existing role matching logic. The SPEC-076 canonical rules add two additional rules to evaluate but maintain the same linear complexity profile.
 
 [No sources needed since this section provides general guidance]
 
@@ -706,6 +839,10 @@ Common issues and diagnostics:
   - Non-list agent_roles_any values are rejected at load time
   - Reachability guard tests detect unauthorized threading of agent-role literals
   - Disjointness guard tests ensure agent roles don't appear in human roles or approver deciders
+- **Updated** SPEC-076 canonical rule issues:
+  - Bundle synchronization failures indicate non-byte-identical replicas
+  - Canonical rule validation failures suggest incorrect agent_roles_any values
+  - Ready-but-inert deployment is expected - rules won't match without agent-role threading
 
 **Section sources**
 - [policy_engine.py:229-331](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L229-L331)
@@ -719,7 +856,7 @@ Common issues and diagnostics:
 ## Conclusion
 The Platform Gateway's policy engine implements a compact, deterministic authorization model grounded in versioned YAML bundles, strict schema validation, and clear precedence rules. It integrates with the Identity Broker via normalized roles, enforces tool permissions at both gateways, and bridges approval workflows where necessary. The live policy matrix provides transparent, authoritative visibility into effective permissions and approval requirements, while bundle provenance ensures deploy-time verification.
 
-**Updated** The OQ-7 authorization contract integration extends this foundation with a protocol for first-use target authorization handoffs. The SPEC-074 policy role axis adds an optional, additive agent-role dimension that composes conjunctively with human roles while maintaining backward compatibility. The axis is implemented as an inert model dimension in phase 3, with comprehensive test coverage ensuring fail-closed behavior, subtractive-only semantics, and disjoint vocabularies. Future phases will introduce live producer wiring and canonical rule deployment.
+**Updated** The OQ-7 authorization contract integration extends this foundation with a protocol for first-use target authorization handoffs. The SPEC-074 policy role axis adds an optional, additive agent-role dimension that composes conjunctively with human roles while maintaining backward compatibility. The SPEC-076 bounded autonomous diagnosis policy enforcement introduces two canonical rules (`deny-diagnostician-tools-mutate` and `require-approval-executor-tools-mutate`) that remain ready-but-inert in deployment since no deployed caller threads non-None agent-role values. The axis is implemented as an inert model dimension in phase 3, with comprehensive test coverage ensuring fail-closed behavior, subtractive-only semantics, and disjoint vocabularies. Future phases will introduce live producer wiring and canonical rule deployment.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -787,3 +924,16 @@ The Platform Gateway's policy engine implements a compact, deterministic authori
 - [spec.md (SPEC-074):1-315](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L1-L315)
 - [plan.md (SPEC-074):1-40](file://docs/specs/SPEC-074-policy-role-axis/plan.md#L1-L40)
 - [tasks.md (SPEC-074):1-90](file://docs/specs/SPEC-074-policy-role-axis/tasks.md#L1-L90)
+
+### SPEC-076 Bounded Autonomous Diagnosis Status
+- Approved 2026-11-06, targeting v0.57.0
+- Two canonical agent_roles_any rules delivered: deny-diagnostician-tools-mutate and require-approval-executor-tools-mutate
+- Rules remain ready-but-inert since no deployed caller threads non-None agent-role values
+- In-process SPEC-073 toolkit narrowing provides live read-only control
+- Byte-identical synchronization across all four bundle replicas
+- Follow-ups recorded: FU-076 (unattended machine-trigger ingestion), FU-076-b (diagnose→act bridge), FU-076-c (live policy axis)
+
+**Section sources**
+- [spec.md (SPEC-076):1-531](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L1-L531)
+- [plan.md (SPEC-076):1-233](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md#L1-L233)
+- [tasks.md (SPEC-076):1-157](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/tasks.md#L1-L157)

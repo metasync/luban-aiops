@@ -1,5 +1,0 @@
-- Every spec uses the fixed Status block fields (`status`, `owner`, `created`, `approved`, `delivered`, `release slice`, `related ADRs`, `lineage`) to anchor provenance and release slicing.
-- Requirements are numbered `R-N:` with a prose header followed by bulleted Acceptance Criteria that are individually testable and mapped to `tasks.md`.
-- Non-Goals sections explicitly enumerate out-of-scope alternatives (e.g. model-emitted intent, structured multi-step rendering, auto-publish) to constrain blast radius.
-- Impact sections enumerate every touched product path, contract schema, policy action, audit event type, and living-state doc to update on delivery.
-- Changelog entries record date-stamped state transitions (`draft → approved → in-progress → delivered`) with commit hashes, test counts, and `make verify` results rather than narrative summaries.

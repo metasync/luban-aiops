@@ -1,1 +1,0 @@
-Python-based policy engines in `platform-gateway` and `tool-gateway`; SHA-256 content hashes over YAML bundles; JSON Schema validation (`policy-rule.schema.json` v2→v3); scenario-driven testing via `policy-scenarios.yaml` consumed by a shared script under `shared/shared-contracts/scripts/`.

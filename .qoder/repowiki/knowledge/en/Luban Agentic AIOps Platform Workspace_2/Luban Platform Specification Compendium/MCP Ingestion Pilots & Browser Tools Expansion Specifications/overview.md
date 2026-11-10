@@ -1,1 +1,0 @@
-Three delivered product specifications defining read-tier MCP ingestion pilots (ServiceNow, Ansible) and an expansion of the browser web-check tool surface with a reorganized samples layout.

@@ -1,1 +1,0 @@
-AgentScope 2.0.6 kernel (pin noted in SPEC-017 risks), `kubernetes-client/python` for the read-only K8s connector, synchronous `psycopg[binary]` for `AgentStateStore`, Pydantic-based JSON Schema contracts in `shared/shared-contracts/schemas/`, and Kustomize overlays under `dev-k8s/base/` for dev deployment.

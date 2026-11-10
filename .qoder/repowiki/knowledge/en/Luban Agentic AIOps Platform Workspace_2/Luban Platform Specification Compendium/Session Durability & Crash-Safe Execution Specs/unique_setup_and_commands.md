@@ -1,1 +1,0 @@
-SPEC-063 delivery gate requires a full root `make verify` campaign (V7 campaign 791 passed, exit 0) and separately authorized isolated S6 acceptance against a dedicated environment; historical V1/V5/V6 runs were retained as honest history after Docker daemon wedges rather than relabeled.

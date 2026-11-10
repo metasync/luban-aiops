@@ -5,4 +5,7 @@ scope:
     - docs/specs/
 source_files: []
 depends_on: []
-related_to: []
+related_to:
+    - path: docs/architecture_decision_records
+    - path: docs/platform_documentation
+    - path: docs/user_and_operator_guides

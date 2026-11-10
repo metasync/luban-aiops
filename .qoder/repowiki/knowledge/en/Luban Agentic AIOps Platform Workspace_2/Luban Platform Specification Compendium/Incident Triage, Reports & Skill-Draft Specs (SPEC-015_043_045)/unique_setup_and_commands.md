@@ -1,1 +1,0 @@
-Each spec directory ships its own `make deploy` smoke path referenced in the living-state docs: `shared/platform-ops/e2e/incident-demo.sh` runs after `make deploy` to assert deterministic outcomes (webhook intake, fingerprint/severity, resolved handling, query visibility, tool access); `make verify` gates delivery across all product suites and overlays.

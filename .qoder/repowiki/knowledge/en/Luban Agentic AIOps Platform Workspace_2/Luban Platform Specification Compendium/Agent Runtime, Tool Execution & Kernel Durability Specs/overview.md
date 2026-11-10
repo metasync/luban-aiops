@@ -1,1 +1,0 @@
-Architectural specifications defining the platform-owned agent-service contract, the read-only tool execution framework bridging AgentScope to Kubernetes, and kernel configuration plus conversation durability.

@@ -1,6 +1,0 @@
-- Each capability is specified as a self-contained directory under `docs/specs/SPEC-NNN-*` holding a triad of `spec.md`, `plan.md`, and `tasks.md`, with status metadata (owner, created, approved, delivered, release slice) at the top of each spec.
-- New tool surfaces reuse the existing `BaseTool`/`ToolRegistry`/`ToolResult` contract and the `tools:invoke` / `tools:mutate` policy actions rather than introducing new policy actions or audit event types.
-- Model-supplied URLs are confined by a server-side origin allowlist that is deny-by-default, rejects disallowed schemes/userinfo/loopback/multicast destinations, and halts redirects that leave the allowlist — enforced before any socket opens.
-- Credentials enter only by reference through named sets resolved from a secret-mounted JSON file via `CredentialSetStore`; values never appear in results, evidence, logs, or audit events, and unknown set names return structured errors.
-- Mutating operations park exactly one confirmation card through the existing HITL bridge — flow-level for browser interactions, action-level for non-browser writes like `http.post` — with a curated change-request formatter rendering the target and field names.
-- Samples and targets are deployed out-of-band under `samples/` and never referenced from `dev-k8s/base`, keeping the base overlay free of sample origins per SPEC-050 R-11.

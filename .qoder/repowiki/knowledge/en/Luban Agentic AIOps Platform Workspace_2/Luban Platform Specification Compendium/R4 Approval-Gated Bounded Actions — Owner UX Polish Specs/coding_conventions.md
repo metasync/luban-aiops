@@ -1,4 +1,0 @@
-- Each spec follows a fixed section order — Status, Summary, Motivation, Requirements (numbered R-N with acceptance criteria), Non-Goals, Impact, Open Questions, Changelog — making them machine-parseable and review-ready.
-- Requirements are written as testable acceptance criteria tied to concrete implementation artifacts (hooks like `usePendingDecisionPoll`, components like `ChatView`, helpers like `detectArrivalSpan`, CSS classes like `.turn-group.turn-arrived`).
-- Backward compatibility is expressed by marking schema/model changes as additive (e.g. nullable `turn_index` with legacy fallback to newest-turn anchoring) and explicitly listing affected contracts in the Impact section.
-- Delivery status is tracked inline in the spec's Changelog with release-train versions (0.14.0 → 0.14.1 patch → 0.15.0 → 0.16.0) and test counts, tying each requirement to a shipped train.

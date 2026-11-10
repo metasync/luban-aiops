@@ -1,1 +1,0 @@
-Three delivered platform-specs documenting the extraction of the portal edge into `platform-gateway`, alignment of agent-platform's kernel to AgentScope middleware, and moving approved mutating execution into an isolated `execution-runtime` worker.

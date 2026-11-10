@@ -1,1 +1,0 @@
-Elastic client for the observability connector; JSON Schema contracts under `shared/shared-contracts/schemas/` (agent-stream-event, audit-event); dual-backend persistence following SPEC-017 pattern; fire-and-forget daemon-thread audit emitter with 2.0s timeout reused across services.

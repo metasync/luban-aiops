@@ -1,5 +1,0 @@
-- Each SPEC directory ships a triple of `spec.md` / `plan.md` / `tasks.md`, with `spec.md` drafted first carrying Open Questions that the operator ratifies before the plan/tasks become binding.
-- Every requirement block ends with explicit acceptance criteria written as testable assertions (unit/contract/scenario/guard tests), never as prose-only goals.
-- Phased features ship as an 'inert substrate': new axes are additive and byte-identical when unexercised (e.g. `agent_role=None`, absent `agent_roles_any`), enforced by reachability guards asserting no deployed route threads the new parameter.
-- Schema evolution follows the additive revision pattern established by SPEC-030: bump the schema version (v1→v2, v2→v3) and keep existing rules valid against the new version, rather than mutating the shape in place.
-- Cross-SPEC references cite the exact prior spec number and section (e.g. 'extends SPEC-004', 'ADR-0017 Decision 4') to anchor decisions instead of restating them.

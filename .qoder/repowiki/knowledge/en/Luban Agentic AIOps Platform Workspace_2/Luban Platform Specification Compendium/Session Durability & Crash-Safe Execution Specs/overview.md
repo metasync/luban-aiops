@@ -1,1 +1,0 @@
-Specification documents defining the evolution of agent-platform session storage from in-memory through Redis to Postgres, and the crash-safe execution ledger that prevents duplicate approved mutations.

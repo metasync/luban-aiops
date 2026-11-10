@@ -1,5 +1,0 @@
-- Each spec follows the three-file layout of `plan.md` (implementation plan), `spec.md` (requirements + acceptance criteria + changelog), and `tasks.md` (testable task list).
-- Requirements are numbered R-1..R-N under `###` headings, each followed by an `Acceptance criteria:` block listing testable outcomes rather than prose descriptions.
-- Cross-product contract changes (schemas, policies, audit events) are declared explicitly in an `Impact` section naming every touched package and file path before implementation begins.
-- Specs track lifecycle via a `## Changelog` section recording draft → approved → delivered transitions and any requirement text changes, preserving the original criterion text when superseded by later specs.
-- Non-goals are enumerated under a dedicated `## Non-Goals` section to bound scope, especially around trust-model surfaces (no new policy actions, no persistence of drafts, no semantic retrieval).

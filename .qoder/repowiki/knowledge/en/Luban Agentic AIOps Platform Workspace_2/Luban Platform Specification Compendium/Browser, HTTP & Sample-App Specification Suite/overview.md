@@ -1,1 +1,0 @@
-Three delivered SPEC documents defining the browser-based web-check connector, the bounded http.get/http.post tools, and the acme-admin sample application with its four single-target skills.

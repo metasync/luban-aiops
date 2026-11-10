@@ -1,1 +1,0 @@
-Three delivered product specs (SPEC-052/053/055) defining the operator portal skill content viewer, the optional `flow_intent` browser confirmation line, and the session-to-skill graduation pipeline.

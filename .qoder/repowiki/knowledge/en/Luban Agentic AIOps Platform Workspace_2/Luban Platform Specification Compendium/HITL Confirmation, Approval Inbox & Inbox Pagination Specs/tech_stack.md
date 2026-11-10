@@ -1,1 +1,0 @@
-Postgres-backed durable store for confirmation lifecycle records (same posture as SPEC-016 session store); SSE-based agent-stream-event contract bumped from v3→v4→v5; antd pager for the History tab; agentscope 2.0.6 kernel events (`RequireUserConfirmEvent`, `UserConfirmResultEvent`, `UserInterruptEvent`).

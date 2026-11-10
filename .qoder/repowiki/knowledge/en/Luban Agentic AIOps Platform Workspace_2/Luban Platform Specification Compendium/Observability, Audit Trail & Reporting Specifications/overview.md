@@ -1,1 +1,0 @@
-Three approved product specs defining the platform's observability baseline (metrics + tracing), durable audit trail with PostgreSQL store and query API, and read-only audit reporting/export surfaces.

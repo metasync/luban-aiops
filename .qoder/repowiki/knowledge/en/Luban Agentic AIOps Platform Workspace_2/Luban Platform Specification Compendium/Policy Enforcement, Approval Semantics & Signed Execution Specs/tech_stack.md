@@ -1,1 +1,0 @@
-HMAC-SHA256 signatures over canonical JSON for execution envelopes; PyYAML for policy-bundle loading; JSON Schema v1/v2 contracts in `shared/shared-contracts/schemas/` validated by a shared-contracts validator; Postgres-backed record store (memory backend for tests) mirroring the SPEC-031 confirmation store posture.

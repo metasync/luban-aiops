@@ -1,1 +1,0 @@
-Authoring templates and two delivered specs (SPEC-042 dependency hygiene, SPEC-062 secure password generation/delivery) that govern portal/backend dependency refreshes and CSPRNG-based secret handoff.

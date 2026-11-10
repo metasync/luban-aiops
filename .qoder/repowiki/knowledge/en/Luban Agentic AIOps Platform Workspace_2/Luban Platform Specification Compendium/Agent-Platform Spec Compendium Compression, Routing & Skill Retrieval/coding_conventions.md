@@ -1,6 +1,0 @@
-- Every spec file opens with a standardized metadata block (`status`, `owner`, `created`, `approved`, `delivered`, `release slice`, `related ADRs`, `lineage`) that tracks the artifact through draft → approved → delivered lifecycle.
-- Requirements are numbered `R-x` with explicit acceptance criteria, and conditional requirements bind only when a prior requirement's verdict returns `adopt` (e.g. R-2/R-3 of SPEC-064 depend on R-1's gate evaluation).
-- Open Questions are resolved inline under an `## Open Questions` section, recording the decision, evidence, and any amendment notes rather than leaving them unresolved.
-- Delivery is recorded in a `## Changelog` section with dated entries tracking status flips, implementation milestones, and the final version bump/release-note linkage.
-- New operator-facing capabilities are paired with additive contract changes and a new policy action mirrored across all four bundle files (`policy-default.yaml` variants), keeping deny-by-default semantics intact.
-- Cross-backend correctness is enforced by a parity harness asserting identical ordering and scores between in-memory and Postgres implementations, rather than relying on single-backend tests.

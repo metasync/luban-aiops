@@ -1,1 +1,0 @@
-Authoritative design-spec repository for the Luban agentic AIOps platform, organizing every product feature as a numbered SPEC with plan/spec/tasks triplets.

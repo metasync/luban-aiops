@@ -1,1 +1,0 @@
-Playwright (Python) driving a chromium-headless-shell sidecar over Chrome DevTools Protocol for the browser connector; FastAPI + uv for the `acme-admin` sample app; kustomize overlays for deployment; all specs target the Luban AIOps platform's existing `tool-gateway` connector framework and agent-platform HITL bridge rather than introducing new frameworks.

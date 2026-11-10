@@ -1,6 +1,0 @@
-- Every spec ships a triple-file scaffold (`spec.md` + `plan.md` + `tasks.md`) authored together, with `plan.md`/`tasks.md` banner-marked provisional until operator approval lifts them.
-- Requirements are numbered R-N with explicit acceptance criteria per requirement, and Open Questions are resolved inline with dates and operator attribution before moving to `approved`.
-- Read-tier external-system tools are deny-by-default at the gateway admission allowlist (connector config, not policy bundle) and resolve to `risk_level="read"` mapping to `tools:invoke` alone, never touching the action-based policy bundle.
-- Fail-closed semantics are enforced uniformly: upstream timeouts/unreachables map to a failed outcome with `failure_class="target_unavailable"` and are never surfaced as fabricated successes.
-- Secret redaction invariants (no credential/token/client_secret in audit or logs) are asserted alongside each requirement rather than delegated to a shared helper.
-- Live-PDI validation is kept out of CI: a gated script with `LIVE_TARGET=true` requires explicit environment literals and implies `STRICT_LIVE=true`, while default runs assert against in-cluster mocks.

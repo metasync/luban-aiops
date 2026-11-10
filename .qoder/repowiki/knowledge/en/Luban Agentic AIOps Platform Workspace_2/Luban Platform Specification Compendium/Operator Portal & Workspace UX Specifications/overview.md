@@ -1,1 +1,0 @@
-Three delivered product specs covering the operator portal's documentation, transparency/navigation features, and its rebuild onto React + Ant Design X with a multi-session workspace.

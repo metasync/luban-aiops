@@ -1,4 +1,0 @@
-- Specs follow a fixed top-level structure: Status, Summary, Motivation, Requirements (R-N blocks with Acceptance criteria), Non-Goals, Impact, Open Questions, Delivery Status, Changelog.
-- External interfaces are defined as JSON Schema files under `shared/shared-contracts/schemas/` and referenced by name (e.g. `agent-chat-request`, `tool-invocation.schema.json`) rather than inlined in code comments.
-- Configuration knobs are exposed as environment variables mapped into typed `RuntimeSettings` fields with explicit defaults matching upstream AgentScope behavior, so unset deployments preserve existing semantics.
-- Persistence backends are expressed as a protocol with multiple implementations selected by an env var (e.g. `AGENT_STATE_STORE_BACKEND=memory|postgres`), defaulting to in-memory for fail-open availability.

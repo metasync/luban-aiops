@@ -1,4 +1,0 @@
-- Specs follow a fixed triad of `spec.md` (requirements + acceptance criteria + non-goals + impact + open questions + changelog), `plan.md`, and `tasks.md` under one directory per feature number.
-- Requirements are numbered `R-N:` with verifiable acceptance criteria, and open design decisions are captured as `Q-N:` items resolved inline during draft review.
-- New capabilities are introduced as additive extensions to existing surfaces (catalog, middleware chain, audit payload fields) rather than new event types or contract shapes, keeping the v2 API and stream schema byte-stable.
-- Operator-facing configuration uses environment-variable knobs with a provider-specific prefix (`OPENAI_*`, `DEEPSEEK_*`, `LUBAN_*`, `AGENTSCOPE_MODEL_ROUTER_*`) parsed alongside the existing `AGENTSCOPE_*` settings.

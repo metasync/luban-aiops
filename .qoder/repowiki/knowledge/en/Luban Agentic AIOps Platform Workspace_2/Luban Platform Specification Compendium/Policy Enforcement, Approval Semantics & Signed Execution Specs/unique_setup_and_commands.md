@@ -1,1 +1,0 @@
-`make sync-policy` propagates the default bundle to every gateway overlay; `make validate-policy` runs the schema validator; deploy scripts invoke `sync-execution-signing-secret.sh` to provision `AGENT_EXECUTION_SIGNING_KEY`, skippable in CI via `SKIP_EXECUTION_SIGNING_SECRET=true` matching the existing `SKIP_*_SECRETS` pattern.

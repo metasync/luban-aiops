@@ -1,1 +1,0 @@
-Spec-driven development artifacts for the Luban Agentic AIOps Platform; references agentscope 2.0.8, PostgreSQL 16 GIN expression indexes (`idx_skills_search_v2`), and the platform's v2 REST contract plus YAML policy bundles.

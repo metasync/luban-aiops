@@ -1,1 +1,0 @@
-Specification documents for the platform's inbound service-to-service token delegation and the tool-gateway's outbound execution-credential substrate plus user-delegated OAuth flow.

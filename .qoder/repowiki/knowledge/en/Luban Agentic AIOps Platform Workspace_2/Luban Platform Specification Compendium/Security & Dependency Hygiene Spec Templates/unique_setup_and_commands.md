@@ -1,1 +1,0 @@
-Specs are authored against the `templates/spec.md` skeleton and tracked through the `make verify` / `make sync-policy` gates described inside the specs (e.g. `validate-password-policy`, `validate-secret-vocabulary`) rather than via a dedicated command in this directory.

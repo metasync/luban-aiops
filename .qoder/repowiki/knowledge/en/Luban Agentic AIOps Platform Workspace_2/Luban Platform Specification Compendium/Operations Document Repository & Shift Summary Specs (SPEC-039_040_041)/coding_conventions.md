@@ -1,5 +1,0 @@
-- Specs use a fixed front-matter status block (status, owner, created, approved, delivered, release slice, related ADRs) plus numbered Requirements with explicit Acceptance Criteria.
-- Digest evolution is additive and schema-compatible: new top-level keys (handover, summary) are added to the open `digest` object with description-only notes in `operation-document.schema.json`, so pre-existing stored documents degrade gracefully.
-- Cross-owner reads follow an envelope-only listing posture — lists expose metadata only, while full content (digest/prose) is served exclusively through the audited single fetch, with `document_read` audit events emitted only for cross-owner access.
-- Foreign-session coverage is consistently metadata-only: titles, transcript excerpts, evidence payloads, and record ids are never exposed outside the owner's own sessions, gated additionally by `approvals:list` where applicable.
-- LLM-generated prose is always fail-soft: generation failure yields `prose_status=failed` and leaves the deterministic digest as the complete artifact of record, never surfacing model output outside the labeled prose section.

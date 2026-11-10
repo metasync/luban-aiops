@@ -1,1 +1,0 @@
-Markdown-based Spec-Driven Development artifacts following the project's SPEC/ADR/plan/tasks convention; additive JSON schema changes across `shared/shared-contracts/schemas/` (agent-stream-event, agent-session, execution-request, skill) and YAML policy bundle edits (`policy-default.yaml`).

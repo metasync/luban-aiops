@@ -18,6 +18,11 @@
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
 - [spec.md](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md)
 - [plan.md](file://docs/specs/SPEC-075-multi-agent-audit-attribution/plan.md)
+- [orchestration.py](file://products/agent-platform/src/agent_service/services/orchestration.py)
+- [runtime_kernel.py](file://products/agent-platform/src/agent_service/runtime_kernel.py)
+- [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [spec.md](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md)
+- [plan.md](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md)
 </cite>
 
 ## Update Summary
@@ -26,6 +31,9 @@
 - Updated Audit Access section to include agent_role filtering capabilities
 - Added comprehensive documentation for the agent-role provenance tracking alongside existing subject/username and delegation_mode fields
 - Expanded troubleshooting guidance to cover agent-role attribution failures and audit trail verification
+- **New**: Added Bounded Autonomous Diagnosis section documenting SPEC-076 executor-scoped staging mechanism and diagnose-before-act ceiling
+- **Updated**: Enhanced Executor role documentation with stage_remediation capability and HITL confirmation integration
+- **Updated**: Added orchestration budget configuration (AGENT_ORCHESTRATION_MAX_STEPS) and bounded read-only loop semantics
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -202,6 +210,67 @@ H --> S["Distinct human approver"]
 - [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
 - [SPEC-073 spec.md:114-204](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L114-L204)
 - [SPEC-074 spec.md:146-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L146-L163)
+
+### Bounded Autonomous Diagnosis (SPEC-076)
+
+**Phase 5 of the multi-agent program** introduces the first producer that binds the agent-roles SPEC-073, SPEC-074, and SPEC-075 each landed inert. The bounded read-only orchestration loop creates a platform-owned orchestrator that decomposes diagnosis goals into bounded fan-outs of read-only diagnostician sub-agents over the same governed gateway.
+
+#### Executor-Scoped Staging Mechanism
+
+The executor role has a specialized staging capability through `stage_remediation()`:
+
+- **Staging vs. Dispatching**: The executor stages proposed remediations onto existing HITL confirmation cards but never dispatches them autonomously
+- **Diagnose-Before-Act Ceiling**: Any mutation proposed by the diagnosis must park on the existing HITL + signed-dispatch path with a distinct human approver
+- **Process-Local Context**: The executor role is bound only for the staging turn, not persisted across sessions
+- **Self-Approval Block**: The executor cannot self-approve its own staged mutations
+
+```mermaid
+sequenceDiagram
+participant Orchestrator as "Orchestrator"
+participant Diagnostician as "Diagnostician"
+participant Executor as "Executor"
+participant Human as "Human Approver"
+participant Worker as "Signed Worker"
+Orchestrator->>Diagnostician : Fan-out read-only turns
+Diagnostician-->>Orchestrator : Member summaries
+Orchestrator->>Orchestrator : Synthesize diagnosis
+Orchestrator->>Executor : Stage remediation proposal
+Executor->>Human : Park HITL confirmation card
+Human->>Worker : Approve & authorize execution
+Worker-->>Human : Execute mutation
+```
+
+**Diagram sources**
+- [orchestration.py:179-274](file://products/agent-platform/src/agent_service/services/orchestration.py#L179-L274)
+- [orchestration.py:335-385](file://products/agent-platform/src/agent_service/services/orchestration.py#L335-L385)
+- [runtime_kernel.py:1903-1909](file://products/agent-platform/src/agent_service/runtime_kernel.py#L1903-L1909)
+
+#### Orchestration Budget and Safety Controls
+
+The bounded orchestration loop includes critical safety mechanisms:
+
+- **Step Budget**: `AGENT_ORCHESTRATION_MAX_STEPS` (default 20) bounds total member read steps per orchestration
+- **Fail-Closed Behavior**: On budget exhaustion, the loop stops and synthesizes a best-effort partial diagnosis
+- **Two-Level Bounds**: Composed with per-turn `AGENTSCOPE_MAX_ITERS` for granular control
+- **Read-Only Admission**: The loop admits only where every step is read-only; mutations are structurally impossible inside the loop
+
+#### Configuration
+
+| Setting | Default | Description |
+|---|---:|---|
+| `AGENT_ORCHESTRATION_MAX_STEPS` | 20 | Total member read steps per bounded autonomous diagnosis |
+| `AGENTSCOPE_MAX_ITERS` | Configured | Per-member turn iteration limit |
+
+**Validation**: Non-positive budget values fail startup rather than licensing unbounded fan-out.
+
+**Section sources**
+- [orchestration.py:1-44](file://products/agent-platform/src/agent_service/services/orchestration.py#L1-L44)
+- [orchestration.py:179-274](file://products/agent-platform/src/agent_service/services/orchestration.py#L179-L274)
+- [orchestration.py:335-385](file://products/agent-platform/src/agent_service/services/orchestration.py#L335-L385)
+- [runtime_settings.py:372-382](file://products/agent-platform/src/agent_service/runtime_settings.py#L372-L382)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
+- [spec.md:76-92](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L76-L92)
+- [spec.md:210-241](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L210-L241)
 
 ### Agent-Role Attribution in the Audit Trail (SPEC-075, phase 4)
 
@@ -426,6 +495,7 @@ Audit --> Attribution["Agent-Role Attribution"]
 - Avoid frequent bundle reloads; changes take effect on next load cycle.
 - Agent-role axis is optional and inert by default — no performance impact when `agent_role=None`.
 - Agent-role attribution in audit trail is additive and inert — no performance impact when omitted.
+- **Bounded orchestration**: The `AGENT_ORCHESTRATION_MAX_STEPS` budget prevents unbounded fan-out in autonomous diagnosis scenarios.
 
 [No sources needed since this section provides general guidance]
 
@@ -439,19 +509,24 @@ Common issues and resolutions:
 - **Agent-role authorization failures**: ensure the agent-role vocabulary is correctly scoped; remember that agent-roles narrow authority and never widen it beyond human token permissions.
 - **Agent-role attribution missing in audit trail**: verify that the agent-platform emitter seam is properly wired; remember that `agent_role` is omitted when absent (not null) and only appears when a producer binds a role (phase 5+).
 - **Audit trail verification issues**: use the `?agent_role=` query parameter to filter audit events by agent role; verify the attribution triple is complete for multi-agent scenarios.
+- **Bounded diagnosis budget exceeded**: check `AGENT_ORCHESTRATION_MAX_STEPS` configuration; the loop fails closed to a partial diagnosis when the budget is exhausted.
+- **Executor staging not working**: verify the profile declares a `remediation_shape`; the executor staging mechanism requires a valid remediation shape to propose.
 
-**Updated** Added troubleshooting guidance for the new agent-role axis, agent-role attribution, and audit trail verification.
+**Updated** Added troubleshooting guidance for the new agent-role axis, agent-role attribution, audit trail verification, bounded diagnosis budget, and executor staging mechanism.
 
 **Section sources**
 - [user-and-role-administration.md:118-137](file://docs/guides/user-and-role-administration.md#L118-L137)
 - [policy_engine.py:374-387](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L374-L387)
 - [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
 - [spec.md:141-159](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L141-L159)
+- [orchestration.py:365-371](file://products/agent-platform/src/agent_service/services/orchestration.py#L365-L371)
 
 ## Conclusion
 The platform's authorization model combines a fixed human role vocabulary, a closed agent-role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime. The addition of runtime:flags provides operational teams with safe visibility into platform configuration without exposing sensitive values. The agent-role axis adds a powerful new dimension for controlling sub-agent authority while preserving the single-token identity model.
 
 The completion of the attribution triple through SPEC-075 ensures that every audited event carries complete provenance information: which role acted (`agent_role`), on whose behalf (`subject`/`username`), and under which delegation (`delegation_mode`). This enables comprehensive audit trails for multi-agent scenarios while maintaining backward compatibility and byte-identical behavior for existing single-agent paths.
+
+**Phase 5 of the multi-agent program** (SPEC-076) delivers the bounded read-only orchestration loop that first binds the agent-roles, introducing the executor-scoped staging mechanism for proposed remediations and maintaining the diagnose-before-act ceiling through the read-only orchestration loop. The bounded autonomous diagnosis capability provides a controlled relaxation of composition authority while preserving all existing safety invariants.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -507,3 +582,21 @@ The `agent_role` field is optional and omitted when absent, ensuring backward co
 - [audit-event.schema.json:62-83](file://shared/shared-contracts/schemas/audit-event.schema.json#L62-L83)
 - [spec.md:63-85](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L63-L85)
 - [plan.md:12-24](file://docs/specs/SPEC-075-multi-agent-audit-attribution/plan.md#L12-L24)
+
+### Bounded Autonomous Diagnosis Configuration
+The bounded autonomous diagnosis capability introduces new configuration options:
+
+| Setting | Default | Description |
+|---|---:|---|
+| `AGENT_ORCHESTRATION_MAX_STEPS` | 20 | Total member read steps per bounded autonomous diagnosis |
+| `AGENTSCOPE_MAX_ITERS` | Configured | Per-member turn iteration limit |
+
+**Validation Rules:**
+- `AGENT_ORCHESTRATION_MAX_STEPS` must be >= 1 (fails startup otherwise)
+- Budget exhaustion results in fail-closed partial diagnosis
+- Two-level bounds: per-member turn × total steps
+
+**Section sources**
+- [runtime_settings.py:372-382](file://products/agent-platform/src/agent_service/runtime_settings.py#L372-L382)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
+- [orchestration.py:208-216](file://products/agent-platform/src/agent_service/services/orchestration.py#L208-L216)

@@ -1,1 +1,0 @@
-Specification documents defining the Release 1 security hardening across gateway authentication, identity trust via JWT/JWKS, and pre-production redaction plus workload-identity service tokens.

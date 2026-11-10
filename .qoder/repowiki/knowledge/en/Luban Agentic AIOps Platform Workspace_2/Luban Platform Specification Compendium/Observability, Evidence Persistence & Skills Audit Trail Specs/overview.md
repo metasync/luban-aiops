@@ -1,1 +1,0 @@
-Specification documents for three delivered features extending the platform's observability surface: Elastic tool traces with evidence panels, durable session transcript evidence, and skills-hub usage audit events.

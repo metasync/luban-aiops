@@ -1,4 +1,0 @@
-- Each spec follows the plan/spec/tasks triple layout, with status metadata (status, owner, created, release slice, related ADRs) at the top of `spec.md`.
-- Requirements are numbered R-N with explicit acceptance criteria per requirement, and Non-Goals sections enumerate out-of-scope items.
-- Impact sections enumerate products touched, contracts touched, identity/policy/audit safety impact, and living-state docs to update on delivery.
-- New portal views preserve server-side role gating and deny-by-default semantics, with client-side visibility as convenience only.

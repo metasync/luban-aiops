@@ -1,4 +1,0 @@
-- Each SPEC is organized as a triple of `plan.md` / `spec.md` / `tasks.md`, with `spec.md` carrying Status, Summary, Motivation, Requirements (R-N with Acceptance criteria), Non-Goals, Impact, Open Questions, and Changelog sections.
-- Requirements are numbered R-N and paired with concrete, testable acceptance criteria rather than narrative descriptions, enabling direct mapping to unit/contract tests.
-- Spec status follows a fixed lifecycle (draft → approved → in-progress → delivered) recorded in both the Status block and the Changelog, with release-slice attribution (e.g., `Release 1`).
-- Impact sections enumerate affected products, contracts, trust-model changes, and living-state docs that need updating on delivery, keeping cross-product coupling explicit.

@@ -1,1 +1,0 @@
-Python FastAPI for the incident-service product described in the specs; JSON Schema contracts in `shared/shared-contracts/schemas/`; Pydantic models mirroring schemas per the SPEC-015 contract-parity convention; dev-k8s overlays for deployment.

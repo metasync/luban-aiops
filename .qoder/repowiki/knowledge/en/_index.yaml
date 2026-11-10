@@ -3,15 +3,15 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-11-08T02:16:49Z"
+exported_at: "2026-11-10T13:38:29Z"
 modules:
     "":
-        dir_name: Luban Agentic AIOps Platform Workspace_2
+        dir_name: Luban Agentic AIOps Platform Workspace
         title: Luban Agentic AIOps Platform Workspace
         scope: []
         source_files: []
         children:
-            - specs
+            - docs
         depends_on: []
         related_to: []
     docs:
@@ -36,7 +36,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: docs/formal_specs
     docs/formal_specs:
         dir_name: Feature Spec Index & Spec-Driven Development Workflow
         title: Feature Spec Index & Spec-Driven Development Workflow
@@ -45,7 +46,10 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: docs/architecture_decision_records
+            - path: docs/platform_documentation
+            - path: docs/user_and_operator_guides
     docs/platform_documentation:
         dir_name: Agentic AIOps Platform Design & Release Notes
         title: Agentic AIOps Platform Design & Release Notes
@@ -54,7 +58,8 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: docs/formal_specs
     docs/user_and_operator_guides:
         dir_name: User & Operator Guides
         title: User & Operator Guides
@@ -63,325 +68,13 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: docs/formal_specs
     docs/workspace_explorations:
         dir_name: Workspace Model & Product Boundary Documentation
         title: Workspace Model & Product Boundary Documentation
         scope:
             - docs/workspace/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs:
-        dir_name: Luban Platform Specification Compendium
-        title: Luban Platform Specification Compendium
-        scope:
-            - docs/specs/
-        source_files: []
-        children:
-            - specs/acme_admin_samples_and_browser_flow_polish
-            - specs/action_approval_and_change_request_card
-            - specs/agent_runtime_and_execution
-            - specs/agentscope_pipeline_and_model_router_enhancements
-            - specs/browser_http_and_external_tools
-            - specs/decision_sync_and_owner_side_polish
-            - specs/evidence_persistence_and_transcripts
-            - specs/hitl_confirmation_and_inbox_flow
-            - specs/identity_trust_and_credentials
-            - specs/incident_triage_and_collaboration
-            - specs/mcp_ingestion_pilots_and_integrations
-            - specs/model_routing_and_llm_providers
-            - specs/multi_session_and_multi_model_features
-            - specs/observability_audit_and_evidence
-            - specs/operations_document_repository
-            - specs/platform_security_hardening
-            - specs/policy_approval_and_governance
-            - specs/portal_operator_and_workspace_ux
-            - specs/role_policy_and_feature_flags
-            - specs/security_utilities_and_dependency_hygiene
-            - specs/service_mesh_and_gateway_extraction
-            - specs/sessions_and_durable_state
-            - specs/skill_intent_composition_and_graduation
-            - specs/skills_framework_and_authoring
-        depends_on: []
-        related_to: []
-    specs/acme_admin_samples_and_browser_flow_polish:
-        dir_name: Browser Flow HITL Gate, Web-Checks Sample Rebase & browser-check-target Retireme
-        title: Browser Flow HITL Gate, Web-Checks Sample Rebase & browser-check-target Retirement Specs
-        scope:
-            - docs/specs/SPEC-060-rebase-web-checks-samples-onto-acme-admin/
-            - docs/specs/SPEC-061-retire-browser-check-target/
-            - docs/specs/SPEC-051-browser-flow-hitl-gate-enforcement/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/browser_http_and_external_tools
-    specs/action_approval_and_change_request_card:
-        dir_name: Approval, Change-Request Cards & Skill Composition Specs
-        title: Approval, Change-Request Cards & Skill Composition Specs
-        scope:
-            - docs/specs/SPEC-021-bounded-mutating-actions/
-            - docs/specs/SPEC-054-action-approval-and-change-request-card/
-            - docs/specs/SPEC-057-skill-composition-runbooks/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/agent_runtime_and_execution:
-        dir_name: Agent Runtime, Tool Execution & Kernel Durability Specs
-        title: Agent Runtime, Tool Execution & Kernel Durability Specs
-        scope:
-            - docs/specs/SPEC-002-agent-service-contract/
-            - docs/specs/SPEC-007-tool-execution-framework/
-            - docs/specs/SPEC-017-agent-kernel-utilization-and-durability/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/sessions_and_durable_state
-    specs/agentscope_pipeline_and_model_router_enhancements:
-        dir_name: Agent-Platform Spec Compendium Compression, Routing & Skill Retrieval
-        title: 'Agent-Platform Spec Compendium: Compression, Routing & Skill Retrieval'
-        scope:
-            - docs/specs/SPEC-064-agentscope-compression-and-goal-pipeline/
-            - docs/specs/SPEC-072-auto-routing-and-platform-feature-flags/
-            - docs/specs/SPEC-066-skill-retrieval-ranking-fidelity/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/browser_http_and_external_tools:
-        dir_name: Browser, HTTP & Sample-App Specification Suite
-        title: Browser, HTTP & Sample-App Specification Suite
-        scope:
-            - docs/specs/SPEC-049-browser-web-check-tools/
-            - docs/specs/SPEC-058-http-service-check-tools/
-            - docs/specs/SPEC-059-acme-admin-sample-app-and-skill-suite/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/acme_admin_samples_and_browser_flow_polish
-            - path: specs/mcp_ingestion_pilots_and_integrations
-    specs/decision_sync_and_owner_side_polish:
-        dir_name: R4 Approval-Gated Bounded Actions — Owner UX Polish Specs
-        title: R4 Approval-Gated Bounded Actions — Owner UX Polish Specs
-        scope:
-            - docs/specs/SPEC-032-owner-side-live-decision-sync/
-            - docs/specs/SPEC-033-confirmation-card-turn-anchoring/
-            - docs/specs/SPEC-034-approval-owner-ux-polish/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/evidence_persistence_and_transcripts:
-        dir_name: Observability, Evidence Persistence & Skills Audit Trail Specs
-        title: Observability, Evidence Persistence & Skills Audit Trail Specs
-        scope:
-            - docs/specs/SPEC-011-observability-and-evidence-panels/
-            - docs/specs/SPEC-025-evidence-persistence-in-transcripts/
-            - docs/specs/SPEC-029-skills-usage-audit-trail/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/hitl_confirmation_and_inbox_flow:
-        dir_name: HITL Confirmation, Approval Inbox & Inbox Pagination Specs
-        title: HITL Confirmation, Approval Inbox & Inbox Pagination Specs
-        scope:
-            - docs/specs/SPEC-020-hitl-confirmation-bridging/
-            - docs/specs/SPEC-031-approval-inbox-persistent-confirmation/
-            - docs/specs/SPEC-036-inbox-pagination-and-seeded-reveal/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/policy_approval_and_governance
-            - path: specs/sessions_and_durable_state
-    specs/identity_trust_and_credentials:
-        dir_name: Identity, Trust & Outbound Credential Specs (SPEC-008 _ SPEC-068 _ SPEC-070)
-        title: Identity, Trust & Outbound Credential Specs (SPEC-008 / SPEC-068 / SPEC-070)
-        scope:
-            - docs/specs/SPEC-008-service-to-service-identity/
-            - docs/specs/SPEC-068-outbound-execution-credential-schemes/
-            - docs/specs/SPEC-070-outbound-user-delegated-identity/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/mcp_ingestion_pilots_and_integrations
-            - path: specs/policy_approval_and_governance
-    specs/incident_triage_and_collaboration:
-        dir_name: Incident Triage, Reports & Skill-Draft Specs (SPEC-015_043_045)
-        title: Incident Triage, Reports & Skill-Draft Specs (SPEC-015/043/045)
-        scope:
-            - docs/specs/SPEC-015-incident-triage-and-collaboration/
-            - docs/specs/SPEC-043-incident-report-document-type/
-            - docs/specs/SPEC-045-incident-skill-draft-and-preview/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/mcp_ingestion_pilots_and_integrations:
-        dir_name: MCP Ingestion Pilots & Browser Tools Expansion Specifications
-        title: MCP Ingestion Pilots & Browser Tools Expansion Specifications
-        scope:
-            - docs/specs/SPEC-067-servicenow-mcp-ingestion-pilot/
-            - docs/specs/SPEC-069-ansible-read-tier-mcp-ingestion-pilot/
-            - docs/specs/SPEC-050-browser-tools-expansion-and-samples/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/browser_http_and_external_tools
-            - path: specs/identity_trust_and_credentials
-    specs/model_routing_and_llm_providers:
-        dir_name: LLM Model Routing & Provider Specifications
-        title: LLM Model Routing & Provider Specifications
-        scope:
-            - docs/specs/SPEC-024-runtime-llm-model-switching/
-            - docs/specs/SPEC-028-luban-llm-provider/
-            - docs/specs/SPEC-071-agentscope-model-router/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/multi_session_and_multi_model_features:
-        dir_name: Multi-Session, Multi-Model & Live Discovery Specs (SPEC-022_026_027)
-        title: Multi-Session, Multi-Model & Live Discovery Specs (SPEC-022/026/027)
-        scope:
-            - docs/specs/SPEC-022-multi-session-operator-workspace/
-            - docs/specs/SPEC-026-multi-model-runtime-catalog/
-            - docs/specs/SPEC-027-live-model-discovery/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/observability_audit_and_evidence:
-        dir_name: Observability, Audit Trail & Reporting Specifications
-        title: Observability, Audit Trail & Reporting Specifications
-        scope:
-            - docs/specs/SPEC-005-observability-baseline/
-            - docs/specs/SPEC-013-durable-audit-trail/
-            - docs/specs/SPEC-046-audit-reporting-and-export/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/policy_approval_and_governance
-    specs/operations_document_repository:
-        dir_name: Operations Document Repository & Shift Summary Specs (SPEC-039_040_041)
-        title: Operations Document Repository & Shift Summary Specs (SPEC-039/040/041)
-        scope:
-            - docs/specs/SPEC-039-operations-document-repository/
-            - docs/specs/SPEC-040-shift-summary-handover-narrative/
-            - docs/specs/SPEC-041-documents-readability-and-digest-reference/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/platform_security_hardening:
-        dir_name: Release 1 Security Hardening Specifications
-        title: Release 1 Security Hardening Specifications
-        scope:
-            - docs/specs/SPEC-001-release-1-platform-hardening/
-            - docs/specs/SPEC-003-identity-trust-hardening/
-            - docs/specs/SPEC-009-pre-production-hardening/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/policy_approval_and_governance:
-        dir_name: Policy Enforcement, Approval Semantics & Signed Execution Specs
-        title: Policy Enforcement, Approval Semantics & Signed Execution Specs
-        scope:
-            - docs/specs/SPEC-004-policy-enforcement/
-            - docs/specs/SPEC-030-require-approval-policy-semantics/
-            - docs/specs/SPEC-037-signed-execution-requests/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/hitl_confirmation_and_inbox_flow
-            - path: specs/identity_trust_and_credentials
-            - path: specs/observability_audit_and_evidence
-    specs/portal_operator_and_workspace_ux:
-        dir_name: Operator Portal & Workspace UX Specifications
-        title: Operator Portal & Workspace UX Specifications
-        scope:
-            - docs/specs/SPEC-012-operator-guide/
-            - docs/specs/SPEC-019-portal-transparency-navigation/
-            - docs/specs/SPEC-023-portal-framework-rebuild/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/role_policy_and_feature_flags:
-        dir_name: Policy, Role-Scoped Identity & Feature-Flag Specs (SPEC-048_073_074)
-        title: Policy, Role-Scoped Identity & Feature-Flag Specs (SPEC-048/073/074)
-        scope:
-            - docs/specs/SPEC-073-role-scoped-agent-identity/
-            - docs/specs/SPEC-074-policy-role-axis/
-            - docs/specs/SPEC-048-policy-testing-rollout-controls/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/security_utilities_and_dependency_hygiene:
-        dir_name: Security & Dependency Hygiene Spec Templates
-        title: Security & Dependency Hygiene Spec Templates
-        scope:
-            - docs/specs/SPEC-062-secure-password-generation-and-delivery/
-            - docs/specs/SPEC-042-dependency-hygiene/
-            - docs/specs/templates/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/service_mesh_and_gateway_extraction:
-        dir_name: Platform Gateway, Kernel Middleware & Isolated Execution Worker Specs
-        title: Platform Gateway, Kernel Middleware & Isolated Execution Worker Specs
-        scope:
-            - docs/specs/SPEC-010-platform-gateway-extraction/
-            - docs/specs/SPEC-018-kernel-middleware-alignment/
-            - docs/specs/SPEC-038-isolated-execution-worker/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/sessions_and_durable_state:
-        dir_name: Session Durability & Crash-Safe Execution Specs
-        title: Session Durability & Crash-Safe Execution Specs
-        scope:
-            - docs/specs/SPEC-006-session-durability/
-            - docs/specs/SPEC-016-session-store-postgres-separation/
-            - docs/specs/SPEC-063-crash-safe-execution/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: specs/agent_runtime_and_execution
-            - path: specs/hitl_confirmation_and_inbox_flow
-    specs/skill_intent_composition_and_graduation:
-        dir_name: Skill Content Viewer, Declared Step Intent & Develop-As-You-Go Graduation Specs
-        title: Skill Content Viewer, Declared Step Intent & Develop-As-You-Go Graduation Specs
-        scope:
-            - docs/specs/SPEC-052-skill-content-viewer/
-            - docs/specs/SPEC-053-skill-declared-step-intent/
-            - docs/specs/SPEC-055-develop-as-you-go-skill-graduation/
-        source_files: []
-        children: []
-        depends_on: []
-        related_to: []
-    specs/skills_framework_and_authoring:
-        dir_name: Skills Framework, Authoring Export & Studio Workspace Specs
-        title: Skills Framework, Authoring Export & Studio Workspace Specs
-        scope:
-            - docs/specs/SPEC-014-skills-and-grounded-guidance/
-            - docs/specs/SPEC-044-skill-authoring-export/
-            - docs/specs/SPEC-056-studio-skill-development-workspace/
         source_files: []
         children: []
         depends_on: []

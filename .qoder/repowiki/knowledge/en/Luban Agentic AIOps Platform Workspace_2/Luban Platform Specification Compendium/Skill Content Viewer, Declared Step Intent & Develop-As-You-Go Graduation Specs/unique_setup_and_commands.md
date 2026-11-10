@@ -1,1 +1,0 @@
-Specs follow the ADR-0008 gate: each requirement maps to automated tests recorded in `tasks.md`, and delivery requires `make verify` green across all affected products plus `npm test` / `npm run build` clean in the portal, with version lockstep across `VERSION`, `pyproject.toml`, `metadata.py`, and `uv.lock` files.

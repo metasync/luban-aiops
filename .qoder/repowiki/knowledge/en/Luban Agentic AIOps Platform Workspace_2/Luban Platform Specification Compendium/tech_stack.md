@@ -1,1 +1,0 @@
-Markdown-based spec authoring driven by the shared `templates/` triplet; no runtime technology lives here.

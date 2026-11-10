@@ -1,1 +1,0 @@
-Authoritative design specs for the skills ecosystem: federated skill ingestion (SPEC-014), session-to-skill draft export (SPEC-044), and the Studio workspace that separates development sessions from operational Chat (SPEC-056).

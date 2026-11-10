@@ -1,1 +1,0 @@
-AgentScope 2.0.x runtime kernel with its `ModelRouterMiddleware` / `classifier` package; OpenAI-compatible chat model adapters for public clouds plus a self-hosted `luban` provider targeting Ollama, vLLM, and llama.cpp `llama-server` serving stacks.

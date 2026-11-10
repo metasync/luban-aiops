@@ -1,1 +1,0 @@
-Three delivered product specs defining deny-by-default gateway policy enforcement, tiered approval-policy semantics bridged into HITL confirmation, and tamper-evident signed execution requests with receipts.

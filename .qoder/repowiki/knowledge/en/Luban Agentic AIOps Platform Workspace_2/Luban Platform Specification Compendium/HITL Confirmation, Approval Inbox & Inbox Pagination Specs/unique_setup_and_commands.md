@@ -1,1 +1,0 @@
-Delivery gates referenced by the specs include `make sync-policy` (refreshes packaged policy copies and dev-k8s ConfigMap), `make validate-policy` (policy bundle validation), and `make verify` (runs all product suites including agent-platform bridging tests, platform-gateway proxy/audit tests, overlay renders, and policy/version gates).

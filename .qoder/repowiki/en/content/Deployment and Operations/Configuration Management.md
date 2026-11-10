@@ -19,12 +19,14 @@
 - [skills-hub runtime-config.env](file://shared/platform-ops/gitops/dev-k8s/base/skills-hub/runtime-config.env)
 - [kernel_middleware.py](file://products/agent-platform/src/agent_service/services/kernel_middleware.py)
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
+- [orchestration.py](file://products/agent-platform/src/agent_service/services/orchestration.py)
 - [config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [skills_hub config.py](file://products/skills-hub/src/skills_hub/core/config.py)
 - [skills_hub ingestion.py](file://products/skills-hub/src/skills_hub/services/ingestion.py)
 - [secrets_connector.py](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py)
 - [secret_delivery.py](file://products/tool-gateway/src/tool_gateway/tools/secret_delivery.py)
 - [configuration-reference.md](file://docs/guides/configuration-reference.md)
+- [SPEC-076 spec.md](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md)
 - [runtime-profiles README.md](file://shared/platform-ops/gitops/runtime-profiles/README.md)
 - [select-runtime-profile.sh](file://shared/platform-ops/gitops/select-runtime-profile.sh)
 </cite>
@@ -37,6 +39,7 @@
 - Enhanced Secret Contracts sections with new credential secret types for ansible-mock and servicenow-mock OAuth2 client credentials
 - Corrected Runtime Profiles paragraph to reflect dev-k8s wiring five non-LLM postures: mutating-dev, browser-dev, secrets-dev, ansible-dev, and servicenow-dev
 - Added detailed environment variable documentation for both Ansible and ServiceNow configurations with security implications and validation rules
+- **New**: Added documentation for AGENT_ORCHESTRATION_MAX_STEPS configuration setting (default 20) that validates against positive values at startup, supporting bounded autonomous diagnosis fan-out per SPEC-076
 
 ## Table of Contents
 1. Introduction
@@ -61,6 +64,7 @@ This document explains how the Luban AIOPS platform manages configuration and se
 - **New**: Skill composition configuration including the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` operator-tunable limit for controlling the maximum number of sub-skills in compositions.
 - **Updated**: Secret delivery configuration including the `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` environment variable for portal_copy channel TTL management in gated workflows.
 - **New**: Agent-driven context compression configuration including the `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` environment variable for enabling proactive context summarization with trigger ratio validation.
+- **New**: Bounded autonomous diagnosis configuration including the `AGENT_ORCHESTRATION_MAX_STEPS` environment variable for controlling the maximum number of member steps in bounded diagnosis fan-out operations.
 - **New**: Ansible read-tier ingestion configuration through SPEC-069 with MCP server integration and native fallback support.
 - **New**: ServiceNow read-tier ingestion configuration through SPEC-067 with REST/Table-API connector and OAuth2 client credentials.
 
@@ -78,7 +82,7 @@ A --> G["ServiceNow profile env<br/>servicenow-dev/servicenow.env"]
 B --> H["Platform services read ConfigMap at startup"]
 H --> I["Skills Hub<br/>Composition Limits"]
 H --> J["Tool Gateway<br/>Secret Delivery"]
-H --> K["Agent Platform<br/>Context Compression"]
+H --> K["Agent Platform<br/>Context Compression + Orchestration Budget"]
 H --> L["Tool Gateway<br/>Ansible Ingestion"]
 H --> M["Tool Gateway<br/>ServiceNow Ingestion"]
 ```
@@ -99,6 +103,7 @@ H --> M["Tool Gateway<br/>ServiceNow Ingestion"]
 - **New**: Skills composition configuration: Operator-tunable limits for controlling the maximum number of sub-skills in skill compositions to prevent resource exhaustion and maintain security boundaries.
 - **Updated**: Secret delivery configuration: Portal_copy channel TTL management with configurable hold periods spanning full HITL approval workflows.
 - **New**: Agent-driven context compression: Opt-in feature that enables proactive context summarization before hard compression thresholds are reached.
+- **New**: Bounded autonomous diagnosis: Operator-controlled budget for limiting the total number of member steps in bounded diagnosis fan-out operations to prevent unbounded resource consumption.
 - **New**: Ansible read-tier ingestion: MCP server integration with native fallback support for inventory discovery and read-only operations.
 - **New**: ServiceNow read-tier ingestion: REST/Table-API connector with OAuth2 client credentials for read-only table access.
 
@@ -108,6 +113,7 @@ Key responsibilities:
 - **New**: Composition limits: Configurable bounds on skill composition complexity to balance functionality with resource constraints.
 - **Updated**: Secret delivery TTL: Configurable hold periods for portal_copy channels to support gated workflow scenarios.
 - **New**: Context compression: Opt-in agent-driven compression with trigger ratio validation to prevent premature context summarization.
+- **New**: Orchestration budget: Configurable bounds on bounded diagnosis fan-out to prevent unbounded resource consumption while allowing complex multi-agent coordination.
 - **New**: Ansible ingestion: Server-agnostic MCP client with native fallback for inventory operations.
 - **New**: ServiceNow ingestion: Native REST connector with OAuth2 authentication for table data access.
 
@@ -124,6 +130,7 @@ The platform uses a layered configuration approach:
 - **New**: Skills composition limits are enforced at ingestion time through configurable bounds.
 - **Updated**: Secret delivery hold TTL spans full HITL approval workflows for portal_copy channels.
 - **New**: Agent-driven context compression is opt-in and validates trigger ratios against buffer constraints.
+- **New**: Bounded autonomous diagnosis provides operator control over the maximum number of member steps in diagnosis fan-out operations to prevent resource exhaustion.
 - **New**: Ansible read-tier ingestion provides MCP server connectivity with native fallback support.
 - **New**: ServiceNow read-tier ingestion provides REST/Table-API connectivity with OAuth2 authentication.
 
@@ -137,7 +144,7 @@ P4["Ansible profile env<br/>ansible-dev/ansible.env"]
 P5["ServiceNow profile env<br/>servicenow-dev/servicenow.env"]
 P6["Skills Hub config<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
 P7["Tool Gateway config<br/>GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS"]
-P8["Agent Platform config<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED"]
+P8["Agent Platform config<br/>AGENTSCOPE_COMPRESS_CONTEXT_ENABLED + AGENT_ORCHESTRATION_MAX_STEPS"]
 P9["Ansible config<br/>GATEWAY_ANSIBLE_*"]
 P10["ServiceNow config<br/>GATEWAY_SERVICENOW_*"]
 end
@@ -149,7 +156,7 @@ CM["ConfigMap<br/>platform-runtime-config"]
 S1["Secrets<br/>per-product runtime-secrets"]
 end
 subgraph "Services"
-AG["Agent Service<br/>Context Compression"]
+AG["Agent Service<br/>Context Compression + Orchestration Budget"]
 PG["Platform Gateway"]
 TG["Tool Gateway<br/>Secret Delivery + Ingestions"]
 IB["Identity Broker"]
@@ -203,6 +210,56 @@ Operational implications:
 **Section sources**
 - [kustomization.yaml:11-19](file://shared/platform-ops/gitops/dev-k8s/kustomization.yaml#L11-L19)
 - [configmap.yaml:1-11](file://shared/platform-ops/gitops/runtime-profiles/default/configmap.yaml#L1-L11)
+
+### Bounded autonomous diagnosis configuration
+**New Feature**: The agent-platform service now supports bounded autonomous diagnosis through SPEC-076, providing operator control over the maximum number of member steps in bounded diagnosis fan-out operations. The `AGENT_ORCHESTRATION_MAX_STEPS` environment variable controls the total step budget for orchestration operations.
+
+**Configuration Details:**
+- **Variable**: `AGENT_ORCHESTRATION_MAX_STEPS`
+- **Default**: `20`
+- **Source**: `runtime-config` (via Kustomize ConfigMap)
+- **Validation**: Must be an integer ≥ 1; invalid values cause startup failure with `ValueError("AGENT_ORCHESTRATION_MAX_STEPS must be >= 1.")`
+- **Purpose**: Controls the maximum total number of member read steps in bounded diagnosis fan-out operations
+
+**Orchestration Behavior:**
+- Bounds the total member read steps per orchestration (not per member), preventing unbounded fan-out regardless of member count
+- On budget exhaustion, the loop fails closed to a partial diagnosis and never widens to a mutating step
+- Composed with the per-turn `AGENTSCOPE_MAX_ITERS` to provide two-level bounds (per member turn × total steps)
+- Each member turn runs on its own derived session ID so member memory never crosses and the leader sees only summaries
+- No agentscope orchestration/pipeline type is constructed on this path (ADR-0017 Decision 5)
+
+**Security Implications:**
+- Read-only operations only: bounded diagnosis fans out as diagnostician role with read_only=True
+- Fail-closed on budget exhaustion rather than licensing unbounded resource consumption
+- Prevents resource exhaustion while allowing complex multi-agent coordination
+- Each member turn preserves the same bearer token (no member mints or requests a second broker token)
+
+**Behavior Matrix:**
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `20` (default) | Balanced orchestration budget | Standard production deployments |
+| `1-10` | Conservative limit | High-security environments with limited resources |
+| `21-50` | Moderate complexity | Development/staging environments |
+| `50+` | Complex workflows | Specialized use cases requiring extensive multi-agent coordination |
+
+**Example Configuration:**
+```bash
+# Development environment - higher budget for testing complex scenarios
+AGENT_ORCHESTRATION_MAX_STEPS=50
+
+# Production environment - balanced security and performance
+AGENT_ORCHESTRATION_MAX_STEPS=20
+
+# High-security environment - conservative limit
+AGENT_ORCHESTRATION_MAX_STEPS=10
+```
+
+**Section sources**
+- [runtime_settings.py:382](file://products/agent-platform/src/agent_service/runtime_settings.py#L382)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
+- [runtime_settings.py:752-754](file://products/agent-platform/src/agent_service/runtime_settings.py#L752-L754)
+- [orchestration.py:198-216](file://products/agent-platform/src/agent_service/services/orchestration.py#L198-L216)
+- [SPEC-076 spec.md:441-451](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L441-L451)
 
 ### Ansible read-tier ingestion configuration
 **New Feature**: The tool-gateway service now supports Ansible read-tier ingestion through SPEC-069, providing MCP server connectivity with native fallback support for inventory discovery and read-only operations. The configuration is controlled by `GATEWAY_ANSIBLE_*` environment variables.
@@ -557,6 +614,7 @@ GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS=600
 - **New**: Skills composition limits can be tuned per environment based on security requirements and operational needs.
 - **Updated**: Secret delivery hold TTL can be configured per environment based on HITL workflow requirements.
 - **New**: Agent-driven context compression can be enabled per environment based on memory constraints and session length requirements.
+- **New**: Bounded autonomous diagnosis budget can be tuned per environment based on complexity requirements and resource constraints.
 
 To switch environments:
 - Select or create a runtime profile under runtime-profiles.
@@ -574,6 +632,7 @@ To switch environments:
 - HTTP connector validation: When `GATEWAY_HTTP_ENABLED=false`, no HTTP tools are registered. When enabled but origin allowlist is empty, all HTTP requests are denied.
 - Browser connector validation: When `GATEWAY_BROWSER_ENABLED=false`, no browser tools are registered. When enabled but origin allowlist is empty, all browser navigation is denied.
 - Agent auto-allow validation: Tools listed in auto-allow configuration must be read-only; mutating tools are logged as misconfiguration but remain available for HITL approval.
+- **New**: Bounded orchestration validation: Invalid `AGENT_ORCHESTRATION_MAX_STEPS` values (< 1) cause immediate startup failure with descriptive error messages.
 - **New**: Ansible ingestion validation: Invalid MCP transport values or missing required endpoints cause startup failure with descriptive error messages.
 - **New**: ServiceNow ingestion validation: Missing base URL or invalid credential set configuration causes startup failure with descriptive error messages.
 - **New**: Skills composition validation: Invalid `SKILLS_COMPOSITION_MAX_SUB_SKILLS` values (non-integer or < 1) cause immediate startup failure with descriptive error messages.
@@ -584,6 +643,7 @@ Operational guidance:
 - Validate that all required keys are present in the relevant runtime-secrets.env files before applying.
 - Use the SKIP_* environment variables in sync scripts to bypass provisioning when CI injects secrets externally.
 - Verify auto-allow list composition matches expected behavior for your environment.
+- **New**: Test bounded orchestration budget configuration to ensure it meets operational requirements before production deployment.
 - **New**: Test Ansible and ServiceNow ingestion configurations with appropriate endpoints and credentials.
 - **New**: Test composition limits during development to ensure they meet operational requirements before production deployment.
 - **Updated**: Verify secret delivery TTL values are appropriate for your HITL workflow timing requirements.
@@ -597,6 +657,7 @@ Operational guidance:
 - HTTP connector changes: Toggle `GATEWAY_HTTP_ENABLED` and adjust timeout/size limits through ConfigMap updates without requiring image rebuilds.
 - Browser configuration changes: Modify browser profile settings through ConfigMap updates without requiring image rebuilds.
 - Agent auto-allow changes: Update `AGENT_GATEWAY_TOOL_AUTO_ALLOW` or `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` through ConfigMap updates; changes take effect on service restart.
+- **New**: Bounded orchestration budget changes: Update `AGENT_ORCHESTRATION_MAX_STEPS` through ConfigMap updates; changes take effect on agent-service restart with proper validation.
 - **New**: Ansible ingestion changes: Update `GATEWAY_ANSIBLE_*` variables through ConfigMap updates; changes take effect on tool-gateway service restart.
 - **New**: ServiceNow ingestion changes: Update `GATEWAY_SERVICENOW_*` variables through ConfigMap updates; changes take effect on tool-gateway service restart.
 - **New**: Skills composition limit changes: Update `SKILLS_COMPOSITION_MAX_SUB_SKILLS` through ConfigMap updates; changes take effect on skills-hub service restart.
@@ -608,6 +669,7 @@ Best practice:
 - Keep sensitive configuration in Secrets and manage them exclusively via sync scripts.
 - Test HTTP and browser connector configurations in development profiles before promoting to production.
 - Use additive auto-allow patterns (`_EXTRA` variables) for environment-specific opt-ins rather than replacing entire default lists.
+- **New**: Test bounded orchestration budget values to ensure they accommodate your diagnosis complexity requirements before production deployment.
 - **New**: Test Ansible and ServiceNow ingestion configurations thoroughly in development environments before production deployment.
 - **New**: Ensure trigger ratio validation passes before enabling compression in production environments.
 - **New**: Test composition limits thoroughly in development environments to validate workflow complexity requirements before production deployment.
@@ -684,6 +746,39 @@ Best practice:
 **Section sources**
 - [browser.env:1-26](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L26)
 - [kustomization.yaml:1-29](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/kustomization.yaml#L1-L29)
+
+#### Tuning bounded autonomous diagnosis budget
+**Scenario**: Configure the maximum number of member steps in bounded diagnosis fan-out operations based on your environment's complexity requirements and resource constraints.
+
+**Development Environment (Higher Complexity):**
+```bash
+# Allow more complex multi-agent diagnosis scenarios
+AGENT_ORCHESTRATION_MAX_STEPS=50
+```
+
+**Production Environment (Balanced Security):**
+```bash
+# Standard production limit for bounded diagnosis
+AGENT_ORCHESTRATION_MAX_STEPS=20
+```
+
+**High-Security Environment (Conservative Limit):**
+```bash
+# Minimal orchestration budget for high-security deployments
+AGENT_ORCHESTRATION_MAX_STEPS=10
+```
+
+**Validation Testing:**
+```bash
+# Test orchestration budget configuration with current limit
+echo "Testing orchestration budget with $(cat /proc/self/environ | tr '\0' '\n' | grep AGENT_ORCHESTRATION_MAX_STEPS)"
+```
+
+**Section sources**
+- [runtime_settings.py:382](file://products/agent-platform/src/agent_service/runtime_settings.py#L382)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
+- [runtime_settings.py:752-754](file://products/agent-platform/src/agent_service/runtime_settings.py#L752-L754)
+- [orchestration.py:198-216](file://products/agent-platform/src/agent_service/services/orchestration.py#L198-L216)
 
 #### Enabling Ansible read-tier ingestion
 **New Scenario**: Configure Ansible MCP-ingestion for inventory discovery and read-only operations through the server-agnostic connector.
@@ -889,7 +984,9 @@ UpdateCM --> Apply["Apply Kustomize overlay"]
 UpdateSecret --> Apply
 Apply --> Restart["Restart affected deployments"]
 Restart --> Verify["Verify services start and endpoints respond"]
-Verify --> AnsibleCheck{"Ansible ingestion?"}
+Verify --> OrchestrationCheck{"Bounded orchestration budget?"}
+OrchestrationCheck --> |Yes| ValidateBudget["Validate AGENT_ORCHESTRATION_MAX_STEPS"]
+OrchestrationCheck --> |No| AnsibleCheck{"Ansible ingestion?"}
 AnsibleCheck --> |Yes| ValidateAnsible["Validate GATEWAY_ANSIBLE_* configuration"]
 AnsibleCheck --> |No| ServiceNowCheck{"ServiceNow ingestion?"}
 ServiceNowCheck --> |Yes| ValidateServiceNow["Validate GATEWAY_SERVICENOW_* configuration"]
@@ -900,6 +997,7 @@ SecretDeliveryCheck --> |Yes| ValidateTTL["Validate GATEWAY_SECRET_DELIVERY_HOLD
 SecretDeliveryCheck --> |No| CompressionCheck{"Context compression?"}
 CompressionCheck --> |Yes| ValidateCompression["Validate AGENTSCOPE_COMPRESS_CONTEXT_ENABLED + trigger ratio"]
 CompressionCheck --> |No| Complete["Configuration complete"]
+ValidateBudget --> Complete
 ValidateAnsible --> Complete
 ValidateServiceNow --> Complete
 ValidateLimits --> Complete
@@ -919,6 +1017,7 @@ The sync scripts coordinate dependencies across services and databases:
 - HTTP connectors depend on configured origin allowlists and optional credential sets.
 - Browser connectors depend on CDP endpoint availability and configured origin allowlists.
 - Agent auto-allow list depends on tool definitions being available at toolkit construction time.
+- **New**: Bounded orchestration budget depends on proper validation of `AGENT_ORCHESTRATION_MAX_STEPS` during service startup.
 - **New**: Ansible ingestion depends on MCP server availability and configured credential sets.
 - **New**: ServiceNow ingestion depends on REST endpoint availability and OAuth2 client credentials.
 - **New**: Skills composition limits depend on proper validation of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` during service startup.
@@ -937,11 +1036,12 @@ TG --> BROWSER["Browser Connectors"]
 TG --> SECRET["Secret Delivery<br/>Hold TTL"]
 TG --> ANSIBLE["Ansible Ingestion<br/>MCP/Native"]
 TG --> SERVICENOW["ServiceNow Ingestion<br/>REST/Table-API"]
-AG["Agent Service<br/>Context Compression"] --> IS
+AG["Agent Service<br/>Context Compression + Orchestration Budget"] --> IS
 AG --> SH
 AG --> EXEC["Execution Runtime"]
 AG --> AUTOALLOW["Auto-Allow List"]
 AG --> COMPRESS["Context Compression<br/>Trigger Ratio Validation"]
+AG --> ORCH["Orchestration Budget<br/>AGENT_ORCHESTRATION_MAX_STEPS"]
 IS --> DBI["Postgres 'incidents'"]
 SH --> DBS["Postgres 'skills'"]
 SH --> LIMITS["Composition Limits<br/>SKILLS_COMPOSITION_MAX_SUB_SKILLS"]
@@ -952,6 +1052,7 @@ AUTOALLOW --> TOOLS["Gateway Tools"]
 LIMITS --> VALIDATION["Ingestion Validation"]
 SECRET --> BUFFER["Delivery Buffer<br/>Memory/Redis"]
 COMPRESS --> TRIGGER["Trigger Ratio<br/>Buffer Validation"]
+ORCH --> BUDGET["Step Budget<br/>Positive Integer Validation"]
 ANSIBLE --> MCPSERVER["MCP Server<br/>or Native Inventory"]
 SERVICENOW --> SNOWAPI["ServiceNow Table-API<br/>REST Endpoint"]
 ```
@@ -966,6 +1067,7 @@ SERVICENOW --> SNOWAPI["ServiceNow Table-API<br/>REST Endpoint"]
 - [skills_hub config.py:161-178](file://products/skills_hub/src/skills_hub/core/config.py#L161-L178)
 - [config.py:373-378](file://products/tool-gateway/src/tool_gateway/core/config.py#L373-L378)
 - [runtime_settings.py:313-328](file://products/agent-platform/src/agent_service/runtime_settings.py#L313-L328)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
 
 **Section sources**
 - [sync-delegation-secrets.sh:1-97](file://shared/platform-ops/gitops/sync-delegation-secrets.sh#L1-L97)
@@ -983,6 +1085,8 @@ SERVICENOW --> SNOWAPI["ServiceNow Table-API<br/>REST Endpoint"]
 - Monitor HTTP connector usage to tune timeout and size parameters based on actual service response patterns.
 - Browser connector performance depends on CDP endpoint responsiveness and session management settings.
 - Auto-allow list resolution occurs at service startup; frequent changes require service restarts.
+- **New**: Bounded orchestration budget directly impacts resource consumption in multi-agent diagnosis scenarios; lower budgets reduce resource usage but may result in partial diagnoses.
+- **New**: Consider worst-case scenarios for bounded orchestration when planning resource allocation; higher budgets allow more complex multi-agent coordination.
 - **New**: Ansible ingestion performance depends on MCP server response times and credential set resolution.
 - **New**: ServiceNow ingestion performance depends on REST endpoint latency and pagination limits.
 - **New**: Consider worst-case scenarios for both Ansible and ServiceNow ingestion when planning resource allocation.
@@ -1013,6 +1117,9 @@ Common issues and resolutions:
 - Browser navigation denied: Check that `GATEWAY_BROWSER_ALLOW_ORIGINS` includes `http://acme-admin:8080` and that the acme-admin sample is deployed.
 - Tool auto-approval not working: Verify auto-allow list configuration and check that tools are read-only; mutating tools cannot be auto-approved.
 - Unexpected tool parking: Check if tool is in the correct auto-allow list (built-in default vs. extra list) and verify environment-specific overrides.
+- **New**: Bounded orchestration startup failure: Check `AGENT_ORCHESTRATION_MAX_STEPS` value and ensure it's a valid integer ≥ 1. Review startup error messages for specific validation failures.
+- **New**: Orchestration budget exhausted prematurely: Verify that `AGENT_ORCHESTRATION_MAX_STEPS` is sufficient for your diagnosis complexity requirements. Consider increasing the budget if diagnoses are being cut short.
+- **New**: Partial diagnosis results: Check if the orchestration budget is being exhausted; review logs for "budget-limited" indicators and consider adjusting the budget accordingly.
 - **New**: Ansible ingestion not working: Verify `GATEWAY_ANSIBLE_MCP_ENABLED=true`, check MCP server connectivity, and ensure credential sets are properly mounted.
 - **New**: ServiceNow ingestion not working: Verify `GATEWAY_SERVICENOW_ENABLED=true`, check REST endpoint connectivity, and ensure OAuth2 client credentials are valid.
 - **New**: Ansible MCP server unreachable: Check network policies, service discovery, and credential set configuration for the MCP endpoint.
@@ -1040,6 +1147,8 @@ Verification steps:
 - Verify browser connectivity to acme-admin sample through the CDP endpoint.
 - Check agent-service logs for auto-allow list resolution and tool registration.
 - Verify tool auto-approval behavior matches expected environment posture.
+- **New**: Test bounded orchestration budget configuration with various diagnosis complexity levels.
+- **New**: Verify orchestration budget validation passes with appropriate values for your environment.
 - **New**: Test Ansible MCP server connectivity and credential set resolution.
 - **New**: Test ServiceNow REST endpoint connectivity and OAuth2 token acquisition.
 - **New**: Verify skills-hub logs for composition limit validation and successful ingestion of compositions.
@@ -1065,6 +1174,7 @@ Luban's configuration system separates non-secret and secret concerns:
 - HTTP connector configuration provides flexible service health checking capabilities with security controls.
 - Browser connector configuration enables web application testing through Chromium automation with strict origin controls.
 - Agent auto-allow list configuration supports both hardened defaults and environment-specific opt-ins through additive patterns.
+- **New**: Bounded autonomous diagnosis configuration provides operator control over the maximum number of member steps in diagnosis fan-out operations through the `AGENT_ORCHESTRATION_MAX_STEPS` knob, balancing functionality with resource constraints and preventing unbounded resource consumption.
 - **New**: Ansible read-tier ingestion configuration provides MCP server connectivity with native fallback support for inventory discovery and read-only operations.
 - **New**: ServiceNow read-tier ingestion configuration provides REST/Table-API connectivity with OAuth2 authentication for read-only table access.
 - **New**: Skills composition configuration provides operator control over composition complexity through the `SKILLS_COMPOSITION_MAX_SUB_SKILLS` knob, balancing functionality with security and resource constraints.
@@ -1072,7 +1182,7 @@ Luban's configuration system separates non-secret and secret concerns:
 - **New**: Agent-driven context compression configuration provides operator control over proactive context summarization through the `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` knob, with strict trigger ratio validation to ensure proper compression timing.
 - Following the documented procedures ensures consistent, auditable, and recoverable configuration management across development, staging, and production.
 
-**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios. **Updated**: The addition of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` enables precise control over portal_copy channel TTL management, supporting gated workflow scenarios with robust validation and flexible backend options. **New**: The addition of `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` enables proactive context compression for memory optimization in long-running agent sessions, with comprehensive validation to prevent misconfiguration. **New**: The addition of Ansible and ServiceNow read-tier ingestion configurations enables secure, read-only integration with external systems through standardized MCP and REST protocols.
+**Updated** The retirement of browser-check-target per SPEC-061 simplifies the browser configuration surface while maintaining full functionality through the stateful acme-admin sample application. The addition of `AGENT_GATEWAY_TOOL_AUTO_ALLOW_EXTRA` provides more granular control over tool auto-approval while maintaining security-hardened defaults. **New**: The introduction of `AGENT_ORCHESTRATION_MAX_STEPS` enables fine-grained control over bounded diagnosis complexity, supporting diverse operational requirements from high-security environments to development scenarios. **New**: The introduction of `SKILLS_COMPOSITION_MAX_SUB_SKILLS` enables fine-grained control over skill composition complexity, supporting diverse operational requirements from high-security environments to development scenarios. **Updated**: The addition of `GATEWAY_SECRET_DELIVERY_HOLD_TTL_SECONDS` enables precise control over portal_copy channel TTL management, supporting gated workflow scenarios with robust validation and flexible backend options. **New**: The addition of `AGENTSCOPE_COMPRESS_CONTEXT_ENABLED` enables proactive context compression for memory optimization in long-running agent sessions, with comprehensive validation to prevent misconfiguration. **New**: The addition of Ansible and ServiceNow read-tier ingestion configurations enables secure, read-only integration with external systems through standardized MCP and REST protocols.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -1140,6 +1250,51 @@ Luban's configuration system separates non-secret and secret concerns:
 - [config.py:17-24](file://products/tool-gateway/src/tool_gateway/core/config.py#L17-L24)
 - [config.py:72-80](file://products/tool-gateway/src/tool_gateway/core/config.py#L72-L80)
 - [browser.env:1-15](file://shared/platform-ops/gitops/runtime-profiles/browser-dev/browser.env#L1-L15)
+
+### Bounded Autonomous Diagnosis Configuration Reference
+**Feature**: Bounded autonomous diagnosis configuration for SPEC-076 operator control over diagnosis fan-out budget.
+
+**Environment Variables:**
+- `AGENT_ORCHESTRATION_MAX_STEPS`: Total member read-step bound for bounded diagnosis fan-out (default: 20)
+
+**Configuration Options:**
+| Value Range | Environment | Security Level | Resource Impact |
+|-------------|-------------|----------------|-----------------|
+| 1-10 | High-security production | Maximum security | Minimal resource usage |
+| 11-20 | Standard production | Balanced security | Moderate resource usage |
+| 21-50 | Development/staging | Lower security | Higher resource usage |
+| 50+ | Specialized use cases | Custom security | Significant resource usage |
+
+**Security Implications:**
+- Read-only operations only: bounded diagnosis fans out as diagnostician role with read_only=True
+- Fail-closed on budget exhaustion rather than licensing unbounded resource consumption
+- Prevents resource exhaustion while allowing complex multi-agent coordination
+- Each member turn preserves the same bearer token (no member mints or requests a second broker token)
+- Composed with per-turn `AGENTSCOPE_MAX_ITERS` for two-level bounds (per member turn × total steps)
+
+**Validation Rules:**
+- Must be an integer ≥ 1
+- Invalid values cause immediate startup failure with `ValueError("AGENT_ORCHESTRATION_MAX_STEPS must be >= 1.")`
+- On budget exhaustion, the loop fails closed to a partial diagnosis and never widens to a mutating step
+
+**Example Configuration:**
+```bash
+# Development environment - higher budget for testing complex scenarios
+AGENT_ORCHESTRATION_MAX_STEPS=50
+
+# Production environment - balanced security
+AGENT_ORCHESTRATION_MAX_STEPS=20
+
+# High-security environment - conservative limit  
+AGENT_ORCHESTRATION_MAX_STEPS=10
+```
+
+**Section sources**
+- [runtime_settings.py:382](file://products/agent-platform/src/agent_service/runtime_settings.py#L382)
+- [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
+- [runtime_settings.py:752-754](file://products/agent-platform/src/agent_service/runtime_settings.py#L752-L754)
+- [orchestration.py:198-216](file://products/agent-platform/src/agent_service/services/orchestration.py#L198-L216)
+- [SPEC-076 spec.md:441-451](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L441-L451)
 
 ### Ansible Ingestion Configuration Reference
 **New Feature**: Ansible read-tier ingestion configuration for SPEC-069 MCP server integration and native fallback support.
@@ -1432,6 +1587,7 @@ AGENTSCOPE_COMPRESS_CONTEXT_ENABLED=false
 | **Mutating tools (`k8s.delete_pod`)** | `GATEWAY_MUTATING_TOOLS_ENABLED=true`, `GATEWAY_K8S_ENABLED=true`, `AGENT_HITL_CONFIRM_TIMEOUT>0`, `tools:mutate` policy grant, opt-in pod-delete RBAC | tool-gateway, agent-service, policy bundle | disabled (`false`) |
 | **Browser web-checks (`web.*`, SPEC-049)** | `GATEWAY_BROWSER_ENABLED=true`, `GATEWAY_BROWSER_ALLOW_ORIGINS` (deny-by-default), reachable `GATEWAY_BROWSER_CDP_ENDPOINT`; write-class flows additionally need `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0`; credentials via `GATEWAY_BROWSER_CREDENTIAL_SETS` | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
 | **HTTP service-checks (`http.*`, SPEC-058)** | `GATEWAY_HTTP_ENABLED=true`, `GATEWAY_HTTP_ALLOW_ORIGINS` (deny-by-default); `http.post` (write) additionally needs `GATEWAY_MUTATING_TOOLS_ENABLED=true` + `AGENT_HITL_CONFIRM_TIMEOUT>0` + a `tools:mutate` grant; credentials via `GATEWAY_HTTP_CREDENTIAL_SETS` (defaults to the browser path) | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `browser-dev` profile |
+| **Bounded autonomous diagnosis (`diagnose-*` runbooks, SPEC-076)** | `AGENT_ORCHESTRATION_MAX_STEPS>=1` (default: 20); bounded read-only diagnosis fan-out with per-member turns and synthesis step | agent-service | enabled (20) |
 | **Ansible read-tier ingestion (`ansible.*`, SPEC-069)** | `GATEWAY_ANSIBLE_MCP_ENABLED=true` plus `GATEWAY_ANSIBLE_MCP_URL` (`streamable_http`) or `GATEWAY_ANSIBLE_MCP_COMMAND` (`stdio`); credentials via `GATEWAY_ANSIBLE_MCP_CREDENTIAL_SET`/`_CREDENTIAL_SETS`. The `GATEWAY_ANSIBLE_NATIVE_ENABLED` shell-out is the no-MCP-server fallback and stays off when a server is wired | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `ansible-dev` profile (in-cluster mock MCP server) |
 | **ServiceNow read-tier ingestion (`servicenow.*`, SPEC-067)** | `GATEWAY_SERVICENOW_ENABLED=true`, `GATEWAY_SERVICENOW_BASE_URL`, and an `oauth2_client_credentials` set named by `GATEWAY_SERVICENOW_CREDENTIAL_SET` at `GATEWAY_SERVICENOW_CREDENTIAL_SETS`; the six-tool admission allowlist, fixed tables, and field projections are gateway-owned config, never target- or model-derived | tool-gateway, agent-service | disabled in base (`false`); dev-k8s opts in via the `servicenow-dev` profile (in-cluster mock Table API). Repointing at a live tenant is config-only — see the [ServiceNow Live Integration Guide](servicenow-integration.md) |
 | **Signed execution (SPEC-037)** | `AGENT_EXECUTION_SIGNING_KEY` ↔ `execution-signing-secret` | agent-service | **must be provisioned** (`sync-execution-signing-secret.sh`); absent key fails mutating resumes closed |

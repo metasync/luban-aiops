@@ -1,1 +1,0 @@
-Each spec directory follows the standard `plan.md` / `spec.md` / `tasks.md` triad; delivery was verified through the full train including unit + portal suites, `make verify`, extended documents-demo e2e, and browser walkthroughs as recorded in each spec's changelog.
