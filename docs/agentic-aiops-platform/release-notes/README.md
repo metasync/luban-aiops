@@ -10,6 +10,70 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-11-10-spec-076-bounded-autonomous-diagnosis.md`
+  - minor (v0.57.0) — bounded autonomous diagnosis (SPEC-076), phase 5 of the
+    ADR-0017 six-phase bounded read-only multi-agent program and the **producer**
+    that first binds the SPEC-073/074/075 agent-roles **live**. Adds a
+    platform-owned bounded read-only orchestration loop (`services/orchestration.py`,
+    `run_bounded_diagnosis`) — an `orchestrator` fanning out read-only
+    `diagnostician` members on the **same** delegated token over the existing
+    `_ensure_toolkit(read_only=True)` seam, bounded by
+    `AGENT_ORCHESTRATION_MAX_STEPS` (default 20) and failing closed to a partial
+    diagnosis — behind the new operator-invoked `POST /api/v2/diagnose` (+ gateway
+    proxy), gated by the **existing** `chat` action. Realizes the
+    **diagnose-before-act** ceiling (Decision 2): the `executor`
+    `stage_remediation(...)` mechanism is delivered unit-proven but wires **no
+    production trigger** (autonomous resolve deferred); no agentscope orchestration
+    surface (Decision 5). The **live** read-only control is in-process SPEC-073
+    toolkit narrowing + the loop's `read_only=True` admission and the SPEC-075
+    `agent_role` dimension is populated, while the SPEC-074 policy axis lands
+    **ready-but-inert** (R-3 keeps the role off every wire field).
+    `agent-stream-event`/`execution-request` stay **byte-unchanged** and the
+    deployed unscoped single-agent path stays byte-identical. Validated against the
+    operator's four named first workflows (two driven end-to-end, all four
+    scenario-tested); agent-platform **1774**, platform-gateway **503**,
+    `diagnosis-livecheck` **6**, root `make verify` green across all sixteen legs
+    (incl. the SPEC-063 campaign **795**, exit 0). Records `FU-076` (unattended
+    machine-trigger ingestion), `FU-076-b` (the operator diagnose→act bridge), and
+    `FU-076-c` (a live in-process policy-eval point); phase 6 (the v2 multi-agent
+    wire contract) remains open.
+- `2026-11-02-auto-routing-and-platform-feature-flags.md`
+  - minor (v0.53.0) — auto-routing selection + platform feature-flag transparency
+    (SPEC-072). Adds a reserved `auto` sentinel on the chat `model` field (an
+    explicit, pinnable **Auto (routed)** choice in the portal's `ModelSelect`,
+    resolving to SPEC-071's router; `422` on an explicit `auto` when routing is
+    unavailable, degrade-to-default on a pinned `auto` whose routing is later
+    removed) and a curated feature-flag inventory at a new authenticated
+    `GET /api/v1/runtime/flags` (proxying `GET /api/v2/runtime/flags`) behind a new
+    `runtime:flags` action + `feature-flags.schema.json` — nine deployment toggles
+    as name + on/off boolean, **never a secret value**, rendered read-only in
+    Settings ▸ Platform with graceful `403`/absence degradation. All additive; the
+    router stays **default-off**, `agent-runtime-metadata`/`agent-stream-event`
+    byte-unchanged, no new audit event type. Corrects the architecture-overview
+    allow-rule count (nineteen → twenty). `make verify` green (portal vitest 546).
+- `2026-11-01-per-turn-model-routing.md`
+  - minor (v0.52.0) — per-turn model routing, opt-in/default-off/measured
+    (SPEC-071). Adopts agentscope 2.0.11's `ModelRouterMiddleware` (a
+    model-selection `on_reply` middleware that clears all four SPEC-018
+    adoption-gate points) behind three `AGENTSCOPE_MODEL_ROUTER_*` settings
+    (`_ENABLED` default `false`, `_MODEL`, `_CANDIDATES`), giving a "cheap/fast
+    model for simple turns, strong model for complex ones" path that composes with
+    — not replaces — SPEC-024's audited model choice. No new route, action,
+    contract, schema, audit event type, or execution path;
+    `agent-stream-event.schema.json` byte-unchanged and no agentscope type leaks
+    through the v2 contract. Ships **default-off**; the default-on flip is a
+    separate, measurement-gated operator decision (R-3).
+- `2026-10-31-dependency-refresh-agentscope-2-0-11.md`
+  - patch (v0.51.1) — dependency refresh (agentscope 2.0.11). A routine re-lock of
+    the agent-platform inside its declared caret-capped ranges at latest stable
+    (agentscope 2.0.8 → **2.0.11**, mcp 1.29.1 → 2.3.0, + mcp-types 2.3.0, certifi
+    refresh) plus a PyJWT harmonization to **2.15.1** across all eight backend
+    products; `agentscope-runtime` stays at 1.1.6.post2. No manifest range changed
+    — a lockfile refresh, not a contract change; no new routes, actions, event
+    types, contracts, schemas, audit changes, or execution paths. Adoption posture
+    unchanged from SPEC-042 (latest stable only — no alpha/beta/RC/dev; OTel
+    instrumentation stays on its permanent `0.xb` channel). Carries the
+    kernel-verification leg for the agentscope bump.
 - `2026-10-03-spec-066-skill-retrieval-ranking-fidelity.md`
   - minor (v0.46.0) — the skill-retrieval ranking-fidelity slice (SPEC-066,
     extending SPEC-014 R-3), closing the "Semantic (vector) skill retrieval"
@@ -915,6 +979,20 @@ waves and validation outcomes rather than published product releases.
     stale-pin degradation, fallback-response provider attribution,
     discovery-cache bootstrap connection leak, Ollama readiness probe
     under token auth)
+- `2026-08-23-post-release-ux-hardening.md`
+  - closes v0.9.1, the post-SPEC-023 portal UX & stream hardening: fixes
+    the stale-session "(no response received)" defect end to end (the
+    gateway opens the upstream chat stream eagerly and maps upstream
+    4xx→pass-through / 5xx→502; the portal retries once without the
+    session id on a 404 so the agent auto-creates a fresh session, and
+    tracks server-gone sessions in `missingRef` so they never re-prime the
+    pointer), remediates the live-walkthrough UX findings (session-creation
+    gating, evidence-card parity, sticky request banner, markdown table
+    header/body reconnect, version tag), and reworks the folded sidebar
+    into a navigable icon rail. A code + doc review returned approve; its
+    two findings (httpx error-body cleanup hardening, a stale drawer-parity
+    comment) are remediated here. Patch — no API, contract, or
+    deployment-shape change.
 - `2026-08-22-portal-framework-rebuild.md`
   - delivers SPEC-023 (v0.9.0): the operator portal rebuilt as a
     Vite + React 18 + TypeScript SPA on antd / Ant Design X — a
