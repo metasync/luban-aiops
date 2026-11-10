@@ -1,0 +1,1 @@
+New features are authored by copying `docs/specs/templates/{plan,spec,tasks}.md` into a new `SPEC-NNN-name/` directory and incrementing the next available number.

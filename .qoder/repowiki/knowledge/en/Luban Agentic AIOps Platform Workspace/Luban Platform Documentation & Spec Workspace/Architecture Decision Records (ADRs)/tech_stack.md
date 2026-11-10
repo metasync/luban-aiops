@@ -1,0 +1,1 @@
+Plain Markdown; no tooling beyond the repository's documentation pipeline. References AgentScope 2.0 as the runtime kernel, OpenTelemetry for metric push, and Postgres for gateway-owned secret storage.

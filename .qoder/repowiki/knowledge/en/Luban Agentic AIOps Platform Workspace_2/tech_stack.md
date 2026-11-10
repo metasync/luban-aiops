@@ -1,0 +1,1 @@
+Python + uv lockfiles per product, Docker images built from shared `base-uv` image, kustomize GitOps overlays under `shared/platform-ops/gitops`, OpenObserve dashboards validated offline, and a single `VERSION` semver source-of-truth for all product images.

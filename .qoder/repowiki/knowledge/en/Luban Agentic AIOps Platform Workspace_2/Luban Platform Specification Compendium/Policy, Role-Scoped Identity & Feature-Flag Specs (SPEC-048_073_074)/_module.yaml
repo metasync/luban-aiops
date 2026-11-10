@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/role_policy_and_feature_flags
+title: Policy, Role-Scoped Identity & Feature-Flag Specs (SPEC-048/073/074)
+scope:
+    - docs/specs/SPEC-073-role-scoped-agent-identity/
+    - docs/specs/SPEC-074-policy-role-axis/
+    - docs/specs/SPEC-048-policy-testing-rollout-controls/
+source_files: []
+depends_on: []
+related_to: []

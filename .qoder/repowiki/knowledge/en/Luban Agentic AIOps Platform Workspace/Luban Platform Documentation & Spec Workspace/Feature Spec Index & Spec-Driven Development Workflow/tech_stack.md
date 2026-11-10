@@ -1,0 +1,1 @@
+Markdown-based spec documents governed by a process defined in `README.md`; mechanical enforcement hooks into the root `Makefile` (`make verify`, `make policy-diff`, `make validate-secret-vocabulary`) and contract-test suites rather than a dedicated spec tooling stack.

@@ -1,0 +1,1 @@
+Three delivered design specs (SPEC-032/033/034) that close the owner-side gap in approval-gated bounded actions: live decision sync, confirmation-card turn anchoring, and owner/inbox UX polish.

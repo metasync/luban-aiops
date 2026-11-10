@@ -1,0 +1,1 @@
+Markdown-based design and release-note corpus; references AgentScope 2.0 as the selected agent framework, FastAPI for the runtime kernel, React/Ant Design X for the portal, PostgreSQL for durable stores, and OpenObserve/OTLP for observability — all cited as architectural decisions in the design docs rather than build tooling.

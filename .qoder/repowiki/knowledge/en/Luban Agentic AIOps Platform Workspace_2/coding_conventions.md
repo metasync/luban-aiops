@@ -1,0 +1,4 @@
+- Each product is a self-contained Python package under `products/<name>/src/<name>/` with its own `pyproject.toml`, `uv.lock`, `Dockerfile`, and `Makefile`, invoked only through the root Makefile targets.
+- Cross-service contracts (Pydantic schemas, policy bundles, SQL migrations) live exclusively in `shared/shared-contracts/` and are copied or referenced by consumers rather than imported as packages.
+- Every feature ships as a numbered `docs/specs/SPEC-NNN/` directory containing plan.md, spec.md, and tasks.md, keeping requirements separate from implementation.
+- Policy bundles are authored once at `shared/shared-contracts/policies/` and synchronized into consumers via `make sync-policy`, with scenario validation run through `make validate-policy-scenarios`.

@@ -1,0 +1,1 @@
+Markdown-based ADR/spike format; evaluation artifacts include a JSON label sheet (`semantic-skill-retrieval-labels.json`) and an eval set manifest (`semantic-skill-retrieval-eval-set.md`) used to score semantic skill retrieval against skills-hub's lexical `rank()` baseline.

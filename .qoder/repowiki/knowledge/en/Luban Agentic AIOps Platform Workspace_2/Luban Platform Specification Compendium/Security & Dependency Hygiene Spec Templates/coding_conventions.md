@@ -1,0 +1,5 @@
+- Each spec directory ships a triad of `spec.md`, `plan.md`, and `tasks.md` mirroring the template layout.
+- Requirements are numbered R-1, R-2, … and each carries an `Acceptance criteria:` bullet list of observable, testable outcomes.
+- Every spec opens with a YAML-like Status block recording status, owner, created/approved/delivered dates, release slice, and related ADRs.
+- Impact sections enumerate products touched, contracts touched, identity/policy/audit/execution safety impact, and living state docs to update on delivery.
+- Design decisions and non-goals are explicitly enumerated so out-of-scope items do not drift into future slices.

@@ -6,6 +6,7 @@
 - [identity-and-authorization-design.md](file://docs/agentic-aiops-platform/identity-and-authorization-design.md)
 - [policy-default.yaml](file://shared/shared-contracts/policies/policy-default.yaml)
 - [policy-rule.schema.json](file://shared/shared-contracts/schemas/policy-rule.schema.json)
+- [audit-event.schema.json](file://shared/shared-contracts/schemas/audit-event.schema.json)
 - [policy_engine.py](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py)
 - [agent_role.py](file://products/agent-platform/src/agent_service/services/agent_role.py)
 - [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
@@ -15,14 +16,16 @@
 - [PermissionsView.tsx](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx)
 - [test_policy_matrix.py](file://products/platform-gateway/tests/test_policy_matrix.py)
 - [runtime.py](file://products/platform-gateway/src/platform_gateway/api/routes/runtime.py)
+- [spec.md](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md)
+- [plan.md](file://docs/specs/SPEC-075-multi-agent-audit-attribution/plan.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added Agent-Role Axis section documenting three agent-roles (diagnostician, orchestrator, executor), their postures, fail-closed semantics, and executor→human-approver invariant
-- Updated Policy Engine Integration section to reflect the new agent-role dimension
-- Enhanced Role Hierarchy section with agent-role vs human role distinction
-- Added comprehensive documentation for the agent-role vocabulary and its relationship to the authorization model
+- Enhanced Agent-Role Attribution section with complete attribution triple documentation reflecting SPEC-075 delivery
+- Updated Audit Access section to include agent_role filtering capabilities
+- Added comprehensive documentation for the agent-role provenance tracking alongside existing subject/username and delegation_mode fields
+- Expanded troubleshooting guidance to cover agent-role attribution failures and audit trail verification
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -51,7 +54,7 @@ Authorization spans several components:
 - Platform gateway enforces policies on protected actions and exposes a live permission matrix.
 - Policy bundle defines role-to-action grants and approval requirements.
 - Operator portal renders the effective permissions for the current user.
-- Audit service records decisions and execution events.
+- Audit service records decisions and execution events with complete attribution tracking.
 
 ```mermaid
 graph TB
@@ -62,6 +65,7 @@ Gateway --> IdentityBroker["Identity Broker"]
 PolicyEngine --> Bundle["Policy Bundle (YAML)"]
 Gateway --> Audit["Audit Service"]
 IdentityBroker --> Keycloak["Keycloak / AD"]
+Audit --> Storage["Durable Audit Store"]
 ```
 
 **Diagram sources**
@@ -103,6 +107,7 @@ participant G as "Platform Gateway"
 participant E as "Policy Engine"
 participant B as "Policy Bundle"
 participant I as "Identity Broker"
+participant A as "Audit Service"
 U->>P : Sign in
 P->>I : Exchange OIDC token
 I-->>P : Token with roles/groups
@@ -117,6 +122,8 @@ P->>G : Approve/Deny
 G->>E : Re-evaluate with confirmer context
 E-->>G : Final decision
 end
+G->>A : Emit audit event with agent_role attribution
+A-->>G : Acknowledge
 G-->>P : Result
 ```
 
@@ -195,6 +202,30 @@ H --> S["Distinct human approver"]
 - [policy_engine.py:138-143](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L138-L143)
 - [SPEC-073 spec.md:114-204](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L114-L204)
 - [SPEC-074 spec.md:146-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L146-L163)
+
+### Agent-Role Attribution in the Audit Trail (SPEC-075, phase 4)
+
+The agent-role axis above is **prescriptive** — it narrows authority (SPEC-074). Phase 4 adds a **descriptive** sibling: the durable audit trail can record *which role acted*, completing the attribution triple beside the two legs that already existed as top-level audit-event fields.
+
+| Attribution leg | Audit-event field | Answers | Landed |
+|---|---|---|---|
+| on whose behalf | `subject` / `username` | which human the action is attributed to | SPEC-013 |
+| under which delegation | `delegation_mode` | how outbound authority was acquired | SPEC-070 |
+| which role acted | `agent_role` | which sub-agent role performed the turn | **SPEC-075** |
+
+- **Descriptive, never prescriptive.** `agent_role` records provenance only; it narrows no authority and grants nothing. The prescriptive axis is the SPEC-074 policy `agent_roles_any` dimension above — the two are orthogonal and share one closed vocabulary (`diagnostician` / `orchestrator` / `executor`), so attribution can never drift from the identity/policy vocabulary.
+- **One vocabulary, three contracts.** The same closed enum is pinned across `audit-event.schema.json`, `session-evidence.schema.json`, and the `evidence_turns` item of `agent-session.schema.json`, and equals the SPEC-073 producer vocabulary — an enum-lockstep guard fails the build on any drift.
+- **Additive and inert.** The field is optional and **omitted when absent** (never null, never an empty string), exactly like `delegation_mode`, so every event from today's unscoped single-agent path audits **byte-identically** and a legacy row reads back `agent_role is None`. The agent-platform emitter seam is wired to SPEC-073's `current_agent_role_value()`, which returns `None` on every deployed turn — no producer binds a role until phase 5 (reachability and no-diff guards enforce this). It is a plain string enum on the v2 contract: no agentscope type leaks and no new principal, claim, or identity edge. Four-point gate: audit strengthened; identity, read-only posture, and no-agentscope unchanged.
+- **Evidence-turn attribution.** The same optional `agent_role` rides a persisted `session_evidence` turn, so a scoped turn records which role produced its evidence and a legacy turn replays with no empty artifact.
+- **Deferred (no consumer yet).** Per OQ-4 there is no portal filter or column (`delegation_mode` has none either) and per OQ-5 no summary facet — both are consumerless until a producer binds roles in phase 5. Per OQ-6 the field is additive within audit-event v1 (no title bump, no new ADR), the `delegation_mode` precedent. Per OQ-3 the transcript-turn projection and any concurrent-multi-agent transcript re-modelling stay deferred to phase 5/6.
+
+**Updated** Enhanced with complete attribution triple documentation reflecting SPEC-075 delivery, showing how `agent_role` completes the provenance tracking alongside existing `subject/username` and `delegation_mode` fields.
+
+**Section sources**
+- [authorization-matrix.md:188-227](file://docs/agentic-aiops-platform/authorization-matrix.md#L188-L227)
+- [audit-event.schema.json:79-83](file://shared/shared-contracts/schemas/audit-event.schema.json#L79-L83)
+- [spec.md:63-85](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L63-L85)
+- [plan.md:12-24](file://docs/specs/SPEC-075-multi-agent-audit-attribution/plan.md#L12-L24)
 
 ### Feature Access Matrix
 Feature access is governed by both UI visibility and backend action grants. The following summarizes defaults derived from the authorization matrix and the policy bundle:
@@ -339,10 +370,16 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 ### Audit Access
 - audit:read: allowed for auditor and platform-admin.
 - Audit surfaces include summary and CSV export, riding existing audit:read grants.
+- **Agent-role filtering**: The audit query API supports `?agent_role=` filtering for the three closed agent-role values (diagnostician, orchestrator, executor), mirroring the `delegation_mode` filtering mechanism.
+- **Attribution triple**: Every audited event may carry the complete attribution triple: `agent_role` (which role acted), `subject`/`username` (on whose behalf), and `delegation_mode` (under which delegation).
+
+**Updated** Added agent-role filtering capabilities and attribution triple documentation reflecting SPEC-075 delivery.
 
 **Section sources**
 - [policy-default.yaml:164-175](file://shared/shared-contracts/policies/policy-default.yaml#L164-L175)
 - [authorization-matrix.md:455-463](file://docs/agentic-aiops-platform/authorization-matrix.md#L455-L463)
+- [audit-event.schema.json:79-83](file://shared/shared-contracts/schemas/audit-event.schema.json#L79-L83)
+- [spec.md:141-159](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L141-L159)
 
 ### Approval Model and Separation of Duties
 - Tier 1: self-approval allowed by default for session operators when policy permits.
@@ -369,6 +406,8 @@ Engine --> Bundle["Policy Bundle"]
 Engine --> AgentRole["Agent Role Context"]
 Gateway --> Matrix["Live Permission Matrix"]
 Matrix --> Portal["Operator Portal"]
+Gateway --> Audit["Audit Service"]
+Audit --> Attribution["Agent-Role Attribution"]
 ```
 
 **Diagram sources**
@@ -386,6 +425,7 @@ Matrix --> Portal["Operator Portal"]
 - Live matrix derivation reuses the same evaluate() path, ensuring consistency without extra logic.
 - Avoid frequent bundle reloads; changes take effect on next load cycle.
 - Agent-role axis is optional and inert by default — no performance impact when `agent_role=None`.
+- Agent-role attribution in audit trail is additive and inert — no performance impact when omitted.
 
 [No sources needed since this section provides general guidance]
 
@@ -397,16 +437,21 @@ Common issues and resolutions:
 - Permissions mismatch: confirm the deployed bundle version and source via the portal Permissions view; compare SHA-256 fingerprint with canonical file.
 - **Feature-flag transparency unavailable**: verify user has platform-admin, approver, or operator role; the runtime:flags action is denied by default for developer, read-only-observer, and auditor roles.
 - **Agent-role authorization failures**: ensure the agent-role vocabulary is correctly scoped; remember that agent-roles narrow authority and never widen it beyond human token permissions.
+- **Agent-role attribution missing in audit trail**: verify that the agent-platform emitter seam is properly wired; remember that `agent_role` is omitted when absent (not null) and only appears when a producer binds a role (phase 5+).
+- **Audit trail verification issues**: use the `?agent_role=` query parameter to filter audit events by agent role; verify the attribution triple is complete for multi-agent scenarios.
 
-**Updated** Added troubleshooting guidance for the new agent-role axis and runtime:flags capability.
+**Updated** Added troubleshooting guidance for the new agent-role axis, agent-role attribution, and audit trail verification.
 
 **Section sources**
 - [user-and-role-administration.md:118-137](file://docs/guides/user-and-role-administration.md#L118-L137)
 - [policy_engine.py:374-387](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L374-L387)
 - [PermissionsView.tsx:96-127](file://products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx#L96-L127)
+- [spec.md:141-159](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L141-L159)
 
 ## Conclusion
 The platform's authorization model combines a fixed human role vocabulary, a closed agent-role vocabulary, environment-scoped permissions, and a versioned policy bundle evaluated by a deny-by-default engine. Mutating actions are tightly controlled through HITL and tiered approvals. Transparency is provided via a live permission matrix rendered in the portal, enabling operators to verify effective permissions at runtime. The addition of runtime:flags provides operational teams with safe visibility into platform configuration without exposing sensitive values. The agent-role axis adds a powerful new dimension for controlling sub-agent authority while preserving the single-token identity model.
+
+The completion of the attribution triple through SPEC-075 ensures that every audited event carries complete provenance information: which role acted (`agent_role`), on whose behalf (`subject`/`username`), and under which delegation (`delegation_mode`). This enables comprehensive audit trails for multi-agent scenarios while maintaining backward compatibility and byte-identical behavior for existing single-agent paths.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -446,3 +491,19 @@ The schema defines the structure of the live permission matrix response, includi
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
 - [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)
+
+### Audit Event Schema and Attribution Triple
+The audit-event schema now includes the complete attribution triple:
+
+| Field | Purpose | Example Values |
+|---|---|---|
+| `subject` / `username` | On whose behalf the action was taken | Human user identifiers |
+| `delegation_mode` | Under which delegation authority was acquired | `user_delegated`, `acting_service`, `none` |
+| `agent_role` | Which agent role performed the action | `diagnostician`, `orchestrator`, `executor` |
+
+The `agent_role` field is optional and omitted when absent, ensuring backward compatibility with existing audit events. When present, it provides complete provenance tracking for multi-agent scenarios.
+
+**Section sources**
+- [audit-event.schema.json:62-83](file://shared/shared-contracts/schemas/audit-event.schema.json#L62-L83)
+- [spec.md:63-85](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L63-L85)
+- [plan.md:12-24](file://docs/specs/SPEC-075-multi-agent-audit-attribution/plan.md#L12-L24)

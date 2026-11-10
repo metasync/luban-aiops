@@ -1,0 +1,1 @@
+No build or test commands — the README prescribes a recommended reading order for the foundational docs and marks each spike as "assessment only, no implementation authorized" unless explicitly approved via a SPEC/ADR path.

@@ -1,0 +1,1 @@
+Markdown documentation authored against the Kustomize-based dev-k8s overlay; references Kubernetes 1.28+, kubectl, make, Docker/Podman, kustomize, uv, and Envoy Gateway as the documented deployment surface.

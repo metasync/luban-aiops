@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: docs/formal_specs
+title: Feature Spec Index & Spec-Driven Development Workflow
+scope:
+    - docs/specs/
+source_files: []
+depends_on: []
+related_to: []

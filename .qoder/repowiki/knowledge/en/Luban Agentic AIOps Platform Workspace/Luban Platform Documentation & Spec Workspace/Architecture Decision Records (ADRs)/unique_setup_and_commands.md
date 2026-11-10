@@ -1,0 +1,1 @@
+New ADRs are created by copying `template.md`, assigning the next sequential `NNNN` number, and updating the index table in `README.md`; superseding an existing record changes its status to `superseded by ADR-NNNN` rather than editing the original file.

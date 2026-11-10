@@ -1,0 +1,6 @@
+This module is a documentation-only leaf under `docs/workspace/` that documents how the monorepo should evolve into a modular workspace. It is organized around two layers:
+
+- Foundational design docs (read in the order prescribed by `README.md`): `workspace-model.md`, `product-boundaries.md`, `product-structure-review.md`, `backend-service-layout-convention.md`, `python-container-strategy.md`, `repository-reorganization-plan.md`, `github-repository-governance.md`. These define the target workspace structure, dependency rules, per-product ownership, backend package conventions, container baselines, migration plan, and GitHub governance.
+- Spike / assessment files (all named `*-spike.md` plus a few supporting artifacts like `semantic-skill-retrieval-eval-set.md` and `semantic-skill-retrieval-labels.json`): independent feasibility studies evaluating concrete AgentScope features, MCP ingestion/exposure paths, skill retrieval, policy rollout, session handover, shared SDK extraction, and multi-agent orchestration against SPEC-018's four-point adoption gate.
+
+The directory extends the main platform study in `docs/agentic-aiops-platform/` by answering how products split, relate, and are governed — it has no executable code and no runtime dependencies on the rest of the repo.

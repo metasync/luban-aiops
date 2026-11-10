@@ -1,0 +1,3 @@
+- Exploration documents follow a `*-spike.md` filename convention and consistently frame their conclusion as an assessment with an explicit go/no-go against SPEC-018's four-point adoption gate.
+- Spike outcomes are tagged with a status phrase such as "assessment only, no implementation authorized" (or variants like "no ADR, SPEC number, or implementation authorized") to distinguish exploratory analysis from approved work.
+- Foundational workspace design is sequenced through a prescribed reading order in `README.md`, starting with `workspace-model.md` and ending with `github-repository-governance.md`.

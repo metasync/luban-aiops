@@ -1,0 +1,4 @@
+- Every feature is a top-level `SPEC-NNN-<kebab-case>/` directory containing exactly `plan.md`, `spec.md`, and `tasks.md` derived from `templates/`.
+- Cross-feature dependencies are declared via explicit `See also: SPEC-NNN-*` references inside `spec.md` rather than implicit links.
+- SPEC numbers follow release-phase ordering (R1 through R5), so later numbers depend on earlier ones.
+- Implementation tasks in `tasks.md` map one-to-one to PRs or issues that realize the corresponding `spec.md` requirements.

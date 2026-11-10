@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: specs/agent_runtime_and_execution
+title: Agent Runtime, Tool Execution & Kernel Durability Specs
+scope:
+    - docs/specs/SPEC-002-agent-service-contract/
+    - docs/specs/SPEC-007-tool-execution-framework/
+    - docs/specs/SPEC-017-agent-kernel-utilization-and-durability/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/sessions_and_durable_state

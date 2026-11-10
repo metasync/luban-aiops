@@ -1,0 +1,1 @@
+Design and exploration documentation defining the Luban platform's modular workspace layout, product boundaries, repository governance, and spike assessments for future architectural changes.

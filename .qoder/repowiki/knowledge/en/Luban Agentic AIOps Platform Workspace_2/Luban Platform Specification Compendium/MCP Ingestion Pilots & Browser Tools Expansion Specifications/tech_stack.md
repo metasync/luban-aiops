@@ -1,0 +1,1 @@
+SPEC-069 pins the official `mcp` Python SDK (`mcp>=2.3,<3.0`, locked `2.3.0`, MIT) as the ingestion transport against AAP/AWX MCP servers; SPEC-067 takes the fallback path using `httpx` against ServiceNow's REST/Table API (`/api/now/table/...`). SPEC-050 extends Playwright-backed browser tools (`_WebInteractionTool`, `gate_capture`, `gate_interaction`, `FlowState`).

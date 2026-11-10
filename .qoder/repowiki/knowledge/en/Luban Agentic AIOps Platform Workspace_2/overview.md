@@ -1,0 +1,1 @@
+Monorepo workspace that composes eight Python services plus an operator portal around shared contracts, GitOps overlays, and a unified Makefile verification gate.

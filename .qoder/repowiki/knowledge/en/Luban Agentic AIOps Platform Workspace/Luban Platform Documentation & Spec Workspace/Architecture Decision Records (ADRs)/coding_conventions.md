@@ -1,0 +1,4 @@
+- Each decision lives in a single numbered Markdown file named `NNNN-<slug>.md` and follows the Status / Context / Decision / Alternatives Considered / Consequences section order defined in `template.md`.
+- The `Status` block carries a fixed enum value (`proposed`, `accepted`, or `superseded by ADR-NNNN`) plus date, deciders, and related-spec metadata.
+- Accepted ADRs are treated as immutable except for status transitions and supersession links; new decisions supersede rather than edit prior records.
+- Cross-references between ADRs use the `ADR-NNNN` identifier form, and specs cite dependent ADRs in their status header instead of embedding decision text.

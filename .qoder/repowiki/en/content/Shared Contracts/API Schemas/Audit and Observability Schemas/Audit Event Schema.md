@@ -8,6 +8,7 @@
 - [SPEC-013-durable-audit-trail/spec.md](file://docs/specs/SPEC-013-durable-audit-trail/spec.md)
 - [SPEC-046-audit-reporting-and-export/spec.md](file://docs/specs/SPEC-046-audit-reporting-and-export/spec.md)
 - [SPEC-062-secure-password-generation-and-delivery/spec.md](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md)
+- [SPEC-075-multi-agent-audit-attribution/spec.md](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md)
 - [0012-one-time-secret-delivery-handoff.md](file://docs/adr/0012-one-time-secret-delivery-handoff.md)
 - [audit_store.py](file://products/audit-service/src/audit_service/services/audit_store.py)
 - [audit_emitter.py (tool-gateway)](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py)
@@ -20,15 +21,16 @@
 - [decoder.ts](file://products/operator-portal/web-ui/app/src/stream/decoder.ts)
 - [constants.test.ts](file://products/operator-portal/web-ui/app/src/views/audit/__tests__/constants.test.ts)
 - [AuditView.tsx](file://products/operator-portal/web-ui/app/src/views/audit/AuditView.tsx)
+- [agent_role.py](file://products/agent-platform/src/agent_service/services/agent_role.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added `secret_delivered` to the audit event taxonomy with full field semantics and provenance requirements
-- Documented secret delivery stream frame (v12) integration with audit events
-- Enhanced examples to include secret generation and delivery workflows
-- Updated privacy considerations to address generated secret handling
-- Added new section on secret delivery audit trail covering buffer, channels, and redemption tracking
+- Added `agent_role` field to the audit event schema with closed enum vocabulary (diagnostician, orchestrator, executor)
+- Updated provenance chain documentation to include the attribution triple (role, behalf, delegation)
+- Enhanced examples to show agent role attribution in multi-agent scenarios
+- Updated privacy considerations to address agent role as descriptive attribution
+- Added new section on multi-agent audit attribution covering the SPEC-075 implementation
 
 ## Table of Contents
 1. Introduction
@@ -43,7 +45,7 @@
 10. Appendices
 
 ## Introduction
-This document defines the audit event schema and its ecosystem for capturing platform activities, user actions, and system events with full provenance. It specifies required and optional fields, enumerates the event taxonomy, explains the provenance chain across services, and provides examples for chat interactions, approval workflows, skill executions, incident triage activities, and secure secret delivery operations. It also covers data retention policies, privacy considerations for sensitive information including generated secrets, and export capabilities for compliance reporting.
+This document defines the audit event schema and its ecosystem for capturing platform activities, user actions, and system events with full provenance. It specifies required and optional fields, enumerates the event taxonomy, explains the provenance chain across services, and provides examples for chat interactions, approval workflows, skill executions, incident triage activities, secure secret delivery operations, and multi-agent attribution. It also covers data retention policies, privacy considerations for sensitive information including generated secrets, and export capabilities for compliance reporting.
 
 ## Project Structure
 The audit trail spans multiple products:
@@ -100,6 +102,7 @@ UI --> API
 Key field semantics:
 - Required: event_id, occurred_at, event_type, service, request_id, outcome.
 - Optional identity/provenance: subject, username, actor, roles, session_id.
+- **New**: agent_role - optional agent-role attribution from closed vocabulary (diagnostician, orchestrator, executor).
 - Per-event payload: details (additionalProperties allowed), typed by event type.
 
 Event taxonomy (closed enum):
@@ -112,12 +115,12 @@ Event taxonomy (closed enum):
 - execution_requested, execution_completed, execution_rejected
 - document_created, document_published, document_read
 - skill_draft_generated, incident_skill_draft_generated, skill_graduated
-- **secret_delivered** (new)
+- secret_delivered, target_authorization
 
 Outcomes: allow, deny, success, error.
 
 **Section sources**
-- [audit-event.schema.json:1-94](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L94)
+- [audit-event.schema.json:1-106](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L106)
 - [audit-store summary spec:52-87](file://docs/specs/SPEC-046-audit-reporting-and-export/spec.md#L52-L87)
 
 ## Architecture Overview
@@ -174,16 +177,51 @@ AuditAPI-->>Portal : "CSV (bounded)"
 - outcome: Result of the audited action.
 - details: Per-event-type payload; additional properties allowed.
 
+**Updated** Added `agent_role` field completing the attribution triple alongside subject/username and delegation_mode fields. The agent_role field is optional and drawn from the closed SPEC-073 vocabulary (diagnostician, orchestrator, executor). When absent, it is omitted (never null), preserving byte-identical behavior for legacy events.
+
 Provenance chain highlights:
 - Request origin: request_id ties events back to the initiating call.
-- Delegation chain: actor captures service-level delegation; combined with subject/username/roles for attribution.
+- Attribution triple: **which role acted** (agent_role), **on whose behalf** (subject/username), **under which delegation** (delegation_mode).
 - Execution context: session_id links events to a session; confirmation_decided → execution_requested → execution_completed/rejected forms the decision-to-execution lineage.
 
-**Updated** Added `secret_delivered` event type with specific provenance requirements for secret delivery operations.
+**Section sources**
+- [audit-event.schema.json:15-101](file://shared/shared-contracts/schemas/audit-event.schema.json#L15-L101)
+- [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
+- [SPEC-075-multi-agent-audit-attribution/spec.md:63-85](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L63-L85)
+
+### Multi-Agent Audit Attribution
+The `agent_role` field implements SPEC-075's multi-agent audit attribution, providing the missing leg of the memo's *which role acted / on whose behalf / under which delegation* attribution triple. This is an additive, inert dimension that completes the provenance chain without changing authorization logic.
+
+Agent role vocabulary (closed enum):
+- `diagnostician`: Read-level tools, autonomous diagnosis without mutation authority
+- `orchestrator`: Decomposes/delegates/synthesizes; holds no direct gateway tools  
+- `executor`: May see mutating tools but still requires human approval
+
+Implementation characteristics:
+- Optional field omitted when unscoped (byte-identical to legacy events)
+- Descriptive attribution only - narrows no authority (prescriptive axis is SPEC-074)
+- Stored in dedicated column with index for efficient querying
+- Filterable via query API (`?agent_role=diagnostician`)
+- Phase 4 delivered as inert substrate - no deployed caller binds non-None role yet
+
+```mermaid
+flowchart TD
+Start(["Multi-Agent Event"]) --> CheckRole{"Agent role bound?"}
+CheckRole -- No --> OmitField["Omit agent_role field<br/>(legacy compatibility)"]
+CheckRole -- Yes --> IncludeRole["Include agent_role:<br/>diagnostician/orchestrator/executor"]
+IncludeRole --> Store["Store in dedicated column<br/>with idx_audit_agent_role index"]
+OmitField --> Store
+Store --> Queryable["Queryable via ?agent_role= filter"]
+```
+
+**Diagram sources**
+- [audit_store.py:246-248](file://products/audit-service/src/audit_service/services/audit_store.py#L246-L248)
+- [audit_store.py:332-334](file://products/audit-service/src/audit_service/services/audit_store.py#L332-L334)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 
 **Section sources**
-- [audit-event.schema.json:15-90](file://shared/shared-contracts/schemas/audit-event.schema.json#L15-L90)
-- [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
+- [SPEC-075-multi-agent-audit-attribution/spec.md:63-85](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L63-L85)
+- [agent_role.py:30-49](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L49)
 
 ### Secret Delivery Audit Events
 The `secret_delivered` event tracks when generated secrets reach humans through secure delivery channels. This event is emitted by the tool-gateway when:
@@ -228,7 +266,7 @@ Tool->>Audit : emit secret_delivered(event)
 - [secrets_connector.py:630-654](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L630-L654)
 
 **Section sources**
-- [audit-event.schema.json:89-90](file://shared/shared-contracts/schemas/audit-event.schema.json#L89-L90)
+- [audit-event.schema.json:89-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L89-L100)
 - [SPEC-062-secure-password-generation-and-delivery/spec.md:203-224](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L203-L224)
 - [0012-one-time-secret-delivery-handoff.md:58-66](file://docs/adr/0012-one-time-secret-delivery-handoff.md#L58-L66)
 
@@ -282,7 +320,7 @@ LogOnly --> End
 ### Storage, Filtering, and Summarization
 - In-memory store: simple list with deduplication by event_id; supports query filters and summarize.
 - PostgreSQL store: WAL-durable table with indexes; parameterized filters; batched eviction by cutoff and hard cap.
-- Filters: username, session_id, request_id, event_type, service, outcome, since/until; newest-first ordering with cursor pagination.
+- Filters: username, session_id, request_id, event_type, service, outcome, delegation_mode, **agent_role**, since/until; newest-first ordering with cursor pagination.
 - Summarization: deterministic aggregation over envelope columns only (event_type, outcome, service, username); top actors limited; decision_chain projection counts confirmation_decided, execution_requested, execution_completed, execution_rejected.
 
 ```mermaid
@@ -324,16 +362,18 @@ AuditStore <|.. PostgresAuditStore
 - Documents: document_created/published/read with document_id, document_type, ownership counts, prose_status.
 - Incident triage: incident_triaged with incident envelope, severity_assessment, report_summary, next_steps titles, skills_cited.
 - Skill authoring and graduation: skill_draft_generated/incident_skill_draft_generated/skill_graduated with validation, mode, step_count, web_target, declaration.
-- **Secret delivery**: secret_delivered with delivery_id, channel, recipient - fires when generated secrets reach humans securely.
+- Secret delivery: secret_delivered with delivery_id, channel, recipient - fires when generated secrets reach humans securely.
+- Target authorization: target_authorization with operation, authorization_outcome, reason, challenge_id/target/session correlation.
 
 Examples mapped to code:
 - Chat completed: platform-gateway emits chat_completed with input_modality and model after streaming completes.
 - Confirmation decided: platform-gateway emits confirmation_decided with decision, tool_names, and optional approval context.
 - Skill search: skills-hub emits skill_searched with query, limit, result_count, skill_ids, and optional source/tag.
-- **Secret delivered**: tool-gateway emits secret_delivered on successful redemption or SMTP acceptance, carrying channel and recipient metadata only.
+- Secret delivered: tool-gateway emits secret_delivered on successful redemption or SMTP acceptance, carrying channel and recipient metadata only.
+- **Multi-agent attribution**: agent-platform emits events with agent_role when bound to diagnostician/orchestrator/executor contexts.
 
 **Section sources**
-- [audit-event.schema.json:25-89](file://shared/shared-contracts/schemas/audit-event.schema.json#L25-L89)
+- [audit-event.schema.json:25-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L25-L100)
 - [gateway_service.py:1200-1363](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1200-L1363)
 - [chat.py:37-76](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L37-L76)
 - [skills.py:99-146](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L99-L146)
@@ -353,12 +393,14 @@ Examples mapped to code:
 - Sensitive information handling: emitters perform redaction before ingestion; the audit service stores post-redaction payloads verbatim.
 - Identity fields: subject, username, actor, roles are optional and included only when available; they enable attribution while avoiding unnecessary PII.
 - Details payload: per-event-type sensitive values are expected to be redacted by emitters prior to emission.
-- **Generated secrets**: The `secret_delivered` event never carries the actual secret value; only metadata about the delivery channel and recipient. Generated values ride no human-readable projection due to redemption-on-click design.
+- Generated secrets: The `secret_delivered` event never carries the actual secret value; only metadata about the delivery channel and recipient. Generated values ride no human-readable projection due to redemption-on-click design.
+- **Agent role attribution**: The `agent_role` field is descriptive attribution only - it narrows no authority and never becomes a new principal, claim, or identity edge. It complements the existing identity fields without introducing new privacy concerns.
 
 **Section sources**
-- [audit-event.schema.json:60-90](file://shared/shared-contracts/schemas/audit-event.schema.json#L60-L90)
+- [audit-event.schema.json:60-101](file://shared/shared-contracts/schemas/audit-event.schema.json#L60-L101)
 - [SPEC-013-durable-audit-trail/spec.md:30-73](file://docs/specs/SPEC-013-durable-audit-trail/spec.md#L30-L73)
 - [SPEC-062-secure-password-generation-and-delivery/spec.md:203-224](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L203-L224)
+- [SPEC-075-multi-agent-audit-attribution/spec.md:248-252](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L248-L252)
 
 ### Export Capabilities for Compliance
 - Summary endpoint: GET /api/v1/audit/summary returns deterministic aggregates over envelope columns only; no details excavation.
@@ -387,7 +429,7 @@ Constants["Portal Constants"] --- Schema
 ```
 
 **Diagram sources**
-- [audit-event.schema.json:1-94](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L94)
+- [audit-event.schema.json:1-106](file://shared/shared-contracts/schemas/audit-event.schema.json#L1-L106)
 - [audit_emitter.py (tool-gateway):1-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L1-L98)
 - [audit_emitter.py (agent-platform):1-99](file://products/agent-platform/src/agent_service/services/audit_emitter.py#L1-L99)
 - [audit_store.py:222-324](file://products/audit-service/src/audit_service/services/audit_store.py#L222-L324)
@@ -398,7 +440,7 @@ Constants["Portal Constants"] --- Schema
 
 ## Performance Considerations
 - Fire-and-forget emission ensures audit does not block user-facing paths; timeouts and metrics capture delivery health.
-- PostgreSQL store uses targeted indexes on occurred_at, username, session_id, request_id, event_type for efficient filtering and pagination.
+- PostgreSQL store uses targeted indexes on occurred_at, username, session_id, request_id, event_type, delegation_mode, **agent_role** for efficient filtering and pagination.
 - Summarization avoids JSONB excavation; grouped SQL over envelope columns keeps aggregate queries fast and deterministic.
 - Export streams in pages to bound memory; row cap prevents large responses.
 
@@ -408,7 +450,8 @@ Common issues and mitigations:
 - Ingest rejections: malformed events return 400; verify envelope against the shared schema.
 - Query/filter mismatches: ensure filters match envelope columns; outcome dimension is supported for filtering.
 - Store readiness: use /health to verify backend connectivity; eviction runs independently and should not block ingest.
-- **Secret delivery issues**: Verify buffer backend connectivity (memory/Redis), check handle expiration, validate owner scope matching, confirm audit service availability for secret_delivered events.
+- Secret delivery issues: Verify buffer backend connectivity (memory/Redis), check handle expiration, validate owner scope matching, confirm audit service availability for secret_delivered events.
+- **Agent role attribution issues**: Verify agent-platform emitter integration, check current_agent_role_value() returns expected values, confirm agent_role field is properly omitted when None.
 
 **Section sources**
 - [audit_emitter.py (tool-gateway):76-98](file://products/tool-gateway/src/tool_gateway/services/audit_emitter.py#L76-L98)
@@ -416,30 +459,31 @@ Common issues and mitigations:
 - [audit_store.py:535-546](file://products/audit-service/src/audit_service/services/audit_store.py#L535-L546)
 
 ## Conclusion
-The audit event schema provides a stable, extensible contract for capturing platform-wide activities with strong provenance. Emitters produce standardized envelopes, the audit-service persists them durably with bounded growth, and reporting surfaces deliver deterministic summaries and bounded exports for compliance. The design preserves privacy by storing post-redaction data and restricts access via audit:read, ensuring auditors can review trails without write privileges. The addition of `secret_delivered` events enhances security auditing for generated secret operations while maintaining the no-projection guarantee for sensitive values.
+The audit event schema provides a stable, extensible contract for capturing platform-wide activities with strong provenance. Emitters produce standardized envelopes, the audit-service persists them durably with bounded growth, and reporting surfaces deliver deterministic summaries and bounded exports for compliance. The design preserves privacy by storing post-redaction data and restricts access via audit:read, ensuring auditors can review trails without write privileges. The addition of `agent_role` completes the attribution triple (role/behalf/delegation) while maintaining the no-projection guarantee for sensitive values. The `secret_delivered` events enhance security auditing for generated secret operations. Together, these features provide comprehensive audit coverage for both single-agent and multi-agent scenarios.
 
 ## Appendices
 
 ### Field Reference Summary
 - Required: event_id, occurred_at, event_type, service, request_id, outcome.
-- Optional: subject, username, actor, roles, session_id.
+- Optional: subject, username, actor, roles, session_id, delegation_mode, **agent_role**.
 - Details: per-event-type payload; see schema for permitted keys per event type.
 
 **Section sources**
-- [audit-event.schema.json:7-90](file://shared/shared-contracts/schemas/audit-event.schema.json#L7-L90)
+- [audit-event.schema.json:7-101](file://shared/shared-contracts/schemas/audit-event.schema.json#L7-L101)
 
 ### Example Scenarios Mapped to Code
 - Chat interaction: chat_started/chat_completed emitted by platform-gateway with input_modality and model.
 - Approval workflow: confirmation_decided emitted with decision, tool_names, and optional approval context.
 - Skill execution: skill_searched emitted by skills-hub with query, limit, result_count, skill_ids, and optional source/tag.
 - Incident triage: incident_triaged emitted with incident envelope, severity assessment, report summary, next steps, and cited skills.
-- **Secret delivery**: secret_delivered emitted by tool-gateway with delivery_id, channel, and recipient when generated secrets reach humans securely.
+- Secret delivery: secret_delivered emitted by tool-gateway with delivery_id, channel, and recipient when generated secrets reach humans securely.
+- **Multi-agent attribution**: agent-platform emits events with agent_role (diagnostician/orchestrator/executor) when bound to role-scoped contexts.
 
 **Section sources**
 - [chat.py:37-76](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L37-L76)
 - [gateway_service.py:1200-1363](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L1200-L1363)
 - [skills.py:99-146](file://products/skills-hub/src/skills_hub/api/routes/skills.py#L99-L146)
-- [audit-event.schema.json:25-89](file://shared/shared-contracts/schemas/audit-event.schema.json#L25-L89)
+- [audit-event.schema.json:25-100](file://shared/shared-contracts/schemas/audit-event.schema.json#L25-L100)
 
 ### Secret Delivery Implementation Details
 The secret delivery system implements a secure handoff mechanism for generated passwords:
@@ -466,3 +510,35 @@ The secret delivery system implements a secure handoff mechanism for generated p
 - [secrets_connector.py:393-521](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L393-L521)
 - [secrets_connector.py:524-654](file://products/tool-gateway/src/tool_gateway/tools/secrets_connector.py#L524-L654)
 - [SPEC-062-secure-password-generation-and-delivery/spec.md:172-224](file://docs/specs/SPEC-062-secure-password-generation-and-delivery/spec.md#L172-L224)
+
+### Multi-Agent Attribution Implementation Details
+The multi-agent audit attribution system implements SPEC-075's role-based provenance tracking:
+
+**Agent Role Vocabulary:**
+- Closed enum with three values: diagnostician, orchestrator, executor
+- Platform-owned, immutable for the life of agent context
+- Never model-chosen - role is a platform fact, not derivable from model output
+- Reduces to plain platform strings with no agentscope imports
+
+**Attribution Triple:**
+- Which role acted: agent_role field (diagnostician/orchestrator/executor)
+- On whose behalf: subject/username fields (existing identity)
+- Under which delegation: delegation_mode field (existing provenance)
+
+**Storage and Query Support:**
+- Dedicated database column with index (idx_audit_agent_role)
+- Optional field omitted when None (byte-identical to legacy events)
+- Filterable via query API (?agent_role=diagnostician)
+- Composes with existing filters (AND semantics)
+
+**Phase 4 Characteristics:**
+- Inert substrate - no deployed caller binds non-None role yet
+- Byte-identical behavior for unscoped single-agent events
+- Producer seam wired but inactive (current_agent_role_value() returns None)
+- Ready for phase 5 when concurrent members begin producing role-attributed events
+
+**Section sources**
+- [agent_role.py:30-120](file://products/agent-platform/src/agent_service/services/agent_role.py#L30-L120)
+- [SPEC-075-multi-agent-audit-attribution/spec.md:115-237](file://docs/specs/SPEC-075-multi-agent-audit-attribution/spec.md#L115-L237)
+- [audit_store.py:246-248](file://products/audit-service/src/audit_service/services/audit_store.py#L246-L248)
+- [audit_store.py:332-334](file://products/audit-service/src/audit_service/services/audit_store.py#L332-L334)

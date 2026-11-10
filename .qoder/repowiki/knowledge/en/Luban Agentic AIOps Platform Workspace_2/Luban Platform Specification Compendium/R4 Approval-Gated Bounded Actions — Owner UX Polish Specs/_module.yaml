@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: specs/decision_sync_and_owner_side_polish
+title: R4 Approval-Gated Bounded Actions — Owner UX Polish Specs
+scope:
+    - docs/specs/SPEC-032-owner-side-live-decision-sync/
+    - docs/specs/SPEC-033-confirmation-card-turn-anchoring/
+    - docs/specs/SPEC-034-approval-owner-ux-polish/
+source_files: []
+depends_on: []
+related_to: []

@@ -1,0 +1,4 @@
+- Feature proposals follow the three-file template (`spec.md`, `plan.md`, `tasks.md`) under `specs/SPEC-NNN-<slug>/`, with optional acceptance criteria files alongside.
+- Architectural decisions are recorded as sequentially numbered Markdown files under `adr/` using the shared `template.md`.
+- Release milestones are captured as dated Markdown files under `agentic-aiops-platform/release-notes/` named `<YYYY-MM-DD>-<slug>.md`.
+- Exploratory work lives in `workspace/` as standalone `.md` files until it graduates into a formal SPEC entry.

@@ -1,0 +1,4 @@
+- Each guide is a single self-contained Markdown file named in kebab-case describing one operator concern, linked from the top-level README index table.
+- Operational steps are presented as numbered steps with fenced bash code blocks showing exact commands run against the `dev-luban-aiops` namespace.
+- Prerequisites and secret provisioning are enumerated in tables (e.g., tool versions, K8s Secret names and their provisioning scripts) rather than prose paragraphs.
+- Guides cross-reference sibling documentation trees using relative paths like `../agentic-aiops-platform/...` and `../specs/...` instead of absolute URLs.

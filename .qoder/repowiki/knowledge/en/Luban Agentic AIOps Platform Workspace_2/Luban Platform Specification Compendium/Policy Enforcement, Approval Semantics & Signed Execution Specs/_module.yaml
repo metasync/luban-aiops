@@ -1,0 +1,13 @@
+schema_version: 1
+module_path: specs/policy_approval_and_governance
+title: Policy Enforcement, Approval Semantics & Signed Execution Specs
+scope:
+    - docs/specs/SPEC-004-policy-enforcement/
+    - docs/specs/SPEC-030-require-approval-policy-semantics/
+    - docs/specs/SPEC-037-signed-execution-requests/
+source_files: []
+depends_on: []
+related_to:
+    - path: specs/hitl_confirmation_and_inbox_flow
+    - path: specs/identity_trust_and_credentials
+    - path: specs/observability_audit_and_evidence

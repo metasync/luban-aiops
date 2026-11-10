@@ -14,14 +14,15 @@
 - [tool-gateway app.py](file://products/tool-gateway/src/tool_gateway/app.py)
 - [tool-gateway config.py](file://products/tool-gateway/src/tool_gateway/core/config.py)
 - [SPEC-073 role-scoped agent identity](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md)
+- [SPEC-076 bounded autonomous diagnosis](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**   
-- Updated ADR-0017 status from `proposed` to `accepted` (2026-11-03)
-- Added reference to SPEC-073 as the first concrete implementation spec
-- Updated acceptance rationale and downstream implications
-- Enhanced section sources with SPEC-073 references where relevant
+- Updated ADR-0017 to reference SPEC-076 as the next phase in the multi-agent orchestration series
+- Advanced from role-scoped identity substrate (SPEC-073) to bounded autonomous diagnosis implementation (SPEC-076)
+- Updated acceptance rationale and downstream implications to reflect SPEC-076's approved status
+- Enhanced section sources with SPEC-076 references where relevant
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -37,15 +38,15 @@
 ## Introduction
 ADR-0017 is an **accepted** architecture decision that formally ratifies bounded read-only multi-agent orchestration while preserving every existing mutation gate. It does not adopt an agentscope orchestration surface as shipped; instead, it defines the control-flow model the platform may admit and the identity, policy, audit, and contract boundaries any downstream implementation must respect.
 
-The record's status is `accepted` as of 2026-11-03. The three load-bearing decisions — bounded read-only loop, diagnose-before-act autonomy ceiling, and role-scoped agents on the same delegated token narrowed per role — were ratified by the workspace operator on 2026-11-01 and formally accepted on 2026-11-03. Acceptance authorizes drafting the phased SPEC series described in the related memo, beginning with SPEC-073 (role-scoped identity & authority). It authorizes no runtime code, deployment, commit/push, version bump, or additional SPEC numbers beyond what the operator separately directed.
+The record's status is `accepted` as of 2026-11-03. The three load-bearing decisions — bounded read-only loop, diagnose-before-act autonomy ceiling, and role-scoped agents on the same delegated token narrowed per role — were ratified by the workspace operator on 2026-11-01 and formally accepted on 2026-11-03. Acceptance authorizes drafting the phased SPEC series described in the related memo, beginning with SPEC-073 (role-scoped identity & authority) and advancing to SPEC-076 (bounded autonomous diagnosis). It authorizes no runtime code, deployment, commit/push, version bump, or additional SPEC numbers beyond what the operator separately directed.
 
-**Updated** Status changed from `proposed` to `accepted` on 2026-11-03, formally ratifying the architecture and unblocking the phased multi-agent SPEC series.
+**Updated** Status changed from `proposed` to `accepted` on 2026-11-03, formally ratifying the architecture and unblocking the phased multi-agent SPEC series. The series has now advanced from role-scoped identity substrate (SPEC-073, delivered v0.54.0) to bounded autonomous diagnosis implementation (SPEC-076, approved v0.57.0), representing the concrete realization of Decision 1's bounded read-only orchestration loop.
 
 **Section sources**   
 - [ADR-0017:3-17](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L3-L17)
 
 ## Project Structure
-This document is primarily an architectural decision record supported by a prior exploration memo and several existing platform components that define the mutation gates, HITL bridging, browser tool sets, and step-budget discipline the ADR references. The acceptance of ADR-0017 has now triggered the opening of SPEC-073 as the first concrete implementation artifact.
+This document is primarily an architectural decision record supported by a prior exploration memo and several existing platform components that define the mutation gates, HITL bridging, browser tool sets, and step-budget discipline the ADR references. The acceptance of ADR-0017 has triggered the opening of the phased multi-agent SPEC series, which has now progressed through role-scoped identity substrate (SPEC-073) to bounded autonomous diagnosis implementation (SPEC-076).
 
 ```mermaid
 graph TB
@@ -53,7 +54,8 @@ ADR["ADR-0017<br/>Bounded read-only multi-agent orchestration<br/>Status: accept
 SPIKE["Multi-agent orchestration spike<br/>exploration & gate scoring"]
 COMP_ADR["ADR-0011<br/>Composition carries no authority"]
 SPEC64["SPEC-064<br/>GoalPipeline reopen trigger"]
-SPEC073["SPEC-073<br/>Role-scoped agent identity<br/>(first concrete spec)"]
+SPEC073["SPEC-073<br/>Role-scoped agent identity<br/>(delivered v0.54.0)"]
+SPEC076["SPEC-076<br/>Bounded autonomous diagnosis<br/>(approved v0.57.0)"]
 HITL["HITL confirmations<br/>parking & resume"]
 FLOW["Flow approvals<br/>browser write set"]
 GW_APP["Tool-gateway app<br/>step budget wiring"]
@@ -62,6 +64,7 @@ ADR --> SPIKE
 ADR --> COMP_ADR
 ADR --> SPEC64
 ADR --> SPEC073
+ADR --> SPEC076
 ADR --> HITL
 ADR --> FLOW
 ADR --> GW_APP
@@ -74,6 +77,7 @@ GW_APP --> GW_CFG
 - [ADR-0011:1-119](file://docs/adr/0011-composition-carries-no-authority.md#L1-L119)
 - [SPEC-064 spec:31-41](file://docs/specs/SPEC-064-agentscope-compression-and-goal-pipeline/spec.md#L31-L41)
 - [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
+- [SPEC-076 spec:17-21](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L17-L21)
 - [hitl_confirmations.py:1-12](file://products/agent-platform/src/agent_service/services/hitl_confirmations.py#L1-L12)
 - [flow_approvals.py:43-53](file://products/agent-platform/src/agent_service/services/flow_approvals.py#L43-L53)
 - [tool-gateway app.py:200-210](file://products/tool-gateway/src/tool_gateway/app.py#L200-L210)
@@ -301,32 +305,32 @@ SPEC-064 recorded the `GoalPipeline` reopen condition as "a concrete autonomous-
 - [agentscope compression goal pipeline spike:1-6](file://docs/workspace/agentscope-compression-goal-pipeline-spike.md#L1-L6)
 - [ADR-0017:30-44](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L30-L44)
 
-### Downstream Implementation: SPEC-073 Role-Scoped Agent Identity
-With ADR-0017 now accepted, the first concrete implementation artifact is SPEC-073, which focuses on role-scoped identity and authority. This spec addresses the mechanism by which per-role agents carry narrowed authority on the delegated-token/broker model, building on the existing `_ensure_toolkit(bearer_token, read_only)` seam in the runtime kernel.
+### Downstream Implementation: From SPEC-073 to SPEC-076
+With ADR-0017 now accepted, the multi-agent orchestration series has progressed through two key phases. The first concrete implementation artifact was SPEC-073, which focused on establishing the role-scoped identity and authority substrate. This spec established an inert substrate where every requirement is provable by unit/contract tests over the role-narrowing and identity-preservation seams with no orchestration caller and no change to the deployed single-agent path.
 
-SPEC-073 establishes an inert substrate where every requirement is provable by unit/contract tests over the role-narrowing and identity-preservation seams with no orchestration caller and no change to the deployed single-agent path. The spec introduces a closed, platform-owned agent-role vocabulary (`diagnostician`, `planner`/`orchestrator`, `executor`) bound to an agent-construction context, immutable for the life of that context, and never model-chosen.
+**Updated** The series has now advanced to SPEC-076, which represents the concrete realization of ADR-0017 Decision 1 — the bounded read-only orchestration loop. SPEC-076 binds the agent-roles that SPEC-073, SPEC-074, and SPEC-075 each landed inert, making the controlled relaxation of ADR-0011 Decision 3 concrete. SPEC-076 introduces a platform-owned orchestration module that drives bounded member turns over the existing `read_only=True` seam, binding roles via `agent_role_scope()`.
 
 ```mermaid
 flowchart TD
-ADR17["ADR-0017 Accepted<br/>Role-scoped agents on same token"] --> SPEC073["SPEC-073<br/>Role-scoped identity & authority"]
-SPEC073 --> ROLE_ENUM["Closed agent-role enum<br/>diagnostician/planner/orchestrator/executor"]
-SPEC073 --> TOOLKIT_NARROWING["Per-role toolkit narrowing<br/>on delegated token"]
-SPEC073 --> POLICY_AXIS["Policy role axis<br/>authorization matrix"]
-ROLE_ENUM --> IMPLEMENTATION["Runtime substrate<br/>no orchestration caller"]
-TOOLKIT_NARROWING --> IMPLEMENTATION
-POLICY_AXIS --> IMPLEMENTATION
+ADR17["ADR-0017 Accepted<br/>Role-scoped agents on same token"] --> SPEC073["SPEC-073<br/>Role-scoped identity & authority<br/>(delivered v0.54.0)"]
+SPEC073 --> SPEC076["SPEC-076<br/>Bounded autonomous diagnosis<br/>(approved v0.57.0)"]
+SPEC076 --> LOOP["Platform-owned orchestration loop<br/>bounded fan-out over read-only seam"]
+LOOP --> ROLES["Binds agent_roles_any policy axis<br/>and populates audit attribution"]
 ```
 
 **Diagram sources**
 - [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
-- [SPEC-073 spec:93-109](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L93-L109)
+- [SPEC-076 spec:17-21](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L17-L21)
+- [SPEC-076 spec:383-394](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L383-L394)
 
 **Section sources**
 - [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
 - [SPEC-073 spec:93-109](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L93-L109)
+- [SPEC-076 spec:17-21](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L17-L21)
+- [SPEC-076 spec:383-394](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L383-L394)
 
 ## Dependency Analysis
-ADR-0017 depends on existing platform invariants more than it introduces new runtime dependencies. With its acceptance, it now gates the phased multi-agent SPEC series.
+ADR-0017 depends on existing platform invariants more than it introduces new runtime dependencies. With its acceptance, it now gates the phased multi-agent SPEC series, which has progressed from role-scoped identity substrate to bounded autonomous diagnosis implementation.
 
 ```mermaid
 graph LR
@@ -334,7 +338,8 @@ ADR["ADR-0017<br/>Accepted"] --> ADR11["ADR-0011<br/>composition authority"]
 ADR --> HITL["HITL confirmation registry"]
 ADR --> GW["Tool-gateway policy + audit"]
 ADR --> SPEC64["SPEC-064 reopen trigger"]
-ADR --> SPEC073["SPEC-073<br/>role-scoped identity"]
+ADR --> SPEC073["SPEC-073<br/>role-scoped identity<br/>(delivered)"]
+ADR --> SPEC076["SPEC-076<br/>bounded autonomous diagnosis<br/>(approved)"]
 ADR --> SPIKE["Multi-agent spike"]
 ADR --> CONTRACT["v2 stream schema<br/>additive, versioned, last"]
 ```
@@ -343,6 +348,7 @@ ADR --> CONTRACT["v2 stream schema<br/>additive, versioned, last"]
 - [ADR-0017:15-23](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L15-L23)
 - [ADR-0017:85-88](file://docs/adr/0017-bounded-read-only-multi-agent-orchestration.md#L85-L88)
 - [SPEC-073 spec:59-83](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L59-L83)
+- [SPEC-076 spec:17-21](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md#L17-L21)
 
 Key dependency relationships:
 
@@ -352,7 +358,8 @@ Key dependency relationships:
 | SPEC-020/030/031 | HITL confirmation path remains the sole mutation gate. |
 | SPEC-037/038/063 | Signed at-most-one dispatch remains the sole mutation execution path. |
 | SPEC-064 | Provides the reopened `GoalPipeline` trigger but does not authorize adoption. |
-| SPEC-073 | First concrete implementation spec for role-scoped identity & authority. |
+| SPEC-073 | First concrete implementation spec for role-scoped identity & authority (delivered v0.54.0). |
+| SPEC-076 | Second concrete implementation spec for bounded autonomous diagnosis (approved v0.57.0). |
 | Tool-gateway | Supplies deny-by-default policy, redaction, evidence, audit, and step-budget discipline. |
 | v2 stream schema | Must remain additive and versioned; no agentscope types leak through. |
 
@@ -400,6 +407,6 @@ Common pitfalls grounded in the source:
 ## Conclusion
 ADR-0017 is a controlled relaxation of ADR-0011's no-control-flow rule, limited to a bounded read-only orchestration loop. It preserves the platform's governed mutation path, denies adoption of agentscope orchestration surfaces as shipped, and defers autonomous resolve and external A2A federation until later, evidence-backed decisions. 
 
-**Updated** On acceptance (2026-11-03), ADR-0017 unblocks a phased SPEC series covering role-scoped identity and authority (SPEC-073), policy role axis, multi-agent audit and attribution, bounded autonomous diagnosis, and finally an additive, versioned v2 multi-agent contract. The first concrete implementation artifact, SPEC-073, focuses on establishing the role-scoped identity and authority substrate that enables all subsequent phases.
+**Updated** On acceptance (2026-11-03), ADR-0017 unblocked a phased SPEC series covering role-scoped identity and authority (SPEC-073), policy role axis, multi-agent audit and attribution, bounded autonomous diagnosis, and finally an additive, versioned v2 multi-agent contract. The series has now advanced significantly: SPEC-073 (role-scoped identity substrate, delivered v0.54.0) established the foundational role vocabulary and toolkit narrowing, while SPEC-076 (bounded autonomous diagnosis, approved v0.57.0) represents the concrete realization of Decision 1's bounded read-only orchestration loop, binding the agent-roles that the previous phases landed inert. The next phase will address the v2 multi-agent contract, completing the series outlined in the original planning memo.
 
 [No sources needed since this section summarizes without analyzing specific files]

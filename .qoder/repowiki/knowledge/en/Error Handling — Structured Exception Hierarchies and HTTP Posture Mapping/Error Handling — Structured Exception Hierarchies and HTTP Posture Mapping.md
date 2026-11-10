@@ -8,79 +8,68 @@ source_files:
     - products/agent-platform/src/agent_service/services/skills_client.py
     - products/agent-platform/src/agent_service/services/incident_client.py
     - products/agent-platform/src/agent_service/api/v2/routes.py
-    - products/agent-platform/src/agent_service/runtime_kernel.py
+    - products/agent-platform/src/agent_service/services/hitl_confirmations.py
     - products/agent-platform/src/agent_service/providers/base.py
-    - products/agent-platform/src/agent_service/services/delegated_identity.py
-    - products/agent-platform/src/agent_service/services/execution_protocol.py
-    - products/agent-platform/src/agent_service/services/execution_worker_client.py
-    - products/agent-platform/src/agent_service/services/shift_summary.py
-    - products/audit-service/src/audit_service/services/audit_store.py
-    - products/audit-service/src/audit_service/services/ingest_auth.py
-    - products/execution-runtime/src/execution_runtime/services/execution_protocol.py
-    - products/identity-broker/src/identity_service/services/exchange_service.py
-    - products/incident-service/src/incident_service/core/config.py
-    - products/incident-service/src/incident_service/services/connectors.py
-    - products/incident-service/src/incident_service/services/incident_store.py
-    - products/incident-service/src/incident_service/services/normalization.py
-    - products/incident-service/src/incident_service/services/query_auth.py
-    - products/incident-service/src/incident_service/services/triage.py
+    - products/agent-platform/src/agent_service/runtime_kernel.py
+    - products/platform-gateway/src/platform_gateway/api/routes/audit.py
     - products/platform-gateway/src/platform_gateway/services/policy_engine.py
     - products/platform-gateway/src/platform_gateway/services/token_verifier.py
-    - products/skills-hub/src/skills_hub/core/config.py
-    - products/skills-hub/src/skills_hub/services/query_auth.py
-    - products/tool-gateway/src/tool_gateway/services/authorization_service.py
-    - samples/acme-admin/app/src/acme_admin/main.py
+    - products/incident-service/src/incident_service/services/triage.py
+    - products/audit-service/src/audit_service/services/audit_store.py
+    - products/execution-runtime/src/execution_runtime/services/execution_protocol.py
 ---
 
-## Approach
+# Error Handling in Luban Agentic AIOps Platform
 
-Luban is a multi-product Python workspace (FastAPI services) that uses **domain-specific exception classes** rather than raw `Exception`/`ValueError` propagation, combined with **per-route HTTP posture mapping** at the API layer. There is no global FastAPI `exception_handler` decorator; instead each route handler catches client exceptions and raises `fastapi.HTTPException` with an explicit `status_code` and human-readable `detail`. No `try/except` blocks catch `HTTPException`, so it bubbles to FastAPI's default handler.
+## Approach Overview
 
-The pattern is most clearly documented in the service-client modules:
+The platform uses a **two-layer error model** consistent across all Python services (agent-platform, audit-service, execution-runtime, identity-broker, incident-service, platform-gateway, skills-hub, tool-gateway):
 
-- `products/agent-platform/src/agent_service/services/skills_client.py` — docstring: "Errors surface as a small structured hierarchy so the generation route maps them to the house posture — 503 when the dependency is not configured, 502 on transport failure or upstream 5xx — and an unvalidated draft is never returned."
-- `products/agent-platform/src/agent_service/services/incident_client.py` — identical docstring wording for its own hierarchy.
+1. **Domain-level exceptions**: per-module `*Error` classes that encode business semantics (configuration missing, service unavailable, not found, rejected by upstream). These are raised inside services and clients.
+2. **HTTP-level translation**: route handlers convert domain exceptions into FastAPI `HTTPException`s with explicit status codes, never leaking raw stack traces to the wire.
 
-## Key Files and Packages
+There is no centralized exception base class shared across products; each product defines its own hierarchy rooted at either `Exception` or `ValueError`. There is no repository-wide `errors/` package — errors live next to the code that raises them.
 
-**Agent platform (primary example of the pattern):**
-- `products/agent-platform/src/agent_service/services/skills_client.py` — `SkillsClientError` base + `SkillsDependencyNotConfigured`, `SkillsServiceUnavailable`, `SkillsClientRejected(status_code, message)`.
-- `products/agent-platform/src/agent_service/services/incident_client.py` — `IncidentClientError` base + `IncidentDependencyNotConfigured`, `IncidentServiceUnavailable`, `IncidentNotFound(incident_id)`, `IncidentClientRejected(status_code, message)`.
-- `products/agent-platform/src/agent_service/api/v2/routes.py` — central place where these are caught and mapped to `HTTPException` (lines 1205–1210, 1374–1381).
-- `products/agent-platform/src/agent_service/runtime_kernel.py` — `UnknownModelError(ValueError)`.
-- `products/agent-platform/src/agent_service/providers/base.py` — `ProviderConfigurationError(ValueError)`.
-- `products/agent-platform/src/agent_service/services/delegated_identity.py` — `DelegatedIdentityError(ValueError)`.
-- `products/agent-platform/src/agent_service/services/execution_protocol.py` — `ProtocolError(ValueError)`.
-- `products/agent-platform/src/agent_service/services/execution_worker_client.py` — `WorkerHandoffError(Exception)`.
-- `products/agent-platform/src/agent_service/services/shift_summary.py` — `DigestInputError`, `UnknownSessionError`.
+## Domain Exception Patterns
 
-**Other products define analogous per-service hierarchies:**
+### Client-to-upstream error hierarchies
+
+The most consistent pattern appears in cross-service HTTP clients under `services/<name>_client.py`. Two canonical examples:
+
+- `products/agent-platform/src/agent_service/services/skills_client.py` defines `SkillsClientError` → `SkillsDependencyNotConfigured`, `SkillsServiceUnavailable`, `SkillsClientRejected`.
+- `products/agent-platform/src/agent_service/services/incident_client.py` defines `IncidentClientError` → `IncidentDependencyNotConfigured`, `IncidentServiceUnavailable`, `IncidentNotFound`, `IncidentClientRejected`.
+
+Each client follows the same contract:
+- `is_configured(settings)` checks URL + secret presence before making a call.
+- Transport failures (`httpx.HTTPError`) become `<Name>ServiceUnavailable`.
+- Upstream `>=500` becomes `<Name>ServiceUnavailable`.
+- Upstream `4xx` becomes `<Name>ClientRejected(status_code, message)`, carrying both `status_code` and `message` attributes so callers can pass them through verbatim.
+- `_upstream_message(response)` extracts the upstream `error.message` field when present, falling back to a generic string.
+
+This pattern is replicated for other outbound clients (e.g., `incident_client.py`, `skills_client.py`).
+
+### In-process domain errors
+
+Other modules define small, purpose-specific hierarchies:
+
+- `agent_service/providers/base.py`: `ProviderConfigurationError(ValueError)` — configuration validation for LLM providers.
+- `agent_service/runtime_kernel.py`: `UnknownModelError(ValueError)`.
+- `agent_service/services/agent_role.py`: `AgentRoleError(ValueError)`.
+- `agent_service/services/delegated_identity.py`: `DelegatedIdentityError(ValueError)`.
+- `agent_service/services/execution_protocol.py`: `ProtocolError(ValueError)`.
+- `agent_service/services/hitl_confirmations.py`: `ConfirmationNotFound(LookupError)`, `ConfirmationExpired(LookupError)` — in-memory confirmation registry errors.
 - `audit-service`: `StoreError`, `IngestAuthError`.
-- `execution-runtime`: `ProtocolError(ValueError)`.
-- `identity-broker`: `ExchangeError`.
+- `execution-runtime`: `ProtocolError(ValueError)` mirroring the agent-platform variant.
+- `identity-broker`: `ExchangeError(Exception)`.
 - `incident-service`: `SettingsError`, `ConnectorConfigError`, `StoreError`, `NormalizationError`, `QueryAuthError`, `TriageError`.
-- `platform-gateway`: `PolicyLoadError`, `TokenVerificationError`.
+- `platform-gateway`: `PolicyLoadError(Exception)`, `TokenVerificationError(Exception)`.
 - `skills-hub`: `SettingsError`, `QueryAuthError`, `StoreError`.
-- `tool-gateway`: `AuthorizationError`.
 
-## Architecture and Conventions
+Most of these inherit from `Exception`; those representing invalid input/configuration often inherit from `ValueError`.
 
-### 1. Three-tier exception taxonomy
+## HTTP Translation Layer
 
-For outbound HTTP clients the taxonomy is uniform across agent-platform:
-
-| Exception | Meaning | HTTP posture | Example file |
-|---|---|---|---|
-| `*DependencyNotConfigured` | Service URL / secret missing | `503` (service unavailable) | `skills_client.py`, `incident_client.py` |
-| `*ServiceUnavailable` | Transport failure (`httpx.HTTPError`) or upstream `>= 500` | `502` (bad gateway) | same |
-| `*NotFound` | Domain-level "not found" (e.g. unknown incident id) | `404` | `incident_client.py` |
-| `*Rejected` | Upstream `4xx` | Pass-through `exc.status_code` | same |
-
-The classification logic lives in the client module itself (`response.status_code >= 300` branch), not in the caller.
-
-### 2. Caller-side posture mapping
-
-Route handlers in `api/v2/routes.py` contain explicit `except <DomainError> as exc: raise HTTPException(...)` blocks. The `_validate_skill_markdown` helper (line 1194–1210) is the canonical template:
+FastAPI route handlers perform the mapping from domain exceptions to HTTP responses. The canonical example is `products/agent-platform/src/agent_service/api/v2/routes.py`:
 
 ```python
 except SkillsDependencyNotConfigured as exc:
@@ -91,26 +80,62 @@ except SkillsClientRejected as exc:
     raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
 ```
 
-The `from None` suppresses the chained traceback in logs; domain errors never leak raw stack traces to the response.
+The same shape repeats for incident-client calls:
 
-### 3. Validation failures degrade gracefully
+```python
+except IncidentDependencyNotConfigured as exc:
+    raise HTTPException(status_code=503, detail=str(exc)) from None
+except IncidentServiceUnavailable as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from None
+except IncidentNotFound as exc:
+    raise HTTPException(status_code=404, detail="incident not found") from exc
+except IncidentClientRejected as exc:
+    raise HTTPException(status_code=exc.status_code, detail=exc.message) from None
+```
 
-The skill-draft generation path (`_validated_draft_sequence`, line 1275–1343) demonstrates a resilience convention: generation failures fall back to a facts-only skeleton, one bounded regeneration is attempted, and only after a second validation failure does the route return `502`. The docstring states: "generation never raises — any failure degrades to the anchor's facts-only skeleton, which is always format-valid; a second validation failure answers 502, never an unvalidated draft." This is a product-level invariant enforced by the code path, not just a comment.
+Key conventions observed in the translation layer:
 
-### 4. Non-HTTP domains use plain exceptions
+- `from None` is used on re-raises to suppress the original traceback chain, preventing raw stack traces from leaking into HTTP responses.
+- Dependency-not-configured cases consistently map to **503 Service Unavailable**.
+- Transport / upstream 5xx cases consistently map to **502 Bad Gateway**.
+- Upstream 4xx cases are passed through via `exc.status_code` and `exc.message`.
+- Structural 404s use a fixed human-readable detail rather than echoing the domain exception message.
+- Authorization failures raise `HTTPException(status_code=401, detail=...)` directly in routes (e.g., missing `X-User-ID`, unverified human identity).
 
-Domain logic inside services raises typed exceptions (`ValueError` subclasses for configuration/model errors, `Exception` subclasses for business failures). These are expected to be caught by the nearest route handler; there is no global middleware catching them. For example, `RuntimeKernel.get_model()` raises `UnknownModelError`; callers must handle it.
+The platform-gateway's own routes follow the same posture: `503` for "not configured", `502` for transport/upstream failure, and direct `HTTPException` raises for auth/validation failures.
 
-### 5. Samples show the alternative
+## House Posture Rules
 
-`samples/acme-admin/app/src/acme_admin/main.py` registers a custom `@app.exception_handler(AdminAuthRequired)` — demonstrating that custom exception handlers exist but are used sparingly (only in sample apps, not in the core Luban services).
+The docstrings and comments codify an explicit policy:
 
-## Conventions and Constraints
+> "structured errors map to the house posture: not configured 503, unreachable or upstream 5xx 502, any other 4xx passed through — an unvalidated draft is never returned."
 
-- **Structured exception hierarchy**: Each outbound client defines a small base class plus named subclasses for `DependencyNotConfigured`, `ServiceUnavailable`, `NotFound`, and `Rejected`. Observed in both `skills_client.py` and `incident_client.py`.
-- **Posture mapping at the boundary**: Route handlers translate domain exceptions into `HTTPException` with explicit status codes; the translation table is documented in the client module docstrings.
-- **No raw tracebacks**: All `raise HTTPException(...)` calls use `from None` when wrapping domain exceptions, preventing stack traces from leaking into logs/responses.
-- **Upstream 4xx pass-through**: `*Rejected` exceptions carry the original `status_code` and `message` attributes, and routes re-raise them verbatim via `exc.status_code` / `exc.message`.
-- **Validation paths never return unvalidated artifacts**: The skill-draft generation flow enforces that every response is either a validated draft or a degraded skeleton; this is stated in docstrings and implemented by the fallback-to-skeleton logic.
-- **No global exception middleware**: A grep for `@app.exception_handler` finds only the sample app; core services rely on per-route `try/except` blocks.
-- **Domain errors are plain Python exceptions**, not Pydantic/validation errors — FastAPI's built-in 422 handling is used separately for request-body validation, while business errors use the custom hierarchies above.
+This rule appears verbatim in multiple places:
+
+- `skills_client.py` module docstring: "Errors surface as a small structured hierarchy so the generation route maps them to the house posture — 503 when the dependency is not configured, 502 on transport failure or upstream 5xx — and an unvalidated draft is never returned (consistency outranks availability on a knowledge-production path)."
+- `incident_client.py` module docstring: same wording adapted for the incident document path.
+- `_validate_skill_markdown` helper in `api/v2/routes.py`: comment restates the mapping.
+
+## Fail-Closed Design
+
+A recurring safety pattern is **fail-closed over fail-open**:
+
+- In-memory HITL confirmations (`hitl_confirmations.py`): "a parked confirmation never survives a restart — after an agent rebuild the entry is simply gone and any confirm attempt fails closed (404/410), never auto-running a parked tool call."
+- Skill-draft generation: if validation fails twice, the route falls back to a facts-only skeleton that is guaranteed format-valid; it never returns an unvalidated draft.
+- Secret deliveries generated during a park ride across resume but are released only on commit; mid-approval restart drops them and they expire unreleased — described as "fail-safe — no leak, no orphaned Copy button".
+
+## No Global Middleware
+
+There is no repository-wide exception middleware registered via `@app.exception_handler` or FastAPI's `add_exception_handler`. The only custom handler found is in the sample app `samples/acme-admin/app/src/acme_admin/main.py`, which registers a handler for `AdminAuthRequired`. Production services rely on explicit `try/except` blocks in route handlers rather than global exception handling.
+
+## Summary of Conventions
+
+| Concern | Convention |
+|---|---|
+| Domain errors | Per-module `*Error` classes, grouped under a base `*Error(Exception)` where there are multiple variants |
+| Invalid input / config | Often subclass `ValueError` |
+| Cross-service clients | Three-tier hierarchy: `*DependencyNotConfigured` (503), `*ServiceUnavailable` (502), `*ClientRejected` (passthrough 4xx) |
+| HTTP translation | Explicit `try/except` in route handlers raising `HTTPException` with documented status codes |
+| Traceback hygiene | `raise ... from None` on re-raises to avoid leaking stack traces |
+| Safety posture | Fail-closed for parked operations; never return unvalidated artifacts |
+| Centralization | No shared exception package; patterns are replicated by convention rather than enforced by a common base class |

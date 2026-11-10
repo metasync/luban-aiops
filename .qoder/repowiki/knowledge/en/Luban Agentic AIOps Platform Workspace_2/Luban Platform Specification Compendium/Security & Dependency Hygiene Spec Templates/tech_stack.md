@@ -1,0 +1,1 @@
+Markdown-based spec format driven by the repository's spec lifecycle (draft → approved → delivered); SPEC-062 references Python `secrets` CSPRNG, Redis `EXPIRE`/`GETDEL`, and the existing `session_store.py` Protocol pattern as architectural anchors.

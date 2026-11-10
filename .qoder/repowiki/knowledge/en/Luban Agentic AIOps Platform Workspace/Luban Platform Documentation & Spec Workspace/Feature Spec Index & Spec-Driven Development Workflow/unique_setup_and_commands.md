@@ -1,0 +1,1 @@
+Specs are authored from the templates under `docs/specs/templates/`; delivery requires green root `make verify` and at least one asserting test per `R-x` requirement recorded in `tasks.md`. The spec index in `README.md` must be updated when new specs land.

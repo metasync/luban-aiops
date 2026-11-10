@@ -1,0 +1,6 @@
+- Each spec directory follows the fixed triple-file layout `spec.md` / `plan.md` / `tasks.md`, with `spec.md` written and agreed first before implementation begins.
+- Specs are named `SPEC-NNN-<kebab-slug>` with zero-padded sequential numbers, and requirements inside a spec use stable `R-1`, `R-2`, ... identifiers once approved.
+- Every `spec.md` carries a YAML-like Status header listing `status`, `owner`, `created`, `release slice`, and `related ADRs`.
+- Requirements are enumerated as `### R-N: <title>` blocks followed by an `Acceptance criteria:` bullet list of observable outcomes.
+- Cross-spec dependencies are declared inline with `extends SPEC-XXX` prose rather than a machine-readable dependency graph.
+- The README spec-index table is kept in sync with each new spec, recording its ID, title summary, and current lifecycle status.
