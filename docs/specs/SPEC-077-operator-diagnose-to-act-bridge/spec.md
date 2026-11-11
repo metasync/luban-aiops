@@ -2,14 +2,13 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-11-10
-- approval: **not yet approved** — this draft carries nine Open Questions (`## Open Questions`)
-  that block `approved`. Per the SPEC-066/069/076 pattern, the plan and tasks will be written and
-  banner-marked **provisional** once the operator ratifies the Open Questions; approval then
-  authorizes implementation to *begin* — **not** to merge, commit/push, deploy, or version-bump
-  (separate gates).
+- approved: 2026-11-11 — all nine Open Questions ratified as recommended (`## Open Questions`); per
+  the SPEC-066/069/076 pattern the [plan](plan.md) and [tasks](tasks.md) are authored on ratification.
+  Approval authorizes implementation to *begin* — **not** to merge, commit/push, deploy, or
+  version-bump (each a separate gate).
 - named follow-up: this spec **is** `FU-076-b`, the operator-initiated diagnose→act bridge that
   [SPEC-076](../SPEC-076-bounded-autonomous-diagnosis/spec.md) (v0.57.0) recorded in its Non-Goals,
   the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md) multi-agent row, and its
@@ -21,7 +20,7 @@
 - release slice: the **multi-agent / bounded-autonomy program** — the first increment *after*
   phase 5 of the phased SPEC series [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md)
   gates ([memo](../../workspace/multi-agent-orchestration-spike.md) §7). Target version
-  **v0.58.0** (proposed; a minor bump over v0.57.0 per the SPEC-070…076 pattern), pinned on approval.
+  **v0.58.0** — pinned on approval (2026-11-11); a minor bump over v0.57.0 per the SPEC-070…076 pattern.
 - related ADRs: [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md)
   (**Decision 2** the diagnose-before-act autonomy ceiling — this spec is the *act* half, admitted
   only as an operator-initiated, HITL-parked proposal, never autonomous resolve; **Decision 4**
@@ -73,7 +72,7 @@ the read-only delivery: a distinct portal entry, a distinct deny-by-default poli
 UX that reuses the existing confirmation card and approval inbox, and a live-check that proves the
 staged proposal **parks and never auto-dispatches**.
 
-## Approach (recommended resolution)
+## Approach (ratified resolution)
 
 Add an **operator-initiated staging trigger** — a new agent-service `POST /api/v2/remediate` (+ a
 gateway `POST /api/v1/remediate` proxy) gated by a **new** deny-by-default action — that calls the
@@ -86,21 +85,22 @@ at-most-one-dispatch worker (SPEC-037/038/063) alone dispatches. **Zero new muta
 new gate, worker, claim type, dispatch path, or wire frame. A diagnosis-only profile
 (`remediation_shape is None`) **fails closed** at the trigger (4xx) and never opens an executor turn.
 
-The trigger is **anchored on a completed diagnosis** (OQ-2): the operator stages from a diagnosis they
-have already run and read, so the bridge does **not** re-run the bounded fan-out. The role stays
-**process-local** (SPEC-073 R-3 — off every wire field), so the SPEC-074 policy axis stays
-**ready-but-inert** on this path (OQ-6) and the live control remains in-process toolkit narrowing plus
-the HITL park.
+The trigger is **anchored on a completed diagnosis** (OQ-2, ratified **request-carried**): the operator
+stages from a diagnosis they have already run and read — the `RemediateRequest` carries the `goal` +
+`diagnosis` text the portal already received from `/diagnose` — so the bridge does **not** re-run the
+bounded fan-out and adds **no** new persistence. The role stays **process-local** (SPEC-073 R-3 — off
+every wire field), so the SPEC-074 policy axis stays **ready-but-inert** on this path (OQ-6) and the
+live control remains in-process toolkit narrowing plus the HITL park.
 
 ## Requirements
 
 ### R-1: The operator-initiated staging trigger (wires `stage_remediation`)
 
 A new agent-service `POST /api/v2/remediate` calls the delivered `stage_remediation(...)` for a
-**stageable** profile anchored on a completed diagnosis, and returns through the **existing**
-`AgentChatResponse` (the parked confirmation surfaces through the existing SPEC-031 card frame — no
-new response frame). The gateway exposes `POST /api/v1/remediate` as a proxy mirroring the
-`/api/v1/diagnose` proxy shape (delegated token, longer proxy budget — R-7).
+**stageable** profile anchored on the request-carried completed diagnosis (`goal` + `diagnosis`, OQ-2),
+and returns through the **existing** `AgentChatResponse` (the parked confirmation surfaces through the
+existing SPEC-031 card frame — no new response frame). The gateway exposes `POST /api/v1/remediate` as
+a proxy mirroring the `/api/v1/diagnose` proxy shape (delegated token, longer proxy budget — R-7).
 
 - **Acceptance:** a staging request for `post-deploy-verify` / `k8s-pod-degradation` invokes
   `stage_remediation` with `AgentRole.EXECUTOR` bound for exactly one `read_only=False` turn over
@@ -120,7 +120,7 @@ A staging request for a profile with `remediation_shape is None` (`servicenow-in
 
 ### R-3: A new deny-by-default policy action gates the trigger
 
-The staging trigger is gated by a **new** action (proposed `remediate:stage`; OQ-3) in both gateway
+The staging trigger is gated by a **new** action (`remediate:stage`, ratified; OQ-3) in both gateway
 `evaluate()` engines, `PROTECTED_ACTIONS`, all policy-bundle mirrors, and `policy-scenarios.yaml` —
 **not** the existing `chat` action, because staging is mutation-adjacent and deserves its own
 deny-by-default gate. Granted to `platform-admin` and `operator`; denied to `developer`,
@@ -148,12 +148,11 @@ The staging turn audits with the SPEC-075 `agent_role="executor"` dimension (alr
 delivered mechanism) and the parked card carries the SPEC-073 `staged_by_role="executor"` provenance.
 The diagnose→act bridge is reconstructable from the durable trail: the read-only diagnosis
 (`chat_completed`, role `orchestrator`/`diagnostician`) and the staged proposal (role `executor`) are
-both attributable to the same human + delegated token. The `event_type` enum stays **closed** unless an
-Open Question resolves otherwise (OQ-5).
+both attributable to the same human + delegated token. The `event_type` enum stays **closed** (OQ-5
+ratified: no new event type).
 
 - **Acceptance:** an executor staging turn emits an audit event carrying `agent_role="executor"`; the
-  six-emitter parity family and contract-parity tests stay green; no new event type unless OQ-5 ratifies
-  one.
+  six-emitter parity family and contract-parity tests stay green; no new event type is added.
 
 ### R-6: Contract boundary — existing frames only, role off the wire
 
@@ -171,10 +170,10 @@ The gateway `POST /api/v1/remediate` proxy carries a budget adequate for **one e
 against a real remote provider**. This spec **carries the v0.57.0 live-check finding**: the observed
 live bounded diagnosis took ~140s, exceeding the `120`s `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS`
 **code default** (the dev overlay now sets `300`s); a single staging turn is shorter than a full fan-out
-but is still a real provider call. The remediate proxy budget is set accordingly (proposed
-`PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS`, OQ-7), and the too-tight `120`s diagnose **code default**
-is recorded as a follow-up finding for the operator (raised in dev, not silently changed in product
-code by this spec).
+but is still a real provider call. The remediate proxy budget is set accordingly (ratified: a dedicated
+`PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS`, **code default `300`s**, OQ-7), and the too-tight `120`s
+diagnose **code default** is recorded as a follow-up finding for the operator (raised in dev, not
+silently changed in product code by this spec).
 
 - **Acceptance:** the remediate proxy does not `ReadTimeout` on a legitimate live staging turn; the
   configuration reference documents the new knob and its default; the `120`s code-default finding is
@@ -209,51 +208,55 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
   (the delivered mechanism + the existing SPEC-020/030/031/037/038/063 path are reused verbatim).
 - **New runbooks or widening `remediation_shape`.** The two stageable profiles ship as declared;
   diagnosis-only profiles stay diagnosis-only.
-- **Re-running the diagnosis on staging** (OQ-2 recommends anchoring on the completed diagnosis, not a
-  fresh fan-out).
+- **Re-running the diagnosis on staging** (OQ-2 ratified anchoring on the request-carried completed
+  diagnosis, not a fresh fan-out).
 
 ## Open Questions
 
-> Provisional — each blocks `approved`. Recommendations follow the SPEC-076 pattern; the operator
-> ratifies (or amends) each, and the [plan](plan.md)/[tasks](tasks.md) provisional banners lift on
-> ratification.
+> **Ratified 2026-11-11** — all nine resolved as recommended (each `**Ratified:**` below is binding);
+> `status` is now `approved` and the [plan](plan.md)/[tasks](tasks.md) are authored. Recommendations
+> followed the SPEC-066/069/076 pattern.
 
 - **OQ-1 — Trigger shape.** A dedicated `POST /api/v2/remediate` endpoint (+ gateway proxy), **or** an
-  `act`/`stage` flag on the existing `/diagnose`, **or** a chat-driven tool? **Recommended: a dedicated
+  `act`/`stage` flag on the existing `/diagnose`, **or** a chat-driven tool? **Ratified: a dedicated
   endpoint** — it cleanly separates the read-only diagnosis from the mutation-adjacent staging, carries
   its own policy action (R-3) and its own proxy budget (R-7), and keeps `/diagnose` diagnosis-only (so
   the phase-5 read-only ceiling statement stays literally true).
 - **OQ-2 — How the staging turn obtains the diagnosis.** Re-run the bounded fan-out, **or** anchor on the
-  already-completed diagnosis (persisted on the session / passed in the request)? **Recommended: anchor
+  already-completed diagnosis (persisted on the session / passed in the request)? **Ratified: anchor
   on the completed diagnosis** — the operator stages from a diagnosis they have run and read; re-running
-  is a second billable fan-out and could diverge from what the operator approved. Requires the diagnosis
-  text to be reliably available (session-persisted or request-carried, fail-closed if absent).
+  is a second billable fan-out and could diverge from what the operator approved. **Ratified resolution:
+  request-carried** — the `RemediateRequest` carries the `goal` + `diagnosis` text the portal already
+  received from `/diagnose` (`extra="forbid"`, fail-closed 4xx if absent/empty); zero new persistence,
+  and the distinct-human HITL approval of the concrete proposed call is the integrity backstop (the
+  staged-from diagnosis rides the executor turn's audit record).
 - **OQ-3 — Policy action name + grant set.** New `remediate:stage` (or `diagnose:act`), granted to
-  `platform-admin` + `operator`, denied to `developer`/`read-only-observer`/`auditor`? **Recommended: a
+  `platform-admin` + `operator`, denied to `developer`/`read-only-observer`/`auditor`? **Ratified: a
   new `remediate:stage` action** with that grant set — staging is mutation-adjacent and must not ride the
   broad `chat` action.
 - **OQ-4 — Portal entry placement + visibility.** A **Stage remediation** button on the completed
-  diagnosis card, visible only for a stageable profile + a role holding the action? **Recommended: yes**,
+  diagnosis card, visible only for a stageable profile + a role holding the action? **Ratified: yes**,
   reusing the existing SPEC-031 card + inbox for park/resume (no new UX surface).
 - **OQ-5 — Audit event type.** Does the bridge need a new `event_type`, or is the executor staging turn
   fully attributable on existing events (SPEC-075 `agent_role` dimension + the parked-card provenance)?
-  **Recommended: no new event type** — the `agent_role="executor"` dimension plus the existing
+  **Ratified: no new event type** — the `agent_role="executor"` dimension plus the existing
   `chat_completed`/execution-request events make the bridge reconstructable; the enum stays closed.
 - **OQ-6 — Does the SPEC-074 policy axis go live on this path?** The executor role is bound in-process
   during staging, but SPEC-073 R-3 keeps it off the wire, so a deployed gateway `evaluate()` still sees
-  `None`. **Recommended: the axis stays ready-but-inert here** (making it live in-process is `FU-076-c`);
+  `None`. **Ratified: the axis stays ready-but-inert here** (making it live in-process is `FU-076-c`);
   the live control on this path is in-process toolkit narrowing (the executor gets the full toolkit,
   `read_only=False`) **plus** the HITL park + distinct-human approval — which is the actual ceiling.
 - **OQ-7 — The remediate proxy budget + the carried `120`s finding.** A dedicated
   `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` (proposed default mirroring the raised diagnose value),
   and separately record the too-tight `120`s **diagnose code default** as a follow-up finding?
-  **Recommended: yes to both** — set an adequate remediate budget, and log the `120`s code-default finding
-  for a future product decision (this spec raises the dev overlay, not the product default).
+  **Ratified: yes to both** — set the dedicated `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` code default
+  to `300`s (mirroring the raised dev diagnose value), and log the `120`s code-default finding for a
+  future product decision (this spec raises the dev overlay, not the product default).
 - **OQ-8 — Runbook scope.** Only the two stageable profiles (`post-deploy-verify`,
-  `k8s-pod-degradation`); the two diagnosis-only profiles fail closed (R-2)? **Recommended: yes.**
+  `k8s-pod-degradation`); the two diagnosis-only profiles fail closed (R-2)? **Ratified: yes.**
 - **OQ-9 — Evidence depth.** A gated billable live-check that stages one proposal and asserts park +
   zero dispatch + no auto-approval, mirroring `diagnosis-livecheck.sh`, plus scenario tests for all four
-  profiles and the four-point-gate mapping? **Recommended: yes** (the mocked leg collected by
+  profiles and the four-point-gate mapping? **Ratified: yes** (the mocked leg collected by
   `make test`; the live leg an explicit operator step).
 
 ## Carried findings (from v0.57.0 delivery)
@@ -267,3 +270,7 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
 ## Changelog
 
 - 2026-11-10 — drafted as `FU-076-b` (SPEC-077) with nine Open Questions; not yet approved.
+- 2026-11-11 — all nine Open Questions ratified as recommended (OQ-2 → request-carried anchor;
+  OQ-7 → `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` code default `300`s + the `120`s diagnose
+  code-default finding logged); `status: draft → approved`; target **v0.58.0** pinned; `plan.md` +
+  `tasks.md` authored.
