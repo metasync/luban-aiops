@@ -956,16 +956,47 @@ async def chat(
     input_modality: str = "text",
     model: str | None = None,
 ) -> dict:
-    return await agent_client.chat(
-        settings,
-        request_id,
-        user_id,
-        message,
-        session_id,
-        delegated_token,
-        input_modality,
-        model,
-    )
+    """Proxy the non-streaming chat turn to agent-service.
+
+    The upstream status is relayed under the house proxy error model (mirroring
+    ``_identity_leg`` and the streaming sibling ``chat_stream``): agent-service's
+    own 4xx — an unknown session, a parked confirmation conflict, an unknown
+    model — passes through with its status and detail, while 5xx and transport
+    failures become a structured 502. The chat surface never answers a raw 500
+    when the upstream leg fails closed or races a rollout.
+    """
+    try:
+        return await agent_client.chat(
+            settings,
+            request_id,
+            user_id,
+            message,
+            session_id,
+            delegated_token,
+            input_modality,
+            model,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code < 500:
+            detail = "agent service rejected the chat turn"
+            try:
+                body = exc.response.json()
+                if isinstance(body.get("detail"), str):
+                    detail = body["detail"]
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(
+                status_code=exc.response.status_code, detail=detail
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unavailable — retry the chat turn",
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unreachable — retry the chat turn",
+        ) from None
 
 
 async def diagnose(
@@ -979,18 +1010,48 @@ async def diagnose(
     model: str | None = None,
     incident_id: str | None = None,
 ) -> dict:
-    """Proxy an operator-invoked bounded read-only diagnosis (SPEC-076 R-7)."""
-    return await agent_client.diagnose(
-        settings,
-        request_id,
-        user_id,
-        profile,
-        goal,
-        session_id,
-        delegated_token,
-        model,
-        incident_id,
-    )
+    """Proxy an operator-invoked bounded read-only diagnosis (SPEC-076 R-7).
+
+    The upstream status is relayed under the house proxy error model (mirroring
+    ``_identity_leg``): agent-service's own 4xx — the fail-closed guard, an
+    unknown profile or session — passes through with its status and detail,
+    while 5xx and transport failures become a structured 502. The diagnose
+    surface never answers a raw 500 when the upstream leg fails closed or races
+    a rollout.
+    """
+    try:
+        return await agent_client.diagnose(
+            settings,
+            request_id,
+            user_id,
+            profile,
+            goal,
+            session_id,
+            delegated_token,
+            model,
+            incident_id,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code < 500:
+            detail = "agent service rejected the diagnosis"
+            try:
+                body = exc.response.json()
+                if isinstance(body.get("detail"), str):
+                    detail = body["detail"]
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(
+                status_code=exc.response.status_code, detail=detail
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unavailable — retry the diagnosis",
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unreachable — retry the diagnosis",
+        ) from None
 
 
 async def remediate(
@@ -1004,18 +1065,48 @@ async def remediate(
     delegated_token: str | None = None,
     model: str | None = None,
 ) -> dict:
-    """Proxy the operator-initiated diagnose→act staging trigger (SPEC-077 R-1)."""
-    return await agent_client.remediate(
-        settings,
-        request_id,
-        user_id,
-        profile,
-        goal,
-        diagnosis,
-        session_id,
-        delegated_token,
-        model,
-    )
+    """Proxy the operator-initiated diagnose→act staging trigger (SPEC-077 R-1).
+
+    The upstream status is relayed under the house proxy error model (mirroring
+    ``_identity_leg``): agent-service's own 4xx — notably the R-2 fail-closed
+    guard that refuses a diagnosis-only profile before any staging turn opens —
+    passes through with its status and detail, while 5xx and transport failures
+    become a structured 502. The trigger surface never answers a raw 500 when
+    the upstream leg fails closed or races a rollout.
+    """
+    try:
+        return await agent_client.remediate(
+            settings,
+            request_id,
+            user_id,
+            profile,
+            goal,
+            diagnosis,
+            session_id,
+            delegated_token,
+            model,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code < 500:
+            detail = "agent service rejected the remediation trigger"
+            try:
+                body = exc.response.json()
+                if isinstance(body.get("detail"), str):
+                    detail = body["detail"]
+            except (ValueError, AttributeError):
+                pass
+            raise HTTPException(
+                status_code=exc.response.status_code, detail=detail
+            ) from None
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unavailable — retry the remediation",
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=502,
+            detail="agent service unreachable — retry the remediation",
+        ) from None
 
 
 async def chat_stream(

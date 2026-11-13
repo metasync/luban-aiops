@@ -12,6 +12,7 @@ orchestration frame inside the loop is the only binder.
 import unittest
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from platform_gateway.app import create_app
@@ -175,6 +176,68 @@ class DiagnoseRouteTests(unittest.TestCase):
 
 async def _none():
     return None
+
+
+def _upstream_status_error(status_code: int, detail: str) -> httpx.HTTPStatusError:
+    """Build the httpx error ``agent_client`` raises on an upstream ``status_code``."""
+    request = httpx.Request("POST", "http://agent-service/api/v2/diagnose")
+    response = httpx.Response(status_code, request=request, json={"detail": detail})
+    return httpx.HTTPStatusError(
+        f"upstream {status_code}", request=request, response=response
+    )
+
+
+class DiagnoseUpstreamRelayTests(unittest.TestCase):
+    """v0.58.1 regression: the diagnose proxy relays agent-service's status too.
+
+    ``gateway_service.diagnose`` (SPEC-076 R-7) shared the identical
+    unhandled-``httpx.HTTPStatusError`` gap as ``remediate``: an upstream 4xx
+    escaped as a gateway 500. These tests drive the **real** relay — patching
+    only the transport underneath it — so the ``_identity_leg``-mirrored
+    4xx-passthrough / 502 mapping is the actual route outcome.
+    """
+
+    def _post_with_upstream(self, exc: Exception):
+        async def fake_agent_diagnose(*args, **kwargs):
+            raise exc
+
+        with (
+            patch(
+                "platform_gateway.api.routes.chat.resolve_request_identity",
+                _fake_identity,
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.obtain_delegated_token",
+                lambda *a, **k: _none(),
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.enforce_policy",
+                lambda *a, **k: None,
+            ),
+            patch(
+                "platform_gateway.services.gateway_service.agent_client.diagnose",
+                fake_agent_diagnose,
+            ),
+        ):
+            return TestClient(_app()).post(
+                "/api/v1/diagnose",
+                json={"profile": "k8s-pod-degradation", "goal": "why crash-loop"},
+            )
+
+    def test_upstream_4xx_is_relayed_with_its_status_and_detail(self) -> None:
+        response = self._post_with_upstream(
+            _upstream_status_error(422, "bounded diagnosis refused")
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "bounded diagnosis refused")
+
+    def test_upstream_5xx_maps_to_502(self) -> None:
+        response = self._post_with_upstream(_upstream_status_error(503, "boom"))
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        response = self._post_with_upstream(httpx.ConnectError("connection refused"))
+        self.assertEqual(response.status_code, 502)
 
 
 if __name__ == "__main__":

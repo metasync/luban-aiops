@@ -343,3 +343,67 @@ class AgentClientModelParamTests(unittest.IsolatedAsyncioTestCase):
             _frames = [frame async for frame in stream]
 
         self.assertNotIn("model", recorded["params"])
+
+
+def _upstream_status_error(status_code: int, detail: str) -> httpx.HTTPStatusError:
+    """Build the httpx error ``agent_client`` raises on an upstream ``status_code``."""
+    request = httpx.Request("POST", "http://agent-service/api/v2/chat")
+    response = httpx.Response(status_code, request=request, json={"detail": detail})
+    return httpx.HTTPStatusError(
+        f"upstream {status_code}", request=request, response=response
+    )
+
+
+class ChatUpstreamRelayTests(unittest.TestCase):
+    """v0.58.1 regression: the non-stream chat proxy relays agent-service's status.
+
+    ``gateway_service.chat`` shared the identical unhandled-``httpx.HTTPStatusError``
+    gap as ``diagnose``/``remediate``: an upstream 4xx (unknown session, parked
+    conflict, unknown model) escaped as a gateway 500. These tests drive the
+    **real** relay — patching only the transport underneath it — so the
+    ``_identity_leg``-mirrored 4xx-passthrough / 502 mapping is the actual route
+    outcome, not a dict-returning fake that skips the error path.
+    """
+
+    def _post_with_upstream(self, exc: Exception):
+        async def fake_agent_chat(*args, **kwargs):
+            raise exc
+
+        with (
+            patch(
+                "platform_gateway.api.routes.chat.resolve_request_identity",
+                _fake_identity,
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.obtain_delegated_token",
+                _fake_delegation,
+            ),
+            patch(
+                "platform_gateway.api.routes.chat.enforce_policy",
+                lambda *a, **k: None,
+            ),
+            patch(
+                "platform_gateway.services.gateway_service.agent_client.chat",
+                fake_agent_chat,
+            ),
+        ):
+            return TestClient(_app()).post("/api/v1/chat", json={"message": "hi"})
+
+    def test_upstream_4xx_is_relayed_with_its_status_and_detail(self) -> None:
+        # A parked-confirmation conflict (409) relays verbatim — the proxy
+        # preserves whatever 4xx agent-service answers, with its detail.
+        response = self._post_with_upstream(
+            _upstream_status_error(409, "session is parked — resolve the confirmation")
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"], "session is parked — resolve the confirmation"
+        )
+
+    def test_upstream_5xx_maps_to_502(self) -> None:
+        response = self._post_with_upstream(_upstream_status_error(503, "boom"))
+        self.assertEqual(response.status_code, 502)
+
+    def test_transport_failure_maps_to_502(self) -> None:
+        response = self._post_with_upstream(httpx.ConnectError("connection refused"))
+        self.assertEqual(response.status_code, 502)

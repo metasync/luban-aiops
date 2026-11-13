@@ -11,6 +11,30 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.58.1 — 2026-11-13
+
+Patch — **platform-gateway relays agent-service's HTTP status instead of masking it as a raw `500`.**
+The v0.58.0 post-deploy billable `remediation-livecheck.sh` aborted at its **non-billable** `(2b)` step:
+agent-service's **correct** R-2 fail-closed `422` (a diagnosis-only profile — `servicenow-incident` —
+refused staging before any `executor` turn opened) surfaced at the gateway as an HTTP `500`. Root cause:
+the three agent-service **JSON** proxies in `gateway_service` — non-stream `chat`, `diagnose` (SPEC-076
+R-7) and `remediate` (SPEC-077 R-1) — delegated to `agent_client`, whose `raise_for_status()` raises
+`httpx.HTTPStatusError`, and let it escape **unhandled** through the route, so FastAPI answered a raw
+`500`. **No Credits were spent** (the billable `(2c)` staging turn never ran) and the **mutation ceiling
+held** (nothing was dispatched). The fix mirrors the house `_identity_leg` proxy error model already used
+by the sign-in legs and the streaming sibling `chat_stream`: an upstream `<500` is relayed with **its own
+status and `detail`** verbatim, while `5xx` and transport failures become a structured `502` — so the
+chat/diagnose/remediate surfaces never answer a raw `500` when the upstream leg fails closed or races a
+rollout. This is **HTTP error-fidelity only** — *not* a security-posture change: the R-2 fail-closed guard,
+the deny-by-default `remediate:stage` gate, the SPEC-030 self-approval block and the signed
+at-most-one-dispatch ceiling are all unchanged, and agent-service was already answering correctly.
+Evidence: **9** new relay regression tests (3 per proxy, across `test_chat_model_relay.py`,
+`test_diagnose_route.py` and `test_remediate_route.py`) drive the **real** `gateway_service` relay —
+patching only `agent_client` underneath it — asserting upstream `4xx → relayed status + detail (not 500)`,
+`5xx → 502` and transport `→ 502`; the platform-gateway suite is **519** (510 + 9) and root `make verify`
+is green across every leg. The gap shipped in the deployed `0.58.0-dev-k8s` images, so this patch re-cuts
+the 27-surface version lockstep and redeploys.
+
 ## 0.58.0 — 2026-11-13
 
 [SPEC-077](docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md) operator

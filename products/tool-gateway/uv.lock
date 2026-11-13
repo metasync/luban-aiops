@@ -1607,7 +1607,7 @@ wheels = [
 
 [[package]]
 name = "tool-gateway"
-version = "0.58.0"
+version = "0.58.1"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
