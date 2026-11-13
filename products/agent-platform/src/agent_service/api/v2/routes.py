@@ -37,6 +37,7 @@ from agent_service.schemas.v2 import (
     ConfirmationRecordModel,
     DocumentCreateRequest,
     EvidenceTurn,
+    RemediateRequest,
     SessionTitleUpdateRequest,
     SkillGraduationResponse,
     SkillTargetDeclaration,
@@ -86,7 +87,10 @@ from agent_service.services.operation_documents import (
     OPERATION_DOCUMENT_STORE,
     make_document,
 )
-from agent_service.services.orchestration import run_bounded_diagnosis
+from agent_service.services.orchestration import (
+    run_bounded_diagnosis,
+    stage_remediation,
+)
 from agent_service.services.runbooks import get_profile
 from agent_service.services.runtime_dependencies import (
     get_confirmation_registry,
@@ -482,6 +486,105 @@ async def diagnose(
         status="partial" if result.budget_limited else "ok",
         content=result.diagnosis,
         model=resolved_model,
+    )
+
+
+@router.post("/remediate", response_model=AgentChatResponse)
+async def remediate(
+    body: RemediateRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
+) -> AgentChatResponse:
+    """Operator-initiated diagnose→act bridge (SPEC-077 R-1).
+
+    The **production trigger** that reaches the delivered-but-unwired
+    ``stage_remediation(...)``: a human operator who has already run and read a
+    bounded diagnosis (``POST /api/v2/diagnose``) asks the platform to *stage* a
+    proposed remediation from it. Per OQ-2 (ratified **request-carried**) the
+    ``goal`` + ``diagnosis`` ride the request — the bounded fan-out is **not**
+    re-run and nothing new is persisted. ``stage_remediation`` binds
+    ``AgentRole.EXECUTOR`` for **one** ``read_only=False`` turn on
+    ``{session_id}::orch::staging`` over the *same* delegated token and lets the
+    executor's full toolkit *propose* the single mutating call, which the kernel
+    parks as the **existing** SPEC-020/030/031 confirmation card labelled
+    ``staged_by_role="executor"`` for a **distinct human** approver.
+
+    This route binds no role, carries none in the body (R-6), and dispatches
+    **nothing** — the signed at-most-one-dispatch worker (SPEC-037/038/063) alone
+    dispatches an approved proposal and the SPEC-030 self-approval block fires
+    unchanged (the stager can never be the approver). The proposal surfaces
+    through the **existing** ``AgentChatResponse`` + SPEC-031 card frame, so no
+    new frame is added and ``agent-stream-event``/``execution-request`` stay
+    byte-unchanged (R-6). Like ``/diagnose``, this is not a streaming route: the
+    parked card rides the confirmation registry, never the response body.
+    """
+    user_id = _user_id(x_user_id)
+    request_id = x_request_id or "untracked"
+    record_chat_request()
+    # Fail closed on an unknown profile: never coerce to a wider runbook
+    # (mirrors /diagnose). Checked before any session or executor turn is opened.
+    profile = get_profile(body.profile)
+    if profile is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown diagnosis profile: {body.profile}",
+        )
+    # R-2 fail closed on a diagnosis-only profile: a profile with no declared
+    # remediation_shape has nothing to stage, so refuse it here rather than
+    # opening an executor turn (the delivered ValueError guard inside
+    # stage_remediation stays as the inner backstop). The trigger must never
+    # widen a read-only runbook into a mutation to "finish" it.
+    if profile.remediation_shape is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"profile {body.profile} is diagnosis-only: it declares no "
+                "remediation to stage"
+            ),
+        )
+    requester = await _verified_requester(authorization, user_id)
+    session = ensure_session(
+        body.session_id, user_id, **({"requester": requester} if requester else {})
+    )
+    await _reject_if_parked(session.session_id, session.model)
+    resolved_model, _selected_by = _resolve_model(
+        body.model, session.model, get_runtime_kernel().routing_available()
+    )
+    LOGGER.info(
+        "remediation staging started",
+        extra={
+            "request_id": request_id,
+            "session_id": session.session_id,
+            "profile": profile.name,
+            "model": resolved_model,
+        },
+    )
+    mark_session_turn(session.session_id, body.goal)
+    # The delivered mechanism binds EXECUTOR internally, parks the proposed
+    # mutating call, and returns the staging turn's BlockingReply unchanged.
+    reply = await stage_remediation(
+        get_runtime_kernel(),
+        profile=profile,
+        goal=body.goal,
+        diagnosis=body.diagnosis,
+        session_id=session.session_id,
+        user_name=user_id,
+        bearer_token=_bearer_token(authorization),
+        model_id=resolved_model,
+    )
+    content, structured_output = reply
+    # SPEC-071 R-2: surface the model that actually served the staging turn —
+    # the routed candidate when the router fired, else the resolved model.
+    effective_model = getattr(reply, "effective_model", None) or resolved_model
+    return AgentChatResponse(
+        session_id=session.session_id,
+        request_id=request_id,
+        authorization_required=getattr(reply, "authorization_required", None),
+        status="partial" if getattr(reply, "authorization_required", None) else "ok",
+        content=content,
+        structured_output=structured_output,
+        model=effective_model,
     )
 
 

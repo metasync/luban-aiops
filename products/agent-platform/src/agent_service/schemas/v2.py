@@ -130,6 +130,75 @@ class AgentDiagnoseRequest(BaseModel):
     )
 
 
+class RemediateRequest(BaseModel):
+    """Body for ``POST /api/v2/remediate`` — the operator-initiated diagnose→act
+    bridge that wires the delivered ``stage_remediation(...)`` (SPEC-077 R-1).
+
+    A human operator who has already run and read a bounded diagnosis
+    (``POST /api/v2/diagnose``) asks the platform to *stage* a proposed
+    remediation from it. Per OQ-2 (ratified **request-carried**) the body carries
+    the ``goal`` + ``diagnosis`` text the portal already received from
+    ``/diagnose`` — the bridge does **not** re-run the bounded fan-out and adds
+    **no** new persistence. The staged proposal always parks on the **existing**
+    SPEC-020/030/031 HITL confirmation card for a **distinct human** approver and
+    is dispatched only by the signed at-most-one-dispatch worker
+    (SPEC-037/038/063); this trigger never dispatches (ADR-0017 Decision 2
+    ceiling — autonomous resolve stays deferred).
+
+    The role stays process-local — it is **never** a request field, a claim, or a
+    forwarded header (SPEC-073 R-3), so this body carries no ``agent_role``; the
+    ``executor`` role is bound inside ``stage_remediation`` alone. A
+    diagnosis-only profile (``remediation_shape is None``) or an unknown profile
+    fails closed at the route (R-2) and never opens an executor turn.
+    """
+
+    # ``extra="forbid"`` makes the "carries no ``agent_role``" contract above
+    # enforced, not merely documented: an unknown field (a smuggled role, a
+    # misspelt key) is refused 4xx rather than silently ignored — the same
+    # fail-closed posture as ``AgentDiagnoseRequest`` and the gateway's inbound
+    # ``RemediateRequest``.
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = Field(
+        min_length=1,
+        description=(
+            "A declared runbook profile name. Only a profile that declares a "
+            "remediation_shape is stageable (post-deploy-verify, "
+            "k8s-pod-degradation); a diagnosis-only profile "
+            "(servicenow-incident, observability-alert) or an unknown name is "
+            "refused with 4xx (fail-closed, R-2) — never coerced or widened."
+        ),
+    )
+    goal: str = Field(
+        min_length=1,
+        description=(
+            "The diagnosis goal the completed diagnosis pursued — the same text "
+            "the portal received from /diagnose (OQ-2 request-carried). It "
+            "anchors the staged proposal; the bridge never re-runs the fan-out."
+        ),
+    )
+    diagnosis: str = Field(
+        min_length=1,
+        description=(
+            "The completed bounded-diagnosis synthesis the operator read and is "
+            "acting on — the content /diagnose returned (OQ-2 request-carried). "
+            "Fail-closed if absent/empty: there is nothing to stage from without "
+            "it, and re-running the fan-out is explicitly out of scope."
+        ),
+    )
+    session_id: str | None = None
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Optional model id resolved request > pinned > default by the same "
+            "precedence as POST /api/v2/chat (SPEC-024 R-3); metadata only — it "
+            "never changes policy, the park, or HITL outcomes. The resolved "
+            "concrete model is threaded to the single executor staging turn "
+            "as-is: per-turn auto-routing does not fire on this route."
+        ),
+    )
+
+
 class AuthorizationRequired(BaseModel):
     """Opaque gateway challenge, never model-authored execution authority."""
 

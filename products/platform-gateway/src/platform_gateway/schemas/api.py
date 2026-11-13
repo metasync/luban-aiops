@@ -53,6 +53,30 @@ class DiagnoseRequest(BaseModel):
     incident_id: str | None = Field(default=None, max_length=200)
 
 
+class RemediateRequest(BaseModel):
+    """Operator-initiated diagnose→act staging trigger (SPEC-077 R-1 / R-6).
+
+    Relayed verbatim to agent-service ``POST /api/v2/remediate``. Carries **no**
+    ``agent_role``: the executor role is process-local to the staging frame and is
+    never a wire field (SPEC-073 R-3), so a smuggled role is refused 4xx by
+    ``extra="forbid"``. The ``diagnosis`` is the request-carried text the portal
+    already received from ``/api/v1/diagnose`` (OQ-2) — the bridge does not re-run
+    the bounded fan-out. Only a stageable profile (one declaring a
+    ``remediation_shape``) proceeds; a diagnosis-only or unknown profile fails
+    closed at agent-service (R-2). The route dispatches nothing: the proposed
+    mutation parks on the existing HITL card for a distinct-human approver.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    diagnosis: str = Field(min_length=1)
+    session_id: str | None = None
+    # Metadata only — never changes policy, the staging posture, or HITL.
+    model: str | None = None
+
+
 class ChatConfirmRequest(BaseModel):
     """Mirror of `shared-contracts/schemas/chat-confirm.schema.json` (SPEC-020)."""
 

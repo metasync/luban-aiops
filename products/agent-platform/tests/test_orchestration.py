@@ -861,6 +861,88 @@ class TestExecutorStaging:
 
 
 # ---------------------------------------------------------------------------
+# SPEC-077 R-5 (OQ-5): the wired diagnose→act bridge audits by role
+# ---------------------------------------------------------------------------
+class TestDiagnoseActBridgeAttribution:
+    """Stage 5 adds **no** production code — the attribution mechanism is the
+    delivered SPEC-075 emitter seam (``build_audit_event(agent_role=
+    current_agent_role_value())``) and the SPEC-073 ``staged_by_role`` park
+    label, both already exercised off the diagnosis path (``TestLiveAttribution``
+    and ``TestExecutorStaging`` above). These tests drive the *executor staging*
+    turn — the half SPEC-077 wires to an explicit human trigger — through the
+    same real seam and assert the audit trail reconstructs the bridge: diagnosis
+    under ``diagnostician``/``orchestrator``, the staged proposal under
+    ``executor``, one human + one delegated token throughout, and **no** new
+    ``event_type`` (the enum stays closed).
+    """
+
+    def test_executor_staging_turn_emits_an_audit_event_attributed_to_executor(self):
+        kernel = AttributionFakeKernel(_settings())
+        _run(
+            stage_remediation(
+                kernel,
+                profile=_remediation_profile(),
+                goal="g",
+                diagnosis="pod is crash-looping",
+                session_id="ses-50",
+                user_name="alice",
+                bearer_token="the-one-token",
+            )
+        )
+        # Exactly one executor turn, on the derived staging session.
+        assert len(kernel.calls) == 1
+        call = kernel.calls[0]
+        assert call.session_id == "ses-50::orch::staging"
+        # The delivered emitter seam threads the bound role verbatim: the audit
+        # event and the persisted evidence turn both carry agent_role="executor"
+        # (SPEC-075), with no new event_type minted for the bridge.
+        assert call.event["agent_role"] == "executor"
+        assert call.turn.model_dump()["agent_role"] == "executor"
+
+    def test_diagnose_to_act_bridge_is_reconstructable_by_role(self):
+        # The full bridge over ONE session/human/token: run_bounded_diagnosis
+        # (diagnostician members + orchestrator synthesis) then stage_remediation
+        # (the executor proposal). Every turn emits through the one seam, so the
+        # audit trail partitions the diagnose→act story by role and the staged
+        # proposal is attributable to the executor that parked it. The one
+        # delegated token is threaded unchanged across both halves (proven by
+        # test_staging_rides_the_same_token_and_leaves_no_role_bound above).
+        kernel = AttributionFakeKernel(_settings())
+        _run(
+            run_bounded_diagnosis(
+                kernel,
+                profile=_profile(3),
+                goal="g",
+                session_id="ses-51",
+                user_name="alice",
+                bearer_token="the-one-token",
+            )
+        )
+        _run(
+            stage_remediation(
+                kernel,
+                profile=_remediation_profile(),
+                goal="g",
+                diagnosis="d",
+                session_id="ses-51",
+                user_name="alice",
+                bearer_token="the-one-token",
+            )
+        )
+        roles = [c.event["agent_role"] for c in kernel.calls]
+        # 3 diagnostician member reads + 1 orchestrator synthesis + 1 executor
+        # staging proposal — the whole bridge reconstructable from the trail.
+        assert roles.count("diagnostician") == 3
+        assert roles.count("orchestrator") == 1
+        assert roles.count("executor") == 1
+        # The executor proposal is the bridge's final turn, on the derived
+        # staging session.
+        final = kernel.calls[-1]
+        assert final.event["agent_role"] == "executor"
+        assert final.session_id == "ses-51::orch::staging"
+
+
+# ---------------------------------------------------------------------------
 # R-7: the four declared runbook profiles + the trigger boundary
 # ---------------------------------------------------------------------------
 class TestRunbookProfiles:

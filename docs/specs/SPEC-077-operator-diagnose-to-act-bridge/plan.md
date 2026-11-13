@@ -91,6 +91,14 @@ R-1…R-8.
 
 ### R-4: Portal entry + park/resume UX (OQ-4)
 
+> **DEFERRED 2026-11-11 (operator re-scope, post-approval).** The "affected files" premise below is
+> false: the operator portal has **no** diagnosis card component and no `/api/v1/diagnose` client —
+> SPEC-076 shipped the diagnose flow **backend-only** (the portal was last touched by SPEC-072 /
+> v0.53.0). The operator's direction is an **agentic / multi-agent** remediation (conversational or
+> graduated-autonomy, not a button on a card), so building this UX would be throwaway. R-4 is deferred
+> as **`FU-077-agentic-remediation`** (a SPEC-078 candidate); Stage 6 is **cancelled** for v0.58.0.
+> The backend trigger (Stages 1–5) is UX-agnostic and ships regardless. Original text retained below.
+
 - affected files: the operator-portal diagnosis card component (the completed-diagnosis view), its API
   client (a `POST /api/v1/remediate` call), and the permission/role gating used to decide visibility
   (the same capability check the portal already applies to gated affordances).
@@ -179,11 +187,14 @@ R-1…R-8.
 5. **Stage 5 — attribution verification (R-5)** — confirm the wired executor turn audits
    `agent_role="executor"` and parks `staged_by_role="executor"`; six-emitter parity stays green. Depends
    on Stage 2.
-6. **Stage 6 — portal entry (R-4)** — the **Stage remediation** button + profile/role visibility gating +
-   the `POST /api/v1/remediate` client call, reusing the existing card/inbox. Depends on Stage 4.
+6. **Stage 6 — portal entry (R-4)** — **CANCELLED for v0.58.0** (R-4 deferred 2026-11-11, operator
+   re-scope): the portal has no completed-diagnosis surface to attach a button to (SPEC-076 was
+   backend-only) and the agentic/multi-agent direction supersedes the button UX. Tracked as
+   `FU-077-agentic-remediation` (SPEC-078 candidate). ~~the **Stage remediation** button + profile/role
+   visibility gating + the `POST /api/v1/remediate` client call, reusing the existing card/inbox.~~
 7. **Stage 7 — evidence (R-8, OQ-8/OQ-9)** — scenario tests for all four profiles, the gated
    `remediation-livecheck.sh` (park + zero dispatch + no auto-approval), the four-point-gate mapping.
-   Depends on Stages 1–6.
+   Depends on Stages 1–5 (Stage 6 cancelled).
 8. **Stage 8 — docs + verify (R-8)** — reconcile the authorization matrix, configuration reference,
    roadmap, index, and CHANGELOG; `make verify` green. Depends on all.
 
@@ -202,8 +213,10 @@ R-1…R-8.
   no `agent_role` on any wire field.
 - attribution tests: the executor staging turn emits an audit event carrying `agent_role="executor"`; the
   six-emitter parity family + contract-parity tests stay green; no new event type is added.
-- portal tests (Vitest): the **Stage remediation** button is present only for a stageable profile **and**
-  a role holding `remediate:stage`, absent otherwise; typechecked production build green.
+- portal tests (Vitest): **N/A for v0.58.0** — R-4/Stage 6 deferred (2026-11-11 operator re-scope;
+  `FU-077-agentic-remediation`). ~~the **Stage remediation** button is present only for a stageable
+  profile **and** a role holding `remediate:stage`, absent otherwise; typechecked production build
+  green.~~ The portal is untouched by this increment, so its existing suite + build stay green as-is.
 - scenario / e2e: all four profiles covered at the trigger; a **gated live-cluster** check stages one
   proposal and asserts park + **zero** `execution_requested` + **no** HITL auto-approval (mocked leg
   collected by `make test`; live leg an explicit operator step).
@@ -221,10 +234,10 @@ R-1…R-8.
   been updated refuses staging (fail-closed) rather than admitting it; `/api/v2/diagnose` and the unscoped
   single-agent chat/triage/documents/skills paths are **unchanged** and byte-identical. A deployment that
   never calls `/remediate` behaves exactly as v0.57.0.
-- rollback approach: revert the `remediate` route + gateway proxy + the `remediate:stage` action + the
-  portal button. Because the mutation path is entirely reused and `stage_remediation(...)` returns to
-  unwired, rollback removes only the trigger and returns the platform to the v0.57.0 diagnosis-only
-  posture with no schema or data effect.
+- rollback approach: revert the `remediate` route + gateway proxy + the `remediate:stage` action (there
+  is **no** portal button to revert in v0.58.0 — R-4/Stage 6 deferred). Because the mutation path is
+  entirely reused and `stage_remediation(...)` returns to unwired, rollback removes only the trigger and
+  returns the platform to the v0.57.0 diagnosis-only posture with no schema or data effect.
 - autonomy safety: the staged proposal **always** parks on HITL for a **distinct human**; nothing
   dispatches without approval and the SPEC-030 self-approval block is unchanged (ADR-0017 Decision 2
   ceiling; ADR-0007 one-gate-per-mutating-flow). Autonomous resolve stays deferred.

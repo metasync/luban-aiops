@@ -96,6 +96,18 @@ ACTION_SESSION_SKILL_GRADUATE = "session:skill_graduate"
 # the operational trio only — developer, read-only-observer, and auditor are
 # denied by default (the documents:read / session:skill_graduate posture).
 ACTION_RUNTIME_FLAGS = "runtime:flags"
+# Operator-initiated diagnose→act staging trigger (SPEC-077 R-3 / OQ-3): gates
+# the production trigger that reaches the delivered executor-scoped
+# stage_remediation(...). Mutation-adjacent — it opens one read_only=False
+# executor turn that PROPOSES a single mutating call, parked as the existing
+# SPEC-020/030/031 HITL card and never dispatched here — so it is a distinct
+# deny-by-default action rather than folded into chat. Granted to platform admins
+# and operators only; the approver is deliberately excluded so the stager and the
+# distinct-human approver who resumes the parked card stay disjoint (SPEC-074 /
+# SPEC-030). Enforced here on the POST /api/v1/remediate proxy; also registered
+# in the tool-gateway vocabulary for policy-matrix + scenario-coverage parity
+# (SPEC-077 R-3, ratified "both engines"), though no tool-gateway route evaluates it.
+ACTION_REMEDIATE_STAGE = "remediate:stage"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_CHAT,
@@ -122,6 +134,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_INCIDENT_SKILL_DRAFT,
         ACTION_SESSION_SKILL_GRADUATE,
         ACTION_RUNTIME_FLAGS,
+        ACTION_REMEDIATE_STAGE,
     }
 )
 

@@ -49,6 +49,11 @@ EXPECTED_ROUTES = {
     # ``chat`` action — no new policy vocabulary; the orchestration frame inside
     # the loop is the only agent-role binder.
     ("POST", "/api/v1/diagnose"),
+    # Operator-initiated diagnose→act staging trigger (SPEC-077 R-1): proxies the
+    # agent-service POST /api/v2/remediate behind the NEW remediate:stage action
+    # (R-3) — mutation-adjacent, so gated separately from the reused chat action;
+    # it stages a parked HITL proposal and dispatches nothing.
+    ("POST", "/api/v1/remediate"),
     ("GET", "/api/v1/audit/events"),
     # Audit reporting surfaces (SPEC-046 R-3): summary aggregates and the
     # bounded CSV export ride the same audit:read gate as the raw trail.

@@ -440,3 +440,35 @@ rules:
       actions_any: ["runtime:flags"]
     decision:
       outcome: allow
+
+  # Operator-initiated diagnose→act staging trigger (SPEC-077 R-3 / OQ-3):
+  # remediate:stage gates the production trigger that reaches the delivered
+  # executor-scoped stage_remediation(...). A NEW deny-by-default action rather
+  # than the existing chat grant, because staging is mutation-adjacent — it opens
+  # one read_only=False executor turn that PROPOSES a single mutating call, which
+  # the kernel parks as the existing SPEC-020/030/031 HITL card (labelled
+  # staged_by_role="executor") and never dispatches here. Granted to platform
+  # admins and operators — the roles that drive an incident response. Approver is
+  # deliberately NOT granted: the stager and the distinct-human approver who
+  # resumes the parked card must stay disjoint (SPEC-074 executor→distinct-human-
+  # approver; SPEC-030 self-approval block), so separating the trigger role from
+  # the approval role enforces that invariant at the policy layer too. This gates
+  # the TRIGGER only — necessary, not sufficient: the staged proposal still parks
+  # behind require-approval-executor-tools-mutate (tier_2) and a distinct-human
+  # approval before the at-most-one-dispatch worker (SPEC-037/038/063) acts.
+  # developer, read-only-observer, auditor, and approver are denied by default.
+  # Registered in BOTH engines' PROTECTED_ACTIONS so the action surfaces in both
+  # policy matrices and both scenario-coverage tables (SPEC-077 R-3, ratified
+  # "both gateway evaluate() engines"); the enforcement point is the platform-
+  # gateway POST /api/v1/remediate proxy — the tool-gateway carries it for matrix
+  # parity but has no route that evaluates it.
+  - id: allow-operators-remediate-stage
+    domain: action_authz
+    description: Platform admins and operators may trigger staging of a proposed remediation from a completed diagnosis.
+    priority: 100
+    enabled: true
+    match:
+      roles_any: ["platform-admin", "operator"]
+      actions_any: ["remediate:stage"]
+    decision:
+      outcome: allow

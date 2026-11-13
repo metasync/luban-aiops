@@ -35,6 +35,18 @@ api:
   - roles: ["developer", "read-only-observer", "auditor", "unknown"]
     action: runtime:flags
     expect: deny
+  # allow-operators-remediate-stage (SPEC-077 R-3 / OQ-3): the operator-initiated
+  # diagnose→act staging trigger is mutation-adjacent, so it gets its own deny-by-
+  # default action rather than riding chat. Granted to platform admins and
+  # operators; the approver is deliberately denied so the stager (executor-scoped)
+  # and the distinct-human approver who resumes the parked card stay disjoint
+  # (SPEC-074 / SPEC-030); developer/observer/auditor/unknown denied by default.
+  - roles: ["platform-admin", "operator"]
+    action: remediate:stage
+    expect: allow
+  - roles: ["approver", "developer", "read-only-observer", "auditor", "unknown"]
+    action: remediate:stage
+    expect: deny
   # allow-operators-chat: operational and developer roles use chat and
   # manage their session workspace.
   - roles: ["platform-admin", "approver", "operator", "developer"]
@@ -304,6 +316,18 @@ tools:
       - read-only-observer
     action: tools:list
     expect: allow
+
+  # allow-operators-remediate-stage (SPEC-077 R-3): registered on this engine too
+  # so the action surfaces in both engines' matrices and coverage (R-3 ratified
+  # "both engines"); the enforcement point is the platform-gateway proxy and this
+  # engine has no route that evaluates it, so it is a plain allow/deny here — the
+  # approver is denied for stager/approver disjointness (SPEC-074 / SPEC-030).
+  - roles: ["platform-admin", "operator"]
+    action: remediate:stage
+    expect: allow
+  - roles: ["approver", "developer", "read-only-observer", "auditor", "unknown"]
+    action: remediate:stage
+    expect: deny
 
   # SPEC-076 orchestration-path (agent-role axis on the real canonical bundle).
   # This engine skips require_approval rules at load (SPEC-030 R-2), so the

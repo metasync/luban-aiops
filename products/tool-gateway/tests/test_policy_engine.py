@@ -345,7 +345,10 @@ class ContractAlignmentTests(unittest.TestCase):
         # gates write/admin risk invocations (SPEC-021 R-1), secrets:deliver
         # gates external-channel secret delivery (SPEC-062 R-4), and
         # targets:authorize gates the human-initiated outbound user-delegated
-        # authorization workflow (SPEC-070 OQ-7).
+        # authorization workflow (SPEC-070 OQ-7). remediate:stage (SPEC-077 R-3)
+        # is enforced on the platform-gateway proxy but registered here too so
+        # the action surfaces in both engines' matrices and scenario coverage
+        # (R-3 ratified "both engines"); no tool-gateway route evaluates it.
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset(
@@ -355,6 +358,7 @@ class ContractAlignmentTests(unittest.TestCase):
                     "tools:mutate",
                     "secrets:deliver",
                     "targets:authorize",
+                    "remediate:stage",
                 }
             ),
         )

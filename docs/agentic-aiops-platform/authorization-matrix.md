@@ -245,7 +245,9 @@ gateway `evaluate()`.
   *would* see mutating tools but only to **stage** a proposal onto the existing HITL
   card (which still dispatches solely through the signed worker with a **distinct
   human** approver) — and in phase 5 the executor-staging mechanism is delivered +
-  unit-proven but **not wired to a trigger** (`FU-076-b`). No agent-role ever approves.
+  unit-proven but **not wired to a trigger** (`FU-076-b` — **wired by
+  [SPEC-077](../specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md), v0.58.0; see
+  below**). No agent-role ever approves.
 - **The live read-only control is in-process narrowing, not the gateway axis.** A
   `diagnostician` cannot reach a mutating grant because `_narrow_for_role` gives it no
   mutating tool (risk tier) and the loop admits only `read_only=True` turns — non-spoofable,
@@ -268,6 +270,56 @@ gateway `evaluate()`.
   diagnosis; the operator-invoked trigger (`POST /api/v2/diagnose`, gateway
   `/api/v1/diagnose`, gated by the existing `chat` action) never dispatches a mutation.
   Unattended machine-trigger ingestion is the named follow-up **`FU-076`**.
+
+## Operator Diagnose→Act Bridge (SPEC-077, v0.58.0) — the executor-staging trigger is wired
+
+Phase 5 delivered the `executor`-scoped `stage_remediation(...)` mechanism unit-proven
+but **not wired to a production trigger** (`FU-076-b`). **SPEC-077 closes `FU-076-b`**
+and supplies **only the trigger** — an explicit, human-initiated `POST /api/v2/remediate`
+(gateway `POST /api/v1/remediate` proxy) that reaches the delivered mechanism
+**unchanged**. **Zero new mutation-path machinery**, no new wire frame; the
+diagnose-before-act ceiling (ADR-0017 Decision 2) is unchanged and autonomous resolve
+stays deferred.
+
+- **A new deny-by-default action gates the trigger.** `remediate:stage` is granted to
+  `platform-admin` + `operator` and **denied** to `developer`, `read-only-observer`, and
+  `auditor` — added to the canonical `policy-default.yaml`, synced byte-identically
+  across all four bundle replicas, and registered in `PROTECTED_ACTIONS` + the action
+  vocabulary of **both** gateway `evaluate()` engines. A token without `remediate:stage`
+  is refused **403** at the gateway before any proxy or model call. (The sibling
+  `/api/v1/diagnose` trigger reuses the existing `chat` action; the mutating-proposal
+  trigger gets its **own** action because it reaches an `executor` staging turn.)
+- **The `executor` → distinct-human invariant is the mutation ceiling.** The trigger
+  binds `AgentRole.EXECUTOR` for **exactly one** `read_only=False` staging turn on the
+  derived `{session_id}::orch::staging` session, over the **same** gateway-forwarded
+  delegated token. The executor's full toolkit may *propose* the single mutating call,
+  which the kernel **parks** as the **existing** SPEC-020/030/031 confirmation card
+  carrying `staged_by_role="executor"` provenance. It dispatches **only** through the
+  signed at-most-one-dispatch worker (SPEC-037/038/063) after a **distinct human**
+  approver decides — the SPEC-030 self-approval block is unchanged, so the stager can
+  never be the approver. The trigger itself dispatches **nothing** and never auto-approves.
+- **Fail-closed on a non-stageable profile.** Only the two stageable profiles
+  (`post-deploy-verify`, `k8s-pod-degradation`) can stage; a diagnosis-only profile
+  (`servicenow-incident`, `observability-alert` — `remediation_shape is None`) or an
+  unknown profile is refused **4xx before any executor turn**, never coerced to a wider
+  runbook.
+- **Role off the wire, no new frame, audit enum closed.** `RemediateRequest` is
+  `extra="forbid"` and carries **no** `agent_role`; the response rides the existing
+  `AgentChatResponse` + SPEC-031 card, `agent-stream-event.schema.json` /
+  `execution-request.schema.json` stay **byte-unchanged**, and no `agent_role` crosses any
+  wire field (SPEC-073 R-3) — so the SPEC-074 gateway policy axis stays **ready-but-inert**
+  on this path (making it live is `FU-076-c`). The wired executor turn audits the SPEC-075
+  `agent_role="executor"` dimension through the delivered emitter seam with **no new
+  `event_type`** (the gateway reuses `chat_completed`; the enum stays closed).
+- **Portal entry deferred (`FU-077-agentic-remediation`, a SPEC-078 candidate).** The R-4
+  portal **Stage remediation** button was **deferred post-approval (2026-11-11, operator
+  re-scope)**: the portal has no completed-diagnosis surface to attach it to (SPEC-076
+  shipped diagnose backend-only; the portal was last touched by SPEC-072 / v0.53.0), and the
+  operator's direction is an **agentic / multi-agent** remediation — human-requested,
+  agent-team-carried, surfacing through the existing conversational portal surface (no card,
+  no discrete button) or graduated autonomy — rather than a button on a card. The backend
+  trigger is UX-agnostic and ships regardless, and is that follow-up's prerequisite (any
+  entry shape reaches the same wired `stage_remediation`).
 
 ## Feature Access Matrix
 

@@ -11,6 +11,57 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.58.0 — 2026-11-13
+
+[SPEC-077](docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md) operator
+diagnose→act bridge — **`FU-076-b`**, the increment
+[SPEC-076](docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md) (v0.57.0) recorded as
+tracked-not-dropped, and the first step after phase 5 of the phased multi-agent series
+[ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md) gates. Supplies
+**only the production trigger** that reaches the delivered-but-unwired `executor`-scoped
+`stage_remediation(...)` — **zero new mutation-path machinery**. A new agent-service
+`POST /api/v2/remediate` (+ gateway `POST /api/v1/remediate` proxy) is gated by a **new**
+deny-by-default action `remediate:stage` (granted to `platform-admin` + `operator`; denied to
+`developer`, `read-only-observer`, `auditor` — added to the canonical `policy-default.yaml`,
+synced byte-identically across all four bundle replicas, and registered in `PROTECTED_ACTIONS`
++ the action vocabulary of **both** gateway `evaluate()` engines). The trigger binds
+`AgentRole.EXECUTOR` for **exactly one** `read_only=False` staging turn on the derived
+`{session_id}::orch::staging` session over the **same** gateway-forwarded delegated token,
+letting the executor's full toolkit *propose* the single mutating call — which the kernel
+**parks** as the **existing** SPEC-020/030/031 confirmation card carrying
+`staged_by_role="executor"` provenance for a **distinct human** approver, dispatched only by
+the signed at-most-one-dispatch worker (SPEC-037/038/063); the SPEC-030 self-approval block is
+unchanged and the trigger itself dispatches **nothing**. It anchors on a **request-carried**
+completed diagnosis (does **not** re-run the SPEC-076 fan-out): only the two stageable profiles
+(`post-deploy-verify`, `k8s-pod-degradation`) can stage, while the two diagnosis-only profiles
+(`servicenow-incident`, `observability-alert`) and any unknown profile **fail closed** 4xx
+before an executor turn is opened (R-2). R-5 **verified (no new code)** that the wired executor
+turn audits the SPEC-075 `agent_role="executor"` dimension and parks the SPEC-073
+`staged_by_role="executor"` provenance with **no new `event_type`** (the enum stays closed; the
+gateway reuses `chat_completed`). R-6 kept the role **off the wire** and
+`agent-stream-event.schema.json` / `execution-request.schema.json` **byte-unchanged**
+(`RemediateRequest` is `extra="forbid"` with no `agent_role`), so the SPEC-074 policy axis stays
+**ready-but-inert** on this path (making it live remains `FU-076-c`) and autonomous resolve stays
+**deferred** (ADR-0017 Decision 2). R-7 added `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` (code
+default **`300`**, mirroring the diagnose knob) and **carried the v0.57.0 finding** that the
+`120`s `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` **code default** is too tight for a real
+provider (observed ~140s; the dev overlay already sets `300`s) — recorded as a **tracked
+follow-up**, the product default left **unchanged** pending real provider-latency data. **R-4
+(the portal Stage-remediation button) was deferred post-approval (2026-11-11, operator
+re-scope):** the ratified premise was false — the operator portal has **no** completed-diagnosis
+surface (SPEC-076 shipped diagnose **backend-only**; the portal was last touched by SPEC-072 /
+v0.53.0) — and the operator's direction is an **agentic / multi-agent** remediation
+(human-requested, agent-team-carried, conversational or graduated-autonomy) rather than a button
+on a card, so the UX would be throwaway. It is recorded as the **new named follow-up
+`FU-077-agentic-remediation`** (a **SPEC-078 candidate**); the backend trigger is UX-agnostic,
+ships regardless, and is that follow-up's prerequisite. Evidence: four-profile trigger scenario
+tests, a **gated** `remediation-livecheck.sh` (+ `make remediation-livecheck`) whose billable leg
+asserts one authorized staging turn **parks** with **zero** `execution_requested` and **no** HITL
+auto-approval while its mocked-I/O leg is collected by `make test`, and the recorded SPEC-018
+four-point-gate mapping; full agent-platform suite **1793**, platform-gateway **510**, and root
+`make verify` green across every leg. The `VERSION` bump + spec-index `delivered` flip land at the
+release gate; commit/tag/push remain separate.
+
 ## 0.57.0 — 2026-11-10
 
 [SPEC-076](docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md) bounded

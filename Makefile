@@ -223,6 +223,19 @@ observability-livecheck: ## Observability live-check (SPEC-065 R-4): mocked proo
 diagnosis-livecheck: ## Bounded-diagnosis live-check (SPEC-076 R-8): mocked proof by default; LIVE=1 read-only cluster pre-flight; LIVE=1 DRIVE_TURN=1 the gated billable bounded read-only fan-out
 	@LUBAN_DIAGNOSIS_DRIVE_PAID_TURN="$(DRIVE_TURN)" sh $(E2E_DIR)/diagnosis-livecheck.sh $(if $(LIVE),--live,--local)
 
+# SPEC-077 R-8: the remediation-staging live-check proves the operator-initiated
+# diagnose→act trigger PARKS a proposed remediation end to end and never
+# dispatches it (the four-point gate's point 3, the mutation ceiling). The default
+# (--local) runs the mocked-I/O pytest proof of the pipeline logic — no cluster,
+# no network, no paid call — which is also collected by `make test`. LIVE=1 runs
+# the read-only two-tier route pre-flight; LIVE=1 DRIVE_TURN=1 additionally drives
+# ONE gated, billable staging turn for a stageable profile (k8s-pod-degradation)
+# and asserts the proposal parks with ZERO execution_requested, plus the
+# non-billable R-3 deny-by-default 403 and R-2 fail-closed 4xx guards.
+.PHONY: remediation-livecheck
+remediation-livecheck: ## Remediation-staging live-check (SPEC-077 R-8): mocked proof by default; LIVE=1 read-only cluster pre-flight; LIVE=1 DRIVE_TURN=1 the gated billable one-turn park + zero-dispatch proof
+	@LUBAN_REMEDIATION_DRIVE_PAID_TURN="$(DRIVE_TURN)" sh $(E2E_DIR)/remediation-livecheck.sh $(if $(LIVE),--live,--local)
+
 .PHONY: secret-delivery-demo
 secret-delivery-demo: ## Run the local sample handoff proof (uv + installed portal npm dependencies; no cluster)
 	@sh $(SAMPLES_DIR)/acme-admin/password-reset/demo/demo.sh --secret-delivery-local
@@ -301,7 +314,7 @@ e2e: ## Run the e2e demo scripts against the deployed dev cluster
 	@echo "The acme-admin suite additionally needs 'make deploy-sample-app' and"
 	@echo "'make deploy-samples' to have been run; it fails loudly naming them if not."
 	@status=0; \
-	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(E2E_DIR)/ansible-mcp-check.sh $(E2E_DIR)/servicenow-check.sh $(E2E_DIR)/secret-delivery-demo.sh $(E2E_DIR)/observability-livecheck.sh $(E2E_DIR)/diagnosis-livecheck.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
+	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(E2E_DIR)/ansible-mcp-check.sh $(E2E_DIR)/servicenow-check.sh $(E2E_DIR)/secret-delivery-demo.sh $(E2E_DIR)/observability-livecheck.sh $(E2E_DIR)/diagnosis-livecheck.sh $(E2E_DIR)/remediation-livecheck.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
 		echo "==> $$script"; \
 		sh $$script || status=1; \
 	done; \

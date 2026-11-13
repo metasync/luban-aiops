@@ -335,7 +335,10 @@ class ContractAlignmentTests(unittest.TestCase):
         # session:skill_graduate guards skill graduation and the target
         # declaration that scopes it — one capability, one action
         # (SPEC-055 R-4/OQ-3). runtime:flags guards the authenticated
-        # feature-flag inventory read (SPEC-072 R-5).
+        # feature-flag inventory read (SPEC-072 R-5). remediate:stage guards the
+        # operator-initiated diagnose→act staging trigger (SPEC-077 R-3), enforced
+        # on this gateway's POST /api/v1/remediate proxy and registered in both
+        # engines' vocabularies for policy-matrix parity.
         self.assertEqual(
             PROTECTED_ACTIONS,
             frozenset({
@@ -350,6 +353,7 @@ class ContractAlignmentTests(unittest.TestCase):
                 "models:list", "approvals:list",
                 "documents:create", "documents:read",
                 "runtime:flags",
+                "remediate:stage",
             }),
         )
 

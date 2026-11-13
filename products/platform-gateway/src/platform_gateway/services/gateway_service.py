@@ -993,6 +993,31 @@ async def diagnose(
     )
 
 
+async def remediate(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    profile: str,
+    goal: str,
+    diagnosis: str,
+    session_id: str | None,
+    delegated_token: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Proxy the operator-initiated diagnose→act staging trigger (SPEC-077 R-1)."""
+    return await agent_client.remediate(
+        settings,
+        request_id,
+        user_id,
+        profile,
+        goal,
+        diagnosis,
+        session_id,
+        delegated_token,
+        model,
+    )
+
+
 async def chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,

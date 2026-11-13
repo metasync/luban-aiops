@@ -7,7 +7,12 @@ from fastapi.responses import StreamingResponse
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
 from platform_gateway.core.observability import log_event
 from platform_gateway.core.request_context import resolve_request_id
-from platform_gateway.schemas.api import ChatConfirmRequest, ChatRequest, DiagnoseRequest
+from platform_gateway.schemas.api import (
+    ChatConfirmRequest,
+    ChatRequest,
+    DiagnoseRequest,
+    RemediateRequest,
+)
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
@@ -16,9 +21,13 @@ from platform_gateway.services.gateway_service import (
     chat_stream,
     diagnose,
     enforce_policy,
+    remediate,
     resolve_request_identity,
 )
-from platform_gateway.services.policy_engine import ACTION_CHAT_CONFIRM
+from platform_gateway.services.policy_engine import (
+    ACTION_CHAT_CONFIRM,
+    ACTION_REMEDIATE_STAGE,
+)
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -266,6 +275,88 @@ async def diagnose_route(
             details={
                 "profile": body.profile,
                 "diagnosis_status": response.get("status"),
+                "model": response.get("model"),
+            },
+            subject=identity.subject,  # type: ignore[union-attr]
+            username=user_id,
+            actor=identity.actor,  # type: ignore[union-attr]
+            roles=identity.roles,  # type: ignore[union-attr]
+            session_id=response.get("session_id"),
+        ),
+    )
+    return response
+
+
+@router.post("/api/v1/remediate")
+async def remediate_route(
+    request: Request,
+    body: RemediateRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> dict:
+    """Operator-initiated diagnose→act staging trigger (SPEC-077 R-1).
+
+    Proxies agent-service ``POST /api/v2/remediate`` behind the **new**
+    ``remediate:stage`` deny-by-default action (R-3) — a token without the grant
+    is refused ``403`` here, before any staging turn opens. Mutation-adjacent, so
+    it is gated separately from ``chat``/``diagnose``; granted to platform admins
+    and operators, and deliberately **not** approvers so the stager and the
+    distinct-human approver who resumes the parked card stay disjoint (SPEC-074 /
+    SPEC-030). Admission governs *starting* the one ``read_only=False`` executor
+    staging turn only — the turn *proposes* a single mutating call which the kernel
+    parks as the existing SPEC-020/030/031 HITL card carrying the executor
+    ``staged_by_role`` provenance; this route dispatches **nothing**. The one
+    delegated token rides the turn (the single broker exchange); no ``agent_role``
+    crosses the wire (SPEC-073 R-3), so ``enforce_policy`` is called without the
+    agent-role axis (ready-but-inert, OQ-6).
+
+    The proposal surfaces through the existing chat-response shape (the SPEC-031
+    card frame), so the ``chat_completed`` audit type is reused with the runbook
+    ``profile`` in ``details`` — the ``event_type`` enum stays closed (R-5/OQ-5)
+    and the authoritative executor ``agent_role`` attribution rides the runtime's
+    SPEC-075 audit/evidence record.
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, ACTION_REMEDIATE_STAGE, request_id)
+    user_id = identity.username  # type: ignore[union-attr]
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,  # type: ignore[union-attr]
+        _bearer_token(request),
+    )
+    response = await remediate(
+        settings,
+        request_id,
+        user_id,
+        body.profile,
+        body.goal,
+        body.diagnosis,
+        body.session_id,
+        delegated_token,
+        body.model,
+    )
+    log_event(
+        LOGGER,
+        "remediation_staged",
+        request_id=request_id,
+        session_id=response.get("session_id"),
+        user_id=user_id,
+        profile=body.profile,
+        status=response.get("status"),
+        model=response.get("model"),
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    emit_audit_event(
+        settings,
+        build_audit_event(
+            "chat_completed",
+            request_id,
+            "success",
+            details={
+                "profile": body.profile,
+                "staging_status": response.get("status"),
                 "model": response.get("model"),
             },
             subject=identity.subject,  # type: ignore[union-attr]

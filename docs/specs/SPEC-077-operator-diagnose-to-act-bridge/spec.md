@@ -133,6 +133,21 @@ deny-by-default gate. Granted to `platform-admin` and `operator`; denied to `dev
 
 ### R-4: Portal entry + park/resume UX (reuses the existing card and inbox)
 
+> **DEFERRED 2026-11-11 (operator re-scope, post-approval).** Implementation grounding found the
+> ratified premise false: the operator portal has **no** "completed diagnosis" surface — SPEC-076
+> shipped the diagnose flow **backend-only** (the portal was last touched by SPEC-072 / v0.53.0; there
+> is no diagnosis card and no `/api/v1/diagnose` client). So there is no card to attach a **Stage
+> remediation** button to, and the plan's "cheap because it reuses the card" cost assumption is void.
+> The operator's product direction is an **agentic / multi-agent** remediation model — human-requested,
+> carried out by an agent team, surfacing through conversation or graduated autonomy rather than a
+> discrete button — which supersedes the button-on-a-card UX and would make building it throwaway.
+> R-4 is therefore **deferred**, not dropped, and recorded as the named follow-up
+> **`FU-077-agentic-remediation`** (a SPEC-078 candidate: conversational/agentic entry, multi-agent
+> remediation team, an autonomy gradient, the ADR-0017 Decision-2 revisit, and the `FU-076-c` policy
+> axis going live). The backend trigger (R-1/R-2/R-3/R-5/R-6/R-7) is **UX-agnostic** and ships in
+> v0.58.0 regardless — it is the prerequisite for any entry shape (button, chat message, or machine
+> trigger). The original ratified R-4 text is retained below for the record.
+
 The operator portal gains a **Stage remediation** affordance on a completed diagnosis, visible **only**
 for a stageable profile **and** only to a role holding `remediate:stage`. Invoking it calls
 `POST /api/v1/remediate`; the resulting parked proposal appears through the **existing** SPEC-031
@@ -210,6 +225,12 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
   diagnosis-only profiles stay diagnosis-only.
 - **Re-running the diagnosis on staging** (OQ-2 ratified anchoring on the request-carried completed
   diagnosis, not a fresh fan-out).
+- **A portal Stage-remediation affordance (R-4) and the agentic / multi-agent remediation model.**
+  R-4 is **deferred** (2026-11-11 operator re-scope): the portal has no completed-diagnosis surface
+  (SPEC-076 shipped backend-only), and the operator's direction is an agentic/multi-agent remediation
+  — human-requested, agent-team-carried, surfacing through conversation or graduated autonomy rather
+  than a button on a card. Captured as the named follow-up **`FU-077-agentic-remediation`** (a SPEC-078
+  candidate, joining `FU-076` and `FU-076-c`); v0.58.0 ships the **UX-agnostic backend trigger** only.
 
 ## Open Questions
 
@@ -237,6 +258,11 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
 - **OQ-4 — Portal entry placement + visibility.** A **Stage remediation** button on the completed
   diagnosis card, visible only for a stageable profile + a role holding the action? **Ratified: yes**,
   reusing the existing SPEC-031 card + inbox for park/resume (no new UX surface).
+  **Superseded 2026-11-11 (post-approval operator re-scope):** the ratified premise — a pre-existing
+  completed-diagnosis card — is false (the portal has no diagnosis surface; SPEC-076 was backend-only),
+  and the operator's agentic/multi-agent direction supersedes the button-on-a-card UX. R-4 is
+  **deferred** as `FU-077-agentic-remediation` (a SPEC-078 candidate); see the R-4 deferral note and
+  Non-Goals. The backend trigger ships UX-agnostic in v0.58.0.
 - **OQ-5 — Audit event type.** Does the bridge need a new `event_type`, or is the executor staging turn
   fully attributable on existing events (SPEC-075 `agent_role` dimension + the parked-card provenance)?
   **Ratified: no new event type** — the `agent_role="executor"` dimension plus the existing
@@ -274,3 +300,12 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
   OQ-7 → `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` code default `300`s + the `120`s diagnose
   code-default finding logged); `status: draft → approved`; target **v0.58.0** pinned; `plan.md` +
   `tasks.md` authored.
+- 2026-11-11 (post-approval re-scope) — **R-4 deferred** by the operator. Implementation grounding
+  found the portal has no completed-diagnosis surface (SPEC-076 shipped the diagnose flow
+  backend-only; the portal was last touched by SPEC-072 / v0.53.0), so the ratified "button on the
+  diagnosis card" premise is void; the operator's direction is an **agentic / multi-agent**
+  remediation model (human-requested, agent-team-carried, conversational or graduated-autonomy)
+  rather than a discrete button. R-4 + the agentic model are recorded as the named follow-up
+  **`FU-077-agentic-remediation`** (a SPEC-078 candidate). v0.58.0 ships the **UX-agnostic backend
+  trigger** (R-1/R-2/R-3/R-5/R-6/R-7) + evidence (R-8); the portal affordance is deferred, not
+  dropped. OQ-4 annotated **superseded**; Non-Goals + `plan.md`/`tasks.md` updated additively.

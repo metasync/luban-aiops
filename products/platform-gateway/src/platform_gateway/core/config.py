@@ -41,6 +41,12 @@ class PlatformGatewaySettings:
     # longer proxy budget than a single chat turn (mirrors the incident-triage
     # long-read class, not chat's 30s).
     diagnose_response_timeout_seconds: float = 120.0
+    # SPEC-077 R-7 / OQ-7: the operator-initiated staging turn is one executor
+    # model call against a real remote provider — shorter than a full diagnose
+    # fan-out but still a live provider turn. It gets a dedicated budget (the
+    # v0.57.0 live-check observed ~140s for a bounded diagnosis, over the 120s
+    # diagnose code default), so the proxy never ReadTimeouts a legitimate stage.
+    remediate_response_timeout_seconds: float = 300.0
     require_auth: bool = True
     target_authorization_enabled: bool = False
     authorization_workload_token_path: str = ""
@@ -102,6 +108,9 @@ class PlatformGatewaySettings:
             ),
             diagnose_response_timeout_seconds=float(
                 os.getenv("PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS", "120")
+            ),
+            remediate_response_timeout_seconds=float(
+                os.getenv("PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS", "300")
             ),
             require_auth=os.getenv("PLATFORM_GATEWAY_REQUIRE_AUTH", "true")
             .strip()

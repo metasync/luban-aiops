@@ -46,7 +46,17 @@
       `executor`→**distinct-human**-approver disjointness + the SPEC-030 self-approval block hold (the
       stager can never be the approver)
 
-## R-4: Portal entry + park/resume UX (OQ-4)
+## R-4: Portal entry + park/resume UX (OQ-4) — **DEFERRED 2026-11-11 (operator re-scope)**
+
+> **DEFERRED — not in v0.58.0.** Implementation grounding found the ratified premise false: the
+> operator portal has **no** completed-diagnosis surface (SPEC-076 shipped the diagnose flow
+> **backend-only**; the portal was last touched by SPEC-072 / v0.53.0 — no diagnosis card, no
+> `/api/v1/diagnose` client). The operator's direction is an **agentic / multi-agent** remediation
+> (human-requested, agent-team-carried, conversational or graduated-autonomy) rather than a button on a
+> card, so building this UX would be throwaway. Tracked as the named follow-up
+> **`FU-077-agentic-remediation`** (a SPEC-078 candidate) in the Delivery Gate below + the roadmap +
+> spec Non-Goals. The backend trigger (R-1/R-2/R-3/R-5/R-6/R-7) is UX-agnostic and ships regardless.
+> Original tasks retained below for the record (left unchecked — deferred, not done).
 
 - [ ] Add a **Stage remediation** button on the completed diagnosis card, rendered **only** for a
       stageable profile (`post-deploy-verify` / `k8s-pod-degradation`) **and** a role holding
@@ -90,28 +100,63 @@
 
 ## R-8: Evidence — the four-point gate + a gated live-check + docs (OQ-8, OQ-9)
 
-- [ ] Scenario tests for all four profiles at the trigger: the two stageable profiles **park** a proposal
+> **SPEC-018 four-point-gate mapping (recorded 2026-11-11).** The operator-initiated diagnose→act
+> trigger re-affirms the four-point gate for the new control flow:
+> **1 — audit live-attributed:** the wired executor staging turn audits the SPEC-075
+> `agent_role="executor"` dimension through the delivered `build_audit_event` seam and parks the
+> SPEC-073 `staged_by_role="executor"` provenance; **no** new `event_type` — the gateway reuses
+> `chat_completed`, so the enum stays **closed** (proven by `TestDiagnoseActBridgeAttribution` +
+> livecheck point 1).
+> **2 — identity on the one token:** the staging turn rides the *same* gateway-forwarded delegated
+> bearer token; the route binds no role and mints nothing (proven by
+> `test_staging_rides_the_same_token_and_leaves_no_role_bound` + the single-token live drive).
+> **3 — park + distinct-human approval is the mutation ceiling:** the executor **proposes** one
+> mutating call → **parks** on HITL → a **distinct** human approves; the SPEC-030 self-approval block
+> is unchanged and nothing auto-dispatches (proven by livecheck point 3 — **zero**
+> `execution_requested` across the whole session family — + the four-profile scenario tests).
+> **4 — no new frame on the v2 contract:** `RemediateRequest` is `extra="forbid"` and carries **no**
+> `agent_role`; the response rides the existing `AgentChatResponse` + SPEC-031 card, and
+> `agent-stream-event.schema.json` / `execution-request.schema.json` stay **byte-unchanged** with no
+> `agent_role` on any wire field (proven by the contract-parity tests + the livecheck no-wire-leak
+> assertion).
+
+- [x] Scenario tests for all four profiles at the trigger: the two stageable profiles **park** a proposal
       (never dispatch); the two diagnosis-only profiles **fail closed** (OQ-8)
-- [ ] Add `e2e/remediation-livecheck.sh` (mirroring `e2e/diagnosis-livecheck.sh`) + a
+- [x] Add `e2e/remediation-livecheck.sh` (mirroring `e2e/diagnosis-livecheck.sh`) + a
       `make remediation-livecheck` target: the **gated billable** leg drives one authorized staging turn
       and asserts the proposal **parks** with **zero** `execution_requested` dispatch and **no** HITL
       auto-approval; the **mocked-I/O** leg is collected by `make test` so it cannot be skipped silently
-- [ ] Record the SPEC-018 four-point-gate mapping (audit live-attributed; identity on the one token;
+- [x] Record the SPEC-018 four-point-gate mapping (audit live-attributed; identity on the one token;
       park + distinct-human approval is the mutation ceiling; no new frame on the v2 contract)
-- [ ] Docs: `authorization-matrix.md` (`remediate:stage` + the executor→human invariant),
+- [x] Docs: `authorization-matrix.md` (`remediate:stage` + the executor→human invariant),
       `configuration-reference.md` (the R-7 knob), `delivery-roadmap.md` (**FU-076-b closed**; the `120`s
       finding), `docs/specs/README.md` index (this row), `CHANGELOG.md`
-- [ ] Root `make verify` green across every leg
+- [x] Root `make verify` green across every leg (confirmed 2026-11-11: all legs exit 0 — `make test`
+      incl. agent-platform **1793** + platform-gateway **510** + the **8** livecheck scenarios; every
+      `validate-*`; `portal-test`; `audit-contract-test`; the four `delegated-*` campaigns; SPEC-063
+      `execution-failure-test` **795 passed**)
 
 ## Delivery Gate
 
-- [ ] all acceptance criteria in `spec.md` verified (R-1…R-8)
+- [ ] all acceptance criteria in `spec.md` verified (R-1…R-8 **except R-4**, deferred 2026-11-11 by
+      operator re-scope — see the R-4 section + the `FU-077-agentic-remediation` follow-up below)
 - [ ] all nine Open Questions ratified by the operator **exactly as recommended** (2026-11-11); the
-      `plan.md` / `tasks.md` PROVISIONAL banners lifted (binding)
+      `plan.md` / `tasks.md` PROVISIONAL banners lifted (binding). **OQ-4 superseded** post-approval
+      (2026-11-11 operator re-scope) — R-4 deferred as `FU-077-agentic-remediation`; the backend
+      trigger (R-1/R-2/R-3/R-5/R-6/R-7) is UX-agnostic and ships in v0.58.0
 - [ ] **`FU-076`** (unattended machine-trigger ingestion) and **`FU-076-c`** (a live in-process policy
       evaluation point making the SPEC-074 `agent_roles_any` axis fire where R-3 keeps the role — OQ-6)
       remain recorded as **deferred named follow-ups** in the roadmap + spec Non-Goals — **not** pulled
       into this increment, **not** dropped
+- [ ] **`FU-077-agentic-remediation`** (R-4 deferred 2026-11-11 by operator re-scope) is recorded as a
+      **deferred named follow-up** + **SPEC-078 candidate** in the roadmap + spec Non-Goals: an
+      **agentic / multi-agent** remediation model — human-requested, carried out by an agent team,
+      surfacing through the **existing conversational** portal surface (no diagnosis card, no discrete
+      button) or graduated autonomy. Its OQs (conversational entry vs. card; team-*proposal* vs.
+      team-*execution*; the autonomy gradient; the **ADR-0017 Decision-2** revisit; making the
+      `FU-076-c` policy axis live) are **not** resolved here — **not** pulled into v0.58.0, **not**
+      dropped. The v0.58.0 backend trigger is its prerequisite (any entry shape reaches the same wired
+      `stage_remediation`)
 - [ ] the **`120`s** `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` **code-default** finding is recorded as a
       tracked follow-up (R-7): dev overlay already `300`s; product default unchanged pending latency data
 - [ ] living docs updated; `CHANGELOG.md` entry added referencing SPEC-077

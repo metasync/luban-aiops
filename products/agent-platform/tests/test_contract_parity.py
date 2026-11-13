@@ -50,7 +50,11 @@ from pathlib import Path
 
 import jsonschema
 
-from agent_service.schemas.v2 import AgentChatResponse, AgentDiagnoseRequest
+from agent_service.schemas.v2 import (
+    AgentChatResponse,
+    AgentDiagnoseRequest,
+    RemediateRequest,
+)
 
 _ROOT = Path(__file__).resolve().parents[3]
 _SCHEMA_DIR = _ROOT / "shared" / "shared-contracts" / "schemas"
@@ -197,6 +201,20 @@ class TestDiagnoseRidesExistingFrames:
             "agent_role"
             not in AgentDiagnoseRequest.model_json_schema()["properties"]
         )
+
+    def test_remediate_request_model_carries_no_agent_role_wire_field(self) -> None:
+        # SPEC-077 R-6 / SPEC-073 R-3: the diagnose→act trigger body names a
+        # profile + the request-carried goal/diagnosis, never a role. The
+        # executor role is bound inside stage_remediation and stays process-local.
+        assert "agent_role" not in RemediateRequest.model_fields
+        assert (
+            "agent_role"
+            not in RemediateRequest.model_json_schema()["properties"]
+        )
+        # OQ-2 request-carried: the diagnosis the operator acts on rides the body,
+        # and extra="forbid" makes the no-role contract enforced, not documented.
+        assert "diagnosis" in RemediateRequest.model_fields
+        assert RemediateRequest.model_config.get("extra") == "forbid"
 
     def test_diagnose_response_validates_against_the_existing_chat_frame(self) -> None:
         # R-7/R-8: the route returns AgentChatResponse; a budget-limited run

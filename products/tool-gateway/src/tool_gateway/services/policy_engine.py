@@ -51,6 +51,17 @@ ACTION_SECRETS_DELIVER = "secrets:deliver"
 # alone enrolls nothing. Deny-by-default; joined to PROTECTED_ACTIONS so the
 # policy matrix and scenario coverage surface it.
 ACTION_TARGETS_AUTHORIZE = "targets:authorize"
+# Operator-initiated diagnose→act staging trigger (SPEC-077 R-3 / OQ-3): gates the
+# production trigger that reaches the delivered executor-scoped
+# stage_remediation(...). The enforcement point is the platform-gateway POST
+# /api/v1/remediate proxy; it is registered here too so the action surfaces in
+# BOTH engines' PROTECTED_ACTIONS, policy matrices, and scenario-coverage tables
+# (R-3 ratified "both gateway evaluate() engines"), following the targets:authorize
+# / secrets:deliver "joined so the matrix surfaces it" posture. No tool-gateway
+# route evaluates it — mutation-adjacent, deny-by-default, granted to platform
+# admins and operators only (approver deliberately excluded for stager/approver
+# disjointness, SPEC-074 / SPEC-030).
+ACTION_REMEDIATE_STAGE = "remediate:stage"
 PROTECTED_ACTIONS = frozenset(
     {
         ACTION_TOOLS_LIST,
@@ -58,6 +69,7 @@ PROTECTED_ACTIONS = frozenset(
         ACTION_TOOLS_MUTATE,
         ACTION_SECRETS_DELIVER,
         ACTION_TARGETS_AUTHORIZE,
+        ACTION_REMEDIATE_STAGE,
     }
 )
 

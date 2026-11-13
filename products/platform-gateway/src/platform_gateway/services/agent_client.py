@@ -241,6 +241,49 @@ async def diagnose(
     return response.json()
 
 
+async def remediate(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    profile: str,
+    goal: str,
+    diagnosis: str,
+    session_id: str | None,
+    delegated_token: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Proxy the operator-initiated diagnose→act staging trigger (SPEC-077 R-1).
+
+    Mirrors ``diagnose`` but targets ``POST /api/v2/remediate`` and uses the
+    dedicated ``remediate_response_timeout_seconds`` budget (R-7 / OQ-7, code
+    default 300s): one ``read_only=False`` executor turn against a real provider
+    is shorter than a full fan-out but still a live model call, so it must not
+    ReadTimeout. The request-carried ``diagnosis`` (OQ-2) is forwarded verbatim —
+    the bridge does not re-run the bounded fan-out. The delegated token rides the
+    staging turn (the one broker exchange); no ``agent_role`` crosses the wire
+    (SPEC-073 R-3), and the route dispatches nothing — the proposed mutation parks
+    on the existing HITL card for a distinct-human approver.
+    """
+    timeout = httpx.Timeout(settings.remediate_response_timeout_seconds, connect=5.0)
+    payload: dict[str, str] = {
+        "profile": profile,
+        "goal": goal,
+        "diagnosis": diagnosis,
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    if model:
+        payload["model"] = model
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{settings.agent_service_url}/api/v2/remediate",
+            json=payload,
+            headers=_headers(request_id, user_id, delegated_token),
+        )
+    response.raise_for_status()
+    return response.json()
+
+
 async def open_chat_stream(
     settings: PlatformGatewaySettings,
     request_id: str,
