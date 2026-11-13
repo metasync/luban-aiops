@@ -4,11 +4,23 @@
 **Referenced Files in This Document**
 - [routes.py](file://products/agent-platform/src/agent_service/api/v2/routes.py)
 - [v2.py](file://products/agent-platform/src/agent_service/schemas/v2.py)
+- [orchestration.py](file://products/agent-platform/src/agent_service/services/orchestration.py)
+- [runbooks.py](file://products/agent-platform/src/agent_service/services/runbooks.py)
+- [test_remediate_route.py](file://products/agent-platform/tests/test_remediate_route.py)
 - [agent-chat-request.schema.json](file://shared/shared-contracts/schemas/agent-chat-request.schema.json)
 - [agent-chat-response.schema.json](file://shared/shared-contracts/schemas/agent-chat-response.schema.json)
 - [agent-session.schema.json](file://shared/shared-contracts/schemas/agent-session.schema.json)
 - [agent-stream-event.schema.json](file://shared/shared-contracts/schemas/agent-stream-event.schema.json)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added new POST /api/v2/remediate endpoint documentation
+- Included RemediateRequest schema with validation rules
+- Documented executor staging behavior and profile system
+- Updated core components section with remediate endpoint
+- Added detailed remediation workflow section
+- Updated API endpoints summary with new endpoint
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -30,6 +42,7 @@ This document specifies the v2 public API surface of the Agent Platform service 
 - Model discovery and runtime metadata
 - Evidence collection and durable confirmation records
 - Operations documents (shift summaries and incident reports)
+- **New**: Operator-initiated diagnosis-to-action bridge via POST /api/v2/remediate
 - Authentication via internal headers and authorization enforcement at the gateway boundary
 
 The API is implemented as a FastAPI router under /api/v2 with Pydantic models validated against shared JSON schemas. Identity is conveyed via headers; bodies never contain identity or secrets.
@@ -57,6 +70,7 @@ Services --> Stores["Session Store,<br/>Evidence Store,<br/>Confirmation Records
 ## Core Components
 - Chat endpoints: POST /api/v2/chat (text reply), GET /api/v2/chat/stream (SSE), POST /api/v2/chat/confirm (resume parked turn).
 - Sessions: POST /api/v2/sessions, GET /api/v2/sessions, GET /api/v2/sessions/{id}, PATCH /api/v2/sessions/{id}/title, DELETE /api/v2/sessions/{id}.
+- **New**: Remediation trigger: POST /api/v2/remediate (operator-initiated diagnose→act bridge).
 - Confirmations: GET /api/v2/chat/pending-confirmation, GET /api/v2/confirmations.
 - Model discovery: GET /api/v2/models.
 - Runtime health/metadata: GET /api/v2/runtime, GET /api/v2/health.
@@ -73,6 +87,7 @@ Authentication and authorization:
 - [routes.py:320-365](file://products/agent-platform/src/agent_service/api/v2/routes.py#L320-L365)
 - [routes.py:368-464](file://products/agent-platform/src/agent_service/api/v2/routes.py#L368-L464)
 - [routes.py:467-513](file://products/agent-platform/src/agent_service/api/v2/routes.py#L467-L513)
+- [routes.py:492-588](file://products/agent-platform/src/agent_service/api/v2/routes.py#L492-L588)
 - [routes.py:790-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L790-L855)
 - [routes.py:858-914](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L914)
 - [routes.py:917-945](file://products/agent-platform/src/agent_service/api/v2/routes.py#L917-L945)
@@ -226,6 +241,56 @@ State transitions:
 - [routes.py:516-557](file://products/agent-platform/src/agent_service/api/v2/routes.py#L516-L557)
 - [routes.py:1737-1773](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1737-L1773)
 
+### Operator-Initiated Remediation (NEW)
+Endpoint: POST /api/v2/remediate
+- Purpose: Operator-initiated diagnose→act bridge that stages proposed remediations for human approval.
+- Request body: RemediateRequest with profile, goal, diagnosis, optional session_id and model.
+- Behavior:
+  - Validates profile against declared runbook profiles (fail-closed on unknown or diagnosis-only profiles).
+  - Requires operator to have completed a bounded diagnosis first (POST /api/v2/diagnose).
+  - Stages executor role for one turn to propose mutating actions via existing HITL confirmation card.
+  - Does NOT auto-dispatch; proposal parks for distinct human approver via signed dispatch worker.
+  - Uses request-carried goal + diagnosis text (no re-running of bounded fan-out).
+
+RemediateRequest Schema:
+- profile: Required string identifying declared runbook profile (post-deploy-verify, k8s-pod-degradation are stageable).
+- goal: Required string describing the diagnosis goal being acted upon.
+- diagnosis: Required string containing the completed diagnosis synthesis.
+- session_id: Optional string for anchoring to existing session.
+- model: Optional string for model selection (request > pinned > default precedence).
+
+Validation Rules:
+- Unknown profiles return 422 (fail-closed, never coerced to wider runbook).
+- Diagnosis-only profiles (remediation_shape is None) return 422 (never widen read-only runbook).
+- Empty or missing diagnosis returns 422 (request-carried requirement).
+- Smuggled agent_role field returns 422 (extra="forbid" enforcement).
+- Missing X-User-ID returns 401 (identity required).
+
+Executor Staging Behavior:
+- Binds EXECUTOR role internally for one staging turn only.
+- Uses read_only=False to allow full toolkit access for proposing mutations.
+- Parks proposed actions on existing SPEC-020/030/031 confirmation card.
+- Labels proposals with staged_by_role="executor" for provenance tracking.
+- Same delegated token rides the staging turn (identity preservation).
+- No new mutation-path code; reuses existing dispatch mechanism.
+
+Response: AgentChatResponse with session_id, request_id, content, status ("ok" or "partial"), structured_output, model.
+
+Profile System:
+- post-deploy-verify: Declares rollback remediation shape (stageable).
+- k8s-pod-degradation: Declares restart/reschedule remediation shape (stageable).
+- servicenow-incident: Diagnosis-only (not stageable).
+- observability-alert: Diagnosis-only (not stageable).
+
+**Updated** Added comprehensive documentation for the new remediation endpoint including schema validation, executor staging behavior, and profile system.
+
+**Section sources**
+- [routes.py:492-588](file://products/agent-platform/src/agent_service/api/v2/routes.py#L492-L588)
+- [v2.py:133-199](file://products/agent-platform/src/agent_service/schemas/v2.py#L133-L199)
+- [orchestration.py:335-386](file://products/agent-platform/src/agent_service/services/orchestration.py#L335-L386)
+- [runbooks.py:56-222](file://products/agent-platform/src/agent_service/services/runbooks.py#L56-L222)
+- [test_remediate_route.py:1-194](file://products/agent-platform/tests/test_remediate_route.py#L1-L194)
+
 ### Model Switching and Discovery
 - Discovery: GET /api/v2/models
   - Returns credential-gated catalog with id, label, provider, default flag.
@@ -289,6 +354,7 @@ The v2 routes depend on:
 - Confirmation record store for durable HITL lifecycle
 - Model catalog for discovery and resolution
 - Operation document store for shift summaries and incident reports
+- **New**: Runbook profile system for diagnosis and remediation workflows
 
 ```mermaid
 graph LR
@@ -298,6 +364,7 @@ Routes --> EvidenceStore["Evidence Store"]
 Routes --> ConfirmStore["Confirmation Records"]
 Routes --> ModelCatalog["Model Catalog"]
 Routes --> DocStore["Operation Documents"]
+Routes --> Runbooks["Runbook Profiles"]
 ```
 
 **Diagram sources**
@@ -311,6 +378,7 @@ Routes --> DocStore["Operation Documents"]
 - Evidence data payloads are size-capped to prevent large frames in streams.
 - Best-effort degradation for unreadable stores avoids 500 errors; features like evidence_turns and confirmations degrade gracefully.
 - Model resolution is cached in session pins to minimize repeated lookups.
+- **New**: Remediation staging is non-streaming and fails fast on invalid profiles to avoid unnecessary executor turns.
 
 [No sources needed since this section provides general guidance]
 
@@ -319,6 +387,9 @@ Common issues and resolutions:
 - 401 missing X-User-ID: Ensure identity header is present on all requests.
 - 409 parked confirmation pending: Answer or wait for expiry before sending new messages.
 - 422 unknown model id: Use GET /api/v2/models to discover valid model ids.
+- 422 unknown diagnosis profile: Use valid profile names (post-deploy-verify, k8s-pod-degradation for staging).
+- 422 diagnosis-only profile: Cannot stage read-only profiles; use stageable profiles only.
+- 422 smuggled agent_role: Remove agent_role field from request body (role is process-local).
 - 404 confirmation not found: Confirmation may have expired or been resolved; check inbox.
 - 503/502 upstream failures: Indicates unconfigured or unreachable dependencies (skills hub, incident service); retry later.
 
@@ -330,12 +401,13 @@ Diagnostic endpoints:
 - [routes.py:144-157](file://products/agent-platform/src/agent_service/api/v2/routes.py#L144-L157)
 - [routes.py:202-243](file://products/agent-platform/src/agent_service/api/v2/routes.py#L202-L243)
 - [routes.py:368-464](file://products/agent-platform/src/agent_service/api/v2/routes.py#L368-L464)
+- [routes.py:492-588](file://products/agent-platform/src/agent_service/api/v2/routes.py#L492-L588)
 - [routes.py:1779-1789](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1779-L1789)
 - [routes.py:1795-1806](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1795-L1806)
 - [routes.py:1835-1855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1835-L1855)
 
 ## Conclusion
-The Agent Platform v2 API provides a robust, schema-validated surface for session-based agent orchestration, real-time streaming chat, human-in-the-loop approvals, model switching, evidence collection, and operations documents. Authentication is header-based with gateway-enforced authorization, and the service emphasizes graceful degradation and clear error signaling for reliable integrations.
+The Agent Platform v2 API provides a robust, schema-validated surface for session-based agent orchestration, real-time streaming chat, human-in-the-loop approvals, model switching, evidence collection, operations documents, and operator-initiated remediation workflows. Authentication is header-based with gateway-enforced authorization, and the service emphasizes graceful degradation and clear error signaling for reliable integrations.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -346,8 +418,9 @@ The Agent Platform v2 API provides a robust, schema-validated surface for sessio
 - GET /api/v2/chat/stream: Stream real-time events for a message.
 - POST /api/v2/chat/confirm: Answer a parked confirmation and resume streaming.
 - GET /api/v2/chat/pending-confirmation: Retrieve parked confirmation metadata.
+- **New**: POST /api/v2/remediate: Stage proposed remediation for human approval.
 - POST /api/v2/sessions: Create a session (named or auto-generated).
-- GET /api/v2/sessions: List current user’s sessions.
+- GET /api/v2/sessions: List current user's sessions.
 - GET /api/v2/sessions/{id}: Read session details with transcript and evidence.
 - PATCH /api/v2/sessions/{id}/title: Rename session title.
 - DELETE /api/v2/sessions/{id}: Delete session (owner-only).
@@ -368,6 +441,7 @@ The Agent Platform v2 API provides a robust, schema-validated surface for sessio
 - [routes.py:320-365](file://products/agent-platform/src/agent_service/api/v2/routes.py#L320-L365)
 - [routes.py:368-464](file://products/agent-platform/src/agent_service/api/v2/routes.py#L368-L464)
 - [routes.py:467-513](file://products/agent-platform/src/agent_service/api/v2/routes.py#L467-L513)
+- [routes.py:492-588](file://products/agent-platform/src/agent_service/api/v2/routes.py#L492-L588)
 - [routes.py:790-855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L790-L855)
 - [routes.py:858-914](file://products/agent-platform/src/agent_service/api/v2/routes.py#L858-L914)
 - [routes.py:917-945](file://products/agent-platform/src/agent_service/api/v2/routes.py#L917-L945)
@@ -381,3 +455,16 @@ The Agent Platform v2 API provides a robust, schema-validated surface for sessio
 - [routes.py:1779-1789](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1779-L1789)
 - [routes.py:1795-1806](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1795-L1806)
 - [routes.py:1835-1855](file://products/agent-platform/src/agent_service/api/v2/routes.py#L1835-L1855)
+
+### Remediation Profile Reference
+Stageable profiles (can propose mutations):
+- post-deploy-verify: Roll back deployment to last known-good revision
+- k8s-pod-degradation: Restart/reschedule degraded pod or roll back offending config
+
+Diagnosis-only profiles (cannot stage mutations):
+- servicenow-incident: ServiceNow incident correlation (diagnosis only)
+- observability-alert: Alert correlation (diagnosis only)
+
+**Section sources**
+- [runbooks.py:56-222](file://products/agent-platform/src/agent_service/services/runbooks.py#L56-L222)
+- [test_remediate_route.py:26-29](file://products/agent-platform/tests/test_remediate_route.py#L26-L29)

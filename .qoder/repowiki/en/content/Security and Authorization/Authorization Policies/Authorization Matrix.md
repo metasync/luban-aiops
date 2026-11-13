@@ -23,17 +23,18 @@
 - [runtime_settings.py](file://products/agent-platform/src/agent_service/runtime_settings.py)
 - [spec.md](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md)
 - [plan.md](file://docs/specs/SPEC-076-bounded-autonomous-diagnosis/plan.md)
+- [chat.py](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py)
+- [spec.md](file://docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced Agent-Role Attribution section with complete attribution triple documentation reflecting SPEC-075 delivery
-- Updated Audit Access section to include agent_role filtering capabilities
-- Added comprehensive documentation for the agent-role provenance tracking alongside existing subject/username and delegation_mode fields
-- Expanded troubleshooting guidance to cover agent-role attribution failures and audit trail verification
-- **New**: Added Bounded Autonomous Diagnosis section documenting SPEC-076 executor-scoped staging mechanism and diagnose-before-act ceiling
-- **Updated**: Enhanced Executor role documentation with stage_remediation capability and HITL confirmation integration
-- **Updated**: Added orchestration budget configuration (AGENT_ORCHESTRATION_MAX_STEPS) and bounded read-only loop semantics
+- Added comprehensive documentation for the new `remediate:stage` authorization action introduced in SPEC-077
+- Updated policy definitions and security model documentation to reflect the operator-initiated diagnose→act bridge
+- Enhanced executor role documentation with stage_remediation capability and HITL confirmation integration
+- Added detailed explanation of the deny-by-default action gating mechanism for remediation staging
+- Updated feature access matrix to include the new remediation staging capability
+- Expanded troubleshooting guidance to cover remediation staging failures and authorization issues
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -211,6 +212,85 @@ H --> S["Distinct human approver"]
 - [SPEC-073 spec.md:114-204](file://docs/specs/SPEC-073-role-scoped-agent-identity/spec.md#L114-L204)
 - [SPEC-074 spec.md:146-163](file://docs/specs/SPEC-074-policy-role-axis/spec.md#L146-L163)
 
+### Remediation Staging Authorization (SPEC-077)
+
+**Phase 6 of the multi-agent program** introduces the operator-initiated diagnose→act bridge that wires the delivered-but-unwired `executor` `stage_remediation(...)` trigger behind an explicit human authorization gate. This creates a new deny-by-default action `remediate:stage` that gates the production trigger reaching the executor-scoped staging mechanism.
+
+#### New Deny-by-Default Action: `remediate:stage`
+
+The `remediate:stage` action is a dedicated authorization gate for the operator-initiated diagnose→act workflow:
+
+- **Exclusive Grant Set**: Granted only to `platform-admin` and `operator` roles
+- **Denial Pattern**: Explicitly denied to `developer`, `read-only-observer`, and `auditor` roles
+- **Approval Exclusion**: Deliberately excludes `approver` role to maintain stager/approver separation of duties
+- **Protected Action Registration**: Registered in both gateway `evaluate()` engines' `PROTECTED_ACTIONS` sets
+- **403 Enforcement**: Unauthorized requests receive immediate 403 responses before any proxy or model calls
+
+```mermaid
+sequenceDiagram
+participant User as "User"
+participant Gateway as "Platform Gateway"
+participant Policy as "Policy Engine"
+participant Agent as "Agent Service"
+participant Worker as "Signed Worker"
+User->>Gateway : POST /api/v1/remediate
+Gateway->>Policy : enforce_policy(ACTION_REMEDIATE_STAGE)
+alt unauthorized
+Policy-->>Gateway : deny
+Gateway-->>User : 403 Forbidden
+else authorized
+Policy-->>Gateway : allow
+Gateway->>Agent : POST /api/v2/remediate
+Agent->>Worker : Stage remediation proposal
+Worker-->>Agent : Confirmation card parked
+Agent-->>Gateway : Response with session_id
+Gateway-->>User : Success response
+end
+```
+
+**Diagram sources**
+- [chat.py:310-370](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L310-L370)
+- [policy_engine.py:99-110](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L99-L110)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
+
+#### Executor-Scoped Staging Mechanism
+
+When authorized, the remediation staging process binds the executor role for exactly one staging turn:
+
+- **Single Turn Binding**: `AgentRole.EXECUTOR` is bound for exactly one `read_only=False` staging turn
+- **Session Scoping**: Uses derived `{session_id}::orch::staging` session for isolation
+- **Same Token Context**: Operates over the same gateway-forwarded delegated token
+- **Full Toolkit Access**: Executor gains full toolkit access for proposing the single mutating call
+- **HITL Parking**: Proposed mutations are parked as existing SPEC-020/030/031 confirmation cards
+- **Provenance Tracking**: Cards carry `staged_by_role="executor"` provenance metadata
+
+#### Profile-Gated Staging
+
+Only specific runbook profiles support remediation staging:
+
+- **Stageable Profiles**: `post-deploy-verify` (rollback) and `k8s-pod-degradation` (restart/reschedule/rollback)
+- **Diagnosis-Only Profiles**: `servicenow-incident` and `observability-alert` fail closed with 4xx errors
+- **Unknown Profiles**: Any unrecognized profile fails closed before any executor turn opens
+- **Fail-Closed Design**: Non-stageable profiles are refused 4xx before any executor turn, never coerced to wider runbooks
+
+#### Security Invariants
+
+The remediation staging mechanism maintains critical security boundaries:
+
+- **No Autonomous Dispatch**: The trigger itself dispatches nothing and never auto-approves
+- **Distinct Human Approval**: Requires separate human approver distinct from the stager
+- **Self-Approval Block**: SPEC-030 self-approval block remains unchanged — stager cannot approve their own staged mutation
+- **At-Most-One Dispatch**: Only dispatched through the signed at-most-one-dispatch worker (SPEC-037/038/063)
+- **Wire Safety**: No `agent_role` crosses any wire field — the executor role is bound internally only
+
+**Updated** Added comprehensive documentation for the new `remediate:stage` authorization action and executor-scoped staging mechanism introduced in SPEC-077.
+
+**Section sources**
+- [chat.py:310-370](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L310-L370)
+- [policy_engine.py:99-110](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L99-L110)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
+- [spec.md:121-132](file://docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md#L121-L132)
+
 ### Bounded Autonomous Diagnosis (SPEC-076)
 
 **Phase 5 of the multi-agent program** introduces the first producer that binds the agent-roles SPEC-073, SPEC-074, and SPEC-075 each landed inert. The bounded read-only orchestration loop creates a platform-owned orchestrator that decomposes diagnosis goals into bounded fan-outs of read-only diagnostician sub-agents over the same governed gateway.
@@ -306,10 +386,11 @@ Feature access is governed by both UI visibility and backend action grants. The 
 - Policy admin UI: allowed for platform-admin only.
 - Identity mapping admin UI: allowed for platform-admin only.
 - **Platform feature-flag transparency**: allowed for platform-admin, approver, and operator via the `runtime:flags` action; denied for developer, read-only-observer, and auditor.
+- **Remediation staging**: allowed for platform-admin and operator via the `remediate:stage` action; denied for developer, approver, read-only-observer, and auditor.
 
-These are enforced by route-level checks and action grants such as policy:read, skills:read, documents:create/read, session actions, approvals:list, and runtime:flags.
+These are enforced by route-level checks and action grants such as policy:read, skills:read, documents:create/read, session actions, approvals:list, runtime:flags, and remediate:stage.
 
-**Updated** Added Platform feature-flag transparency capability granted to the operational trio via the `runtime:flags` action.
+**Updated** Added remediation staging capability granted exclusively to platform-admin and operator roles via the new `remediate:stage` action.
 
 **Section sources**
 - [authorization-matrix.md:155-168](file://docs/agentic-aiops-platform/authorization-matrix.md#L155-L168)
@@ -318,6 +399,7 @@ These are enforced by route-level checks and action grants such as policy:read, 
 - [policy-default.yaml:153-175](file://shared/shared-contracts/policies/policy-default.yaml#L153-L175)
 - [policy-default.yaml:214-256](file://shared/shared-contracts/policies/policy-default.yaml#L214-L256)
 - [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
 
 ### Environment Scoping
 Environment eligibility affects what actions can be requested or approved:
@@ -334,16 +416,16 @@ The authorization matrix documents default environment eligibility and environme
 - **Human roles** define who may act at the platform level.
 - **Agent roles** narrow toolkit authority for sub-agents operating under the same delegated token.
 - Features define UI surfaces and capabilities.
-- Actions define enforceable operations (e.g., tools:invoke, tools:mutate, session:create, incident:triage, runtime:flags).
+- Actions define enforceable operations (e.g., tools:invoke, tools:mutate, session:create, incident:triage, runtime:flags, remediate:stage).
 - Risk tiers determine approval requirements:
   - tier 0: read-only, no approval.
   - tier 1: low-risk non-production; may allow self-approval when policy permits.
   - tier 2: production low-risk; requires designated approver distinct from requester.
   - tier 3: high-risk production; strong controls, often two-person approval recommended.
 
-Mutating tool execution is bridged through chat:confirm and requires tier_2 approval by approver or platform-admin. The `runtime:flags` action is a tier 0 read operation requiring no approval but restricted to the operational trio.
+Mutating tool execution is bridged through chat:confirm and requires tier_2 approval by approver or platform-admin. The `runtime:flags` action is a tier 0 read operation requiring no approval but restricted to the operational trio. The `remediate:stage` action is a dedicated deny-by-default action requiring explicit authorization.
 
-**Updated** Added agent-role axis as a first-class dimension in the authorization model, composing conjunctively with human roles.
+**Updated** Added `remediate:stage` as a new dedicated authorization action with exclusive grant set to platform-admin and operator roles.
 
 **Section sources**
 - [authorization-matrix.md:34-60](file://docs/agentic-aiops-platform/authorization-matrix.md#L34-L60)
@@ -360,9 +442,9 @@ The authoritative, enforced matrix is exposed by the platform gateway and render
 - matrix: boolean cells indicating immediate allowance.
 - approval_requirements: additive third cell state for require_approval outcomes, including tier and decider roles.
 
-Tests assert many grant postures for actions like approvals:list, documents:create/read, session:update, session:skill_draft, incident:skill_draft, and runtime:flags.
+Tests assert many grant postures for actions like approvals:list, documents:create/read, session:update, session:skill_draft, incident:skill_draft, runtime:flags, and remediate:stage.
 
-**Updated** Added runtime:flags to the list of tested actions in the permission matrix.
+**Updated** Added remediate:stage to the list of tested actions in the permission matrix.
 
 **Section sources**
 - [api.py:209-226](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L209-L226)
@@ -428,13 +510,15 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 - approvals:list: allowed for approver and platform-admin.
 - audit:read: allowed for auditor and platform-admin.
 - **runtime:flags**: allowed for platform-admin, approver, and operator for platform configuration transparency.
+- **remediate:stage**: allowed for platform-admin and operator for remediation staging authorization.
 
-**Updated** Added runtime:flags to administrative functions as a platform configuration transparency capability.
+**Updated** Added remediate:stage to administrative functions as a dedicated authorization action for remediation staging.
 
 **Section sources**
 - [policy-default.yaml:214-256](file://shared/shared-contracts/policies/policy-default.yaml#L214-L256)
 - [policy-default.yaml:164-175](file://shared/shared-contracts/policies/policy-default.yaml#L164-L175)
 - [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
 
 ### Audit Access
 - audit:read: allowed for auditor and platform-admin.
@@ -455,6 +539,9 @@ Browser write tools are bounded and subject to HITL confirmation and approval ga
 - Tier 2: designated approver distinct from requester; self-approval blocked.
 - Production high-risk actions require stronger controls; destructive actions denied by default.
 - **Agent-role invariant**: executor-staged mutations require distinct human approver; no agent-role can be a decider.
+- **Remediation staging separation**: The `remediate:stage` action deliberately excludes approver role to maintain stager/approver separation of duties.
+
+**Updated** Added remediation staging separation of duties to the approval model documentation.
 
 **Section sources**
 - [policy_engine.py:119-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L119-L127)
@@ -496,6 +583,7 @@ Audit --> Attribution["Agent-Role Attribution"]
 - Agent-role axis is optional and inert by default — no performance impact when `agent_role=None`.
 - Agent-role attribution in audit trail is additive and inert — no performance impact when omitted.
 - **Bounded orchestration**: The `AGENT_ORCHESTRATION_MAX_STEPS` budget prevents unbounded fan-out in autonomous diagnosis scenarios.
+- **Remediation staging**: The `remediate:stage` action provides immediate 403 responses for unauthorized requests, preventing unnecessary processing overhead.
 
 [No sources needed since this section provides general guidance]
 
@@ -511,8 +599,11 @@ Common issues and resolutions:
 - **Audit trail verification issues**: use the `?agent_role=` query parameter to filter audit events by agent role; verify the attribution triple is complete for multi-agent scenarios.
 - **Bounded diagnosis budget exceeded**: check `AGENT_ORCHESTRATION_MAX_STEPS` configuration; the loop fails closed to a partial diagnosis when the budget is exhausted.
 - **Executor staging not working**: verify the profile declares a `remediation_shape`; the executor staging mechanism requires a valid remediation shape to propose.
+- **Remediation staging authorization failed**: verify user has platform-admin or operator role; the `remediate:stage` action is denied by default for developer, approver, read-only-observer, and auditor roles.
+- **Profile not stageable**: only `post-deploy-verify` and `k8s-pod-degradation` profiles support staging; diagnosis-only profiles (`servicenow-incident`, `observability-alert`) will fail closed with 4xx errors.
+- **Self-approval attempt blocked**: remember that the stager cannot approve their own staged mutations — a distinct human approver is required.
 
-**Updated** Added troubleshooting guidance for the new agent-role axis, agent-role attribution, audit trail verification, bounded diagnosis budget, and executor staging mechanism.
+**Updated** Added troubleshooting guidance for the new `remediate:stage` authorization action, profile gating, and remediation staging authorization failures.
 
 **Section sources**
 - [user-and-role-administration.md:118-137](file://docs/guides/user-and-role-administration.md#L118-L137)
@@ -527,6 +618,8 @@ The platform's authorization model combines a fixed human role vocabulary, a clo
 The completion of the attribution triple through SPEC-075 ensures that every audited event carries complete provenance information: which role acted (`agent_role`), on whose behalf (`subject`/`username`), and under which delegation (`delegation_mode`). This enables comprehensive audit trails for multi-agent scenarios while maintaining backward compatibility and byte-identical behavior for existing single-agent paths.
 
 **Phase 5 of the multi-agent program** (SPEC-076) delivers the bounded read-only orchestration loop that first binds the agent-roles, introducing the executor-scoped staging mechanism for proposed remediations and maintaining the diagnose-before-act ceiling through the read-only orchestration loop. The bounded autonomous diagnosis capability provides a controlled relaxation of composition authority while preserving all existing safety invariants.
+
+**Phase 6 of the multi-agent program** (SPEC-077) introduces the operator-initiated diagnose→act bridge with the new `remediate:stage` authorization action, providing a secure gateway between diagnosis completion and remediation proposal while maintaining strict separation of duties between stagers and approvers.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -554,10 +647,10 @@ The schema defines the structure of the live permission matrix response, includi
 - The platform gateway's policy engine implements the action_authz slice of the Tier-1 policy specification.
 - It supports deny, allow, and require_approval outcomes with explicit tiers and decider roles.
 - Bridged actions (currently tools:mutate) are enforced through the chat:confirm flow with tier_2 approval.
-- **Protected actions now include runtime:flags** as a tier 0 read operation for the operational trio.
+- **Protected actions now include runtime:flags and remediate:stage** as dedicated authorization actions.
 - **Agent-role axis**: The policy engine now accepts an optional `agent_role` parameter that composes conjunctively with human roles. Rules with `agent_roles_any` never match unscoped calls (fail-closed), ensuring subtractive-only authority narrowing.
 
-**Updated** Added agent-role axis integration and runtime:flags to the list of protected actions in the policy engine integration.
+**Updated** Added remediate:stage to the list of protected actions in the policy engine integration.
 
 **Section sources**
 - [policy_engine.py:1-127](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L127)
@@ -565,6 +658,7 @@ The schema defines the structure of the live permission matrix response, includi
 - [policy_engine.py:428-447](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L428-L447)
 - [policy-default.yaml:129-152](file://shared/shared-contracts/policies/policy-default.yaml#L129-L152)
 - [policy-default.yaml:374-390](file://shared/shared-contracts/policies/policy-default.yaml#L374-L390)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
 - [policy-rule.schema.json:44-48](file://shared/shared-contracts/schemas/policy-rule.schema.json#L44-L48)
 
 ### Audit Event Schema and Attribution Triple
@@ -600,3 +694,23 @@ The bounded autonomous diagnosis capability introduces new configuration options
 - [runtime_settings.py:372-382](file://products/agent-platform/src/agent_service/runtime_settings.py#L372-L382)
 - [runtime_settings.py:532-536](file://products/agent-platform/src/agent_service/runtime_settings.py#L532-L536)
 - [orchestration.py:208-216](file://products/agent-platform/src/agent_service/services/orchestration.py#L208-L216)
+
+### Remediation Staging Configuration
+The remediation staging capability introduces new configuration and validation rules:
+
+| Setting | Default | Description |
+|---|---:|---|
+| `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` | 300 | Timeout for remediation staging requests |
+| Stageable Profiles | post-deploy-verify, k8s-pod-degradation | Profiles that support remediation staging |
+| Diagnosis-Only Profiles | servicenow-incident, observability-alert | Profiles that fail closed for staging |
+
+**Validation Rules:**
+- Only stageable profiles can proceed to executor staging
+- Diagnosis-only profiles fail closed with 4xx errors before any executor turn
+- Unknown profiles fail closed with 4xx errors before any executor turn
+- `remediate:stage` action requires explicit authorization (platform-admin or operator only)
+
+**Section sources**
+- [spec.md:121-132](file://docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md#L121-L132)
+- [policy-default.yaml:465-474](file://shared/shared-contracts/policies/policy-default.yaml#L465-L474)
+- [chat.py:310-370](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L310-L370)

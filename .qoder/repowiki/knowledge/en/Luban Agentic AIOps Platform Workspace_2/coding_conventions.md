@@ -1,0 +1,6 @@
+- Each product is self-contained with its own `pyproject.toml`, `.python-version`, `Dockerfile`, `Makefile`, `src/<package>/`, and `tests/`, and is invoked through the root Makefile rather than imported directly.
+- Cross-product integration points are expressed as JSON schemas, SQL migrations, and policy bundles under `shared/shared-contracts/`, with validation scripts in `shared/shared-contracts/scripts/` that the root Makefile invokes.
+- Feature work follows a spec-driven workflow: each change lives in `docs/specs/SPEC-NNN-<name>/` with a `plan.md`, `spec.md`, and `tasks.md` triad, tracked through draft/approved/delivered states.
+- Architecture decisions are recorded as numbered ADRs under `docs/adr/` using the provided template, with a central `README.md` index.
+- Release history is captured as dated markdown files under `docs/agentic-aiops-platform/release-notes/` and the single source of truth semver lives in the root `VERSION` file, kept in lockstep by `make validate-version`.
+- Policy bundles are authored once in `shared/shared-contracts/policies/` and copied into consumers via `make sync-policy`, so runtime policy enforcement in `tool-gateway` and `platform-gateway` shares a canonical contract.

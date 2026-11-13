@@ -18,7 +18,16 @@
 - [token_verifier.py](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py)
 - [config.py](file://products/platform-gateway/src/platform_gateway/core/config.py)
 - [api.py](file://products/platform-gateway/src/platform_gateway/schemas/api.py)
+- [agent_client.py](file://products/platform-gateway/src/platform_gateway/services/agent_client.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new POST /api/v1/remediate endpoint
+- Updated authentication and authorization requirements for the remediate endpoint
+- Added request/response schemas for the remediate functionality
+- Documented policy enforcement details including the new remediate:stage action
+- Included timeout configuration and audit event handling
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,7 +41,7 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-The Platform Gateway is the portal-facing edge service that authenticates requests, enforces policy, and proxies calls to downstream services (agent-platform, identity-broker, audit-service, incident-service, tool-gateway, skills-hub). It exposes REST endpoints for sessions, chat streaming, approvals, policy transparency, tools discovery, skills registry, model catalog, and documents. Authentication uses OIDC bearer tokens verified locally via JWKS; authorization is enforced per action using a deny-by-default policy bundle. The gateway also obtains short-lived delegated tokens for downstream calls where required.
+The Platform Gateway is the portal-facing edge service that authenticates requests, enforces policy, and proxies calls to downstream services (agent-platform, identity-broker, audit-service, incident-service, tool-gateway, skills-hub). It exposes REST endpoints for sessions, chat streaming, approvals, policy transparency, tools discovery, skills registry, model catalog, documents, and operator-initiated remediation workflows. Authentication uses OIDC bearer tokens verified locally via JWKS; authorization is enforced per action using a deny-by-default policy bundle. The gateway also obtains short-lived delegated tokens for downstream calls where required.
 
 Key responsibilities:
 - Verify portal bearer tokens and enforce deny-by-default policies on every portal-facing action.
@@ -40,6 +49,7 @@ Key responsibilities:
 - Relay auth/identity/runtime endpoints to identity-broker and agent-platform.
 - Proxy durable audit trail queries and incidents surfaces with appropriate gating.
 - Expose health, metrics, and runtime metadata endpoints.
+- Handle operator-initiated diagnose-to-act remediation workflows with proper separation of duties.
 
 **Section sources**
 - [README.md:6-50](file://products/platform-gateway/README.md#L6-L50)
@@ -77,6 +87,7 @@ GW --> SkillsHub["Skills Hub"]
 - Proxies: Session, chat, approvals, models, tools, skills, documents, incidents, audit, and auth/identity routing.
 - Streaming: Server-Sent Events for chat streaming and confirmation resumption.
 - Observability: Structured logs, metrics, and durable audit events emitted for key actions.
+- Remediation Workflows: Operator-initiated diagnose-to-act staging with proper separation of duties between stagers and approvers.
 
 **Section sources**
 - [token_verifier.py:52-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L52-L99)
@@ -306,9 +317,48 @@ Behavior:
 - [documents.py:165-187](file://products/platform-gateway/src/platform_gateway/api/routes/documents.py#L165-L187)
 - [api.py:114-152](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L114-L152)
 
+### Remediation Workflow (/remediate)
+Endpoint:
+- POST /api/v1/remediate
+
+Authentication: Bearer OIDC token verified locally; synthetic dev identity when auth disabled.
+Authorization: remediate:stage (granted to platform-admin and operator roles only; deliberately excludes approvers to maintain separation of duties).
+
+Request Schema:
+- RemediateRequest: profile (required, min_length=1), goal (required, min_length=1), diagnosis (required, min_length=1), session_id (optional), model (optional metadata field)
+
+Response Schema:
+- ChatResponse: session_id, request_id, content, status, structured_output (optional), model (optional)
+
+Behavior:
+- Operator-initiated diagnose-to-act staging trigger that proxies to agent-service POST /api/v2/remediate.
+- Uses dedicated remediate_response_timeout_seconds budget (default 300s) for executor model turns.
+- Obtains one delegated token for the staging turn; no agent_role crosses the wire.
+- The proposed mutation parks on existing HITL card for distinct-human approver approval.
+- Reuses chat_completed audit event type with runbook profile in details.
+
+Security Posture:
+- Deny-by-default policy enforcement before any staging turn opens.
+- Strict schema validation rejects smuggled agent_role fields (extra="forbid").
+- Separation of duties: stagers (platform-admin/operator) cannot approve their own proposals.
+- Request-carried diagnosis prevents re-running bounded fan-out.
+
+Example flows:
+- Submit a completed diagnosis with a stageable profile to propose a remediation.
+- Receive a parked confirmation card for human approval of the proposed mutation.
+
+**Updated** Added comprehensive documentation for the new remediate endpoint including authentication, authorization, request/response schemas, and security considerations.
+
+**Section sources**
+- [chat.py:290-370](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L290-L370)
+- [api.py:56-78](file://products/platform-gateway/src/platform_gateway/schemas/api.py#L56-L78)
+- [agent_client.py:244-284](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L244-L284)
+- [config.py:49](file://products/platform-gateway/src/platform_gateway/core/config.py#L49)
+
 ### Identity Propagation and Delegation
-- For chat and tools discovery, the gateway obtains a short-lived delegated token via identity-broker (audience tool-gateway) before forwarding to downstream services.
+- For chat, tools discovery, and remediation workflows, the gateway obtains a short-lived delegated token via identity-broker before forwarding to downstream services.
 - The original bearer token may be passed along to downstream services where applicable.
+- Remediation workflows use dedicated timeout budgets and maintain strict separation of duties.
 
 **Section sources**
 - [chat.py:48-62](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L48-L62)
@@ -321,6 +371,7 @@ The gateway composes several internal modules:
 - Policy engine loads and evaluates YAML bundles with strict validation.
 - Token verifier uses JWKS client to validate OIDC tokens locally.
 - Configuration is environment-driven with defaults and caching.
+- Agent client handles HTTP communication with dedicated timeouts for different operations.
 
 ```mermaid
 graph LR
@@ -335,11 +386,12 @@ R_Documents["routes/documents.py"] --> GS
 GS --> TV["services/token_verifier.py"]
 GS --> PE
 GS --> CFG["core/config.py"]
+GS --> AC["services/agent_client.py"]
 ```
 
 **Diagram sources**
 - [sessions.py:1-360](file://products/platform-gateway/src/platform_gateway/api/routes/sessions.py#L1-L360)
-- [chat.py:1-199](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L199)
+- [chat.py:1-370](file://products/platform-gateway/src/platform_gateway/api/routes/chat.py#L1-L370)
 - [approvals.py:1-58](file://products/platform-gateway/src/platform_gateway/api/routes/approvals.py#L1-L58)
 - [policy.py:1-55](file://products/platform-gateway/src/platform_gateway/api/routes/policy.py#L1-L55)
 - [tools.py:1-69](file://products/platform-gateway/src/platform_gateway/api/routes/tools.py#L1-L69)
@@ -350,6 +402,7 @@ GS --> CFG["core/config.py"]
 - [policy_engine.py:1-120](file://products/platform-gateway/src/platform_gateway/services/policy_engine.py#L1-L120)
 - [token_verifier.py:1-99](file://products/platform-gateway/src/platform_gateway/services/token_verifier.py#L1-L99)
 - [config.py:1-131](file://products/platform-gateway/src/platform_gateway/core/config.py#L1-L131)
+- [agent_client.py:1-694](file://products/platform-gateway/src/platform_gateway/services/agent_client.py#L1-L694)
 
 **Section sources**
 - [gateway_service.py:204-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L204-L300)
@@ -362,8 +415,8 @@ GS --> CFG["core/config.py"]
 - Policy bundle is cached module-wide; readiness probes include bundle fingerprint.
 - Streaming chat uses Server-Sent Events to minimize latency and payload size.
 - Upstream error mapping centralizes 4xx passthrough and 5xx normalization to 502.
-
-[No sources needed since this section provides general guidance]
+- Dedicated timeout budgets for different operations (300s for remediation vs 120s for diagnosis).
+- Single delegated token acquisition per workflow minimizes identity broker overhead.
 
 ## Troubleshooting Guide
 Common errors and posture:
@@ -371,11 +424,13 @@ Common errors and posture:
 - 403 Forbidden: policy denies the action; includes action, reason, and matched rule ids.
 - 502 Bad Gateway: upstream agent/identity/incident/tool-gateway/service unavailable or transport failure.
 - 503 Service Unavailable: delegated token unavailable for tools discovery; policy bundle unavailable for matrix endpoint; incidents surface disabled when configured URL is empty.
+- 422 Validation Error: malformed request body or smuggled fields (e.g., agent_role in remediate requests).
 
 Diagnostic tips:
 - Check X-Request-Id propagation across logs and audit events.
 - Inspect policy_decision audit events for denied actions.
 - Use /health/live and /health/ready to verify service and dependency health.
+- Monitor remediation-specific audit events with chat_completed event type and profile details.
 
 **Section sources**
 - [gateway_service.py:204-300](file://products/platform-gateway/src/platform_gateway/services/gateway_service.py#L204-L300)
@@ -384,6 +439,4 @@ Diagnostic tips:
 - [README.md:64-88](file://products/platform-gateway/README.md#L64-L88)
 
 ## Conclusion
-The Platform Gateway provides a secure, policy-enforced entry point for all portal-facing operations. It standardizes authentication, authorization, auditing, and error handling while cleanly proxying to downstream services. Clients should always present a valid OIDC bearer token, respect rate limits and timeouts, and handle 4xx passthroughs from upstream as actionable errors.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The Platform Gateway provides a secure, policy-enforced entry point for all portal-facing operations. It standardizes authentication, authorization, auditing, and error handling while cleanly proxying to downstream services. The addition of the remediation workflow extends this capability to support operator-initiated diagnose-to-act scenarios with proper separation of duties, dedicated timeout budgets, and comprehensive audit trails. Clients should always present a valid OIDC bearer token, respect rate limits and timeouts, and handle 4xx passthroughs from upstream as actionable errors.
