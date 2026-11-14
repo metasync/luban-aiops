@@ -2,13 +2,31 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-11-10
 - approved: 2026-11-11 — all nine Open Questions ratified as recommended (`## Open Questions`); per
   the SPEC-066/069/076 pattern the [plan](plan.md) and [tasks](tasks.md) are authored on ratification.
   Approval authorizes implementation to *begin* — **not** to merge, commit/push, deploy, or
   version-bump (each a separate gate).
+- delivered: 2026-11-13 as **v0.58.0** — R-1/R-2/R-3/R-5/R-6/R-7 + R-8 implemented as the **UX-agnostic
+  operator-initiated diagnose→act bridge** (the `FU-076-b` production trigger): a new agent-service
+  `POST /api/v2/remediate` (+ gateway `POST /api/v1/remediate` proxy) gated by a **new** deny-by-default
+  `remediate:stage` action (granted `platform-admin`/`operator`), binding `AgentRole.EXECUTOR` for **one**
+  `read_only=False` staging turn on the *same* delegated token over `{session_id}::orch::staging`, anchored
+  on the **request-carried** completed diagnosis (no fan-out re-run); the executor's toolkit *proposes* the
+  single mutating call, which parks as the **existing** SPEC-020/030/031 card with `staged_by_role="executor"`
+  for a **distinct human** approver, dispatched only by the signed at-most-one-dispatch worker — **zero new
+  mutation-path machinery**, no new wire frame (`agent-stream-event`/`execution-request` byte-unchanged, role
+  off the wire), `event_type` enum closed. Only the two stageable profiles (`post-deploy-verify`,
+  `k8s-pod-degradation`) stage; the two diagnosis-only profiles + an unknown profile **fail closed** 4xx (R-2).
+  Added `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` (code default `300`s) and carried the v0.57.0 finding
+  that the `120`s `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` code default is too tight (tracked; the product
+  default is unchanged). **R-4 (the portal Stage-remediation button) was DEFERRED post-approval**
+  (2026-11-11 operator re-scope) as the named follow-up **`FU-077-agentic-remediation`** (a SPEC-078
+  candidate). Released as **v0.58.0** (2026-11-13); a follow-on **v0.58.1** patched the platform-gateway JSON
+  proxies to relay an upstream agent-service 4xx (the R-2 fail-closed refusal had been surfacing as a raw
+  500). Commit/tag/push remained separate operator gates.
 - named follow-up: this spec **is** `FU-076-b`, the operator-initiated diagnose→act bridge that
   [SPEC-076](../SPEC-076-bounded-autonomous-diagnosis/spec.md) (v0.57.0) recorded in its Non-Goals,
   the [delivery roadmap](../../agentic-aiops-platform/delivery-roadmap.md) multi-agent row, and its
@@ -309,3 +327,30 @@ action + the executor→human invariant), the configuration reference (R-7 knob)
   **`FU-077-agentic-remediation`** (a SPEC-078 candidate). v0.58.0 ships the **UX-agnostic backend
   trigger** (R-1/R-2/R-3/R-5/R-6/R-7) + evidence (R-8); the portal affordance is deferred, not
   dropped. OQ-4 annotated **superseded**; Non-Goals + `plan.md`/`tasks.md` updated additively.
+- 2026-11-13 — **delivered as v0.58.0** — R-1/R-2/R-3/R-5/R-6/R-7 + R-8 implemented and verified (R-4
+  deferred as `FU-077-agentic-remediation`). The operator-initiated diagnose→act bridge wired the
+  delivered-but-unwired `executor` `stage_remediation(...)` behind a new agent-service
+  `POST /api/v2/remediate` + gateway `POST /api/v1/remediate` proxy, gated by a **new** deny-by-default
+  `remediate:stage` action (granted `platform-admin`/`operator`, denied `developer`/`read-only-observer`/
+  `auditor`, synced byte-identically across all four policy replicas + `PROTECTED_ACTIONS` + both gateway
+  `evaluate()` engines). One `read_only=False` executor staging turn rides the *same* delegated token over
+  `{session_id}::orch::staging`, anchored on the request-carried completed diagnosis (no fan-out re-run),
+  parking the proposed mutating call as the existing SPEC-020/030/031 card with `staged_by_role="executor"`
+  for a **distinct human** (SPEC-030 self-approval block unchanged), dispatched only by the signed
+  at-most-one-dispatch worker. The two stageable profiles park; the two diagnosis-only profiles + an unknown
+  profile fail closed 4xx. `agent_role="executor"` audited with **no new** `event_type` (enum closed; the
+  gateway reuses `chat_completed`); role off the wire, `agent-stream-event`/`execution-request`
+  byte-unchanged (SPEC-074 axis stays ready-but-inert, `FU-076-c` unchanged). Added
+  `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` (code default `300`s) and logged the too-tight `120`s
+  `PLATFORM_GATEWAY_DIAGNOSE_TIMEOUT_SECONDS` code-default finding (dev overlay `300`s via `a7b3ba6a`; the
+  product default is unchanged). Evidence: the four-profile trigger scenario tests, the gated
+  `remediation-livecheck.sh` (the billable leg drives one authorized staging turn and asserts park + **zero**
+  `execution_requested` + no HITL auto-approval; the mocked leg is collected by `make test`), and the recorded
+  SPEC-018 four-point-gate mapping (full agent-platform suite **1793**, platform-gateway **510**, root
+  `make verify` green across every leg). Released as **v0.58.0** (2026-11-13); commit/tag/push remained
+  separate operator gates.
+- 2026-11-14 — **v0.58.1** follow-on patch (not a SPEC-077 scope change): the platform-gateway JSON proxies
+  (`chat`/`diagnose`/`remediate`) now **relay** an upstream agent-service 4xx (e.g. the R-2 fail-closed 422)
+  as-is with its extracted `detail` instead of letting an unhandled `httpx.HTTPStatusError` surface a raw
+  **500**; 5xx/transport errors map to a structured **502**. This makes the R-2 diagnosis-only refusal
+  observable end-to-end through the gateway (previously masked as a 500). Released as **v0.58.1**.

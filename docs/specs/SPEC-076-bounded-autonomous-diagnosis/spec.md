@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-11-06
 - approved: 2026-11-06 (all seven Open Questions ratified by the operator **exactly as
@@ -14,6 +14,22 @@
   frame** — the diagnosis surfaces through existing assistant/evidence/card frames (OQ-5); scenario
   tests for all four runbooks plus a gated live-cluster read-only check (OQ-6); the capability built
   once with four declared profiles, two wired end-to-end (OQ-7). See `## Open Questions — resolved`.)
+- delivered: 2026-11-10 as **v0.57.0** — R-1…R-8 implemented as the platform-owned **bounded read-only
+  orchestration loop** (`services/orchestration.py`) that first *binds* the SPEC-073/074/075 agent-roles
+  in-process: an `orchestrator` fans out read-only `diagnostician` members on the *same* delegated token
+  (exactly one broker exchange per user) over the existing `_ensure_toolkit(read_only=True)` seam, bounded by
+  `AGENT_ORCHESTRATION_MAX_STEPS` (default `20`, failing closed to a budget-limited partial diagnosis) and
+  synthesizing a diagnosis + a *proposed* remediation. The `executor`-scoped `stage_remediation(...)`
+  mechanism shipped **unit-proven but unwired** (`POST /api/v2/diagnose` is diagnosis-only), so the
+  diagnose-before-act ceiling holds **by construction** — the operator trigger is `FU-076-b` (delivered next
+  as SPEC-077 / v0.58.0). The SPEC-074 `agent_roles_any` axis + a minimal canonical rule landed
+  **ready-but-inert** (R-3 keeps the bound role off every wire field); the SPEC-075 `agent_role`
+  audit/evidence dimension was populated **live**; the diagnosis surfaced through **existing** frames so
+  `agent-stream-event`/`execution-request` stayed **byte-unchanged**. All four runbooks declared as profiles,
+  two (k8s-pod-degradation, ServiceNow-incident) wired end-to-end, all four scenario-tested. `FU-076`
+  (unattended machine-trigger ingestion), `FU-076-b`, and `FU-076-c` (a live in-process policy axis)
+  recorded as named follow-ups. Released as **v0.57.0** (2026-11-10); commit/tag/push remained separate
+  operator gates.
 - release slice: the **multi-agent / bounded-autonomy program** — phase 5 of the phased SPEC
   series [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md) gates
   ([memo](../../workspace/multi-agent-orchestration-spike.md) §7 step 5, §5). Target version
@@ -528,3 +544,20 @@ tasks Delivery Gate so it is not skipped.**
   is recorded as the **named follow-up `FU-076`** in the Non-Goals, the delivery-roadmap multi-agent
   row, and the tasks Delivery Gate. Approval authorizes implementation to *begin* — **not** to merge,
   commit/push, deploy, or version-bump (separate gates).
+- 2026-11-10: **delivered as v0.57.0** — R-1…R-8 implemented and verified. The platform-owned bounded
+  read-only orchestration loop (`services/orchestration.py`) drives an `orchestrator` → read-only
+  `diagnostician` fan-out on the one delegated token over the existing `read_only=True` seam, bounded by
+  `AGENT_ORCHESTRATION_MAX_STEPS` (default `20`) and failing closed to a budget-limited partial diagnosis;
+  the `executor`-scoped `stage_remediation(...)` mechanism was delivered **unit-proven but unwired**
+  (diagnosis-only trigger, so the diagnose-before-act ceiling holds by construction — the operator-initiated
+  bridge is `FU-076-b`, delivered next as SPEC-077 / v0.58.0). The SPEC-074 `agent_roles_any` axis + a
+  minimal canonical rule landed **ready-but-inert** (R-3 keeps the bound role off every wire field, so no
+  deployed gateway `evaluate()` threads one; OQ-4 resolves in-process SPEC-073 toolkit narrowing as the
+  **live** read-only control); the SPEC-075 `agent_role` audit/evidence dimension was populated **live**. All
+  four runbooks were declared as diagnosis profiles, two (k8s-pod-degradation, ServiceNow-incident) wired
+  end-to-end, all four covered by scenario tests; the diagnosis surfaced through **existing** frames so
+  `agent-stream-event`/`execution-request` stayed byte-unchanged and the deployed unscoped single-agent path
+  stayed byte-identical (full agent-platform suite **1774**, platform-gateway **503**, root `make verify`
+  green across all sixteen legs incl. the SPEC-063 `execution-failure-test` campaign **795 passed,
+  2 deselected, exit 0**). `FU-076`, `FU-076-b`, and `FU-076-c` recorded as named follow-ups (tracked, not
+  dropped). Released as **v0.57.0** (2026-11-10); the push remains a separate operator gate.

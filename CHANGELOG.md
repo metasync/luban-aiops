@@ -11,7 +11,7 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## 0.58.1 — 2026-11-13
+## 0.58.1 — 2026-11-14
 
 Patch — **platform-gateway relays agent-service's HTTP status instead of masking it as a raw `500`.**
 The v0.58.0 post-deploy billable `remediation-livecheck.sh` aborted at its **non-billable** `(2b)` step:
