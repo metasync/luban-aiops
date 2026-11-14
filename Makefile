@@ -32,6 +32,9 @@ SAMPLES_DIR := samples
 # Target namespace for cluster-facing sample helpers.
 NAMESPACE ?= dev-luban-aiops
 
+# Repo-level tooling scripts invoked by cross-cutting checks (docs hygiene, ...).
+SCRIPTS_DIR := scripts
+
 OVERLAYS := dev-k8s \
 	runtime-profiles/default \
 	runtime-profiles/mutating-dev \
@@ -202,6 +205,15 @@ overlays: ## Render every GitOps overlay (kustomize build check)
 validate-dashboards: ## Validate the OpenObserve dashboards are importable and reference emitted metrics (SPEC-065 R-3)
 	@python3 $(DASHBOARDS_DIR)/validate_dashboards.py
 
+# The docs/ layer is the maintained source of truth now that the IDE Repo Wiki
+# cache is retired (untracked + ignored). This offline check keeps it from
+# silently rotting: it fails on a broken relative link or an unindexed guide in
+# the evergreen layer, and warns on frozen-spec links and hard-coded version
+# literals. The tier lifecycle it enforces is defined in docs/specs/README.md.
+.PHONY: docs-check
+docs-check: ## Check docs hygiene: broken links + orphaned guides in the evergreen layer
+	@python3 $(SCRIPTS_DIR)/docs_check.py
+
 # SPEC-065 R-4: the observability live-check reproduces spike §6. The default
 # (--local) runs the mocked-I/O pytest proof of the pipeline logic — no cluster,
 # no network, no paid call — which is also collected by `make test`. LIVE=1 runs
@@ -278,7 +290,7 @@ portal-test: ## Run the operator-portal SPA unit suite and production build (vit
 	@$(MAKE) -C products/operator-portal web-build || exit 1
 
 .PHONY: verify
-verify: test overlays validate-dashboards validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test audit-contract-test delegated-custody-test delegated-runtime-test delegated-multiproc-test delegated-edge-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, portal, secret-delivery, delegated custody/runtime/multi-process/edge, and execution failure proofs
+verify: test overlays validate-dashboards docs-check validate-policy validate-policy-scenarios validate-version validate-secret-vocabulary validate-password-policy secret-delivery-demo portal-test audit-contract-test delegated-custody-test delegated-runtime-test delegated-multiproc-test delegated-edge-test execution-failure-test ## Verification gate: product, contract, policy, overlay, dashboard, docs, portal, secret-delivery, delegated custody/runtime/multi-process/edge, and execution failure proofs
 
 .PHONY: deploy
 deploy: ## Deploy the dev-k8s overlay to the current cluster (wraps deploy.sh)

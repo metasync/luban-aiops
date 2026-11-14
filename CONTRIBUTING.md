@@ -57,7 +57,14 @@ machinery — the layered Makefile fragments, the coordinated tag, and the
 Release workflow: entries accumulate under `Unreleased` in `CHANGELOG.md`;
 closing a release bumps `VERSION` everywhere (run `make validate-version`
 to catch misses), moves the entries into a versioned section, and tags the
-release.
+release. Since the docs layer is now the maintained source of truth (the IDE
+Repo Wiki cache is retired), closing a release also sweeps the Tier-3 living
+docs — the `docs/guides/` layer and the product and overlay `README` files —
+for present-tense claims the release made stale, and restates the current
+release by pointing at `VERSION` / `CHANGELOG.md` rather than a hard-coded
+version number (Documentation Tiers, `docs/specs/README.md`). Run
+`make docs-check` (part of `make verify`) before tagging: it fails on a broken
+link or an unindexed guide in that layer.
 
 ## Testing
 
@@ -67,8 +74,9 @@ How to run tests:
 - `make test` inside a `products/<name>/` directory — runs that product's
   suite only (`uv sync --frozen` then `uv run pytest`)
 - `make verify` (repository root) — the full pre-commit gate: all product
-  tests, overlay rendering, policy bundle validation, and version lockstep.
-  Run it before every commit that touches code, manifests, or policy.
+  tests, overlay rendering, policy bundle and docs-hygiene validation, and
+  version lockstep. Run it before every commit that touches code, manifests,
+  policy, or docs.
 
 What changes are expected to carry:
 

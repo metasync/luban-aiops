@@ -36,18 +36,18 @@ Do not write an ADR for decisions local to a single spec; record those in the sp
 
 | ID | Title | Status |
 | --- | --- | --- |
-| `ADR-0001` | Adopt spec-driven development with tiered documentation | `accepted` |
-| `ADR-0002` | Re-affirm AgentScope 2.0 as the runtime kernel | `accepted` |
-| `ADR-0003` | Platform-owned agent-service contract | `accepted` |
-| `ADR-0004` | Broker-mediated token delegation for service-to-service calls | `accepted` |
-| `ADR-0005` | Extract the platform API edge into a separate `platform-gateway` product | `accepted` |
-| `ADR-0006` | Contract purpose restated — invariant enforcement, not framework swappability | `accepted` |
-| `ADR-0007` | Enforce one HITL gate per mutating browser flow platform-side | `accepted` |
-| `ADR-0008` | Spec delivery requires requirement-to-test traceability and exercised samples | `accepted` |
-| `ADR-0009` | Graduate troubleshooting sessions into replayable executable skills via a durable authoring trace | `accepted` |
-| `ADR-0010` | Signed execution envelopes declare their authority provenance | `accepted` |
-| `ADR-0011` | A composition carries no authority; each sub-skill keeps its own gate | `accepted` |
-| `ADR-0012` | A generated secret is redeemed on click and rides no projection | `accepted` |
+| `ADR-0001` | [Adopt spec-driven development with tiered documentation](0001-adopt-spec-driven-development.md) | `accepted` |
+| `ADR-0002` | [Re-affirm AgentScope 2.0 as the runtime kernel](0002-reaffirm-agentscope-runtime-kernel.md) | `accepted` |
+| `ADR-0003` | [Platform-owned agent-service contract](0003-platform-owned-agent-service-contract.md) | `accepted` |
+| `ADR-0004` | [Broker-mediated token delegation for service-to-service calls](0004-broker-mediated-token-delegation.md) | `accepted` |
+| `ADR-0005` | [Extract the platform API edge into a separate `platform-gateway` product](0005-platform-gateway-extraction.md) | `accepted` |
+| `ADR-0006` | [Contract purpose restated — invariant enforcement, not framework swappability](0006-contract-purpose-invariant-enforcement.md) | `accepted` |
+| `ADR-0007` | [Enforce one HITL gate per mutating browser flow platform-side](0007-browser-flow-single-hitl-gate.md) | `accepted` |
+| `ADR-0008` | [Spec delivery requires requirement-to-test traceability and exercised samples](0008-spec-delivery-traceability-gate.md) | `accepted` |
+| `ADR-0009` | [Graduate troubleshooting sessions into replayable executable skills via a durable authoring trace](0009-graduate-sessions-into-replayable-executable-skills.md) | `accepted` |
+| `ADR-0010` | [Signed execution envelopes declare their authority provenance](0010-signed-execution-envelopes-declare-authority-provenance.md) | `accepted` |
+| `ADR-0011` | [A composition carries no authority; each sub-skill keeps its own gate](0011-composition-carries-no-authority.md) | `accepted` |
+| `ADR-0012` | [A generated secret is redeemed on click and rides no projection](0012-one-time-secret-delivery-handoff.md) | `accepted` |
 | `ADR-0013` | [Durable single-use claims own approved execution dispatch](0013-durable-single-use-execution-claims.md) | `accepted` |
 | `ADR-0014` | [Domain metrics reach dashboards via OTel-instrument push, not a Prometheus scraper](0014-domain-metrics-via-otel-push.md) | `accepted` |
 | `ADR-0015` | [Outbound user-delegated identity via per-user OAuth authorization-code, connector-local](0015-outbound-user-delegated-identity-via-per-user-oauth.md) — superseded by ADR-0016 (first-use workflow); accepted body unchanged | `superseded by ADR-0016` |
