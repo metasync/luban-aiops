@@ -13,8 +13,9 @@ All workspace documentation belongs to exactly one of three tiers, each with a d
 ### Tier 1: Architecture Record
 
 - long-lived, rarely edited
-- examples: `docs/agentic-aiops-platform/part-1-decision-matrix.md`, `part-2-reference-architecture.md`, `identity-and-authorization-design.md`, `docs/workspace/workspace-model.md`
-- new architectural decisions are captured as ADRs in `docs/adr/` instead of growing these documents
+- examples: `docs/agentic-aiops-platform/part-1-decision-matrix.md`, `part-2-reference-architecture.md`, `identity-and-authorization-design.md`, `docs/workspace/workspace-model.md`, and the other `docs/workspace/` structural notes (`product-boundaries.md`, `backend-service-layout-convention.md`, `python-container-strategy.md`, `github-repository-governance.md`, `product-structure-review.md`)
+- new architectural decisions are captured as ADRs in `docs/adr/` instead of growing these documents; an ADR is immutable once accepted and is superseded by a later ADR rather than edited in place
+- dated historical records share this frozen, correction-only lifecycle and are never swept for current state: `docs/agentic-aiops-platform/release-notes/*` (never re-stated or version-bumped) and the `docs/workspace/*-spike.md` assessment memos (frozen once promoted — a promoted memo keeps its body intact and carries a status/promotion banner naming the spec or ADR it became)
 - edits are limited to corrections and explicit supersession notes
 
 ### Tier 2: Feature Specs
@@ -27,10 +28,10 @@ All workspace documentation belongs to exactly one of three tiers, each with a d
 ### Tier 3: Living State Docs
 
 - must always reflect the current state of the workspace
-- examples: root `README.md`, `CHANGELOG.md`, product `README.md` files, GitOps overlay `README.md` files
+- examples: root `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, product `README.md` files, GitOps overlay `README.md` files, the whole operator/contributor guide layer under `docs/guides/` (e.g. `architecture-overview.md`, `configuration-reference.md`, `testing-strategy.md`, `build-system.md`), and the living reference docs `docs/agentic-aiops-platform/authorization-matrix.md`, `policy-specification.md`, and `delivery-roadmap.md`
 - kept intentionally minimal so there is less surface that can go stale
 - state the current release by pointing at `VERSION` / `CHANGELOG.md` / the spec index rather than hard-coding a version number or a "through SPEC-N" marker, which drift on every release
-- every delivered spec includes a task to update affected living state docs
+- every delivered spec includes a task to update affected living state docs; in a guide, sweep its present-tense claims but leave past-tense feature-origin attributions (e.g. "added in v0.NN.0") intact — classify each hit by tense before editing
 
 ## When A Spec Is Required
 

@@ -17,6 +17,8 @@ Luban AIOps platform.
 | [Tool and Connector Guide](tool-configuration.md) | Tool inventory, K8s/Elastic/skills activation checklists, audit-service activation, adding new connectors |
 | [ServiceNow Live Integration Guide](servicenow-integration.md) | Wiring the read-tier `servicenow.*` surface to a real ServiceNow instance: tenant provisioning (machine user, ACLs, OAuth client credentials), gateway wiring, live validation, restore, operations, and troubleshooting |
 | [Adding a Tool to the Tool Gateway](adding-a-tool.md) | Contributor walkthrough: connector class, tool definition, error envelope, wiring, authorization, tests |
+| [Testing Strategy](testing-strategy.md) | The multi-tier test architecture: unit/contract `pytest`, disposable-Postgres integration proofs, portal SPA gate, and mocked-by-default live-checks; plus which tier a new change belongs in |
+| [Build System and Deploy Pipeline](build-system.md) | The layered Makefile architecture, coordinated image tag, `build → push → deploy` handoff, and policy/version sync-and-validate routines |
 | [Skills and Guidance Guide](skills-guide.md) | Managing skill content: add, revise, remove skills and sources; verification and troubleshooting |
 | [Incident Triage and Collaboration Guide](incident-guide.md) | Alertmanager wiring, incident lifecycle, running and interpreting triage, collaboration semantics |
 | [Luban-Hosted Small Model Guide](luban-llm-guide.md) | Self-hosting a small LLM (Ollama/vLLM/llama.cpp) with token auth, platform wiring, K8s hosting |

@@ -22,47 +22,50 @@ Read the documents in this sequence:
 
 ## Document Set
 
-- `part-1-decision-matrix.md`
+- [part-1-decision-matrix.md](part-1-decision-matrix.md)
   - Framework comparison and selection rationale
   - Includes the revised scoring model with `API gateway / service exposure readiness`
   - Establishes why `AgentScope 2.0` was selected
 
-- `part-2-reference-architecture.md`
+- [part-1b-framework-revalidation.md](part-1b-framework-revalidation.md)
+  - Delta re-review (2026-07) of the `Part 1` framework decision against the current landscape and `Release 0` evidence, before committing the native runtime behind a platform-owned contract seam
+
+- [part-2-reference-architecture.md](part-2-reference-architecture.md)
   - Reference architecture for the selected framework
   - Completed and based on `AgentScope 2.0`
   - Defines the platform control plane, execution plane, security boundaries, and service layout
 
-- `identity-and-authorization-design.md`
+- [identity-and-authorization-design.md](identity-and-authorization-design.md)
   - Dedicated design for `SSO`, `Keycloak`, `AD` federation, authorization, approval identity, and audit attribution
   - Defines the enterprise identity and end-to-end attribution model
 
-- `authorization-matrix.md`
+- [authorization-matrix.md](authorization-matrix.md)
   - Concrete role, environment, action, and approval matrix for platform enforcement
   - Translates identity design into explicit access boundaries
 
-- `policy-specification.md`
+- [policy-specification.md](policy-specification.md)
   - Machine-oriented policy rule model, evaluation flow, and sample policy objects
   - Turns the authorization design into enforceable policy structure
 
-- `agent-platform-runtime-options.md`
+- [agent-platform-runtime-options.md](agent-platform-runtime-options.md)
   - Decision note comparing a custom `FastAPI` shell with a more native AgentScope runtime service
   - Recommends how `products/agent-platform` should evolve from `Release 0` toward the target architecture
 
-- `delivery-roadmap.md`
+- [delivery-roadmap.md](delivery-roadmap.md)
   - Stacked delivery roadmap with self-contained releases, value themes, and operator validation checkpoints
   - Shows how capabilities should be introduced one by one
 
-- `release-notes/README.md`
+- [release-notes/README.md](release-notes/README.md)
   - Index for milestone-oriented release notes captured during implementation
   - Links the current implementation wave back to the design and checklist documents
 
-- `../workspace/workspace-model.md`
+- [../workspace/workspace-model.md](../workspace/workspace-model.md)
   - Defines the repository as a modular workspace with product-oriented projects and shared modules
 
-- `../workspace/product-boundaries.md`
+- [../workspace/product-boundaries.md](../workspace/product-boundaries.md)
   - Defines ownership, integration points, and trust boundaries across workspace products
 
-- `../workspace/repository-reorganization-plan.md`
+- [../workspace/repository-reorganization-plan.md](../workspace/repository-reorganization-plan.md)
   - Explains how the current study repository should evolve into the modular workspace
 
 ## Current Status

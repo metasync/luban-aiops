@@ -61,7 +61,7 @@ shared/platform-ops/gitops/sync-runtime-secret.sh default
 make build
 ```
 
-This builds all product images with a coordinated image tag (e.g. `0.46.0-dev-k8s-<gitsha>`) and
+This builds all product images with a coordinated image tag (e.g. `<semver>-dev-k8s-<gitsha>`) and
 writes the tag to `shared/platform-ops/gitops/dev-k8s/.images.env`.
 
 For kind clusters, auto-load images:

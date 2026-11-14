@@ -57,6 +57,7 @@ The workspace is organized as a modular platform made up of multiple product-ori
 
 - Repository changelog: [CHANGELOG.md](CHANGELOG.md)
 - Spec-driven development workflow and spec index: [README.md](docs/specs/README.md)
+- Operator and contributor guides: [README.md](docs/guides/README.md)
 - Architecture decision records: [README.md](docs/adr/README.md)
 - Platform study index: [README.md](docs/agentic-aiops-platform/README.md)
 - Release notes index: [README.md](docs/agentic-aiops-platform/release-notes/README.md)

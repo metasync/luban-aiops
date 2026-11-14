@@ -81,6 +81,28 @@ graph TB
     Audit -->|store| PGDB
 ```
 
+### Per-service reference
+
+This overview covers how the workloads connect; each product's own README is the
+authoritative deep reference for its internal design, routes, configuration, and
+tests. Follow the request-flow chain:
+
+| Service | Product README |
+|---|---|
+| web-ui (portal SPA) | [`products/operator-portal/README.md`](../../products/operator-portal/README.md) |
+| platform-gateway | [`products/platform-gateway/README.md`](../../products/platform-gateway/README.md) |
+| agent-service | [`products/agent-platform/README.md`](../../products/agent-platform/README.md) |
+| tool-gateway | [`products/tool-gateway/README.md`](../../products/tool-gateway/README.md) |
+| execution-runtime | [`products/execution-runtime/README.md`](../../products/execution-runtime/README.md) |
+| identity-service | [`products/identity-broker/README.md`](../../products/identity-broker/README.md) |
+| audit-service | [`products/audit-service/README.md`](../../products/audit-service/README.md) |
+| skills-hub | [`products/skills-hub/README.md`](../../products/skills-hub/README.md) |
+| incident-service | [`products/incident-service/README.md`](../../products/incident-service/README.md) |
+
+> The directory name is not always the image name (`agent-platform` builds
+> `agent-service`, `identity-broker` builds `identity-service`, `operator-portal`
+> builds `web-ui`); see [Build System](build-system.md#per-product-makefile-anatomy).
+
 ## Request Flow
 
 A typical chat request traverses all services in a linear chain:

@@ -49,7 +49,10 @@ independently consumable.
 
 `make validate-version` (part of `make verify`) enforces the lockstep, and
 the coordinated image tag is prefixed with the semver
-(`<semver>-<prefix>-<gitsha>[-dirty-<timestamp>]`).
+(`<semver>-<prefix>-<gitsha>[-dirty-<timestamp>]`). For the full build
+machinery — the layered Makefile fragments, the coordinated tag, and the
+`build → push → deploy` handoff — see
+[Build System and Deploy Pipeline](docs/guides/build-system.md).
 
 Release workflow: entries accumulate under `Unreleased` in `CHANGELOG.md`;
 closing a release bumps `VERSION` everywhere (run `make validate-version`
@@ -86,6 +89,11 @@ What changes are expected to carry:
   spec's `tasks.md`) and any `samples/` demo the spec ships is exercised by
   its own demo script in the verification path — "declared delivered" must
   equal "demonstrably delivered"
+
+For the full multi-tier test architecture — unit/contract `pytest`, the
+disposable-Postgres integration proofs, the portal SPA gate, and the
+mocked-by-default live-checks — see
+[Testing Strategy](docs/guides/testing-strategy.md).
 
 ## Change Principles
 

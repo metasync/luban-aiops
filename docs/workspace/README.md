@@ -14,25 +14,25 @@ This folder contains the documents that define how the platform should be organi
 
 ## Document Set
 
-- `workspace-model.md`
+- [workspace-model.md](workspace-model.md)
   - defines the workspace structure, design principles, dependency rules, and module layout
 
-- `product-boundaries.md`
+- [product-boundaries.md](product-boundaries.md)
   - defines the responsibility boundaries, integration points, and ownership model for each product project
 
-- `repository-reorganization-plan.md`
+- [repository-reorganization-plan.md](repository-reorganization-plan.md)
   - explains how the current repository and design set map into the new workspace model
 
-- `github-repository-governance.md`
+- [github-repository-governance.md](github-repository-governance.md)
   - defines the baseline GitHub settings, labels, milestones, and review controls for the workspace repository
 
-- `product-structure-review.md`
+- [product-structure-review.md](product-structure-review.md)
   - compares the current implementation structure of each workspace product and recommends where normalization should happen next
 
-- `backend-service-layout-convention.md`
+- [backend-service-layout-convention.md](backend-service-layout-convention.md)
   - defines the recommended package structure for backend products that expose HTTP service boundaries
 
-- `python-container-strategy.md`
+- [python-container-strategy.md](python-container-strategy.md)
   - defines the current Python container baseline, evaluates the environment-specific base image option, and records the recommended migration path
 
 - [long-term-operator-memory-spike.md](long-term-operator-memory-spike.md)
@@ -58,6 +58,30 @@ This folder contains the documents that define how the platform should be organi
 
 - [multi-agent-orchestration-spike.md](multi-agent-orchestration-spike.md)
   - frames the operator's named multi-agent / segregation-of-duty / bounded-autonomy need (autonomous detect→troubleshoot→resolve, incident-driven diagnosis) as the SPEC-064 R-1 `GoalPipeline` reopen trigger; scores `TeamPipeline`, `A2AAgent`, and `GoalPipeline` against the four-point gate (all **fail** as shipped) and finds the change is a substrate change requiring a superseding ADR to ADR-0011 ("no control flow"); lays out the five architecture dimensions (identity, policy, audit, orchestration, contract), recommends scoping as diagnose-before-act bounded autonomy (autonomous read-only diagnosis, every mutation behind the existing HITL + signed dispatch), and proposes a superseding-ADR → phased-SPEC path; assessment only, no ADR, SPEC number, or implementation authorized
+
+- [composition-trust-model-spike.md](composition-trust-model-spike.md)
+  - whether a composed skill needs its own approval gate — became ADR-0011 (composition carries no authority) and SPEC-057
+
+- [execution-runtime-spike.md](execution-runtime-spike.md)
+  - the isolated execution worker and signed execution requests — promoted to SPEC-037 / SPEC-038
+
+- [policy-require-approval-spike.md](policy-require-approval-spike.md)
+  - `require_approval` policy semantics — promoted to SPEC-030
+
+- [policy-rollout-controls-spike.md](policy-rollout-controls-spike.md)
+  - policy testing and rollout controls — promoted to SPEC-048
+
+- [portal-framework-rebuild-spike.md](portal-framework-rebuild-spike.md)
+  - portal AI-UI framework selection behind the rebuild (SPEC-023 candidate)
+
+- [portal-help-onboarding-spike.md](portal-help-onboarding-spike.md)
+  - in-portal help and onboarding — decision recorded, promotion parked
+
+- [shared-sdk-extraction-spike.md](shared-sdk-extraction-spike.md)
+  - shared-package extraction vs copy-with-parity — kept copy-with-parity, revisit on stated triggers
+
+- [skill-authoring-spike.md](skill-authoring-spike.md)
+  - skill-authoring export from sessions — Option A promoted to SPEC-044
 
 ## Relationship To The Platform Study
 
