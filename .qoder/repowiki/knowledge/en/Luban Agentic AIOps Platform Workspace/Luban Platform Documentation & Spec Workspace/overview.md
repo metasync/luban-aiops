@@ -1,1 +1,0 @@
-Central documentation workspace for the Luban Agentic AIOps Platform, organizing architecture decisions, formal specs, design docs, operator guides, and exploratory spikes under a single spec-driven development contract.

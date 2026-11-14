@@ -1,1 +1,0 @@
-None — this is a documentation-only module with no build or test commands; the README prescribes a recommended reading order across the top-level design files plus linked workspace and spec-index documents under `docs/workspace/` and `docs/specs/`.

@@ -1,5 +1,0 @@
-- Each product directory is self-contained with its own `pyproject.toml`, `Dockerfile`, `Makefile`, `.python-version`, `src/<package>/`, and `tests/`, invoked via `make -C products/<name>` rather than top-level imports.
-- Cross-product contracts live exclusively in `shared/shared-contracts` (schemas, policies, SQL, scripts); consumers reference them by path or package dependency instead of duplicating definitions.
-- Policy bundles and secret vocabularies are authored once in `shared/shared-contracts` and propagated to consumers through root Makefile targets (`sync-policy`, `validate-secret-vocabulary`) rather than ad-hoc copies.
-- Feature work follows spec-driven development: new capabilities are scoped under `docs/specs/SPEC-NNN-<name>/` with plan.md, spec.md, and tasks.md, and release notes are recorded chronologically under `docs/agentic-aiops-platform/release-notes/`.
-- Container images share the coordinated `IMAGE_TAG` computed from `VERSION` plus git SHA/dirty status, ensuring all deployed services stay in lockstep.

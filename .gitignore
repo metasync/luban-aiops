@@ -43,6 +43,12 @@ shared/platform-ops/gitops/**/.images.env
 # Auto-generated dev signing keys (identity-broker JWT).
 .dev-keys/
 
-# IDE-local better-harness session reports (generated churn, like repowiki
-# but never tracked).
+# IDE-local better-harness session reports (generated churn, never tracked).
 .qoder/better-harness/
+
+# IDE-generated Repo Wiki cache. Formerly tracked; now untracked and ignored so
+# the indexer's regeneration churn no longer dirties the working tree (which
+# forced `make build` to emit -dirty-<timestamp> tags instead of dev-k8s-<sha>).
+# Pair this with disabling Auto Update / Auto Export in the IDE so the directory
+# is not regenerated; the curated docs under docs/ are the maintained source now.
+.qoder/repowiki/

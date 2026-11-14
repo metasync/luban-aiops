@@ -1,1 +1,0 @@
-Python services managed with `uv` on a shared `luban-aiops/base-uv` Amazon Linux 2023 image; Kubernetes deployment via kustomize overlays under `shared/platform-ops/gitops`; OpenObserve dashboards validated offline; PostgreSQL/Redis as shared state backends; operator portal built as a separate SPA (Vitest + tsc/vite).

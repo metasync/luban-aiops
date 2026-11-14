@@ -1,1 +1,0 @@
-Repository workspace for the Luban agentic AIOps platform, coordinating nine Python/Node products, shared contracts, GitOps overlays, and spec-driven delivery under a single Makefile build gate.
