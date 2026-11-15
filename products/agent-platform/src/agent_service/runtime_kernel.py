@@ -12,7 +12,7 @@ from agent_service.core.metrics import (
 )
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
-from agent_service.services.agent_role import AgentRole, current_agent_role, current_agent_role_value
+from agent_service.services.agent_role import AgentRole, current_agent_role_value
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.audit_emitter import (
     build_audit_event,
@@ -66,6 +66,8 @@ from agent_service.schemas.v2 import AuthorizationRequired
 from agent_service.services.kernel_middleware import (
     AuthorizationTurn, CURRENT_AUTHORIZATION_TURN, authorization_turn,
 )
+from agent_service.services.kernel_status import KernelStatus
+from agent_service.services.kernel_toolkits import ToolkitAssembler
 from agent_service.services.model_catalog import MODEL_CATALOG
 from agent_service.services.prose_redaction import (
     CURRENT_PROSE_REDACTOR,
@@ -77,6 +79,7 @@ from agent_service.services.prose_redaction import (
     redact_user_text,
 )
 from agent_service.services.secret_params import parameterize_for_trace
+from agent_service.services.serialization import make_serializable
 
 LOGGER = logging.getLogger(__name__)
 MAX_CACHED_AGENTS = 1000
@@ -151,28 +154,6 @@ MUTATING_TOOLS_UNAVAILABLE_NOTICE = (
     "mutating action. If the user asks for one, say it requires operator "
     "enablement of HITL confirmation."
 )
-
-
-def make_serializable(value: object) -> object:
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, list):
-        return [make_serializable(item) for item in value]
-    if isinstance(value, tuple):
-        return [make_serializable(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): make_serializable(item) for key, item in value.items()}
-    if hasattr(value, "model_dump"):
-        return make_serializable(value.model_dump())
-    if hasattr(value, "__dict__"):
-        return make_serializable(
-            {
-                key: item
-                for key, item in vars(value).items()
-                if not key.startswith("_")
-            }
-        )
-    return str(value)
 
 
 def extract_text(value: object) -> str:
@@ -255,19 +236,18 @@ class AgentKernel:
         self._max_cached_agents = max_cached_agents
         # Ephemeral masking knowledge survives context compaction, never a snapshot.
         self._generated_literals: OrderedDict[str, set[str]] = OrderedDict()
-        self._last_error: str | None = None
-        # Per-token toolkit cache (SPEC-008 R-5): a toolkit is built per owning
-        # user's delegated token so discovery runs once per token. Tool
-        # closures read the current token from the DELEGATED_TOKEN contextvar
-        # at call time (SPEC-018 R-2), so cached toolkits keep working across
-        # portal token refresh.
-        self._toolkits: dict[str, object] = {}
-        self._toolkit_lock = asyncio.Lock()
+        # Decomposition Stage 1: the runtime-status projections (mode / state /
+        # metadata / feature-flags / hint) and the ``_last_error`` slot live in a
+        # KernelStatus collaborator; the per-token toolkit cache (SPEC-008 R-5)
+        # and the discovery → HITL / read-only / role-narrow pipeline live in a
+        # ToolkitAssembler collaborator. AgentKernel keeps thin delegators plus
+        # read/write-through properties for ``_last_error`` and
+        # ``_mutating_tools_excluded`` (SPEC-021 R-3), so the public API and
+        # every caller/test stay byte-identical. See
+        # docs/workspace/agent-kernel-decomposition-spike.md.
+        self._status = KernelStatus(self)
+        self._toolkit_asm = ToolkitAssembler(self)
         self._agent_lock = asyncio.Lock()
-        # SPEC-021 R-3: set when a toolkit build excluded mutating tools
-        # because HITL bridging is disabled, so streamed turns surface the
-        # mutating-unavailable posture honestly.
-        self._mutating_tools_excluded = False
         # SPEC-063 R-2: agent-side durable execution recovery/admission store,
         # built lazily and only when admission is enabled. ``None`` (the
         # default) keeps the legacy in-process handoff path byte-identical, so
@@ -331,126 +311,54 @@ class AgentKernel:
             RunIdentity(str(run_id), session_id, owner_user_id), recovery=recovery
         )
 
+    @property
+    def _last_error(self) -> str | None:
+        """Read/write-through to the KernelStatus collaborator's error slot.
+
+        Kept as a property so the direct ``kernel._last_error = ...`` test
+        coupling (test_runtime_kernel / test_prose_redaction) and any reader
+        stay unchanged after the Stage-1 extraction.
+        """
+        return self._status._last_error
+
+    @_last_error.setter
+    def _last_error(self, value: str | None) -> None:
+        self._status._last_error = value
+
     def mode(self) -> str:
-        return "agentscope" if self.is_configured() else "placeholder"
+        return self._status.mode()
 
     def is_configured(self) -> bool:
-        return self.settings.is_configured()
+        return self._status.is_configured()
 
     def runtime_state(self) -> str:
-        if not self.is_configured():
-            return "not_configured"
-        if self._last_error:
-            return "provider_error"
-        return "ready"
+        return self._status.runtime_state()
 
     def provider_name(self) -> str:
-        return self._provider.provider_name
+        return self._status.provider_name()
 
     def provider_description(self) -> str:
-        return self._provider.describe(self.settings)
+        return self._status.provider_description()
 
     def last_error(self) -> str | None:
-        return self._last_error
+        return self._status.last_error()
 
     def runtime_metadata(self) -> dict[str, object]:
-        return {
-            "runtime_mode": self.mode(),
-            "runtime_state": self.runtime_state(),
-            "agentscope_enabled": self.is_configured(),
-            "profile": self.settings.profile,
-            "provider": self.provider_name(),
-            "provider_description": self.provider_description(),
-            "model_name": self._provider.resolved_model_name(self.settings),
-            "base_url": self._provider.resolved_base_url(self.settings),
-            "provider_options": make_serializable(self.settings.provider_options),
-            "hint": self.configuration_hint(),
-            "last_error": self.last_error(),
-        }
+        return self._status.runtime_metadata()
 
     def feature_flags(self) -> list[dict[str, object]]:
-        """The curated feature-flag inventory (SPEC-072 R-4).
-
-        A discovery-safe allowlist of deployment *toggles* derived from live
-        settings — each entry is a stable snake_case ``name``, a boolean
-        ``enabled``, and an optional human ``label``. Never a key, URL, JWKS,
-        budget, or timeout *value*: a flag whose knob is a secret (e.g.
-        ``execution_signing_key``) reports only configured / not configured.
-        ``model_routing`` reuses ``routing_available()`` so the catalog boolean
-        (R-1), the ``auto`` resolution branch (R-2), and this flag (R-4) read
-        one value and can never disagree (failure-matrix F3). Always-on
-        invariants with no knob (permission, evidence, token-observation) are
-        deliberately absent — the inventory reports toggles, not invariants.
-        """
-        settings = self.settings
-        return [
-            {
-                "name": "model_routing",
-                "enabled": self.routing_available(),
-                "label": "Per-turn model routing",
-            },
-            {
-                "name": "model_discovery",
-                "enabled": bool(settings.model_discovery_enabled),
-                "label": "Live model discovery",
-            },
-            {
-                "name": "context_compression",
-                "enabled": bool(settings.compress_context_enabled),
-                "label": "Agent-driven context compression",
-            },
-            {
-                "name": "outbound_delegated_identity",
-                "enabled": bool(settings.target_authorization_enabled),
-                "label": "Outbound delegated identity",
-            },
-            {
-                "name": "kernel_tracing",
-                "enabled": bool(settings.kernel_tracing),
-                "label": "Kernel tracing",
-            },
-            {
-                "name": "task_tools",
-                "enabled": bool(settings.task_tools_enabled),
-                "label": "Task tools",
-            },
-            {
-                "name": "reply_token_budget",
-                "enabled": settings.reply_token_budget is not None,
-                "label": "Reply token budget",
-            },
-            {
-                "name": "hitl_bridging",
-                "enabled": settings.hitl_confirm_timeout > 0,
-                "label": "HITL confirmation bridging",
-            },
-            {
-                "name": "signed_execution",
-                "enabled": bool(settings.execution_signing_key),
-                "label": "Signed execution requests",
-            },
-        ]
+        """The curated feature-flag inventory (SPEC-072 R-4) — delegates to
+        KernelStatus, the single source shared with ``routing_available()``."""
+        return self._status.feature_flags()
 
     def configuration_hint(self) -> str:
-        if not self.is_configured():
-            return (
-                "AgentScope runtime is not configured. "
-                "Set AGENTSCOPE_API_KEY to enable the runtime kernel."
-            )
-        if self._last_error:
-            return (
-                "AgentScope runtime is configured through the "
-                f"{self.provider_name()} provider, but the last provider call failed: "
-                f"{self._last_error}"
-            )
-        return f"AgentScope runtime ready through {self.provider_description()}."
+        return self._status.configuration_hint()
 
     def remember_error(self, exc: Exception, turn_literals=()) -> None:
-        literals = set(turn_literals).union(*self._generated_literals.values())
-        self._last_error = redact_assistant_text(str(exc), literals)
+        self._status.remember_error(exc, turn_literals)
 
     def clear_error(self) -> None:
-        self._last_error = None
+        self._status.clear_error()
 
     def _build_model(self, model_id: str | None = None):
         """Build the AgentScope model for a turn (SPEC-024 R-3).
@@ -499,175 +407,36 @@ class AgentKernel:
             return model_id
         return self.settings.provider
 
+    @property
+    def _mutating_tools_excluded(self) -> bool:
+        """Read-through to the ToolkitAssembler's SPEC-021 R-3 posture flag.
+
+        Kept as a property so the direct ``kernel._mutating_tools_excluded``
+        test coupling (test_hitl_confirmations) stays unchanged; the flag is
+        written only inside the collaborator's ``filter_mutating_for_hitl``.
+        """
+        return self._toolkit_asm._mutating_tools_excluded
+
     async def _ensure_toolkit(
         self, bearer_token: str | None = None, read_only: bool = False
     ):
-        """Build (once per token) and return the Toolkit with gateway tools.
-
-        Toolkits are cached per delegated token so discovery runs once per
-        token; tool closures read the current token from ``DELEGATED_TOKEN``
-        at call time, so a cached toolkit keeps working across portal token
-        refresh (SPEC-018 R-2). Empty discovery results are intentionally NOT
-        cached: the next caller retries discovery instead of being poisoned.
-
-        ``read_only`` selects a separate cache entry whose toolkit is
-        restricted to read-level tools (automated diagnostic turns).
-
-        A bound ``AGENT_ROLE`` (SPEC-073 R-2) selects a further separate cache
-        entry whose toolkit is narrowed per role — subtractive only, never
-        wider than the unscoped toolkit for the same token. An unscoped turn
-        (no role bound — the only case in phase 2, which wires no orchestration
-        caller) keeps today's exact key and one cache entry, byte-identical.
-        """
-        # SPEC-073 R-2: a bound agent-role joins the cache key so a role-scoped
-        # toolkit never leaks into an unscoped (or differently-scoped) turn,
-        # mirroring ``read_only``. Read once so the key and the narrowing below
-        # agree across the discovery await.
-        role = current_agent_role()
-        cache_key = (bearer_token or "") + ("::read-only" if read_only else "")
-        if role is not None:
-            cache_key = f"{cache_key}::{role.value}"
-        cached = self._toolkits.get(cache_key)
-        if cached is not None:
-            return cached
-
-        from agentscope.tool import Toolkit
-
-        async with self._toolkit_lock:
-            # Re-check: a concurrent caller may have built it while we waited.
-            cached = self._toolkits.get(cache_key)
-            if cached is not None:
-                return cached
-
-            task_tools = (
-                self._build_task_tools()
-                if self.settings.task_tools_enabled
-                else []
-            )
-
-            if self.settings.tool_gateway_url:
-                from agent_service.tools.gateway_tools import (
-                    build_gateway_toolkit,
-                    discover_tools,
-                )
-
-                try:
-                    definitions = await discover_tools(
-                        self.settings.tool_gateway_url, bearer_token
-                    )
-                    if definitions:
-                        definitions = self._filter_mutating_for_hitl(
-                            definitions
-                        )
-                    if definitions and read_only:
-                        definitions = self._filter_read_only(definitions)
-                    if definitions and role is not None:
-                        definitions = self._narrow_for_role(definitions, role)
-                    if definitions:
-                        toolkit = build_gateway_toolkit(
-                            definitions,
-                            self.settings.tool_gateway_url,
-                        )
-                        if task_tools:
-                            toolkit.tool_groups[0].tools.extend(task_tools)
-                        self._toolkits[cache_key] = toolkit
-                        return toolkit
-                except Exception as exc:
-                    LOGGER.warning("failed to build gateway toolkit: %s", exc)
-
-            # No gateway (or nothing discovered): task tools only, returned
-            # uncached so a later turn can retry discovery.
-            return Toolkit(tools=task_tools)
+        """Per-token toolkit assembly — delegates to ToolkitAssembler (the
+        SPEC-073/076 ``_ensure_toolkit(read_only=True)`` narrowing seam)."""
+        return await self._toolkit_asm.ensure_toolkit(bearer_token, read_only)
 
     def _filter_mutating_for_hitl(self, definitions: list[dict]) -> list[dict]:
-        """Drop non-read tools when HITL bridging is disabled (SPEC-021 R-3).
-
-        A mutating tool can never execute without a human confirmation; when
-        ``AGENT_HITL_CONFIRM_TIMEOUT=0`` there is no confirmation surface, so
-        non-read tools are excluded from the toolkit entirely instead of
-        parking silently. Read tools are untouched.
-        """
-        if self.settings.hitl_confirm_timeout > 0:
-            return definitions
-        kept = [
-            definition
-            for definition in definitions
-            if definition.get("risk_level", "read") == "read"
-        ]
-        excluded = len(definitions) - len(kept)
-        if excluded:
-            self._mutating_tools_excluded = True
-            LOGGER.warning(
-                "HITL bridging disabled (AGENT_HITL_CONFIRM_TIMEOUT=0); "
-                "excluded %d mutating tool(s) from the agent toolkit",
-                excluded,
-            )
-        return kept
+        return self._toolkit_asm.filter_mutating_for_hitl(definitions)
 
     def _filter_read_only(self, definitions: list[dict]) -> list[dict]:
-        """Restrict the toolkit to read-level tools for read-only turns.
-
-        Automated diagnostic turns (incident triage) must never invoke — or
-        silently park on — a mutating tool, regardless of what the model
-        decides, so non-read tools are excluded structurally instead of
-        relying on prompt discipline alone.
-        """
-        kept = [
-            definition
-            for definition in definitions
-            if definition.get("risk_level", "read") == "read"
-        ]
-        excluded = len(definitions) - len(kept)
-        if excluded:
-            LOGGER.info(
-                "read-only turn: excluded %d mutating tool(s) from the "
-                "agent toolkit",
-                excluded,
-            )
-        return kept
+        return self._toolkit_asm.filter_read_only(definitions)
 
     def _narrow_for_role(
         self, definitions: list[dict], role: AgentRole
     ) -> list[dict]:
-        """Narrow discovered tools to a role's toolkit (SPEC-073 R-2/R-5).
-
-        Subtractive only: the result is always a subset of the unscoped toolkit
-        for the same token, so a role can never grant a tool the underlying
-        token's ``roles`` could not already reach at the gateway (the real
-        deny-by-default enforcement edge, unchanged in phase 2).
-
-        - ``diagnostician``: read-level tools only (reuses ``_filter_read_only``).
-        - ``executor``: the full discovered set — a mutating tool still parks on
-          the existing HITL confirmation (R-4) and dispatches only through the
-          signed at-most-one-dispatch path with a distinct human approver.
-        - ``orchestrator``: no direct gateway tools — it delegates, it does not
-          itself invoke tools.
-        - anything else: fail closed to the most restrictive posture (empty),
-          never a wider one.
-        """
-        if role is AgentRole.DIAGNOSTICIAN:
-            return self._filter_read_only(definitions)
-        if role is AgentRole.EXECUTOR:
-            return definitions
-        if role is AgentRole.ORCHESTRATOR:
-            return []
-        # Defensive: the closed enum plus the fail-closed bind make this
-        # unreachable, but an unrecognized role must never widen authority.
-        LOGGER.warning(
-            "unrecognized agent role %r; failing closed to no gateway tools",
-            role,
-        )
-        return []
+        return self._toolkit_asm.narrow_for_role(definitions, role)
 
     def _build_task_tools(self) -> list:
-        """Built-in agentscope task tools, opt-in (SPEC-018 R-5).
-
-        These mutate only session-local agent state, so the SPEC-017
-        snapshot/restore persists them with no extra work.
-        """
-        from agentscope.tool import TaskCreate, TaskGet, TaskList, TaskUpdate
-
-        return [TaskCreate(), TaskGet(), TaskList(), TaskUpdate()]
+        return self._toolkit_asm.build_task_tools()
 
     def _routed_candidate_name(self, agent) -> str | None:
         """The candidate the per-turn router chose for this reply (SPEC-071 R-2).
@@ -707,17 +476,11 @@ class AgentKernel:
     def routing_available(self) -> bool:
         """Whether per-turn routing is configured at all (SPEC-072 R-1).
 
-        The deployment-level half of ``_router_armed`` — the router knob is on
-        and a candidate map is configured — independent of any single turn's
-        ``routing_allowed``. The single source of truth for the catalog's
-        ``routing_available`` envelope boolean (R-1), ``_resolve_model``'s
-        ``auto`` branch (R-2), and the ``model_routing`` feature flag (R-4), so
-        the three surfaces can never disagree (failure-matrix F3).
+        Delegates to KernelStatus — the single source of truth shared by the
+        catalog boolean (R-1), ``_resolve_model``'s ``auto`` branch (R-2), and
+        the ``model_routing`` feature flag (R-4), so they can never disagree.
         """
-        return bool(
-            self.settings.model_router_enabled
-            and self.settings.model_router_candidates
-        )
+        return self._status.routing_available()
 
     def _router_armed(self, routing_allowed: bool) -> bool:
         """Whether the per-turn router is registered for this turn (SPEC-071 R-2).
@@ -809,18 +572,7 @@ class AgentKernel:
         return middlewares
 
     def _count_gateway_tools(self, toolkit) -> int:
-        """Count gateway-backed tools in a toolkit.
-
-        Task tools and builtins are excluded: only gateway tools ground the
-        model in live data, which is what the no-tools guard cares about
-        (SPEC-018 R-5).
-        """
-        count = 0
-        for group in getattr(toolkit, "tool_groups", None) or []:
-            for tool in getattr(group, "tools", None) or []:
-                if getattr(tool, "gateway_tool_name", None):
-                    count += 1
-        return count
+        return self._toolkit_asm.count_gateway_tools(toolkit)
 
     def _build_kernel_configs(self):
         """Settings-driven kernel configs (SPEC-017 R-1).
