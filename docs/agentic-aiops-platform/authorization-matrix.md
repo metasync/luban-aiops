@@ -523,6 +523,56 @@ by platform-gateway at `GET /api/v1/policy/matrix` (SPEC-019), evaluated from
 the loaded bundle rather than hand-maintained. The operator portal's
 Permissions view renders it, so the granted role × action surface is
 self-service and always reflects what the gateway actually enforces.
+
+The shipped bundle grants the concrete actions below — a glanceable index over
+the narrative that follows. `✓` = an `allow` grant; `—` = deny-by-default.
+"Since" is the introducing spec (`baseline` marks the original chat /
+read-only-tool surface that predates this transparency log). This table is a
+read-only convenience: the bundle and the live matrix it produces remain the
+authority, and the per-spec rationale, invariants, and audit posture are the
+narrative below.
+
+| Action | Since | platform-admin | approver | operator | developer | read-only-observer | auditor |
+|---|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| `chat` | baseline | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `session:create` | baseline | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `session:read` | baseline | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `session:list` | SPEC-022 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `session:delete` | SPEC-022 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `session:update` | SPEC-039 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `models:list` | SPEC-024 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `chat:confirm` | SPEC-020 | ✓ | ✓ | ✓ | ✓ | — | — |
+| `tools:list` | SPEC-007 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `tools:invoke` | SPEC-007 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `targets:authorize` | SPEC-070 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `tools:mutate` | SPEC-021 | ✓ | ✓ | ✓ | — | — | — |
+| `secrets:deliver` | SPEC-062 | ✓ | ✓ | ✓ | — | — | — |
+| `incident:read` | SPEC-015 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `incident:create` | SPEC-015 | ✓ | ✓ | ✓ | ✓ | — | — |
+| `incident:triage` | SPEC-015 | ✓ | ✓ | ✓ | ✓ | — | — |
+| `incident:skill_draft` | SPEC-045 | ✓ | ✓ | ✓ | — | — | — |
+| `audit:read` | SPEC-013 | ✓ | — | — | — | — | ✓ |
+| `policy:read` | SPEC-019 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `skills:read` | SPEC-014 | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| `approvals:list` | SPEC-031 | ✓ | ✓ | — | — | — | — |
+| `documents:create` | SPEC-039 | ✓ | ✓ | ✓ | — | — | — |
+| `documents:read` | SPEC-039 | ✓ | ✓ | ✓ | — | — | — |
+| `session:skill_draft` | SPEC-044 | ✓ | ✓ | ✓ | — | — | — |
+| `session:skill_graduate` | SPEC-055 | ✓ | ✓ | ✓ | — | — | — |
+| `runtime:flags` | SPEC-072 | ✓ | ✓ | ✓ | — | — | — |
+| `remediate:stage` | SPEC-077 | ✓ | — | ✓ | — | — | — |
+
+> **`tools:mutate` approval overlay.** The `✓` cells are the `allow` grant; every
+> mutating run additionally parks behind the tier_2 `require-approval-tools-mutate`
+> rule (SPEC-030, priority 200), decided by an `approver` or `platform-admin`
+> distinct from the requester. `developer` sits in that rule's `roles_any` (so a
+> parked developer call still requires tier_2) but holds no `allow`, so the
+> tool-gateway denies its execution. Two **ready-but-inert** agent-role rules
+> (SPEC-076) also target `tools:mutate` and never match until a caller threads an
+> agent-role (SPEC-073 R-3 keeps it off every wire field):
+> `deny-diagnostician-tools-mutate` (priority 300) and
+> `require-approval-executor-tools-mutate` (priority 200, tier_2).
+
 Transparency actions `policy:read` and `skills:read` (read-only workspace
 inventory) are granted to all operational roles; deny-by-default semantics
 are unchanged. SPEC-020 adds `chat:confirm` (approve or deny a parked HITL
