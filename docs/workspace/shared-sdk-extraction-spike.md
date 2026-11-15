@@ -1,6 +1,6 @@
 # Spike: Shared-Package Extraction vs Copy-with-Parity (review finding M1)
 
-Status: spike complete — decision recorded: keep copy-with-parity, revisit on stated triggers
+Status: spike complete — decision recorded: keep copy-with-parity, revisit on stated triggers. **Revisit trigger #1 met 2026-11-15** (eighth Python product enrolled; audit-emitter family at six copies, over the five-copy threshold) — **deferral re-confirmed** at v0.58.1 on the [Exploration Backlog row](../agentic-aiops-platform/delivery-roadmap.md#exploration-backlog). Sections 1–5 below are the unchanged 2026-08-25 record.
 Date: 2026-08-25
 Roadmap home: Exploration Backlog "Shared-package extraction of duplicated service modules"
 Verified against: `test_module_parity.py` and product build paths at 0.11.1
