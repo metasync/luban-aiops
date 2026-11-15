@@ -83,6 +83,9 @@ This folder contains the documents that define how the platform should be organi
 - [skill-authoring-spike.md](skill-authoring-spike.md)
   - skill-authoring export from sessions — Option A promoted to SPEC-044
 
+- [agent-kernel-decomposition-spike.md](agent-kernel-decomposition-spike.md)
+  - code-modularity finding C-1 — a staged, behavior-preserving plan to decompose `AgentKernel` (runtime_kernel.py, 3,393 LOC / 76 methods) into collaborators behind thin delegators; Stage 1 (`KernelStatus` + `ToolkitAssembler`) authorized 2026-11-15, Stages 2–4 proposal-only; no spec number, no feature work authorized
+
 ## Relationship To The Platform Study
 
 These documents extend the main platform study in `docs/agentic-aiops-platform/` by answering:
