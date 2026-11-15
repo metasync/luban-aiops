@@ -3,16 +3,19 @@ import json
 import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from agent_service.core.metrics import (
-    record_agent_state_error,
-    record_evidence_write,
-)
+from agent_service.core.metrics import record_evidence_write
 from agent_service.providers import get_provider
 from agent_service.runtime_settings import RuntimeSettings
 from agent_service.services.agent_role import AgentRole, current_agent_role_value
+# Decomposition Stage 2: the persisted-state store binding stays re-exported
+# here even though ``restore_state`` / ``snapshot_state`` now live in the
+# AgentRegistry collaborator. The collaborator resolves ``AGENT_STATE_STORE``
+# through *this* module namespace at call time, so the long-standing test
+# surface ``monkeypatch.setattr(runtime_kernel, "AGENT_STATE_STORE", ...)``
+# stays authoritative after the move (behavior byte-identical). Do not drop it.
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.audit_emitter import (
     build_audit_event,
@@ -63,9 +66,11 @@ from agent_service.services.hitl_confirmations import (
     redact_pending_calls,
 )
 from agent_service.schemas.v2 import AuthorizationRequired
+from agent_service.services.kernel_agents import AgentRegistry
 from agent_service.services.kernel_middleware import (
     AuthorizationTurn, CURRENT_AUTHORIZATION_TURN, authorization_turn,
 )
+from agent_service.services.kernel_models import ModelResolver
 from agent_service.services.kernel_status import KernelStatus
 from agent_service.services.kernel_toolkits import ToolkitAssembler
 from agent_service.services.model_catalog import MODEL_CATALOG
@@ -108,11 +113,6 @@ class UnknownModelError(ValueError):
     kernel never silently falls back to the default model.
     """
 
-
-# SPEC-071 R-2: the stock ModelRouterMiddleware records its per-reply choice in
-# ``agent.state.middle_context[<key>][reply_id]``; ``get_middleware_key()``
-# defaults to the class name, so this is the stable read key for attribution.
-_MODEL_ROUTER_MIDDLEWARE_KEY = "ModelRouterMiddleware"
 
 TEXT_DELTA_EVENTS = {
     "message_delta",
@@ -232,8 +232,6 @@ class AgentKernel:
     ) -> None:
         self.settings = settings or RuntimeSettings.from_env()
         self._provider = get_provider(self.settings.provider)
-        self._agents: OrderedDict[str, tuple[object, type]] = OrderedDict()
-        self._max_cached_agents = max_cached_agents
         # Ephemeral masking knowledge survives context compaction, never a snapshot.
         self._generated_literals: OrderedDict[str, set[str]] = OrderedDict()
         # Decomposition Stage 1: the runtime-status projections (mode / state /
@@ -247,7 +245,18 @@ class AgentKernel:
         # docs/workspace/agent-kernel-decomposition-spike.md.
         self._status = KernelStatus(self)
         self._toolkit_asm = ToolkitAssembler(self)
-        self._agent_lock = asyncio.Lock()
+        # Decomposition Stage 2: model selection + router attribution
+        # (SPEC-024/026/027/071) live in a ModelResolver collaborator; the
+        # per-session agent cache (LRU-bounded ``_agents`` + ``_agent_lock``) and
+        # its build / restore / snapshot lifecycle (SPEC-017) live in an
+        # AgentRegistry collaborator. AgentKernel keeps thin delegators plus
+        # read-through ``_agents`` / ``_max_cached_agents`` properties, so every
+        # caller and test — including direct ``kernel._agents[...]`` access and
+        # ``monkeypatch.setattr(kernel, "_build_agent", ...)`` — stays
+        # byte-identical. Cross-cluster calls route back through these
+        # delegators. See the decomposition spike memo (Stage 2).
+        self._model_resolver = ModelResolver(self)
+        self._agent_registry = AgentRegistry(self, max_cached_agents)
         # SPEC-063 R-2: agent-side durable execution recovery/admission store,
         # built lazily and only when admission is enabled. ``None`` (the
         # default) keeps the legacy in-process handoff path byte-identical, so
@@ -361,51 +370,14 @@ class AgentKernel:
         self._status.clear_error()
 
     def _build_model(self, model_id: str | None = None):
-        """Build the AgentScope model for a turn (SPEC-024 R-3).
-
-        ``model_id=None`` keeps the deploy-time settings path untouched.
-        A concrete id derives a replaced RuntimeSettings from the catalog
-        entry and reuses the existing provider adapters; an unknown id
-        raises ``UnknownModelError`` (fail-closed). Bare provider names
-        alias to the provider's default entry (SPEC-026 R-3).
-        """
-        if model_id is None:
-            return self._provider.build_model(self.settings)
-        entry = MODEL_CATALOG.get(model_id)
-        if entry is None:
-            raise UnknownModelError(f"Unknown model id: {model_id!r}.")
-        if entry.provider == self.settings.provider:
-            # Active provider: keep the deploy-time credentials/options
-            # and swap only the model name, so non-default series entries
-            # build against the same provider (SPEC-026 R-1).
-            settings = replace(self.settings, model_name=entry.model_name)
-        else:
-            settings = replace(
-                self.settings,
-                provider=entry.provider,
-                api_key=entry.api_key,
-                model_name=entry.model_name,
-                base_url=entry.base_url,
-                provider_options=RuntimeSettings.default_provider_options(
-                    entry.provider
-                ),
-            )
-        return get_provider(entry.provider).build_model(settings)
+        """Build the AgentScope model for a turn (SPEC-024 R-3) — delegates to
+        the ModelResolver collaborator."""
+        return self._model_resolver.build_model(model_id)
 
     def _normalize_model_id(self, model_id: str | None) -> str:
-        """Canonical id bound to a turn (SPEC-026 R-3).
-
-        Legacy provider-name ids resolve through the catalog alias map to
-        the concrete default-model entry; unknown ids pass through verbatim
-        (explicit-request paths reject them upstream, so they only surface
-        as the deploy-time provider fallback marker).
-        """
-        if model_id:
-            entry = MODEL_CATALOG.get(model_id)
-            if entry is not None:
-                return entry.id
-            return model_id
-        return self.settings.provider
+        """Canonical id bound to a turn (SPEC-026 R-3) — delegates to the
+        ModelResolver collaborator."""
+        return self._model_resolver.normalize_model_id(model_id)
 
     @property
     def _mutating_tools_excluded(self) -> bool:
@@ -439,39 +411,19 @@ class AgentKernel:
         return self._toolkit_asm.build_task_tools()
 
     def _routed_candidate_name(self, agent) -> str | None:
-        """The candidate the per-turn router chose for this reply (SPEC-071 R-2).
-
-        Reads the stock ``ModelRouterMiddleware``'s own record in
-        ``agent.state.middle_context``. Returns ``None`` when routing is off,
-        did not fire, or failed soft — the turn then keeps its resolved model.
-        Never raises: attribution must not wedge a completed turn.
-        """
-        try:
-            state = getattr(agent, "state", None)
-            if state is None:
-                return None
-            routed = (getattr(state, "middle_context", None) or {}).get(
-                _MODEL_ROUTER_MIDDLEWARE_KEY, {}
-            )
-            name = routed.get(getattr(state, "reply_id", None))
-            return name if isinstance(name, str) else None
-        except Exception:  # pragma: no cover - defensive
-            return None
+        """The candidate the per-turn router chose for this reply (SPEC-071 R-2)
+        — delegates to the ModelResolver collaborator."""
+        return self._model_resolver.routed_candidate_name(agent)
 
     def _candidate_model_id(self, name: str | None) -> str | None:
-        """Map a routed candidate name back to its catalog model id."""
-        if not name:
-            return None
-        for spec in self.settings.model_router_candidates:
-            if spec.name == name:
-                return spec.model_id
-        return None
+        """Map a routed candidate name back to its catalog model id — delegates
+        to the ModelResolver collaborator."""
+        return self._model_resolver.candidate_model_id(name)
 
     def _effective_model_id(self, agent) -> str | None:
-        """The catalog id the per-turn router served, or ``None`` if it did not
-        fire (SPEC-071 R-2). ``None`` lets a caller keep its resolved tier and
-        report ``model_selected_by`` accurately."""
-        return self._candidate_model_id(self._routed_candidate_name(agent))
+        """The catalog id the per-turn router served, or ``None`` (SPEC-071 R-2)
+        — delegates to the ModelResolver collaborator."""
+        return self._model_resolver.effective_model_id(agent)
 
     def routing_available(self) -> bool:
         """Whether per-turn routing is configured at all (SPEC-072 R-1).
@@ -483,15 +435,10 @@ class AgentKernel:
         return self._status.routing_available()
 
     def _router_armed(self, routing_allowed: bool) -> bool:
-        """Whether the per-turn router is registered for this turn (SPEC-071 R-2).
-
-        The single condition shared by ``_build_middlewares`` (register the
-        middleware) and ``ensure_agent`` (split the cache key), so the two can
-        never drift: the cache splits *exactly* when the built stack could
-        differ. An inert router (knob off, or no candidate map) never splits the
-        cache — no wasted entry in the default-off deployment.
-        """
-        return bool(routing_allowed and self.routing_available())
+        """Whether the per-turn router is registered for this turn (SPEC-071 R-2)
+        — delegates to the ModelResolver collaborator, which reads the
+        deployment half back through ``routing_available()``."""
+        return self._model_resolver.router_armed(routing_allowed)
 
     def _build_middlewares(self, routing_allowed: bool = False) -> list:
         """Compose the kernel middleware stack (SPEC-018).
@@ -574,109 +521,41 @@ class AgentKernel:
     def _count_gateway_tools(self, toolkit) -> int:
         return self._toolkit_asm.count_gateway_tools(toolkit)
 
-    def _build_kernel_configs(self):
-        """Settings-driven kernel configs (SPEC-017 R-1).
+    @property
+    def _agents(self):
+        """Read-through to the AgentRegistry's live per-session agent cache.
 
-        Defaults mirror agentscope's own defaults, so unset deployments
-        behave exactly as before the settings existed.
+        Kept as a property so the direct ``kernel._agents[...]`` test coupling
+        (test_prose_redaction) and ``_prose_redactor``'s protected-key scan stay
+        unchanged; item assignment mutates the registry's OrderedDict in place.
         """
-        from agentscope.agent import (
-            ContextConfig,
-            InjectionConfig,
-            ModelConfig,
-            ReActConfig,
-        )
+        return self._agent_registry._agents
 
-        settings = self.settings
-        return {
-            "model_config": ModelConfig(max_retries=settings.model_max_retries),
-            # SPEC-064 R-2: ``compression_tool_enabled`` adds the opt-in
-            # ``CompressContext`` tool (default off). Deliberately no
-            # ``offloader`` is wired into the Agent: the offloader would write
-            # compressed context to a Workspace filesystem path, which breaches
-            # the read-only posture (gate point 3) and lands pod-local state on
-            # the emptyDir workspace volume — invisible to other replicas and
-            # lost on reschedule. Compression state stays in
-            # ``state.summary``/``state.context`` and rides the SPEC-017
-            # snapshot, which is shared and durable across replicas.
-            "context_config": ContextConfig(
-                trigger_ratio=settings.context_trigger_ratio,
-                tool_result_limit=settings.tool_result_limit,
-                compression_tool_enabled=settings.compress_context_enabled,
-            ),
-            "react_config": ReActConfig(max_iters=settings.max_iters),
-            "injection_config": InjectionConfig(
-                inject_runtime_state=True,
-                timezone=settings.timezone,
-            ),
-        }
+    @property
+    def _max_cached_agents(self) -> int:
+        """Read-through to the AgentRegistry's LRU bound (SPEC-017)."""
+        return self._agent_registry._max_cached_agents
+
+    def _build_kernel_configs(self):
+        """Settings-driven kernel configs (SPEC-017 R-1) — delegates to the
+        AgentRegistry collaborator."""
+        return self._agent_registry.build_kernel_configs()
 
     def _restore_state(self, session_id: str):
-        """Load a persisted AgentState for the session, if any (SPEC-017 R-3).
-
-        A missing row returns None (fresh agent); a corrupt row is discarded
-        with a WARNING and a counter so a poisoned snapshot can never wedge
-        a session.
-        """
-        try:
-            raw = AGENT_STATE_STORE.load_state(session_id)
-        except Exception as exc:
-            record_agent_state_error("restore")
-            LOGGER.warning(
-                "agent state restore failed for session %s: %s", session_id, type(exc).__name__
-            )
-            return None
-        if raw is None:
-            return None
-        try:
-            from agentscope.state import AgentState
-
-            return AgentState.model_validate_json(raw)
-        except Exception as exc:
-            record_agent_state_error("restore")
-            LOGGER.warning(
-                "discarding corrupt persisted agent state for session %s: %s",
-                session_id,
-                type(exc).__name__,
-            )
-            return None
+        """Load a persisted AgentState for the session, if any (SPEC-017 R-3) —
+        delegates to the AgentRegistry collaborator."""
+        return self._agent_registry.restore_state(session_id)
 
     def _snapshot_state(self, session_id: str, agent, turn_literals=()) -> None:
-        """Persist the agent state after a completed turn (SPEC-017 R-3).
-
-        Never raises: a failed snapshot degrades durability, not the turn.
-        """
-        try:
-            state = json.loads(agent.state.model_dump_json())
-            literals = set(self._generated_literals.get(session_id, ()))
-            literals.update(turn_literals)
-            literals.update(generated_credential_literals(state))
-            # Only the serialized projection changes; live tool/signing inputs stay raw.
-            state_json = json.dumps(redact_structure(state, literals))
-            AGENT_STATE_STORE.save_state(session_id, state_json)
-        except Exception as exc:
-            record_agent_state_error("snapshot")
-            LOGGER.warning(
-                "agent state snapshot failed for session %s: %s", session_id, type(exc).__name__
-            )
+        """Persist the agent state after a completed turn (SPEC-017 R-3) —
+        delegates to the AgentRegistry collaborator."""
+        return self._agent_registry.snapshot_state(session_id, agent, turn_literals)
 
     @staticmethod
     def _count_user_turns(agent) -> int:
-        """User-message count in the agent context (SPEC-025 turn index).
-
-        The replay path attaches persisted evidence groups to the assistant
-        turn at this ordinal, so the index is captured from the context
-        before the streamed turn appends to it. Counting user messages (not
-        assistant) keeps the index stable across HITL park/resume: parking
-        may add a partial assistant message but never a user one.
-        """
-        try:
-            context = getattr(agent.state, "context", None) or []
-            return sum(
-                1 for msg in context if getattr(msg, "role", None) == "user"
-            )
-        except Exception:  # pragma: no cover - defensive index fallback
-            return 0
+        """User-message count in the agent context (SPEC-025 turn index) —
+        delegates to the AgentRegistry collaborator."""
+        return AgentRegistry.count_user_turns(agent)
 
     def _user_text_literals(self, agent, message: str) -> frozenset[str]:
         """Credential literals the operator typed in this session's prose.
@@ -720,20 +599,9 @@ class AgentKernel:
         return StreamingProseRedactor(self._user_text_literals(agent, message), generated)
 
     def forget_session(self, session_id: str) -> None:
-        """Drop ephemeral agents and literal knowledge after an owner deletion."""
-        self._agents.pop(session_id, None)
-        self._agents.pop(f"{session_id}::read-only", None)
-        # SPEC-076: a bounded-diagnosis run fans member turns out under derived
-        # "<session>::orch::<task>" / "::orch::synthesis" agent keys (each with a
-        # further "::read-only" variant). Drop the whole family so an owner
-        # deletion cannot orphan them in the LRU (m1 leak).
-        orch_prefix = f"{session_id}::orch::"
-        for key in [k for k in self._agents if k.startswith(orch_prefix)]:
-            self._agents.pop(key, None)
-        # In-flight redactors retain their own reference until the turn ends.
-        self._generated_literals.pop(session_id, None)
-        for key in [k for k in self._generated_literals if k.startswith(orch_prefix)]:
-            self._generated_literals.pop(key, None)
+        """Drop ephemeral agents and literal knowledge after an owner deletion —
+        delegates to the AgentRegistry collaborator."""
+        return self._agent_registry.forget_session(session_id)
 
     def _persist_evidence(
         self,
@@ -785,35 +653,10 @@ class AgentKernel:
         read_only: bool = False,
         routing_allowed: bool = False,
     ):
-        from agentscope.agent import Agent
-        from agentscope.message import UserMsg
-
-        toolkit = await self._ensure_toolkit(bearer_token, read_only)
-        configs = self._build_kernel_configs()
-        state = self._restore_state(session_id)
-        agent = Agent(
-            name=self.settings.agent_name,
-            system_prompt=self.settings.system_prompt,
-            model=self._build_model(model_id),
-            toolkit=toolkit,
-            middlewares=self._build_middlewares(routing_allowed),
-            state=state,
-            **configs,
+        """Construct a session agent — delegates to the AgentRegistry collaborator."""
+        return await self._agent_registry.build_agent(
+            session_id, bearer_token, model_id, read_only, routing_allowed
         )
-        LOGGER.info(
-            "kernel agent constructed",
-            extra={
-                "session_id": session_id,
-                "model_id": self._normalize_model_id(model_id),
-                "max_iters": self.settings.max_iters,
-                "context_trigger_ratio": self.settings.context_trigger_ratio,
-                "tool_result_limit": self.settings.tool_result_limit,
-                "timezone": self.settings.timezone,
-                "model_max_retries": self.settings.model_max_retries,
-                "state_restored": state is not None,
-            },
-        )
-        return agent, UserMsg, self._normalize_model_id(model_id)
 
     async def ensure_agent(
         self,
@@ -823,84 +666,12 @@ class AgentKernel:
         read_only: bool = False,
         routing_allowed: bool = False,
     ):
-        """Return the agent bound to `session_id`, creating it on first use.
-
-        Agents are keyed by session so conversation memory never crosses
-        sessions; the cache is LRU-bounded to match the session store.
-        Creation is serialised because it awaits: without the lock two
-        concurrent turns on the same session would each build an agent and
-        one would be discarded along with its memory.
-
-        ``read_only`` turns use a distinct cache key for the same session so
-        a restricted toolkit never leaks into interactive turns (and vice
-        versa); both entries restore the same persisted memory.
-
-        Model switching (SPEC-024 R-3): the cache tracks the bound model
-        id; a turn whose resolved model differs evicts and rebuilds, and
-        ``_restore_state`` rebuilds memory — the same path as a pod
-        restart, so the switch never loses conversation history.
-        """
-        bound_id = self._normalize_model_id(model_id)
-        agent_key = f"{session_id}::read-only" if read_only else session_id
-        # SPEC-071 R-2: an agent built with the router must not be reused for a
-        # turn where routing is disarmed (an explicit request/pin that happens
-        # to resolve to the same model id), and vice versa, so the routing
-        # posture joins the cache key — mirroring ``read_only``. Gated on the
-        # same ``_router_armed`` predicate that registers the middleware, so an
-        # inert (default-off) router never splits the cache. Both entries
-        # restore the same persisted memory.
-        if self._router_armed(routing_allowed):
-            agent_key = f"{agent_key}::routed"
-        cached = self._agents.get(agent_key)
-        if cached is not None:
-            # Gateway tools recovered after this agent was built with an
-            # empty toolkit (discovery failure): rebuild so the turn can see
-            # them. Persisted state (SPEC-017 R-3) restores the memory.
-            agent, _user_msg_cls, cached_model_id = cached
-            if cached_model_id != bound_id:
-                LOGGER.info(
-                    "model switch for session %s: %s -> %s; rebuilding "
-                    "agent with restored state",
-                    session_id,
-                    cached_model_id,
-                    bound_id,
-                )
-                self._agents.pop(agent_key, None)
-            else:
-                current_toolkit = await self._ensure_toolkit(
-                    bearer_token, read_only
-                )
-                if (
-                    self._count_gateway_tools(getattr(agent, "toolkit", None)) == 0
-                    and self._count_gateway_tools(current_toolkit) > 0
-                ):
-                    LOGGER.info(
-                        "gateway tools recovered; rebuilding kernel agent for "
-                        "session %s",
-                        session_id,
-                    )
-                    self._agents.pop(agent_key, None)
-                else:
-                    # Re-check membership: the await above opens a preemption
-                    # window where a concurrent turn's recovery branch may pop
-                    # this entry, or LRU eviction may remove it. A vanished
-                    # entry falls through to the locked path, which re-checks
-                    # the cache before building.
-                    if agent_key in self._agents:
-                        self._agents.move_to_end(agent_key)
-                        return cached
-        async with self._agent_lock:
-            cached = self._agents.get(agent_key)
-            if cached is not None and cached[2] == bound_id:
-                self._agents.move_to_end(agent_key)
-                return cached
-            agent, user_msg_cls, cached_model_id = await self._build_agent(
-                session_id, bearer_token, model_id, read_only, routing_allowed
-            )
-            self._agents[agent_key] = (agent, user_msg_cls, cached_model_id)
-            while len(self._agents) > self._max_cached_agents:
-                self._agents.popitem(last=False)
-            return agent, user_msg_cls, cached_model_id
+        """Return the agent bound to ``session_id``, creating it on first use
+        (SPEC-024 R-3 model-switch cache, SPEC-071 R-2 router split, LRU bound)
+        — delegates to the AgentRegistry collaborator."""
+        return await self._agent_registry.ensure_agent(
+            session_id, bearer_token, model_id, read_only, routing_allowed
+        )
 
     def build_unconfigured_message(self, message: str, session_id: str) -> str:
         # The operator's own text is interpolated into a kernel-authored

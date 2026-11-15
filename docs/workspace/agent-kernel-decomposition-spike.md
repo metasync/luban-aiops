@@ -1,6 +1,6 @@
 # Spike: AgentKernel Decomposition (code-modularity finding C-1)
 
-Status: proposal — read-only assessment plus a staged, behavior-preserving plan. **Stage 1 authorized to begin 2026-11-15** by the operator as an internal refactor (no contract, schema, policy, audit, or trust-model change). This memo authorizes no feature work and no spec promotion.
+Status: proposal — read-only assessment plus a staged, behavior-preserving plan. **Stage 1 authorized to begin 2026-11-15** and executed (commit `cdac445a`); **Stage 2 authorized and executed 2026-11-15** — both by the operator as internal refactors (no contract, schema, policy, audit, or trust-model change). This memo authorizes no feature work and no spec promotion.
 Date: 2026-11-15
 Roadmap home: code-modularity track opened by the v0.58.1 code & document review (finding C-1); no Exploration Backlog row yet — promote to one only if the refactor is scheduled beyond Stage 1
 Verified against: `products/agent-platform/src/agent_service/runtime_kernel.py` at v0.58.1 (static inspection: 3,393 LOC; `AgentKernel` spans L246→EOF, 76 methods); the extraction pattern in `services/kernel_middleware.py`; the agent-platform suite (1,793 tests) and the SPEC-063 `execution-failure-test` campaign (795)
@@ -46,8 +46,8 @@ Verified against: `products/agent-platform/src/agent_service/runtime_kernel.py` 
 Every stage is one commit, keeps behavior byte-identical, and runs the full agent-platform suite plus `make verify` (incl. the 795-test SPEC-063 campaign) before landing.
 
 - **Stage 0 (prerequisite) — characterization gate.** Confirm the status / toolkit / stream / confirmation / execution paths are pinned by golden-output characterization tests; add focused ones where the existing suite leaves a gap. No refactor proceeds without this.
-- **Stage 1 (low risk) — `KernelStatus` + `ToolkitAssembler`.** Extract the 12 read-only status projections and the 8 toolkit-assembly / role-narrowing methods into collaborators; keep thin delegating methods on `AgentKernel` so the public surface consumed by `api/v2/routes.py` is unchanged.
-- **Stage 2 (med) — `ModelResolver` + `AgentRegistry`.** Model selection (SPEC-024/026/027/071) and the agent build / cache / restore / snapshot lifecycle (owns `_agents` + `_agent_lock`).
+- **Stage 1 (low risk) — `KernelStatus` + `ToolkitAssembler`.** Extract the 12 read-only status projections and the 8 toolkit-assembly / role-narrowing methods into collaborators; keep thin delegating methods on `AgentKernel` so the public surface consumed by `api/v2/routes.py` is unchanged. **Done** (commit `cdac445a`): `services/kernel_status.py` + `services/kernel_toolkits.py`; `runtime_kernel.py` 3,393 → 3,146 LOC; adds `tests/test_kernel_stage1_characterization.py` (14 pins); suite 1,807 green.
+- **Stage 2 (med) — `ModelResolver` + `AgentRegistry`.** Model selection (SPEC-024/026/027/071) and the agent build / cache / restore / snapshot lifecycle (owns `_agents` + `_agent_lock`). **Done 2026-11-15**: `services/kernel_models.py` (`ModelResolver`) + `services/kernel_agents.py` (`AgentRegistry`); `runtime_kernel.py` 3,146 → 2,916 LOC; adds `tests/test_kernel_stage2_characterization.py` (17 pins); suite 1,824 green. Behavior byte-identical: the persisted-state store binding (`AGENT_STATE_STORE`) is resolved through `runtime_kernel` at call time — not a module-level import in the collaborator — so the long-standing `monkeypatch.setattr(runtime_kernel, "AGENT_STATE_STORE", …)` test surface stays authoritative after the move.
 - **Stage 3 (med-high) — `ExecutionDispatcher`.** The signed-request / receipt / ledger path (SPEC-037/063/077). Signature canonicalization must stay byte-identical or execution-runtime verification breaks; golden-output parity is mandatory.
 - **Stage 4 (high) — `ConfirmationCoordinator` + `TurnStreamer`.** The HITL park/resume (SPEC-020/030/031) and the reply/SSE path. Do the in-place monster-method split (Option B) first, then move.
 
@@ -59,4 +59,4 @@ Every stage is one commit, keeps behavior byte-identical, and runs the full agen
 
 ## 7. Backlog update
 
-Recorded as the code-modularity track's first candidate. Stage 1 (characterization gate + `KernelStatus` / `ToolkitAssembler` extraction) authorized to begin 2026-11-15; Stages 2–4 remain proposal-only, each needing its own operator go-ahead. No spec number is assigned; promote to a spec only if the refactor is scheduled beyond Stage 1.
+Recorded as the code-modularity track's first candidate. Stage 1 (characterization gate + `KernelStatus` / `ToolkitAssembler` extraction) authorized to begin 2026-11-15 and executed (commit `cdac445a`). Stage 2 (`ModelResolver` + `AgentRegistry`) authorized and executed 2026-11-15 — behavior byte-identical, full agent-platform suite green (1,824). Stages 3–4 remain proposal-only, each needing its own operator go-ahead. No spec number is assigned; promote to a spec only if the refactor is scheduled beyond the authorized stages.
