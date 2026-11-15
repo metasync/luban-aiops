@@ -6,7 +6,7 @@ Repo Wiki cache is retired (untracked + ignored). Run via `make docs-check`,
 which is part of the `make verify` pre-push gate. Pure stdlib; resolves paths
 from the repo root so it can be invoked from anywhere.
 
-Three checks, two of them failing:
+Four checks, two of them failing:
 
   1. Broken relative links -- ERROR in the evergreen layer (everything outside
      the frozen docs/specs/SPEC-*/ Tier-2 record); WARN inside frozen specs,
@@ -19,6 +19,12 @@ Three checks, two of them failing:
      state the release by pointing at VERSION/CHANGELOG rather than a literal,
      but past-tense "added in vX.Y.Z" attributions are allowed, so this needs a
      human eye rather than a hard fail.
+  4. Unresolvable env-var names in the configuration-reference knob tables --
+     WARN only. Every backtick-quoted multi-word env var (``FOO_BAR_BAZ``) in a
+     table row should be referenced somewhere in the products/shared/mk source
+     or overlays; one that is not has likely been renamed or removed (the drift
+     class this gate cannot otherwise see). WARN because a var may be a pure
+     operator-set passthrough with no code reader, so it needs a human eye.
 
 Exit status is non-zero if any ERROR is found. See docs/specs/README.md
 "Documentation Tiers" for the tier lifecycle these checks enforce.
@@ -51,6 +57,22 @@ ATTRIBUTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Check 4: env-var drift in the configuration-reference knob tables.
+CONFIG_REF = os.path.join("docs", "guides", "configuration-reference.md")
+# A multi-word UPPER_SNAKE token (>=2 underscores) -- the shape renames hit, and
+# narrow enough to skip make/py constants like IMAGE_TAG or PLATFORM_VERSION.
+ENV_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b")
+BACKTICK_ENV_RE = re.compile(r"`([A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,})`")
+# Where a documented env var may legitimately be read or set.
+CODE_ENV_ROOTS = ("products", "shared", "mk")
+CODE_ENV_EXTS = {".py", ".env", ".yaml", ".yml", ".toml", ".sh", ".example", ".mk"}
+CODE_ENV_BASENAMES = {"Makefile"}
+PRUNE_DIRS = {
+    ".venv", "node_modules", "__pycache__", ".git", "dist", "build",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+}
+MAX_SCAN_BYTES = 2_000_000
+
 
 def collect_markdown() -> list[str]:
     """Every .md under docs/ plus the root entry docs, as repo-relative paths."""
@@ -77,6 +99,58 @@ def is_external(raw: str) -> bool:
 def is_ip_like(text: str) -> bool:
     parts = text.split(".")
     return len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+def collect_code_env_tokens() -> set[str]:
+    """Every UPPER_SNAKE env-var token referenced in products/shared/mk source.
+
+    Walks the code and overlay trees (pruning .venv/node_modules/caches) and
+    harvests tokens from Python, env fragments, YAML, shell, and makefiles, so a
+    var read via ``os.getenv`` or set in a runtime-config.env both count as real.
+    """
+    tokens: set[str] = set()
+    roots = [os.path.join(ROOT, top) for top in CODE_ENV_ROOTS]
+    roots.append(os.path.join(ROOT, "Makefile"))
+    for base in roots:
+        if os.path.isfile(base):
+            _harvest_env_file(base, tokens)
+            continue
+        if not os.path.isdir(base):
+            continue
+        for root, dirs, names in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in PRUNE_DIRS]
+            for n in names:
+                if os.path.splitext(n)[1] in CODE_ENV_EXTS or n in CODE_ENV_BASENAMES:
+                    _harvest_env_file(os.path.join(root, n), tokens)
+    return tokens
+
+
+def _harvest_env_file(path: str, tokens: set[str]) -> None:
+    try:
+        if os.path.getsize(path) > MAX_SCAN_BYTES:
+            return
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            tokens.update(ENV_TOKEN_RE.findall(fh.read()))
+    except OSError:
+        return
+
+
+def documented_env_vars() -> list[tuple[int, str]]:
+    """(line, var) for each distinct backtick-quoted env var in the config-ref tables."""
+    path = os.path.join(ROOT, CONFIG_REF)
+    if not os.path.exists(path):
+        return []
+    hits: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    with open(path, encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh.read().splitlines(), 1):
+            if not line.lstrip().startswith("|"):
+                continue
+            for var in BACKTICK_ENV_RE.findall(line):
+                if var not in seen:
+                    seen.add(var)
+                    hits.append((lineno, var))
+    return hits
 
 
 def main() -> int:
@@ -130,6 +204,9 @@ def main() -> int:
     broken_evergreen.sort()
     broken_frozen.sort()
 
+    code_env = collect_code_env_tokens()
+    env_var_warns = [(ln, var) for ln, var in documented_env_vars() if var not in code_env]
+
     def header(label: str) -> None:
         print(f"\n== {label} ==")
 
@@ -153,6 +230,10 @@ def main() -> int:
     for p, lineno, literal in version_warns:
         print(f"    {p}:{lineno}  '{literal}'  (point at VERSION/CHANGELOG instead)")
 
+    header(f"4. Config-reference env vars not found in code/overlays (WARN): {len(env_var_warns)}")
+    for lineno, var in env_var_warns:
+        print(f"    {CONFIG_REF}:{lineno}  '{var}'  (no code/overlay reference; renamed or removed?)")
+
     errors = len(broken_evergreen) + len(orphans)
     print("")
     if errors:
@@ -160,7 +241,8 @@ def main() -> int:
               f"{len(orphans)} orphan(s)")
         return 1
     print(f"PASS: evergreen docs layer is link-clean and fully indexed "
-          f"({len(broken_frozen)} frozen-spec link(s), {len(version_warns)} version literal(s) noted as warnings)")
+          f"({len(broken_frozen)} frozen-spec link(s), {len(version_warns)} version literal(s), "
+          f"{len(env_var_warns)} unresolved env var(s) noted as warnings)")
     return 0
 
 

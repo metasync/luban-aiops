@@ -1,6 +1,6 @@
 # Agentic AIOps Workspace
 
-This repository is the workspace for the proposed enterprise-grade agentic AIOps platform.
+This repository is the workspace for the enterprise-grade agentic AIOps platform.
 
 The workspace is organized as a modular platform made up of multiple product-oriented projects with clear boundaries, explicit integration points, and shared platform contracts.
 

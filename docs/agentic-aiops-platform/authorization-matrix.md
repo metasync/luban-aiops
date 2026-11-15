@@ -99,8 +99,8 @@ of the identity-broker dev token.
 Primary use:
 
 - sign in, chat, and query services
-- view incidents and act as first responder (`incident:triage`,
-  `incident:act`)
+- view incidents and act as first responder (`incident:read`,
+  `incident:create`, `incident:triage`)
 - invoke read-class tools (`tools:invoke`), read the policy matrix
   (`policy:read`), and confirm low-risk `tier_1` tool cards in-session
   (`chat:confirm`)
@@ -682,6 +682,27 @@ full approval model —
 policy actions, risk-tier admission, the agent auto-allow list, and HITL
 confirmation — is documented in the
 [Approval and HITL Governance Guide](../guides/approval-and-hitl.md).
+
+Two later R5 slices add concrete grants the matrix's abstract tiers only implied.
+Since v0.41.0 (SPEC-062) `secrets:deliver` gates external delivery of a generated
+secret over an outbound channel (email) — a **distinct** action from `tools:mutate`
+so a deployment can grant "mutate infrastructure" separately from "email a secret to
+a third party" — held by `platform-admin`, `approver`, and `operator` (`developer`,
+`read-only-observer`, and `auditor` receive the standard audited policy 403).
+`secrets.deliver` is write-tier, so `require-approval-tools-mutate` still wins by
+precedence on its `tools:mutate` leg and every send parks behind a designation
+distinct from the requester; `approver` carries the grant only so a tier_2-approved
+send executes on the confirmer's delegated token (SPEC-030 R-3). Since v0.51.0
+(SPEC-070) `targets:authorize` gates the human-initiated outbound **user-delegated**
+authorization workflow (start/status/cancel/browser-reset on the tool-gateway's
+`/api/v2/targets/authorizations` routes), granted to exactly the `tools:invoke`
+holders — `platform-admin`, `approver`, `operator`, `developer`, and
+`read-only-observer` — so a requester may only drive enrollment for a target they
+may already invoke on behalf of, and no observer read-invocation posture is widened;
+`auditor` is denied by default. The grant is necessary but not sufficient: the route
+additionally rechecks the administered owner→account mapping and the current
+invocation entitlement and scopes every operation to the verified owner, so holding
+`targets:authorize` alone enrolls nothing.
 
 Since v0.53.0 (SPEC-072) one new action gates platform-configuration
 transparency: `runtime:flags` authorizes an authenticated read of the runtime's

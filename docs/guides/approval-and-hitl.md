@@ -165,11 +165,11 @@ The shipped rule is `allow-operators-tools-mutate`:
 ```yaml
 - id: allow-operators-tools-mutate
   domain: action_authz
-  description: Platform admins and operators may execute mutating (write/admin risk) tools.
+  description: Platform admins, operators, and approvers may execute mutating (write/admin risk) tools.
   priority: 100
   enabled: true
   match:
-    roles_any: ["platform-admin", "operator"]
+    roles_any: ["platform-admin", "approver", "operator"]
     actions_any: ["tools:mutate"]
   decision:
     outcome: allow

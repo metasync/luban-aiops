@@ -121,8 +121,9 @@ It runs as part of `make verify`.
 ## Tier 4 — Operator-portal SPA gate (`portal-test`)
 
 The operator portal is **not** a uv product, so `make test` never covers it
-(SPEC-063 R-8c). `portal-test` runs `make -C products/operator-portal test`,
-which executes:
+(SPEC-063 R-8c). `portal-test` runs the portal's two targets in sequence —
+`make -C products/operator-portal test` then `web-build` — which together
+execute:
 
 - the full **Vitest** suite — configured to **fail on zero tests**, so there is
   no skip/empty-green path; and

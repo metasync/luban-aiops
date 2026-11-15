@@ -623,7 +623,6 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/tool-gateway/runtime-c
 | `GATEWAY_ELASTIC_PASSWORD` | Elastic basic-auth password | *(none)* | runtime-config |
 | `GATEWAY_ELASTIC_VERIFY_TLS` | Verify Elastic TLS certificates | `true` | code default |
 | `GATEWAY_ELASTIC_ALERTS_INDEX` | Elastic alerts index pattern | `.alerts-*` | code default |
-| `GATEWAY_WORKLOAD_TOKEN_PATH` | Projected SA token file (prod) | *(none)* | runtime-secrets |
 | `GATEWAY_AUDIT_SERVICE_URL` | Audit-service ingest URL (unset = log-only) | `http://audit-service:8000` | runtime-config |
 | `GATEWAY_AUDIT_CLIENT_ID` | Audit ingest client id | `tool-gateway` | runtime-config |
 | `GATEWAY_AUDIT_CLIENT_SECRET` | Audit ingest credential | *(none)* | **runtime-secrets** |
@@ -688,7 +687,7 @@ Config fragment: `shared/platform-ops/gitops/dev-k8s/base/identity-broker/runtim
 | `IDENTITY_TOKEN_AUDIENCE` | JWT audience for portal tokens | `platform-gateway` | runtime-config |
 | `IDENTITY_TOKEN_TTL_SECONDS` | Portal JWT TTL | `3600` | code default |
 | `IDENTITY_DELEGATED_TOKEN_TTL_SECONDS` | Delegated token TTL | `300` | runtime-config |
-| `IDENTITY_JWT_ISSUER` | JWT issuer claim | `http://identity-service:8000` | code default |
+| `IDENTITY_TOKEN_ISSUER` | JWT issuer claim | `luban-identity-broker` | code default |
 | `IDENTITY_JWT_PRIVATE_KEY_PATH` | RSA private key file (prod) | *(auto-generate)* | code default |
 | `IDENTITY_SERVICE_CLIENTS` | Registered service callers | *(none)* | **runtime-secrets** |
 | `IDENTITY_WORKLOAD_ISSUER_URL` | Cluster OIDC issuer (prod) | *(none, disabled)* | runtime-secrets |

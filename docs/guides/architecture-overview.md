@@ -301,14 +301,21 @@ The policy engine enforces deny-by-default authorization on named actions:
 | `tools:invoke` | tool-gateway | Execute a tool |
 | `tools:mutate` | tool-gateway | Execute mutating (write/admin risk) tools (SPEC-021) |
 
-Health, metrics, auth, and identity routes are explicitly exempt (platform plumbing, no
+This table lists the principal actions; the exhaustive, always-current action → role
+mapping is the live matrix served at `GET /api/v1/policy/matrix` (generated from the
+loaded bundle), with the design rationale and SPEC-by-SPEC evolution traced in the
+[Authorization Matrix](../agentic-aiops-platform/authorization-matrix.md). Health,
+metrics, auth, and identity routes are explicitly exempt (platform plumbing, no
 business action).
 
 ### Default Policy Bundle
 
-The platform ships with twenty allow rules at priority 100 plus one tier-2
-`require-approval` rule at priority 200 (`require-approval-tools-mutate`). Everything
-else is denied:
+The platform ships with twenty-one `allow` rules at priority 100, the tier-2
+`require-approval-tools-mutate` at priority 200, and — from the multi-agent series
+(SPEC-073/074/076/077) — two **ready-but-inert** agent-role rules that never match
+until a caller threads an agent-role (SPEC-073 R-3 keeps it off every wire field):
+`require-approval-executor-tools-mutate` (priority 200) and
+`deny-diagnostician-tools-mutate` (priority 300). Everything else is denied:
 
 | Rule | Roles | Actions |
 |---|---|---|
@@ -332,7 +339,10 @@ else is denied:
 | `allow-operators-incident-skill-draft` | platform-admin, approver, operator | `incident:skill_draft` |
 | `allow-operators-skill-graduate` | platform-admin, approver, operator | `session:skill_graduate` |
 | `allow-operators-runtime-flags` | platform-admin, approver, operator | `runtime:flags` |
+| `allow-operators-remediate-stage` | platform-admin, operator | `remediate:stage` (SPEC-077; approver deliberately excluded to keep stager and approver disjoint) |
 | `require-approval-tools-mutate` *(priority 200, tier_2)* | platform-admin, approver, operator, developer | `tools:mutate` → parked for approval by an approver or platform-admin distinct from the requester |
+| `require-approval-executor-tools-mutate` *(priority 200, tier_2; agent-role `executor`, inert)* | platform-admin, approver, operator, developer | `tools:mutate` staged by an `executor` agent-role → parked for a distinct-human approver (SPEC-076 R-4) |
+| `deny-diagnostician-tools-mutate` *(priority 300; agent-role `diagnostician`, inert)* | platform-admin, approver, operator, developer, read-only-observer | `tools:mutate` under a `diagnostician` agent-role → denied (read-only orchestration loop, SPEC-076 R-5) |
 
 > **Note:** The live matrix these rules produce is served by platform-gateway at
 > `GET /api/v1/policy/matrix` (SPEC-019) and rendered in the portal's Permissions view.
