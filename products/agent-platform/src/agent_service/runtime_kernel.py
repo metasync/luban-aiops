@@ -4,7 +4,6 @@ import logging
 from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
 from agent_service.core.metrics import record_evidence_write
 from agent_service.providers import get_provider
@@ -18,7 +17,13 @@ from agent_service.services.agent_role import AgentRole, current_agent_role_valu
 # stays authoritative after the move (behavior byte-identical). Do not drop it.
 from agent_service.services.agent_state_store import AGENT_STATE_STORE
 from agent_service.services.audit_emitter import (
-    build_audit_event,
+    # Decomposition Stage 3: ``build_audit_event`` moved with the emitter into
+    # the ExecutionDispatcher collaborator. ``emit_audit_event`` stays
+    # re-exported here even though ``_emit_execution_event`` now lives in the
+    # collaborator: the dispatcher resolves it through *this* module namespace
+    # at call time, so the long-standing test surface
+    # ``monkeypatch.setattr("agent_service.runtime_kernel.emit_audit_event", ...)``
+    # stays authoritative after the move (behavior byte-identical). Do not drop it.
     emit_audit_event,
 )
 from agent_service.services.authoring_trace import (
@@ -37,9 +42,7 @@ from agent_service.services.evidence_store import (
 )
 from agent_service.services.execution_records import (
     EXECUTION_RECORD_STORE,
-    make_execution_record,
 )
-from agent_service.services.execution_recovery import ExecutionRecovery
 from agent_service.services.delegated_identity import (
     DECIDER_IDENTITY, REQUESTER_IDENTITY, DelegatedIdentityError, VerifiedHuman,
     session_requester, verify_delegated_human,
@@ -47,10 +50,7 @@ from agent_service.services.delegated_identity import (
 from agent_service.services.execution_signing import (
     REASON_ARGS_DIGEST_MISMATCH,
     REASON_REQUEST_MISSING,
-    REASON_SIGNING_UNAVAILABLE,
-    build_flow_request,
     build_receipt,
-    build_requests,
 )
 from agent_service.services.flow_approvals import (
     BROWSER_WRITE_TOOLS,
@@ -61,12 +61,12 @@ from agent_service.services.flow_approvals import (
 from agent_service.services.hitl_confirmations import (
     CONFIRMATION_REGISTRY,
     PendingConfirmation,
-    RISK_LEVEL_ACTIONS,
     curated_effect_sentence,
     redact_pending_calls,
 )
 from agent_service.schemas.v2 import AuthorizationRequired
 from agent_service.services.kernel_agents import AgentRegistry
+from agent_service.services.kernel_executions import ExecutionDispatcher
 from agent_service.services.kernel_middleware import (
     AuthorizationTurn, CURRENT_AUTHORIZATION_TURN, authorization_turn,
 )
@@ -257,67 +257,68 @@ class AgentKernel:
         # delegators. See the decomposition spike memo (Stage 2).
         self._model_resolver = ModelResolver(self)
         self._agent_registry = AgentRegistry(self, max_cached_agents)
-        # SPEC-063 R-2: agent-side durable execution recovery/admission store,
-        # built lazily and only when admission is enabled. ``None`` (the
-        # default) keeps the legacy in-process handoff path byte-identical, so
-        # a partially upgraded mutation path is never enabled by construction.
-        self._recovery: ExecutionRecovery | None = None
-        self._recovery_built = False
+        # Decomposition Stage 3: the signed-request / receipt / ledger
+        # orchestration path (SPEC-037/051/063/077) — the durable recovery
+        # store, the run-identity / ``RunGuard`` bind, the per-action and
+        # flow-unlock signing sites, the durable request write, the receipt
+        # timing helper and the execution-audit emitter — lives in an
+        # ExecutionDispatcher collaborator. It owns the ``_recovery`` /
+        # ``_recovery_built`` slot (SPEC-063 R-2: built lazily and only when
+        # admission is enabled; ``None`` keeps the legacy in-process handoff
+        # path byte-identical). AgentKernel keeps thin delegators plus
+        # read/write-through ``_recovery`` / ``_recovery_built`` properties, so
+        # every caller and test stays byte-identical — ``kernel._execution_recovery()``
+        # in api/v2/routes + services/execution_recovery, the
+        # ``flow_signer=self._sign_flow_execution`` middleware binding, and
+        # ``monkeypatch.setattr(kernel, "_execution_recovery"/"_bind_guard", ...)``.
+        # Sibling execution calls route back through these delegators, and the
+        # emitter resolves ``emit_audit_event`` through this module namespace at
+        # call time. See the decomposition spike memo (Stage 3).
+        self._executions = ExecutionDispatcher(self)
 
-    def _execution_recovery(self) -> ExecutionRecovery | None:
-        """The agent-side durable recovery store, or ``None`` when disabled.
+    @property
+    def _recovery(self):
+        """Read/write-through to the ExecutionDispatcher's durable recovery slot.
 
-        Admission is disabled by default (SPEC-063 R-2a): with the flag off the
-        kernel returns ``None`` and every execution seam stays on the legacy
-        path. When enabled, ``RuntimeSettings.__post_init__`` has already
-        guaranteed a ledger DSN and epoch at startup, so this builds the store
-        once and caches it. Construction never connects (the connection factory
-        is per-call and bounded), so building is cheap and side-effect free.
+        Kept as a property so the direct ``kernel._recovery`` /
+        ``kernel._recovery_built`` reads (test_runtime_kernel) and the lazy
+        build/cache inside ``_execution_recovery`` stay unchanged after the
+        Stage-3 extraction — the collaborator owns the live slot.
         """
-        if not self.settings.execution_admission_enabled:
-            return None
-        if not self._recovery_built:
-            self._recovery = ExecutionRecovery(
-                self.settings.execution_state_db_url,
-                self.settings.execution_signing_key,
-                self.settings.execution_admission_epoch,
-                admission_enabled=True,
-            )
-            self._recovery_built = True
-        return self._recovery
+        return self._executions._recovery
+
+    @_recovery.setter
+    def _recovery(self, value) -> None:
+        self._executions._recovery = value
+
+    @property
+    def _recovery_built(self) -> bool:
+        return self._executions._recovery_built
+
+    @_recovery_built.setter
+    def _recovery_built(self, value: bool) -> None:
+        self._executions._recovery_built = value
+
+    def _execution_recovery(self):
+        """The agent-side durable recovery store, or ``None`` when disabled
+        (SPEC-063 R-2) — delegates to ExecutionDispatcher, the single source
+        shared with the api/v2 + execution_recovery availability projections."""
+        return self._executions._execution_recovery()
 
     def _resolve_run_id(
         self, recovery, session_id, owner_user_id, flow_approval=None
-    ) -> str | None:
-        """The durable run identity for this human root turn (SPEC-063 R-4).
-
-        A reused flow authority inherits its originating run across later turns;
-        otherwise a new human root turn mints one via the ledger. Returns
-        ``None`` when the identity cannot be established (store unavailable), so
-        the mutation lane fails closed rather than proceeding without a durable
-        run — a missing identity is never silently replaced.
-        """
-        inherited = getattr(flow_approval, "run_id", None) if flow_approval else None
-        if inherited:
-            return str(inherited)
-        from agent_service.services.execution_protocol import ProtocolError
-
-        try:
-            return recovery.create_run(session_id, owner_user_id)
-        except ProtocolError as exc:
-            LOGGER.warning(
-                "execution run creation failed for session %s: %s",
-                session_id,
-                exc.reason,
-            )
-            return None
+    ):
+        """The durable run identity for this human root turn (SPEC-063 R-4) —
+        delegates to ExecutionDispatcher (behavior byte-identical)."""
+        return self._executions._resolve_run_id(
+            recovery, session_id, owner_user_id, flow_approval=flow_approval
+        )
 
     def _bind_guard(self, recovery, run_id, session_id, owner_user_id):
-        """Build the turn's ``RunGuard`` bound to a resolved run identity."""
-        from agent_service.services.execution_run_guard import RunGuard, RunIdentity
-
-        return RunGuard(
-            RunIdentity(str(run_id), session_id, owner_user_id), recovery=recovery
+        """Build the turn's ``RunGuard`` bound to a resolved run identity —
+        delegates to ExecutionDispatcher (behavior byte-identical)."""
+        return self._executions._bind_guard(
+            recovery, run_id, session_id, owner_user_id
         )
 
     @property
@@ -1579,149 +1580,26 @@ class AgentKernel:
         requester: VerifiedHuman | None = None,
         decider: VerifiedHuman | None = None,
     ) -> tuple[dict[str, dict], str | None]:
-        """Build, persist, and audit the signed requests (SPEC-037 R-2).
-
-        Returns ``(requests_by_call_id, rejection_reason)``. Approved
-        batches with a provisioned key produce one signed request per
-        parked call; a missing key rejects the whole batch fail-closed
-        (the resumed stream reports the rejection through the tool
-        boundary) and audits ``execution_rejected``
-        (``signing_unavailable``). Denials construct nothing.
-        """
-        if not confirmed:
-            return {}, None
-        key = self.settings.execution_signing_key
-        if not key:
-            LOGGER.warning(
-                "mutating resume rejected: no execution signing key "
-                "provisioned (confirm_id=%s)",
-                pending.confirm_id,
-            )
-            for call in pending.pending_calls_payload():
-                self._emit_execution_event(
-                    "execution_rejected",
-                    "deny",
-                    {
-                        "confirm_id": pending.confirm_id,
-                        "call_id": call.get("call_id"),
-                        "tool_name": call.get("tool_name"),
-                        "reason": REASON_SIGNING_UNAVAILABLE,
-                    },
-                    request_id,
-                    session_id,
-                    decider_user_id,
-                )
-            return {}, REASON_SIGNING_UNAVAILABLE
-        requests_by_call: dict[str, dict] = {}
-        # The signed envelope carries an ``args_digest``, never the raw
-        # arguments, so the authoring-trace capture below has to be handed
-        # them separately (SPEC-055 R-2). One read of the parked payload
-        # yields both the arguments and the risk tier the toolkit
-        # snapshotted at park time; it is raw at resume because
-        # ``redact_parameters`` is a display/at-rest projection applied to
-        # copies, never to a signing input.
-        calls_by_id: dict[str, dict] = {
-            str(call.get("call_id")): call
-            for call in pending.pending_calls_payload()
-        }
-        # SPEC-063 R-4: an approved resume under durable admission signs a v3
-        # envelope bound to the parked batch's originating run. The identity is
-        # inherited from ``pending.run_id`` and never re-minted here; a resume
-        # missing it (e.g. a card parked before the cutover) fails closed rather
-        # than degrading to a v2 envelope that the bound v3 guard would reject
-        # mid-dispatch. Inert when admission is disabled (recovery is None).
-        sign_run_id: str | None = None
-        sign_epoch: str | None = None
-        if self._execution_recovery() is not None:
-            if not pending.run_id:
-                LOGGER.warning(
-                    "mutating resume rejected: no durable run identity on the "
-                    "parked batch (confirm_id=%s)",
-                    pending.confirm_id,
-                )
-                for call in pending.pending_calls_payload():
-                    self._emit_execution_event(
-                        "execution_rejected",
-                        "deny",
-                        {
-                            "confirm_id": pending.confirm_id,
-                            "call_id": call.get("call_id"),
-                            "tool_name": call.get("tool_name"),
-                            "reason": REASON_REQUEST_MISSING,
-                        },
-                        request_id,
-                        session_id,
-                        decider_user_id,
-                    )
-                return {}, REASON_REQUEST_MISSING
-            sign_run_id = pending.run_id
-            sign_epoch = self.settings.execution_admission_epoch
-        try:
-            if self.settings.target_authorization_enabled and pending.requester_identity is not None and requester is None:
-                raise DelegatedIdentityError()
-            requests = build_requests(
-                pending, decider_user_id, key, run_id=sign_run_id,
-                admission_epoch=sign_epoch, requester=requester, decider=decider,
-            )
-        except DelegatedIdentityError:
-            return {}, REASON_REQUEST_MISSING
-        for request in requests:
-            requests_by_call[request["call_id"]] = request
-            self._persist_execution_request(request)
-            call = calls_by_id.get(str(request["call_id"])) or {}
-            # Being *signed* is not the same as being a mutation, so the
-            # trace gate is the tier rather than the signature. A read-tier
-            # call reaches this seam whenever it is off the middleware's
-            # curated auto-allow list — an unvetted read tool parks and is
-            # signed like any other ASK-gated call — and it is not a replay
-            # step: a graduated flow declares ``risk_class: write``, so a
-            # read in its step list is refused by R-4's blast-radius
-            # re-validation, which derives read-tier from the same
-            # ``BROWSER_WRITE_TOOLS`` set rather than keeping a second list.
-            # The platform's single risk→action mapping decides, so this seam
-            # and the policy bridge cannot disagree about what a mutation
-            # is; a call with no known tier is not captured either, which
-            # degrades to "no graduation candidate" — the outcome R-2
-            # already accepts for a store failure — rather than polluting a
-            # store that outlives every receipt. The flow-unlock site needs
-            # no such gate: it is reachable only through
-            # ``BROWSER_WRITE_TOOLS``.
-            if RISK_LEVEL_ACTIONS.get(call.get("risk_level")) == "tools:mutate":
-                self._capture_authoring_step(
-                    request, dict(call.get("parameters") or {})
-                )
-            self._emit_execution_event(
-                "execution_requested",
-                "success",
-                {
-                    "confirm_id": request["confirm_id"],
-                    "execution_id": request["execution_id"],
-                    "call_id": request["call_id"],
-                    "tool_name": request["tool_name"],
-                    "args_digest": request["args_digest"],
-                    "decider_user_id": request["decider_user_id"],
-                    "owner_user_id": request["owner_user_id"],
-                },
-                request_id,
-                session_id,
-                decider_user_id,
-            )
-        return requests_by_call, None
+        """Build, persist, and audit the signed requests (SPEC-037 R-2) —
+        delegates to ExecutionDispatcher (behavior byte-identical). The sibling
+        calls it makes (``_emit_execution_event`` / ``_persist_execution_request``
+        / ``_capture_authoring_step`` / ``_execution_recovery``) route back
+        through this kernel, so an instance-level monkeypatch on any of them
+        stays authoritative after the Stage-3 move."""
+        return self._executions._prepare_executions(
+            pending,
+            decider_user_id,
+            confirmed,
+            request_id,
+            session_id,
+            requester=requester,
+            decider=decider,
+        )
 
     def _persist_execution_request(self, request: dict) -> None:
-        """Best-effort durable request write (SPEC-037 R-4).
-
-        Same posture as the SPEC-031 claim-time writes: a store failure
-        degrades audit completeness, never the resumed stream.
-        """
-        try:
-            EXECUTION_RECORD_STORE.save_request(make_execution_record(request))
-        except Exception as exc:
-            LOGGER.warning(
-                "execution record request write failed for %s: %s",
-                request["execution_id"],
-                exc,
-            )
+        """Best-effort durable request write (SPEC-037 R-4) — delegates to
+        ExecutionDispatcher (behavior byte-identical)."""
+        return self._executions._persist_execution_request(request)
 
     def _capture_authoring_step(self, envelope: dict, parameters: dict) -> None:
         """Best-effort authoring-trace append (SPEC-055 R-2).
@@ -1786,149 +1664,15 @@ class AgentKernel:
     def _sign_flow_execution(
         self, tool_call: object, gateway_tool_name: str
     ) -> dict | None:
-        """Auto-sign one unlocked browser write under a flow authority (SPEC-051 R-1/R-3).
-
-        Armed as ``GatewayPermissionMiddleware``'s ``flow_signer``. Returns a
-        signed execution envelope — injecting it into the shared
-        ``EXECUTION_REQUESTS`` map so the tool closure verifies and hands off
-        exactly like a card-approved call — or ``None`` to fail safe and let the
-        write park. ``None`` (→ ASK) whenever: the tool is not a browser write;
-        the session id is absent; no live flow authority exists (TTL lapse or
-        ``ttl <= 0`` disable); the bound ``FlowContext`` identity no longer
-        matches the approval (a rebind — the guard that eliminates the ADR-0007
-        cross-flow window); the execution state is not armed
-        (``EXECUTION_REQUESTS`` is not a dict); or no signing key is
-        provisioned. Each unlocked write is still individually signed,
-        persisted, audited (``execution_requested``), and appended to the
-        session's authoring trace, and the tool-gateway deviation guard still
-        bounds it on invocation.
-        """
-        from agent_service.tools.gateway_tools import (
-            CHAT_SESSION_ID,
-            EXECUTION_AUDIT_CONTEXT,
-            EXECUTION_REQUESTS,
-        )
-
-        if gateway_tool_name not in BROWSER_WRITE_TOOLS:
-            # SPEC-055 R-5: enforce this function's own stated scope — "one
-            # unlocked *browser* write" — rather than inheriting it from the
-            # middleware that happens to be its only caller today. A browser
-            # flow authority is scoped to a web target the operator approved;
-            # auto-signing an infra mutation under it would execute a write no
-            # decision of theirs covers, which is the one thing the OQ-2
-            # per-action fallback must never do. Ahead of every side effect
-            # below — the ``EXECUTION_REQUESTS`` injection, the durable
-            # execution record, the authoring-trace step and the
-            # ``execution_requested`` audit — so a refused name leaves no
-            # trace of a request that was never made. (The lookups it also
-            # precedes are pure reads every other ``None`` path takes too;
-            # the side effects are what the position buys.) Fail-safe:
-            # ``None`` parks the call, exactly as an absent authority would.
-            return None
-
-        # SPEC-063 R-4 (T-21): gate at the flow-signing seam itself, not only at
-        # the permission middleware that precedes it. A stopped run must never
-        # auto-sign a flow-unlocked browser write — signing persists an intent
-        # registration, an authoring-trace step, and an ``execution_requested``
-        # audit, so the check belongs ahead of every one of those side effects.
-        # Fail safe: ``None`` parks the write exactly as an absent authority
-        # would, and the durable worker claim/final-send gates stay the backstop.
-        # Inert when no guard is bound (admission disabled), so the legacy
-        # flow-unlock path is byte-identical.
-        from agent_service.services.execution_run_guard import current_guard
-
-        flow_guard = current_guard()
-        if flow_guard is not None and flow_guard.stopped():
-            return None
-
-        session_id = CHAT_SESSION_ID.get()
-        if not session_id:
-            return None
-        approval = FLOW_APPROVALS.get(session_id)
-        if approval is None:
-            return None
-        context = FLOW_CONTEXTS.get(session_id)
-        if context is None or context.identity() != approval.identity():
-            # No bound flow, or the flow was rebound to a different skill/origin
-            # since approval — fail safe and re-park (SPEC-051 R-1 identity
-            # guard). This is what eliminates the cross-flow auto-sign window.
-            return None
-        requests = EXECUTION_REQUESTS.get()
-        if not isinstance(requests, dict):
-            # Execution state not armed for this turn — nothing to inject into,
-            # so the write cannot be verified/handed off; park it instead.
-            return None
-        key = self.settings.execution_signing_key
-        if not key:
-            return None
-        call_id = str(getattr(tool_call, "id", "") or "")
-        if not call_id:
-            return None
-        # Parse the parked arguments exactly as the card path does, so the
-        # args_digest matches what the tool closure recomputes from the invoked
-        # kwargs (SPEC-037 R-3). Display enrichment never touches parameters.
-        raw = getattr(tool_call, "input", "") or ""
-        try:
-            parsed = json.loads(raw) if raw else {}
-        except (TypeError, ValueError):
-            parsed = {}
-        parameters = parsed if isinstance(parsed, dict) else {}
-        # SPEC-063 R-4: a flow-unlocked write under durable admission signs a v3
-        # envelope bound to the flow authority's run. The authority recorded at
-        # the approving card carries ``run_id``; if it predates the cutover the
-        # identity is absent, so fail safe and park (return None) rather than
-        # sign a v2 envelope the bound v3 guard would reject mid-dispatch.
-        sign_run_id: str | None = None
-        sign_epoch: str | None = None
-        if self._execution_recovery() is not None:
-            if not approval.run_id:
-                return None
-            sign_run_id = approval.run_id
-            sign_epoch = self.settings.execution_admission_epoch
-        requester = REQUESTER_IDENTITY.get() if self.settings.target_authorization_enabled else None
-        decider = DECIDER_IDENTITY.get() if requester is not None else None
-        try:
-            envelope = build_flow_request(
-                call_id=call_id,
-                tool_name=gateway_tool_name,
-                parameters=parameters,
-                flow_approval=approval,
-                key=key,
-                run_id=sign_run_id,
-                admission_epoch=sign_epoch,
-                requester=requester,
-                decider=decider,
-            )
-        except DelegatedIdentityError:
-            return None  # A new turn cannot impersonate a previous approver.
-        # Inject BEFORE the tool closure runs (the permission check precedes
-        # acting), so _verify_execution_request finds it by call_id and
-        # _handoff_execution presents it to the worker.
-        requests[call_id] = envelope
-        self._persist_execution_request(envelope)
-        # Same seam as the card path, so a session mixing per-action writes
-        # and flow-unlocked writes yields one ordered trace (SPEC-055 R-2).
-        # ``parameters`` here is the very object just digested into
-        # ``envelope["args_digest"]``.
-        self._capture_authoring_step(envelope, parameters)
-        audit_context = EXECUTION_AUDIT_CONTEXT.get() or {}
-        self._emit_execution_event(
-            "execution_requested",
-            "success",
-            {
-                "confirm_id": envelope["confirm_id"],
-                "execution_id": envelope["execution_id"],
-                "call_id": envelope["call_id"],
-                "tool_name": envelope["tool_name"],
-                "args_digest": envelope["args_digest"],
-                "decider_user_id": envelope["decider_user_id"],
-                "owner_user_id": envelope["owner_user_id"],
-            },
-            str(audit_context.get("request_id") or ""),
-            session_id,
-            envelope["decider_user_id"],
-        )
-        return envelope
+        """Auto-sign one unlocked browser write under a flow authority
+        (SPEC-051 R-1/R-3) — delegates to ExecutionDispatcher (behavior
+        byte-identical). Armed as ``GatewayPermissionMiddleware``'s
+        ``flow_signer`` via ``self._sign_flow_execution``; the sibling calls it
+        makes (``_execution_recovery`` / ``_persist_execution_request`` /
+        ``_capture_authoring_step`` / ``_emit_execution_event``) route back
+        through this kernel, so an instance-level monkeypatch on any of them
+        stays authoritative after the Stage-3 move."""
+        return self._executions._sign_flow_execution(tool_call, gateway_tool_name)
 
     @staticmethod
     def _observe_flow_binding(frame: dict[str, object], session_id: str) -> None:
@@ -2264,15 +2008,9 @@ class AgentKernel:
 
     @staticmethod
     def _execution_duration_ms(request: dict) -> int:
-        """Whole-milliseconds between request signing and receipt close."""
-        try:
-            started = datetime.strptime(
-                request["requested_at"], "%Y-%m-%dT%H:%M:%SZ"
-            ).replace(tzinfo=timezone.utc)
-        except (KeyError, ValueError):
-            return 0
-        elapsed = datetime.now(timezone.utc) - started
-        return max(int(elapsed.total_seconds() * 1000), 0)
+        """Whole-milliseconds between request signing and receipt close —
+        delegates to ExecutionDispatcher (pure/static; behavior byte-identical)."""
+        return ExecutionDispatcher._execution_duration_ms(request)
 
     def _emit_execution_event(
         self,
@@ -2283,29 +2021,20 @@ class AgentKernel:
         session_id: str,
         decider_user_id: str,
     ) -> None:
-        """Emit one execution audit event through the canonical emitter.
-
-        Fire-and-forget with ``confirm_id`` in details and the resume's
-        ``x-request-id`` forwarded, so the trail correlates
-        ``confirmation_decided`` → ``execution_requested`` →
-        ``tool_invoked`` → ``execution_completed`` (SPEC-037 R-5).
-        """
-        event = build_audit_event(
+        """Emit one execution audit event through the canonical emitter
+        (SPEC-037 R-5) — delegates to ExecutionDispatcher (behavior
+        byte-identical). The dispatcher resolves ``emit_audit_event`` through
+        *this* module namespace at call time, so the long-standing
+        ``monkeypatch.setattr("agent_service.runtime_kernel.emit_audit_event", ...)``
+        test surface stays authoritative after the Stage-3 move."""
+        return self._executions._emit_execution_event(
             event_type,
-            request_id,
             outcome,
-            details=details,
-            subject=decider_user_id,
-            username=decider_user_id,
-            session_id=session_id,
-            # SPEC-075/076: attribute the execution to the acting agent-role.
-            # Live on the SPEC-076 orchestration path (a bound diagnostician /
-            # orchestrator role projects verbatim); the unscoped single-agent
-            # turn binds none, so the emitter omits the field and that event
-            # stays byte-identical.
-            agent_role=current_agent_role_value(),
+            details,
+            request_id,
+            session_id,
+            decider_user_id,
         )
-        emit_audit_event(self.settings, event)
 
     @staticmethod
     def _toolkit_risk_map(toolkit: object | None) -> dict[str, str]:
