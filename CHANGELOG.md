@@ -11,6 +11,29 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.59.0 — 2026-11-17
+
+Minor — **AgentKernel decomposition delivered: the code-modularity track's first candidate (finding C-1) closes across four gated stages.**
+This is an **internal, behavior-preserving architecture milestone** — *no operator-visible change*: the SSE
+contract, the HITL confirmation flow, execution signing, runtime model switching and the audit envelope are
+all byte-identical. The ~3,393-LOC / 76-method `AgentKernel` god-class in
+`products/agent-platform/src/agent_service/runtime_kernel.py` was decomposed into seven focused collaborators
+behind thin delegators ("kernel assembles, collaborator executes"): Stage 1 `KernelStatus` + `ToolkitAssembler`;
+Stage 2 `ModelResolver` + `AgentRegistry`; Stage 3 `ExecutionDispatcher`; Stage 4a `TurnStreamer` (the SSE
+streaming turn); Stage 4b `ConfirmationCoordinator` (the HITL park / resume / expire path). `runtime_kernel.py`
+shrank **3,393 → 1,469 LOC**. Every stage was gated by a characterization test whose pins fail closed if a
+relocation invariant breaks, plus the full agent-platform suite (1,807 → 1,824 → 1,834 → 1,848 → **1,859**) and
+root `make verify` (including the 795-test SPEC-063 execution-failure campaign). Three invariants held each move
+byte-identical: **route-back-through-kernel** (every sibling call inside a collaborator routes through
+`self._kernel`, so the instance-level `monkeypatch` surfaces stay authoritative); **lazy-resolve-through-
+`runtime_kernel`** (the `AGENT_STATE_STORE`, `emit_audit_event` and `MODEL_CATALOG` patch surfaces resolve at
+call time, which also avoids the circular import); and **async-generator delegators that return the inner
+generator directly** — a wrapper frame's `aclose()` would not propagate, so the inner `finally` (the contextvar
+reset spine) would leak on early close. Tracked in
+[`docs/workspace/agent-kernel-decomposition-spike.md`](docs/workspace/agent-kernel-decomposition-spike.md); the
+delivery-roadmap Exploration Backlog records the campaign as executed. No spec number is assigned — an internal
+refactor within the authorized stages. 27-surface version lockstep `0.58.1 → 0.59.0`.
+
 ## 0.58.1 — 2026-11-14
 
 Patch — **platform-gateway relays agent-service's HTTP status instead of masking it as a raw `500`.**

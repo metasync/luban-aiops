@@ -1,6 +1,6 @@
 [project]
 name = "platform-gateway"
-version = "0.58.1"
+version = "0.59.0"
 description = "Portal-facing platform gateway for Luban AIOps."
 requires-python = ">=3.11"
 dependencies = [
