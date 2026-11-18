@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-11-18
 - promoted from: the [agentic-remediation design spike](../../workspace/agentic-remediation-spike.md)
@@ -12,19 +12,19 @@
   unresolved are settled **as recommended** (memo §3), and the two scope forks are decided:
   **R2 multi-step remediation plans → a named fast-follow after R1** (not in v1), and the
   **`FU-076-c` in-process role axis → folded into v1** (conditioned on staying in-process, role
-  off the wire). This draft carries those resolutions as the **ratified design basis**. The
-  spec-level Open Questions below (entry mechanism, remediation-intent detection, policy action,
-  runbook scope, in-process-axis placement, evidence depth, target version) are **recommended**
-  and pending the operator's formal `draft → approved` ratification, on which its
-  plan and tasks are authored (per the SPEC-066/069/076/077 pattern).
-  Approval will authorize implementation to *begin* — **not** to merge, commit/push, deploy, or
-  version-bump (each a separate gate).
+  off the wire). This spec carries those resolutions as the **ratified design basis**. **Approved
+  2026-11-18** — the seven spec-level Open Questions below (entry mechanism, remediation-intent
+  detection, policy action, runbook scope, in-process-axis placement, evidence depth, target
+  version) were each ratified by the operator **exactly as recommended** (`draft → approved`), and
+  the binding [plan](plan.md) / [tasks](tasks.md) are authored (per the SPEC-066/069/076/077
+  pattern). Approval authorizes implementation to *begin* — **not** to merge, commit/push, deploy,
+  or version-bump (each a separate gate).
 - release slice: the **multi-agent / bounded-autonomy program** — the first increment *after*
   [SPEC-077](../SPEC-077-operator-diagnose-to-act-bridge/spec.md) (`FU-076-b`), composing phase 5
   ([SPEC-076](../SPEC-076-bounded-autonomous-diagnosis/spec.md)) and the diagnose→act trigger
-  (SPEC-077) into one conversational flow. Likely a **MINOR** bump over v0.59.0 (a new
-  operator-facing capability), per the SPEC-070…077 release-train pattern — **pinned only on
-  approval**.
+  (SPEC-077) into one conversational flow. Target version **v0.60.0** — a **MINOR** bump over
+  v0.59.0 (a new operator-facing capability), per the SPEC-070…077 release-train pattern,
+  **pinned on approval 2026-11-18**.
 - related ADRs: [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md)
   (**Decision 2** the diagnose-before-act autonomy ceiling — **unchanged**; **Decision 4**
   role-scoped agents on the same delegated token; **Decision 5** no agentscope orchestration
@@ -216,37 +216,37 @@ now-live in-process role axis), the configuration reference (any new knob), the 
 
 > The five **design** questions SPEC-077 deferred are **resolved** in the approved
 > [memo](../../workspace/agentic-remediation-spike.md) §3 and recorded as the ratified design basis
-> above. The questions below are the **spec-level** decisions that remain, each **recommended** and
-> pending the operator's `draft → approved` ratification (on which its plan and tasks
-> are authored).
+> above. The seven **spec-level** questions below were each **ratified by the operator exactly as
+> recommended 2026-11-18** (`draft → approved`), on which the binding [plan](plan.md) /
+> [tasks](tasks.md) were authored.
 
 - **OQ-1 — Conversational entry mechanism.** Does the kernel reach the flow via a **model-selected
   tool** the orchestrator calls (closest to today's tool-driven turns), or an **explicit gateway
-  route / intent flag** the portal sets on a remediation-intent message? **Recommend: the explicit
+  route / intent flag** the portal sets on a remediation-intent message? **Resolved (ratified 2026-11-18): the explicit
   route/flag** — it keeps remediation-intent determination deterministic and auditable, cleanly
   preserves the byte-identical unscoped-chat path (R-1), and carries the `remediate:stage` policy
   action without relying on model classification. (Memo §3.1 left this to the spec's plan.)
 - **OQ-2 — Remediation-intent detection.** How does the platform know a turn requests remediation —
   an explicit operator affordance (a mode/command/intent flag), or model-classified intent?
-  **Recommend: an explicit affordance** (pairs with OQ-1), so a normal chat turn never silently
+  **Resolved (ratified 2026-11-18): an explicit affordance** (pairs with OQ-1), so a normal chat turn never silently
   widens into a mutation-adjacent flow.
 - **OQ-3 — Policy action.** Does the conversational flow **reuse** the delivered `remediate:stage`
   action (SPEC-077 R-3) for the staging leg, with the read-only diagnosis riding the existing `chat`
-  action? **Recommend: reuse `remediate:stage`** — no new action; the staging leg is the same
+  action? **Resolved (ratified 2026-11-18): reuse `remediate:stage`** — no new action; the staging leg is the same
   mutation-adjacent operation SPEC-077 already gates.
 - **OQ-4 — Runbook scope for v1.** The same two stageable profiles (`post-deploy-verify`,
-  `k8s-pod-degradation`), with the two diagnosis-only profiles failing closed? **Recommend: yes** —
+  `k8s-pod-degradation`), with the two diagnosis-only profiles failing closed? **Resolved (ratified 2026-11-18): yes** —
   unchanged from SPEC-077; no new runbooks.
 - **OQ-5 — In-process role-axis placement + canonical rule (R-3 / `FU-076-c`).** Exactly where does
   the in-process `agent_roles_any` check fire (the staging seam), and what is the first canonical
-  rule? **Recommend:** fire at the executor-staging seam in the kernel; the canonical rule asserts an
+  rule? **Resolved (ratified 2026-11-18):** fire at the executor-staging seam in the kernel; the canonical rule asserts an
   `executor` may stage the profile's mutating tool while a `diagnostician`/`orchestrator` may not —
   proven via `policy-scenarios.yaml`, with `policy-default.yaml` byte-unchanged unless a rule must be
   canonical.
 - **OQ-6 — Evidence depth.** A gated billable live-check mirroring `remediation-livecheck.sh` (park +
   zero dispatch + no auto-approval) plus scenario tests and the four-point-gate mapping?
-  **Recommend: yes** (the mocked leg collected by `make test`; the live leg an explicit operator step).
-- **OQ-7 — Target version.** A MINOR bump over v0.59.0? **Recommend: yes** — a new operator-facing
+  **Resolved (ratified 2026-11-18): yes** (the mocked leg collected by `make test`; the live leg an explicit operator step).
+- **OQ-7 — Target version.** A MINOR bump over v0.59.0? **Resolved (ratified 2026-11-18): yes** — a new operator-facing
   capability, per the SPEC-070…077 release-train pattern; pinned on approval.
 
 ## Changelog
@@ -259,3 +259,14 @@ now-live in-process role axis), the configuration reference (any new knob), the 
   Open Questions (entry mechanism, intent detection, policy action, runbook scope, in-process-axis
   placement, evidence, target version), each recommended and pending formal ratification. No
   implementation, merge, commit/push, deployment, or version bump authorized by this draft.
+- 2026-11-18 — **approved** (`draft → approved`): the operator ratified all seven spec-level Open
+  Questions **exactly as recommended** — OQ-1 the explicit gateway route / intent flag (not a
+  model-selected tool); OQ-2 an explicit operator affordance (not model-classified intent); OQ-3
+  reuse the delivered `remediate:stage` action (no new action); OQ-4 the same two stageable profiles
+  (`post-deploy-verify`, `k8s-pod-degradation`), diagnosis-only profiles fail closed; OQ-5 the
+  in-process `agent_roles_any` check fires at the executor-staging seam with the canonical
+  executor-may-stage / diagnostician-may-not rule; OQ-6 the gated billable live-check (park + zero
+  dispatch + no auto-approval) + scenario tests + the four-point-gate mapping; OQ-7 a MINOR bump
+  over v0.59.0. Target version pinned **v0.60.0**; the binding [plan](plan.md) / [tasks](tasks.md)
+  are authored. Approval authorizes implementation to *begin* — not to merge, commit/push, deploy,
+  or version-bump (each a separate gate).
