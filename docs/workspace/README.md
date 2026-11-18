@@ -59,6 +59,9 @@ This folder contains the documents that define how the platform should be organi
 - [multi-agent-orchestration-spike.md](multi-agent-orchestration-spike.md)
   - frames the operator's named multi-agent / segregation-of-duty / bounded-autonomy need (autonomous detect→troubleshoot→resolve, incident-driven diagnosis) as the SPEC-064 R-1 `GoalPipeline` reopen trigger; scores `TeamPipeline`, `A2AAgent`, and `GoalPipeline` against the four-point gate (all **fail** as shipped) and finds the change is a substrate change requiring a superseding ADR to ADR-0011 ("no control flow"); lays out the five architecture dimensions (identity, policy, audit, orchestration, contract), recommends scoping as diagnose-before-act bounded autonomy (autonomous read-only diagnosis, every mutation behind the existing HITL + signed dispatch), and proposes a superseding-ADR → phased-SPEC path; assessment only, no ADR, SPEC number, or implementation authorized
 
+- [agentic-remediation-spike.md](agentic-remediation-spike.md)
+  - design exploration for `FU-077-agentic-remediation` (a **SPEC-078 candidate**) — resolves the five Open Questions SPEC-077 deferred (conversational entry vs. card; team-*proposal* vs. team-*execution*; the autonomy gradient; the ADR-0017 Decision-2 revisit; making the `FU-076-c` policy axis live) against the delivered foundation (ADR-0017; SPEC-073/074/075/076/077) at v0.59.0; recommends conversational entry, team-proposal under the unchanged diagnose-before-act ceiling (**no new ADR**), delivering the conversational-propose rung, and folding `FU-076-c` in as a separable in-process role-axis check; assessment only, no SPEC number, ADR, or implementation authorized
+
 - [composition-trust-model-spike.md](composition-trust-model-spike.md)
   - whether a composed skill needs its own approval gate — became ADR-0011 (composition carries no authority) and SPEC-057
 
