@@ -2,9 +2,13 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-11-18
+- approved: **2026-11-18** — the operator ratified all three Open Questions **exactly as
+  recommended** (`draft → approved`), and the binding [plan](plan.md) / [tasks](tasks.md) are
+  authored. Approval authorizes implementation to *begin* — **not** to merge, commit/push,
+  deploy, or version-bump (each a separate gate).
 - origin: **operator feedback from a local-cluster trial** of the operator portal. The
   Permissions page renders the live role × action matrix in
   `products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx` with the
@@ -20,7 +24,11 @@
 - release slice: the **operator portal** Permissions view. Independent of
   [SPEC-078](../SPEC-078-conversational-agentic-remediation/spec.md) — that spec is a
   backend composition + entry change whose boundary explicitly adds **no** portal view — so
-  the transpose ships on its own and can land sooner. Target version pinned only on approval.
+  the transpose ships independently within the shared release train (it is **not** blocked by
+  SPEC-078's backend work and can be implemented and delivered first). Target version
+  **v0.60.0** — sharing the next release train with SPEC-078 (both approved over v0.59.0),
+  **pinned on approval 2026-11-18** (the operator chose to ride with SPEC-078 rather than a
+  separate PATCH/MINOR).
 - extends / provenance: [SPEC-019](../SPEC-019-portal-transparency-navigation/spec.md) R-3
   (the role × action policy-matrix view), [SPEC-023](../SPEC-023-portal-framework-rebuild/spec.md)
   R-5 (the rebuilt control view), and [SPEC-030](../SPEC-030-require-approval-policy-semantics/spec.md)
@@ -128,25 +136,27 @@ sweep is expected to be a no-op beyond the index + changelog.)
 
 ## Open Questions
 
-> Each question is **recommended** below; a resolution is proposed so the spec is decision-complete
-> on approval. Pending the operator's formal `draft → approved` ratification, on which the binding
-> plan and tasks are authored.
+> Each question was **ratified by the operator exactly as recommended 2026-11-18** (`draft →
+> approved`), on which the binding [plan](plan.md) / [tasks](tasks.md) were authored.
 
 - **OQ-1 — First-column header + footer wording.** The transposed first column holds the payload's
-  `actions[]`, which the operator calls "permissions." **Recommend:** title the first column
+  `actions[]`, which the operator calls "permissions." **Resolved (ratified 2026-11-18):** title
+  the first column
   **`permission`** (the operator's user-facing term) and re-order the footer to
   **`{actions} permissions × {roles} roles · evaluated from the enforced bundle`** so the summary
   matches the new visual order. Alternative: keep `action` for literal payload-field fidelity.
 - **OQ-2 — Scroll / sticky behavior for the now-long row list.** With roles on the (few) columns and
-  permissions on the (many) rows, the horizontal `x`-scroll is no longer needed. **Recommend:** keep
-  the permission column `fixed: "left"`, drop `scroll={{ x: "max-content" }}`, and let the long
-  permission list scroll **with the page** (the natural vertical axis); adopt a bounded
-  `scroll={{ y: … }}` only if a fixed-height viewport is preferred. Confirm page-scroll vs. bounded-y.
-- **OQ-3 — Test coverage + target version.** **Recommend:** add the missing `PermissionsView.test.tsx`
-  **now** (the transpose is exactly what a DOM assertion guards, and every sibling control view already
-  has one), and pin the target version on approval — likely riding the **next operator-portal release**
-  (a PATCH/MINOR over the then-current version), independent of SPEC-078's v0.60.0. Confirm the release
-  to bundle with.
+  permissions on the (many) rows, the horizontal `x`-scroll is no longer needed. **Resolved
+  (ratified 2026-11-18):** keep the permission column `fixed: "left"`, drop `scroll={{ x:
+  "max-content" }}`, and let the long permission list scroll **with the page** (the natural
+  vertical axis); a bounded `scroll={{ y: … }}` stays an implementation-detail fallback if a
+  fixed-height viewport proves preferable.
+- **OQ-3 — Test coverage + target version.** **Resolved (ratified 2026-11-18):** add the missing
+  `PermissionsView.test.tsx` **now** (the transpose is exactly what a DOM assertion guards, and
+  every sibling control view already has one); target version pinned **v0.60.0** — the operator
+  chose to ride the shared release train with
+  [SPEC-078](../SPEC-078-conversational-agentic-remediation/spec.md) rather than a separate
+  PATCH/MINOR, so SPEC-079 can be implemented and delivered first within v0.60.0.
 
 ## Changelog
 
@@ -159,3 +169,11 @@ sweep is expected to be a no-op beyond the index + changelog.)
   version), each recommended and pending formal ratification. Kept **out of** SPEC-078 (a backend
   composition + entry change with no portal view) so it can ship independently. No implementation,
   merge, commit/push, deployment, or version bump authorized by this draft.
+- 2026-11-18 — **approved** (`draft → approved`): the operator ratified all three Open Questions
+  **exactly as recommended** — OQ-1 the first column is titled `permission` and the footer
+  re-orders to `{actions} permissions × {roles} roles`; OQ-2 the permission column stays
+  `fixed: "left"`, the horizontal `x`-scroll is dropped, and the long list scrolls with the page;
+  OQ-3 add `PermissionsView.test.tsx` now and pin target version **v0.60.0** (riding the shared
+  release train with SPEC-078 rather than a separate PATCH/MINOR). The binding [plan](plan.md) /
+  [tasks](tasks.md) are authored. Approval authorizes implementation to *begin* — not to merge,
+  commit/push, deploy, or version-bump (each a separate gate).
