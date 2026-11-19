@@ -36,6 +36,25 @@ __all__ = [
 
 
 class AgentChatRequest(BaseModel):
+    """Body for ``POST /api/v2/chat`` — one conversational turn.
+
+    Identity rides headers (``X-User-ID``, ``x-request-id``, ``Authorization``),
+    never the body. By default this is the unscoped single-agent turn
+    (``reply_text`` / ``TurnStreamer``). SPEC-078 R-1 adds an **opt-in**
+    remediation-intent affordance (``remediation_intent`` +
+    ``remediation_profile``) that widens the turn into the conversational
+    diagnose→propose→stage composition; it defaults **off**, so a turn that does
+    not set it is byte-identical to v0.59.0 (R-1). The role stays process-local —
+    it is **never** a request field, a claim, or a forwarded header (SPEC-073
+    R-3), so this body carries no ``agent_role``.
+    """
+
+    # ``extra="forbid"`` (SPEC-078 R-5) makes the "carries no ``agent_role``"
+    # contract enforced, not merely documented: an unknown field (a smuggled
+    # role, a misspelt key) is refused 4xx rather than silently ignored — the
+    # same fail-closed posture as ``AgentDiagnoseRequest`` / ``RemediateRequest``.
+    model_config = ConfigDict(extra="forbid")
+
     message: str = Field(min_length=1)
     session_id: str | None = None
     input_modality: Literal["text", "voice"] = Field(
@@ -72,6 +91,57 @@ class AgentChatRequest(BaseModel):
             "selection only: it never changes policy or HITL outcomes."
         ),
     )
+    remediation_intent: bool = Field(
+        default=False,
+        description=(
+            "Opt-in conversational-remediation affordance (SPEC-078 R-1, "
+            "OQ-1/OQ-2): when true — and only when the caller holds the "
+            "reused deny-by-default ``remediate:stage`` action — this turn "
+            "drives the delivered diagnose→propose→stage composition "
+            "in-process, streaming the diagnosis narrative and parking the "
+            "single proposed mutating call on the existing HITL confirmation "
+            "card. Explicit and deterministic (never model-classified), so a "
+            "normal turn cannot silently widen into a mutation-adjacent flow. "
+            "Defaults false: an unset flag runs the unscoped single-agent path "
+            "byte-identically. Gates the flow only — it never changes policy "
+            "evaluation, auto-allow, or a parked confirmation's outcome, and it "
+            "never dispatches (the signed at-most-one-dispatch worker alone "
+            "executes, for a distinct human approver)."
+        ),
+    )
+    remediation_profile: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The declared runbook profile the remediation-intent turn diagnoses "
+            "and, if it declares a ``remediation_shape``, stages (SPEC-078 "
+            "R-1/OQ-4: post-deploy-verify, k8s-pod-degradation). Required when "
+            "``remediation_intent`` is true; an unknown or diagnosis-only "
+            "profile fails closed at the route (4xx) and never opens an executor "
+            "turn. Must be absent when ``remediation_intent`` is false."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_remediation_intent_fields(self) -> "AgentChatRequest":
+        """The remediation-intent flag and its profile are coupled (SPEC-078 R-1).
+
+        Fail closed on a structurally incoherent request rather than let it reach
+        the route: an intent flag with no profile has nothing to diagnose, and a
+        profile with no intent flag would silently widen a normal turn — the exact
+        accident the explicit affordance (OQ-2) exists to prevent. The route still
+        re-checks the profile semantically (known + stageable); this guards only
+        the wire shape.
+        """
+        if self.remediation_intent and not self.remediation_profile:
+            raise ValueError(
+                "remediation_intent=true requires a remediation_profile"
+            )
+        if self.remediation_profile and not self.remediation_intent:
+            raise ValueError(
+                "remediation_profile requires remediation_intent=true"
+            )
+        return self
 
 
 class AgentDiagnoseRequest(BaseModel):

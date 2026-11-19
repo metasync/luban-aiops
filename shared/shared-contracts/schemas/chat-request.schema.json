@@ -32,6 +32,16 @@
     "model": {
       "type": ["string", "null"],
       "description": "Optional model selection (SPEC-024 R-3): a model id from GET /api/v1/models, relayed verbatim to agent-service. Metadata only — it never changes policy or HITL outcomes."
+    },
+    "remediation_intent": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt-in conversational-remediation affordance (SPEC-078 R-1, OQ-1/OQ-2): when true — and only when the caller holds the reused deny-by-default remediate:stage action, which the gateway enforces before proxying — the turn drives the delivered diagnose→propose→stage composition in-process, streaming the diagnosis narrative and parking the single proposed mutating call on the existing HITL confirmation card. Explicit and deterministic (never model-classified), so a normal turn cannot silently widen into a mutation-adjacent flow. Defaults false: an unset flag proxies the unscoped single-agent chat path byte-identically. Gates the flow only — it never changes policy, auto-allow, or a parked confirmation's outcome, and it never dispatches (the signed at-most-one-dispatch worker alone executes, for a distinct human approver)."
+    },
+    "remediation_profile": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "The declared runbook profile the remediation-intent turn diagnoses and, if it declares a remediation_shape, stages (SPEC-078 R-1/OQ-4: post-deploy-verify, k8s-pod-degradation). Required when remediation_intent is true; an unknown or diagnosis-only profile fails closed (4xx) and never opens an executor turn. Must be absent when remediation_intent is false."
     }
   }
 }

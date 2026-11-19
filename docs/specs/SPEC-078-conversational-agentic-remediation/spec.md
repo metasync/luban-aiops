@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
 - owner: chi
 - created: 2026-11-18
 - promoted from: the [agentic-remediation design spike](../../workspace/agentic-remediation-spike.md)
@@ -25,6 +25,27 @@
   (SPEC-077) into one conversational flow. Target version **v0.60.0** — a **MINOR** bump over
   v0.59.0 (a new operator-facing capability), per the SPEC-070…077 release-train pattern,
   **pinned on approval 2026-11-18**.
+- delivered: 2026-11-19 as **v0.60.0** — R-1…R-7 implemented as the **conversational agentic
+  remediation** entry (**`FU-077-agentic-remediation`** closed): an opt-in coupled
+  `remediation_intent` + `remediation_profile` flag on `AgentChatRequest` / the gateway `ChatRequest`
+  (`extra="forbid"`, **no** `agent_role`) **additionally** gated by the **reused** deny-by-default
+  `remediate:stage` action, drives `run_conversational_remediation(...)` composing the **delivered**
+  SPEC-076 `run_bounded_diagnosis(...)` + SPEC-077 `stage_remediation(...)` **verbatim** — the
+  diagnosis narrative streams through the **existing** v0.59.0 `TurnStreamer` and the single proposed
+  mutating call parks through the **existing** `ConfirmationCoordinator` → the SPEC-020/030/031 card
+  for a **distinct human** (SPEC-030 self-approval block unchanged), dispatched only by the signed
+  at-most-one-dispatch worker. **R-3 makes the SPEC-074 `agent_roles_any` axis fire *in-process*** at
+  the executor-staging seam (`_enforce_staging_role_axis`; **`FU-076-c` closed**), role still **off
+  every wire field**, both gateway rules inert on the wire until phase 6. **Zero new mutation-path
+  machinery**; `agent-stream-event`/`execution-request` **byte-unchanged**; `event_type` enum closed
+  (the gateway reuses `chat_completed`); the unscoped single-agent chat path **byte-identical**; **no
+  new knob** (reuses `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` + `AGENT_ORCHESTRATION_MAX_STEPS`).
+  **R2** (multi-step plans) is a named fast-follow; **R3** (autonomous resolve) + `FU-076` stay
+  deferred. Evidence: the conversational-flow scenario + attribution + in-process role-axis tests, the
+  gated `conversational-remediation-livecheck.sh` (park + **zero** dispatch + no auto-approval), and
+  the recorded SPEC-018 four-point-gate mapping (full agent-platform suite **1899**, platform-gateway
+  **536**, root `make verify` green across every leg incl. the SPEC-063 execution-failure campaign
+  **795**). Released as **v0.60.0** (2026-11-19); commit/tag/push remained separate operator gates.
 - related ADRs: [ADR-0017](../../adr/0017-bounded-read-only-multi-agent-orchestration.md)
   (**Decision 2** the diagnose-before-act autonomy ceiling — **unchanged**; **Decision 4**
   role-scoped agents on the same delegated token; **Decision 5** no agentscope orchestration
@@ -270,3 +291,21 @@ now-live in-process role axis), the configuration reference (any new knob), the 
   over v0.59.0. Target version pinned **v0.60.0**; the binding [plan](plan.md) / [tasks](tasks.md)
   are authored. Approval authorizes implementation to *begin* — not to merge, commit/push, deploy,
   or version-bump (each a separate gate).
+- 2026-11-19 — **delivered as v0.60.0** (`approved → delivered`): R-1…R-7 implemented and verified
+  across the seven binding stages — the opt-in coupled `remediation_intent` + `remediation_profile`
+  flag on `AgentChatRequest` / the gateway `ChatRequest` (`extra="forbid"`, **no** `agent_role`)
+  additionally gated by the **reused** deny-by-default `remediate:stage` action (R-1/R-5);
+  `run_conversational_remediation(...)` composing the delivered SPEC-076 `run_bounded_diagnosis(...)`
+  + SPEC-077 `stage_remediation(...)` verbatim over the existing `TurnStreamer` + `ConfirmationCoordinator`
+  seams (R-2); the in-process SPEC-074 `agent_roles_any` axis firing at the executor-staging seam
+  (`_enforce_staging_role_axis`; **`FU-076-c` closed**, role off every wire field) (R-3); one-turn
+  audit attribution across the diagnostician/orchestrator/executor span (R-4); and the gated
+  `conversational-remediation-livecheck.sh` + scenario tests + four-point-gate mapping (R-6/R-7).
+  **`FU-077-agentic-remediation` closed.** Zero new mutation-path machinery; `agent-stream-event` /
+  `execution-request` byte-unchanged; the unscoped single-agent chat path byte-identical; **no new
+  knob** (reuses `PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` + `AGENT_ORCHESTRATION_MAX_STEPS`).
+  Evidence: full agent-platform suite **1899**, platform-gateway **536**, root `make verify` green
+  across every leg incl. the SPEC-063 execution-failure campaign **795**. **R2** (multi-step plans)
+  is a named fast-follow; **R3** (autonomous resolve) + `FU-076` stay deferred. The `VERSION` bump to
+  **v0.60.0** + the spec-index `delivered` flip landed in the release commit; commit/tag/push remained
+  separate operator gates.

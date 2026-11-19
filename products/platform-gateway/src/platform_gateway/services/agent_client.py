@@ -183,9 +183,21 @@ async def chat(
     delegated_token: str | None = None,
     input_modality: str = "text",
     model: str | None = None,
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
 ) -> dict:
-    timeout = httpx.Timeout(settings.chat_response_timeout_seconds, connect=5.0)
-    payload: dict[str, str] = {"message": message}
+    # SPEC-078 R-1: a remediation-intent turn composes the delivered bounded
+    # read-only fan-out *then* one executor staging turn, so it rides the longer
+    # ``remediate_response_timeout_seconds`` budget (the staging leg's own knob)
+    # rather than the plain-chat one — no new knob (plan rollout). A normal turn
+    # keeps the chat budget and a byte-identical payload.
+    budget = (
+        settings.remediate_response_timeout_seconds
+        if remediation_intent
+        else settings.chat_response_timeout_seconds
+    )
+    timeout = httpx.Timeout(budget, connect=5.0)
+    payload: dict[str, object] = {"message": message}
     if session_id:
         payload["session_id"] = session_id
     # SPEC-022 R-2: modality rides the payload as metadata only.
@@ -194,6 +206,13 @@ async def chat(
     # validates it against the credential-gated catalog (fail-closed 422).
     if model:
         payload["model"] = model
+    # SPEC-078 R-1: forward the coupled intent flag verbatim only when set, so a
+    # turn without it keeps a byte-identical payload and runs the unscoped
+    # single-agent path unchanged. agent-service re-checks the profile (known +
+    # stageable) fail-closed; no ``agent_role`` crosses the wire (SPEC-073 R-3).
+    if remediation_intent:
+        payload["remediation_intent"] = True
+        payload["remediation_profile"] = remediation_profile
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{settings.agent_service_url}/api/v2/chat",
@@ -293,6 +312,8 @@ async def open_chat_stream(
     delegated_token: str | None = None,
     input_modality: str = "text",
     model: str | None = None,
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
 ) -> AsyncIterator[str]:
     """Open the chat stream and return an SSE line iterator.
 
@@ -313,6 +334,15 @@ async def open_chat_stream(
     # payload convention; upstream fail-closed 422 passes through.
     if model:
         params["model"] = model
+    # SPEC-078 R-1: the coupled intent flag rides the query, mirroring the POST
+    # payload convention, and only when set — so a turn without it keeps a
+    # byte-identical query and streams the unscoped path unchanged. The upstream
+    # fail-closed 422 (unknown or diagnosis-only profile) passes through eagerly,
+    # before any frame is yielded; no ``agent_role`` crosses the wire (SPEC-073).
+    if remediation_intent:
+        params["remediation_intent"] = "true"
+        if remediation_profile:
+            params["remediation_profile"] = remediation_profile
     client = httpx.AsyncClient(timeout=timeout)
     try:
         request = client.build_request(

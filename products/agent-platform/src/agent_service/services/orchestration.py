@@ -48,8 +48,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from agent_service.services.agent_role import AgentRole, agent_role_scope
+from agent_service.services.agent_role import (
+    AgentRole,
+    agent_role_scope,
+    current_agent_role_value,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, avoids a runtime cycle
+    from agent_service.runtime_kernel import BlockingReply
 
 LOGGER = logging.getLogger(__name__)
 
@@ -332,6 +340,63 @@ def _staging_prompt(goal: str, profile: DiagnosisProfile, diagnosis: str) -> str
     )
 
 
+# ---------------------------------------------------------------------------
+# SPEC-078 R-3 (FU-076-c): the in-process ``agent_roles_any`` evaluation point.
+#
+# The canonical bundle (``policy-default.yaml``, byte-unchanged here) already
+# carries the SPEC-074/076 agent-role axis: ``deny-diagnostician-tools-mutate``
+# (``agent_roles_any: [diagnostician]`` → deny) and
+# ``require-approval-executor-tools-mutate`` (``agent_roles_any: [executor]`` →
+# tier-2 approval). Those rules stay **ready-but-inert** on the deployed path
+# because SPEC-073 R-3 keeps the bound role off every wire field, so no gateway
+# ``evaluate()`` ever threads a non-``None`` ``agent_role``. This is the in-process
+# point that finally makes the axis **fire** where R-3 keeps the role: it reads the
+# bound role from the process-local ``AGENT_ROLE`` contextvar (never a wire field)
+# and enforces the canonical staging rule — an ``executor`` may stage the profile's
+# mutating proposal; a ``diagnostician``/``orchestrator`` (or an unscoped ``None``)
+# may not — failing closed. It is *complementary to*, not a replacement for, the
+# tool-gateway's deny-by-default ``evaluate()`` (which still runs per tool call on
+# the human axis); neither gateway engine is changed and no third engine is built.
+# A test pins ``_STAGING_AGENT_ROLES`` to the canonical bundle's executor rule so
+# the in-process set cannot drift from the policy layer.
+_STAGING_AGENT_ROLES: frozenset[str] = frozenset({AgentRole.EXECUTOR.value})
+
+
+class AgentRoleAxisDenial(RuntimeError):
+    """Raised when the bound agent-role may not stage a mutating proposal (R-3).
+
+    Fail-closed: the in-process ``agent_roles_any`` axis denies any role outside
+    the canonical staging set rather than widening to a more permissive posture.
+    The message is a stable code so tests match it without asserting on prose.
+    """
+
+    def __init__(self, role: str | None) -> None:
+        super().__init__("agent_role_axis_denied")
+        self.role = role
+
+
+def _enforce_staging_role_axis() -> str:
+    """Evaluate + enforce the in-process ``agent_roles_any`` axis at the seam.
+
+    Returns the bound role value (for provenance) when it is permitted to stage,
+    and raises :class:`AgentRoleAxisDenial` otherwise. Called inside the
+    ``executor`` staging scope so the axis fires on the live conversational path
+    (SPEC-078 R-3 / ``FU-076-c``); the role is read from the process-local
+    contextvar and never crosses a wire field (SPEC-073 R-3).
+    """
+    role = current_agent_role_value()
+    if role not in _STAGING_AGENT_ROLES:
+        LOGGER.warning(
+            "in-process agent_roles_any axis denied the staging seam",
+            extra={
+                "bound_agent_role": role,
+                "permitted": sorted(_STAGING_AGENT_ROLES),
+            },
+        )
+        raise AgentRoleAxisDenial(role)
+    return role
+
+
 async def stage_remediation(
     kernel,
     *,
@@ -374,6 +439,12 @@ async def stage_remediation(
     # propose the mutating call — which the kernel still parks on the existing
     # HITL confirmation (never auto-dispatched) with staged_by_role="executor".
     with agent_role_scope(AgentRole.EXECUTOR):
+        # SPEC-078 R-3 (FU-076-c): the in-process agent_roles_any axis fires here
+        # at the executor-staging seam — it reads the bound role from the process-
+        # local contextvar (never a wire field) and fails closed unless it is the
+        # canonical staging role, complementary to the tool-gateway evaluate() that
+        # still runs per tool call on the human axis.
+        _enforce_staging_role_axis()
         reply = await kernel.reply_text(
             message=_staging_prompt(goal, profile, diagnosis),
             session_id=f"{session_id}::orch::staging",
@@ -383,3 +454,117 @@ async def stage_remediation(
             read_only=False,
         )
     return reply
+
+
+# ---------------------------------------------------------------------------
+# SPEC-078 R-1/R-2: the conversational composition — the entry the two delivered
+# halves lacked. One human-requested, remediation-intent chat turn drives
+# diagnose → propose → stage **in-process** by calling the delivered SPEC-076
+# bounded read-only loop then the delivered SPEC-077 executor staging trigger
+# **verbatim**. Zero new mutation-path machinery: the fan-out stays bounded and
+# read-only, the staging turn stays one ``read_only=False`` proposal the kernel
+# parks on the existing HITL card, and nothing here dispatches.
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class ConversationalRemediationResult:
+    """The conversational composition's outcome (SPEC-078 R-1/R-2).
+
+    Carries the bounded read-only :class:`DiagnosisResult` (SPEC-076) and the
+    ``executor`` staging turn's ``BlockingReply`` (SPEC-077). By the time this is
+    returned the single proposed mutating call has **already parked** on the
+    existing HITL card (``staged_by_role="executor"``) through the delivered
+    ``stage_remediation`` → ``ConfirmationCoordinator`` seam, so this result
+    carries only the narrative to project — never a dispatch handle. The route
+    projects :attr:`narrative` into the **one** session stream (single-voice,
+    R-5); the parked card rides the existing SPEC-031 registry + approval inbox
+    exactly as ``POST /api/v2/remediate`` does. No ``agent_role`` crosses here.
+    """
+
+    diagnosis: DiagnosisResult
+    staging_reply: BlockingReply
+
+    @property
+    def narrative(self) -> str:
+        """The single-voice projection: the diagnosis then the staged proposal.
+
+        Member (``diagnostician``) activity is already synthesized into
+        ``diagnosis.diagnosis`` by the delivered loop; this only appends the
+        executor's proposal narration so the operator reads **one** coherent
+        assistant voice (R-5) — never a new multi-agent frame.
+        """
+        parts = [self.diagnosis.diagnosis, self.staging_reply.content]
+        return "\n\n".join(part for part in parts if part)
+
+
+async def run_conversational_remediation(
+    kernel,
+    *,
+    profile: DiagnosisProfile,
+    goal: str,
+    session_id: str,
+    user_name: str,
+    bearer_token: str | None,
+    model_id: str | None = None,
+) -> ConversationalRemediationResult:
+    """Drive one human-requested diagnose → propose → stage turn (SPEC-078 R-1/R-2).
+
+    This is the **conversational entry** the delivered halves lacked: it composes
+    :func:`run_bounded_diagnosis` (SPEC-076 — an ``orchestrator`` fanning out
+    read-only ``diagnostician`` members, bounded by
+    ``AGENT_ORCHESTRATION_MAX_STEPS``, failing closed to a partial diagnosis)
+    then :func:`stage_remediation` (SPEC-077 — **one** ``executor``
+    ``read_only=False`` turn on ``{session_id}::orch::staging``) **verbatim**,
+    over the *same* delegated token and requester identity (R-3). Both delivered
+    functions bind their own roles in-process; this composition binds **none**
+    itself and the caller's body carries none (SPEC-073 R-3 — the role never
+    crosses a wire field).
+
+    **The team proposes; a human disposes.** The executor's single proposed
+    mutating call parks on the existing SPEC-020/030/031 HITL card (labelled
+    ``staged_by_role="executor"``) for a **distinct human** approver; the signed
+    at-most-one-dispatch worker (SPEC-037/038/063) alone executes and the
+    SPEC-030 self-approval block fires unchanged. Nothing here dispatches.
+
+    **Fails closed before the fan-out** on a diagnosis-only profile
+    (``remediation_shape is None``): there is nothing to stage, so it never runs a
+    billable read-only loop whose proposal could not park and never opens an
+    executor turn (mirrors SPEC-077 R-2; the caller maps an unknown or
+    diagnosis-only profile to a 4xx before reaching here). No agentscope
+    orchestration/pipeline type is constructed (ADR-0017 Decision 5) — the
+    composition is platform-owned.
+    """
+    if profile.remediation_shape is None:
+        # Fail closed *before* the billable fan-out: a diagnosis-only profile has
+        # nothing to stage, so never run a loop whose proposal could not park and
+        # never widen it into an executor turn. The delivered ValueError guard
+        # inside stage_remediation stays as the inner backstop.
+        raise ValueError(
+            f"profile {profile.name!r} declares no remediation_shape; "
+            "a conversational remediation turn cannot stage it."
+        )
+    diagnosis = await run_bounded_diagnosis(
+        kernel,
+        profile=profile,
+        goal=goal,
+        session_id=session_id,
+        user_name=user_name,
+        bearer_token=bearer_token,
+        model_id=model_id,
+    )
+    # The delivered staging trigger binds EXECUTOR internally, parks the single
+    # proposed mutating call on the existing HITL card (staged_by_role="executor"),
+    # and returns that turn's BlockingReply unchanged — never a dispatch.
+    staging_reply = await stage_remediation(
+        kernel,
+        profile=profile,
+        goal=goal,
+        diagnosis=diagnosis.diagnosis,
+        session_id=session_id,
+        user_name=user_name,
+        bearer_token=bearer_token,
+        model_id=model_id,
+    )
+    return ConversationalRemediationResult(
+        diagnosis=diagnosis,
+        staging_reply=staging_reply,
+    )

@@ -955,6 +955,8 @@ async def chat(
     delegated_token: str | None = None,
     input_modality: str = "text",
     model: str | None = None,
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
 ) -> dict:
     """Proxy the non-streaming chat turn to agent-service.
 
@@ -964,6 +966,12 @@ async def chat(
     model — passes through with its status and detail, while 5xx and transport
     failures become a structured 502. The chat surface never answers a raw 500
     when the upstream leg fails closed or races a rollout.
+
+    SPEC-078 R-1: when ``remediation_intent`` is set the coupled flag relays
+    verbatim and the turn drives the diagnose→propose→stage composition upstream
+    over the staging budget; the fail-closed 4xx (an unknown or diagnosis-only
+    profile) passes through under the same error model. The route — not here —
+    gates the widening on the reused ``remediate:stage`` action.
     """
     try:
         return await agent_client.chat(
@@ -975,6 +983,8 @@ async def chat(
             delegated_token,
             input_modality,
             model,
+            remediation_intent,
+            remediation_profile,
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code < 500:
@@ -1118,6 +1128,8 @@ async def chat_stream(
     delegated_token: str | None = None,
     input_modality: str = "text",
     model: str | None = None,
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
 ) -> StreamingResponse:
     """Proxy the chat stream to agent-service.
 
@@ -1128,6 +1140,12 @@ async def chat_stream(
     stream. The tee audits ``chat_completed`` — enriched with the serving
     model from the ``message_end`` frame — only once the turn actually
     completes (SPEC-024 R-4).
+
+    SPEC-078 R-1: when ``remediation_intent`` is set the coupled flag relays
+    verbatim onto the SSE query and the upstream drives the conversational
+    diagnose→propose→stage composition; its fail-closed 422 (an unknown or
+    diagnosis-only profile) surfaces as an HTTP status before any frame is
+    yielded. The route — not here — gates the widening on ``remediate:stage``.
     """
     try:
         upstream = await agent_client.open_chat_stream(
@@ -1139,6 +1157,8 @@ async def chat_stream(
             delegated_token,
             input_modality,
             model,
+            remediation_intent,
+            remediation_profile,
         )
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code

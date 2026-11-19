@@ -29,6 +29,29 @@ class ChatRequest(BaseModel):
     # SPEC-024 R-3 model selection: relayed verbatim to agent-service;
     # metadata only — never changes policy or HITL outcomes.
     model: str | None = None
+    # SPEC-078 R-1: opt-in conversational-remediation affordance, relayed
+    # verbatim to agent-service. Defaults off, so a turn that never sets it
+    # proxies the unscoped chat path byte-identically. When set, the route
+    # additionally gates on the reused deny-by-default ``remediate:stage``
+    # action (R-5) before proxying. Carries **no** ``agent_role`` (SPEC-073
+    # R-3) — ``extra="forbid"`` refuses a smuggled role at the edge.
+    remediation_intent: bool = False
+    remediation_profile: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _check_remediation_intent_fields(self) -> "ChatRequest":
+        # Mirror the agent-service coupling guard (SPEC-078 R-1): an intent flag
+        # with no profile has nothing to diagnose, and a profile with no intent
+        # flag would silently widen a normal turn — the exact accident the
+        # explicit affordance (OQ-2) exists to prevent. Fail closed at the edge
+        # before the proxy opens any mutation-adjacent flow; the route still
+        # re-checks the grant (``remediate:stage``) and agent-service re-checks
+        # the profile semantically (known + stageable).
+        if self.remediation_intent and not self.remediation_profile:
+            raise ValueError("remediation_intent=true requires a remediation_profile")
+        if self.remediation_profile and not self.remediation_intent:
+            raise ValueError("remediation_profile requires remediation_intent=true")
+        return self
 
 
 class DiagnoseRequest(BaseModel):

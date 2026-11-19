@@ -89,6 +89,7 @@ from agent_service.services.operation_documents import (
 )
 from agent_service.services.orchestration import (
     run_bounded_diagnosis,
+    run_conversational_remediation,
     stage_remediation,
 )
 from agent_service.services.runbooks import get_profile
@@ -387,6 +388,49 @@ async def chat(
         },
     )
     mark_session_turn(session.session_id, body.message)
+    if body.remediation_intent:
+        # SPEC-078 R-1: an opt-in remediation-intent turn drives the delivered
+        # diagnose → propose → stage composition in-process. Fail closed on an
+        # unknown or diagnosis-only profile *before* any fan-out (mirrors
+        # /remediate). The route binds no role and dispatches nothing: the
+        # executor's single proposal parks on the existing HITL card
+        # (staged_by_role="executor") for a distinct human approver, and the
+        # narrative rides the existing AgentChatResponse frame (no agent_role).
+        profile = (
+            get_profile(body.remediation_profile)
+            if body.remediation_profile
+            else None
+        )
+        if profile is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown diagnosis profile: {body.remediation_profile}",
+            )
+        if profile.remediation_shape is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"profile {body.remediation_profile} is diagnosis-only: it "
+                    "declares no remediation to stage"
+                ),
+            )
+        result = await run_conversational_remediation(
+            get_runtime_kernel(),
+            profile=profile,
+            goal=body.message,
+            session_id=session.session_id,
+            user_name=user_id,
+            bearer_token=_bearer_token(authorization),
+            model_id=resolved_model,
+        )
+        return AgentChatResponse(
+            session_id=session.session_id,
+            request_id=request_id,
+            status="partial" if result.diagnosis.budget_limited else "ok",
+            content=result.narrative,
+            model=getattr(result.staging_reply, "effective_model", None)
+            or resolved_model,
+        )
     reply = await get_runtime_kernel().reply_text(
         message=body.message,
         session_id=session.session_id,
@@ -598,6 +642,13 @@ async def chat_stream(
     # SPEC-023 R-4: voice-readiness parity with POST /chat's body field —
     # modality is metadata only and never changes policy or HITL outcomes.
     input_modality: Literal["text", "voice"] = "text",
+    # SPEC-078 R-1: the opt-in conversational-remediation affordance mirrors
+    # POST /chat's body flag on the SSE query surface. Defaults off, so an unset
+    # turn streams the unscoped single-agent path byte-identically. The reused
+    # deny-by-default remediate:stage policy gate rides the platform-gateway
+    # (Stage 3), exactly as it does for POST /api/v2/remediate.
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
     x_user_id: str | None = Header(None),
     x_request_id: str | None = Header(None),
     authorization: str | None = Header(None),
@@ -635,6 +686,66 @@ async def chat_stream(
     )
     mark_session_turn(session.session_id, message)
     bearer_token = _bearer_token(authorization)
+
+    if remediation_intent:
+        # SPEC-078 R-1: fail closed on an unknown or diagnosis-only profile
+        # *before* headers go out (mirrors the unknown-model 422 above and POST
+        # /chat), so the SSE branch never starts a stream it must abort mid-flight.
+        profile = (
+            get_profile(remediation_profile) if remediation_profile else None
+        )
+        if profile is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown diagnosis profile: {remediation_profile}",
+            )
+        if profile.remediation_shape is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"profile {remediation_profile} is diagnosis-only: it "
+                    "declares no remediation to stage"
+                ),
+            )
+
+        async def _remediation_events() -> AsyncIterator[str]:
+            # The composition runs the delivered blocking diagnose → propose →
+            # stage pair verbatim (parking the single proposal through the
+            # ConfirmationCoordinator, staged_by_role="executor"), then projects
+            # the diagnosis narrative through the existing TurnStreamer seam as
+            # the one session stream (single-voice, R-5). No new frame: the
+            # message_start/delta/end projection is contract-conformant and the
+            # parked card rides the existing SPEC-031 registry + approval inbox,
+            # exactly as POST /api/v2/remediate does.
+            result = await run_conversational_remediation(
+                get_runtime_kernel(),
+                profile=profile,
+                goal=message,
+                session_id=session.session_id,
+                user_name=user_id,
+                bearer_token=bearer_token,
+                model_id=resolved_model,
+            )
+            serving_model = (
+                getattr(result.staging_reply, "effective_model", None)
+                or resolved_model
+            )
+            async for chunk in get_runtime_kernel().fallback_stream(
+                request_id, session.session_id, result.narrative
+            ):
+                # SPEC-024 R-3 / SPEC-071 R-2: attribute the serving model on the
+                # terminal frame, consistent with the unscoped stream_events path
+                # (rides the existing ``model`` field — no schema change).
+                if chunk.get("event") == "message_end":
+                    chunk = {**chunk, "model": serving_model}
+                event = _normalize_stream_event(
+                    chunk, session.session_id, request_id
+                )
+                yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
+
+        return StreamingResponse(
+            _remediation_events(), media_type="text/event-stream"
+        )
 
     async def _events() -> AsyncIterator[str]:
         async for chunk in get_runtime_kernel().stream_events(

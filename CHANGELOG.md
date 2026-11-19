@@ -11,6 +11,61 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.60.0 — 2026-11-19
+
+[SPEC-078](docs/specs/SPEC-078-conversational-agentic-remediation/spec.md)
+conversational agentic remediation — **`FU-077-agentic-remediation`**, the human-facing half
+[SPEC-077](docs/specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md) (v0.58.0) deferred out
+of its R-4, and the next increment after phase 5 + the diagnose→act trigger of the phased
+multi-agent series [ADR-0017](docs/adr/0017-bounded-read-only-multi-agent-orchestration.md)
+gates. Composes the **delivered**
+[SPEC-076](docs/specs/SPEC-076-bounded-autonomous-diagnosis/spec.md) bounded read-only diagnosis
+loop and the **delivered** SPEC-077 `executor` `stage_remediation(...)` into **one
+conversational chat-turn flow** with **zero new mutation-path machinery**: on an opt-in
+remediation-intent turn the kernel drives *diagnose → propose → stage* in-process
+(`run_conversational_remediation(...)`), streaming the diagnosis narrative through the
+**existing** v0.59.0 `TurnStreamer` SSE seam and parking the single proposed mutating call
+through the **existing** v0.59.0 `ConfirmationCoordinator` seam → the existing SPEC-020/030/031
+card + approval inbox (**no** diagnosis card, **no** discrete button). The entry is opt-in and
+coupled — an `AgentChatRequest` / gateway `ChatRequest` `remediation_intent` +
+`remediation_profile` flag (`extra="forbid"`, defaults off, **no** `agent_role` per SPEC-073
+R-3) — and **additionally** rides the **reused** deny-by-default `remediate:stage` action
+(OQ-3): a token that holds `chat` but not `remediate:stage` (e.g. `approver`) is refused **403**
+at the gateway before any proxy or model call, so a normal chat turn never silently widens into
+a mutation-adjacent flow (**no new action**). A turn without the flag runs the unscoped
+single-agent path **byte-identically**. **R-3 makes the SPEC-074 `agent_roles_any` policy axis
+fire *in-process*** (**`FU-076-c` closed**) at the executor-staging seam
+(`_enforce_staging_role_axis` reads the bound role from the `AGENT_ROLE` contextvar; an
+`executor` may stage, a `diagnostician`/`orchestrator`/unscoped caller is refused fail-closed;
+`_STAGING_AGENT_ROLES` pinned to the canonical `require-approval-executor-tools-mutate` rule) —
+**complementary to** the tool-gateway `evaluate()`, with the role still **off every wire field**
+and both gateway rules inert on the wire until the phase-6 v2 contract. The proposal **always**
+parks for a **distinct human** (SPEC-030 self-approval block unchanged) and the signed
+at-most-one-dispatch worker (SPEC-037/038/063) alone executes; a diagnosis-only profile
+(`remediation_shape is None`) or an unknown profile **fails closed** with no executor turn. R-4
+**verified (no new code)** that the fan-out turns audit `agent_role="orchestrator"`/`
+"diagnostician"` and the staging turn `agent_role="executor"`, parking `staged_by_role=
+"executor"`, with **no new `event_type`** (the enum stays closed; the gateway reuses
+`chat_completed`). R-5 kept `agent-stream-event.schema.json` / `execution-request.schema.json`
+**byte-unchanged** (single-voice projection; the phase-6 v2 multi-agent contract is **not** a
+prerequisite). **No new knob** — a remediation-intent chat turn reuses
+`PLATFORM_GATEWAY_REMEDIATE_TIMEOUT_SECONDS` at the gateway and the fan-out stays bounded by
+`AGENT_ORCHESTRATION_MAX_STEPS`. **R-6 records the autonomy gradient as binding:** ceiling =
+**every mutation human-approved**; **R1** delivered; **R2** (multi-step plans) a **named
+fast-follow after R1** (N *individually*-gated proposals, ADR-0011); **R3** (autonomous resolve)
+deferred behind the ADR-0017 Decision-2 trigger. Evidence: the conversational-flow scenario +
+attribution tests, the in-process role-axis tests, a **gated**
+`conversational-remediation-livecheck.sh` (+ `make conversational-remediation-livecheck`) whose
+billable leg asserts one authorized conversational turn **parks** with **zero**
+`execution_requested` and **no** HITL auto-approval (the `approver` widening-gate 403 + the
+diagnosis-only fail-closed are non-billable) while its mocked-I/O leg is collected by
+`make test`, and the recorded SPEC-018 four-point-gate mapping; full agent-platform suite
+**1899**, platform-gateway **536**, and root `make verify` green across every leg. This closes
+**`FU-077-agentic-remediation`** + **`FU-076-c`**; `FU-076` (unattended machine-trigger
+ingestion) remains deferred, tracked, not dropped. Released as **v0.60.0** (2026-11-19); the
+`VERSION` bump + the spec-index `delivered` flip landed in the release commit and commit/tag/push
+remained separate operator gates.
+
 ## 0.59.0 — 2026-11-17
 
 Minor — **AgentKernel decomposition delivered: the code-modularity track's first candidate (finding C-1) closes across four gated stages.**

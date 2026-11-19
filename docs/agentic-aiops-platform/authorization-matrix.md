@@ -254,10 +254,13 @@ gateway `evaluate()`.
   since the role never crosses the wire (R-3). The **minimal** canonical `agent_roles_any`
   rule pair (a `diagnostician` read posture + an `executor`→`require_approval` encoding)
   landed in `policy-default.yaml`, synced byte-identically across all four replicas, and its
-  **engine** semantics are proven — but the rules stay **inert in deployment** (no deployed
-  caller threads a non-`None` role) until the phase-6 wire contract, or the `FU-076-c`
-  in-process evaluation point, threads one. The tool-name/family axis stays deferred (OQ-4:
-  narrowing already suffices).
+  **engine** semantics are proven — but the **gateway** rules stay **inert in deployment** (no
+  deployed caller threads a non-`None` role on the wire) until the phase-6 wire contract does.
+  The `FU-076-c` **in-process** evaluation point is now **live for the executor-staging seam**
+  ([SPEC-078](../specs/SPEC-078-conversational-agentic-remediation/spec.md) R-3, see below):
+  it enforces the same canonical `agent_roles_any` expectation process-locally, so the axis
+  finally fires while the role still never crosses a wire field. The tool-name/family axis
+  stays deferred (OQ-4: narrowing already suffices).
 - **Subtractive-only and fail-closed are preserved.** The axis still composes
   conjunctively with the human `roles_any` matrix, never widens a human role, never
   overrides a `deny`, and never matches an unscoped (`None`) call.
@@ -307,8 +310,11 @@ stays deferred.
   `extra="forbid"` and carries **no** `agent_role`; the response rides the existing
   `AgentChatResponse` + SPEC-031 card, `agent-stream-event.schema.json` /
   `execution-request.schema.json` stay **byte-unchanged**, and no `agent_role` crosses any
-  wire field (SPEC-073 R-3) — so the SPEC-074 gateway policy axis stays **ready-but-inert**
-  on this path (making it live is `FU-076-c`). The wired executor turn audits the SPEC-075
+  wire field (SPEC-073 R-3) — so the SPEC-074 **gateway** policy axis stays **ready-but-inert**
+  on this path (making it live **in-process** at the staging seam is `FU-076-c`, **delivered by
+  [SPEC-078](../specs/SPEC-078-conversational-agentic-remediation/spec.md) R-3** below; the
+  gateway `evaluate()` axis itself stays inert until the phase-6 wire contract threads a role).
+  The wired executor turn audits the SPEC-075
   `agent_role="executor"` dimension through the delivered emitter seam with **no new
   `event_type`** (the gateway reuses `chat_completed`; the enum stays closed).
 - **Portal entry deferred (`FU-077-agentic-remediation`, a SPEC-078 candidate).** The R-4
@@ -319,7 +325,73 @@ stays deferred.
   agent-team-carried, surfacing through the existing conversational portal surface (no card,
   no discrete button) or graduated autonomy — rather than a button on a card. The backend
   trigger is UX-agnostic and ships regardless, and is that follow-up's prerequisite (any
-  entry shape reaches the same wired `stage_remediation`).
+  entry shape reaches the same wired `stage_remediation`). **Realized as
+  [SPEC-078](../specs/SPEC-078-conversational-agentic-remediation/spec.md)** (approved
+  2026-11-18; a conversational entry, not a button) — see below.
+
+## Conversational Agentic Remediation (SPEC-078, v0.60.0) — the human-requested chat entry composes diagnose → propose → stage
+
+[SPEC-077](../specs/SPEC-077-operator-diagnose-to-act-bridge/spec.md) wired the
+`executor`-staging trigger behind a **dedicated** operator endpoint
+(`POST /api/v2/remediate`). **SPEC-078 realizes the deferred `FU-077-agentic-remediation`
+follow-up**: it composes the **delivered**
+[SPEC-076](../specs/SPEC-076-bounded-autonomous-diagnosis/spec.md) bounded read-only
+diagnosis loop and the **delivered** SPEC-077 `stage_remediation(...)` into **one
+conversational chat-turn flow** — a remediation-intent turn drives *diagnose → propose →
+stage* in-process and surfaces through the **existing** chat SSE stream (the v0.59.0
+`TurnStreamer` seam) and the **existing** SPEC-031 confirmation card / approval inbox (the
+v0.59.0 `ConfirmationCoordinator` seam). **No** diagnosis card, **no** discrete button. It is
+a **composition + entry** change with **zero new mutation-path machinery**: the mutation
+ceiling is byte-for-byte the SPEC-077 one.
+
+- **The entry is opt-in, coupled, and gated on the reused `remediate:stage` widening.** The
+  chat request carries an opt-in `remediation_intent` + `remediation_profile` flag
+  (`extra="forbid"`, defaults off, **no** `agent_role` — SPEC-073 R-3). A turn without the
+  flag runs the unscoped single-agent path **byte-identically**. When the flag is set the turn
+  **additionally** rides the **reused** deny-by-default `remediate:stage` action (OQ-3) — a
+  token that holds `chat` but not `remediate:stage` (e.g. `approver`, `developer`,
+  `read-only-observer`, `auditor`) is refused **403** at the gateway before any proxy or model
+  call, so a normal chat turn can never silently widen into a mutation-adjacent flow. **No new
+  action** is introduced.
+- **The in-process role axis is now LIVE (`FU-076-c` closed).** SPEC-078 R-3 adds an
+  **in-process** `agent_roles_any` evaluation point at the executor-staging seam
+  (`_enforce_staging_role_axis` in `services/orchestration.py`), reading the bound role from
+  the `AGENT_ROLE` contextvar (process-local) — so the SPEC-074 axis finally **fires**: an
+  `executor` may stage; a `diagnostician` / `orchestrator` / unscoped (`None`) caller is
+  refused fail-closed (`agent_role_axis_denied`). It is **complementary to**, not a replacement
+  for, the tool-gateway `evaluate()`: the role still **never crosses a wire field** (SPEC-073
+  R-3), so the two canonical gateway `agent_roles_any` rules stay **inert on the wire** (they
+  need the phase-6 v2 contract to thread a role), while the in-process point enforces the
+  **same** canonical expectation — `_STAGING_AGENT_ROLES` is pinned to the
+  `require-approval-executor-tools-mutate` rule's `agent_roles_any`.
+- **Team-proposal, not team-execution — the ceiling is unchanged.** The composition calls the
+  delivered `run_bounded_diagnosis(...)` (bounded by `AGENT_ORCHESTRATION_MAX_STEPS`, failing
+  closed to a partial diagnosis) then `stage_remediation(...)` **verbatim** — **one**
+  `read_only=False` turn on `{session_id}::orch::staging` over the *same* delegated token. The
+  proposal **parks** as the existing SPEC-020/030/031 card with `staged_by_role="executor"` for
+  a **distinct human** approver; the SPEC-030 self-approval block is unchanged and the signed
+  at-most-one-dispatch worker (SPEC-037/038/063) alone executes. A diagnosis-only profile
+  (`remediation_shape is None`) or an unknown profile **fails closed** and never opens an
+  executor turn. The turn itself dispatches **nothing** and never auto-approves.
+- **Role off the wire, no new frame, audit enum closed.** The intent flag is `extra="forbid"`
+  with **no** `agent_role`; the response rides existing frames only (the assistant turn, the
+  SPEC-025 evidence turn, the SPEC-031 card, `execution-request.schema.json`), member
+  (`diagnostician`) activity narrated into the **one** session stream (single-voice
+  projection). `agent-stream-event.schema.json` / `execution-request.schema.json` stay
+  **byte-unchanged**; the fan-out turns audit `agent_role="orchestrator"`/`"diagnostician"` and
+  the staging turn `agent_role="executor"` with **no new `event_type`** (the enum stays closed;
+  the gateway reuses `chat_completed`). The phase-6 v2 multi-agent contract is **not** a
+  prerequisite.
+
+**The autonomy gradient (R-6) is binding: the ceiling is “every mutation is human-approved.”**
+SPEC-078 v1 delivers **R1** (conversational diagnose → propose → stage). **R2** (multi-step
+remediation plans) is a **named fast-follow after R1** and, when built, stays N
+*individually*-gated proposals (ADR-0011 — never a composite approval, never an automatic
+multi-dispatch). **R3** (autonomous resolve) stays **deferred** behind the ADR-0017 Decision-2
+revisit trigger (production-proven bounded diagnosis + a new trust-model ADR); its revisit
+trigger is **not** met. No path dispatches a mutation without a distinct-human approval. **Delivered
+2026-11-19 as v0.60.0** — the `VERSION` bump + the spec-index `delivered` flip landed in the
+release commit; commit/tag/push remained separate operator gates.
 
 ## Feature Access Matrix
 
@@ -571,7 +643,10 @@ narrative below.
 > (SPEC-076) also target `tools:mutate` and never match until a caller threads an
 > agent-role (SPEC-073 R-3 keeps it off every wire field):
 > `deny-diagnostician-tools-mutate` (priority 300) and
-> `require-approval-executor-tools-mutate` (priority 200, tier_2).
+> `require-approval-executor-tools-mutate` (priority 200, tier_2). **SPEC-078 R-3 makes the
+> axis fire *in-process*** at the executor-staging seam (`_STAGING_AGENT_ROLES` is pinned to
+> `require-approval-executor-tools-mutate`'s `agent_roles_any`); these two **gateway** rules
+> stay inert on the wire until the phase-6 v2 contract threads a role.
 
 Transparency actions `policy:read` and `skills:read` (read-only workspace
 inventory) are granted to all operational roles; deny-by-default semantics

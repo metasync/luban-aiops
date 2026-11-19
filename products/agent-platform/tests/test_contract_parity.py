@@ -49,8 +49,11 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
+from pydantic import ValidationError
 
 from agent_service.schemas.v2 import (
+    AgentChatRequest,
     AgentChatResponse,
     AgentDiagnoseRequest,
     RemediateRequest,
@@ -233,3 +236,71 @@ class TestDiagnoseRidesExistingFrames:
             jsonschema.validate(
                 response.model_dump(mode="json", exclude_none=True), contract
             )
+
+
+class TestConversationalRemediationContractBoundary:
+    """SPEC-078 R-1/R-5: the conversational-remediation entry is an **opt-in
+    intent flag** on the existing chat body — never a role on the wire and never
+    a new frame. Mirrors the diagnose/remediate no-role guards above and pins the
+    byte-identical unscoped path (the flag defaults off)."""
+
+    def test_chat_request_model_carries_no_agent_role_and_forbids_extras(self) -> None:
+        # SPEC-078 R-5 / SPEC-073 R-3: the role is process-local, never a wire
+        # field. ``extra="forbid"`` makes the no-role contract enforced, not
+        # merely documented, so a smuggled ``agent_role`` (or any unknown field)
+        # is refused rather than silently ignored.
+        assert "agent_role" not in AgentChatRequest.model_fields
+        assert (
+            "agent_role"
+            not in AgentChatRequest.model_json_schema()["properties"]
+        )
+        assert AgentChatRequest.model_config.get("extra") == "forbid"
+        with pytest.raises(ValidationError):
+            AgentChatRequest(message="hi", agent_role="executor")
+
+    def test_remediation_intent_flag_is_opt_in_and_defaults_off(self) -> None:
+        # R-1: the intent flag + profile default off/absent, so a turn that never
+        # sets them runs the unscoped single-agent path byte-identically.
+        assert AgentChatRequest.model_fields["remediation_intent"].default is False
+        assert AgentChatRequest.model_fields["remediation_profile"].default is None
+        baseline = AgentChatRequest(message="hi")
+        assert baseline.remediation_intent is False
+        assert baseline.remediation_profile is None
+
+    def test_remediation_intent_and_profile_are_coupled(self) -> None:
+        # R-1/OQ-2: an explicit affordance never silently widens a normal turn —
+        # intent requires a profile and a profile requires intent (fail-closed at
+        # the wire shape; the route re-checks the profile semantically).
+        with pytest.raises(ValidationError):
+            AgentChatRequest(message="hi", remediation_intent=True)
+        with pytest.raises(ValidationError):
+            AgentChatRequest(message="hi", remediation_profile="post-deploy-verify")
+        ok = AgentChatRequest(
+            message="hi",
+            remediation_intent=True,
+            remediation_profile="post-deploy-verify",
+        )
+        assert ok.remediation_intent is True
+        assert ok.remediation_profile == "post-deploy-verify"
+
+    def test_chat_request_schema_declares_the_flag_and_refuses_a_role(self) -> None:
+        # The JSON contract mirrors the model: ``additionalProperties=false``
+        # refuses a smuggled ``agent_role``, and the opt-in remediation fields are
+        # declared so a schema-validating client can set them.
+        schema = json.loads(
+            (_SCHEMA_DIR / "agent-chat-request.schema.json").read_text()
+        )
+        assert schema.get("additionalProperties") is False
+        assert "remediation_intent" in schema["properties"]
+        assert "remediation_profile" in schema["properties"]
+        assert "agent_role" not in schema["properties"]
+        jsonschema.validate(
+            {
+                "message": "hi",
+                "remediation_intent": True,
+                "remediation_profile": "post-deploy-verify",
+            },
+            schema,
+        )
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate({"message": "hi", "agent_role": "executor"}, schema)

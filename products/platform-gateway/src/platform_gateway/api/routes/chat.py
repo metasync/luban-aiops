@@ -1,7 +1,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from platform_gateway.core.config import PlatformGatewaySettings, get_settings
@@ -54,12 +54,30 @@ async def chat_route(
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, "chat", request_id)
+    # SPEC-078 R-1/R-5: a remediation-intent turn widens the chat into the
+    # mutation-adjacent diagnose→propose→stage composition, so it additionally
+    # rides the reused deny-by-default ``remediate:stage`` action (OQ-3) — a
+    # token without it is refused 403 here and the composition never opens (the
+    # turn stays unscoped). ``agent_role`` stays None on the wire (SPEC-073 R-3):
+    # the executor role binds in-process at the staging seam, so ``enforce_policy``
+    # rides the human axis only (ready-but-inert, OQ-6).
+    if body.remediation_intent:
+        enforce_policy(settings, identity, ACTION_REMEDIATE_STAGE, request_id)
     user_id = identity.username  # type: ignore[union-attr]
     delegated_token = await obtain_delegated_token(
         settings,
         identity.subject,  # type: ignore[union-attr]
         _bearer_token(request),
     )
+    # A turn without the flag calls the proxy with today's exact arguments, so
+    # the unscoped single-agent chat path stays byte-identical (R-1 acceptance);
+    # only a remediation-intent turn threads the coupled flag to agent-service.
+    remediation_kwargs: dict[str, object] = {}
+    if body.remediation_intent:
+        remediation_kwargs = {
+            "remediation_intent": True,
+            "remediation_profile": body.remediation_profile,
+        }
     response = await chat(
         settings,
         request_id,
@@ -69,6 +87,7 @@ async def chat_route(
         delegated_token,
         body.input_modality,
         body.model,
+        **remediation_kwargs,
     )
     log_event(
         LOGGER,
@@ -114,12 +133,33 @@ async def chat_stream_route(
     # SPEC-023 R-4: voice-readiness parity for the streaming surface —
     # modality rides as metadata only, mirroring POST /api/v1/chat.
     input_modality: Literal["text", "voice"] = "text",
+    # SPEC-078 R-1: opt-in conversational-remediation affordance for the
+    # streaming surface, mirroring the POST body flag. Defaults off so an unset
+    # turn streams the unscoped single-agent path byte-identically.
+    remediation_intent: bool = False,
+    remediation_profile: str | None = None,
     x_request_id: str | None = Header(default=None),
     settings: PlatformGatewaySettings = Depends(get_settings),
 ) -> StreamingResponse:
+    # The streaming surface has no pydantic body to couple the flag, so guard the
+    # wire shape here and fail closed at the edge (422), mirroring the POST
+    # ChatRequest validator: an intent flag with no profile has nothing to
+    # diagnose, and a profile with no flag would be silently ignored upstream.
+    if bool(remediation_intent) != bool(remediation_profile):
+        raise HTTPException(
+            status_code=422,
+            detail="remediation_intent and remediation_profile must be set together",
+        )
     request_id = resolve_request_id(x_request_id)
     identity = await resolve_request_identity(settings, request, request_id)
     enforce_policy(settings, identity, "chat", request_id)
+    # SPEC-078 R-1/R-5: the remediation-intent widening additionally rides the
+    # reused deny-by-default ``remediate:stage`` action (OQ-3) — a token without
+    # it is refused 403 before the composition opens (the turn stays unscoped).
+    # ``agent_role`` stays None on the wire (SPEC-073 R-3): the executor role
+    # binds in-process at the staging seam, so the gate rides the human axis.
+    if remediation_intent:
+        enforce_policy(settings, identity, ACTION_REMEDIATE_STAGE, request_id)
     user_id = identity.username  # type: ignore[union-attr]
     delegated_token = await obtain_delegated_token(
         settings,
@@ -153,6 +193,14 @@ async def chat_stream_route(
             session_id=session_id,
         ),
     )
+    # Only a remediation-intent turn threads the coupled flag; an unset turn
+    # calls the proxy exactly as before, so the unscoped SSE path is unchanged.
+    remediation_kwargs: dict[str, object] = {}
+    if remediation_intent:
+        remediation_kwargs = {
+            "remediation_intent": True,
+            "remediation_profile": remediation_profile,
+        }
     return await chat_stream(
         settings=settings,
         request_id=request_id,
@@ -162,6 +210,7 @@ async def chat_stream_route(
         delegated_token=delegated_token,
         input_modality=input_modality,
         model=model,
+        **remediation_kwargs,
     )
 
 
