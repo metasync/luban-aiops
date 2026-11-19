@@ -119,8 +119,8 @@ identity-broker expects.
 
 1. Sign in to the portal as the user.
 2. Click the user card in the sidebar footer — it lists the resolved roles.
-3. Open **Permissions** — the user sees their own rows of the live
-   role × action matrix.
+3. Open **Permissions** — permissions run down the first column, and the
+   user's own roles appear across the header of the live matrix.
 4. For the full trail, sign in as `luban-auditor` (or any `audit:read`
    identity) and check the audit view: login and action events carry the
    acting identity.

@@ -13,6 +13,13 @@ Release 1 entries are grouped retrospectively under 0.1.0.
 
 ## Unreleased
 
+### Changed
+
+- SPEC-079 transposes the portal Permissions matrix: roles across the header,
+  permissions down the first column, and page-level vertical scrolling. The
+  server-scoped payload, allow/deny/approval states, and decider tooltips are
+  unchanged; DOM regression coverage and operator guides follow the new layout.
+
 ### Fixed
 
 - SPEC-078 conversational remediation now consumes the real SDK confirmation event

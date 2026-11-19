@@ -1,7 +1,7 @@
-// Permissions matrix view (SPEC-019 R-3, SPEC-023 R-5): renders the live
-// role × action matrix from the gateway's policy matrix endpoint. Rows
-// arrive scoped server-side; the view displays them verbatim. Sign-in
-// gated in the sidebar; the gateway re-enforces policy:read per request.
+// Permissions matrix view (SPEC-019 R-3, SPEC-023 R-5, SPEC-079): renders
+// permissions as rows and roles as columns from the gateway's live matrix.
+// Role columns stay scoped server-side; only the presentation is transposed.
+// Sign-in gated in the sidebar; the gateway re-enforces policy:read per request.
 import { useEffect, useState } from "react";
 import { Alert, Spin, Table, Tag, Tooltip, Typography } from "antd";
 import { requestJson } from "../../api/client";
@@ -61,13 +61,13 @@ export default function PermissionsView() {
   const roles = payload?.roles ?? [];
 
   const columns = [
-    { title: "role", dataIndex: "role", key: "role", fixed: "left" as const },
-    ...actions.map((action) => ({
-      title: action,
-      key: action,
-      render: (_: unknown, row: { role: string }) => {
+    { title: "permission", dataIndex: "action", key: "action", fixed: "left" as const },
+    ...roles.map((role) => ({
+      title: role,
+      key: role,
+      render: (_: unknown, row: { action: string }) => {
         const requirement =
-          payload?.approval_requirements?.[row.role]?.[action];
+          payload?.approval_requirements?.[role]?.[row.action];
         // SPEC-030 R-5: the third cell state renders distinctly from
         // allow/deny, naming the tier and the designated deciders.
         if (requirement) {
@@ -83,7 +83,7 @@ export default function PermissionsView() {
             </Tooltip>
           );
         }
-        const allowed = Boolean(payload?.matrix?.[row.role]?.[action]);
+        const allowed = Boolean(payload?.matrix?.[role]?.[row.action]);
         return (
           <Tag color={allowed ? "success" : "error"}>
             {allowed ? "allow" : "deny"}
@@ -108,18 +108,17 @@ export default function PermissionsView() {
         {payload ? (
           <Table
             size="small"
-            rowKey="role"
+            rowKey="action"
             columns={columns}
-            dataSource={roles.map((role) => ({ role }))}
+            dataSource={actions.map((action) => ({ action }))}
             pagination={false}
-            scroll={{ x: "max-content" }}
           />
         ) : null}
       </Spin>
       {payload ? (
         <Typography.Text type="secondary">
-          {roles.length} role{roles.length === 1 ? "" : "s"} ×{" "}
-          {actions.length} actions · evaluated from the enforced bundle
+          {actions.length} permissions × {roles.length} role{roles.length === 1 ? "" : "s"}
+          {" · evaluated from the enforced bundle"}
         </Typography.Text>
       ) : null}
     </div>

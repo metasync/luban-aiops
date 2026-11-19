@@ -346,8 +346,9 @@ until a caller threads an agent-role (SPEC-073 R-3 keeps it off every wire field
 
 > **Note:** The live matrix these rules produce is served by platform-gateway at
 > `GET /api/v1/policy/matrix` (SPEC-019) and rendered in the portal's Permissions view.
-> Rows are scoped server-side: `platform-admin` sees every role, every other identity
-> only its own granted rows. "Why was I denied?" is therefore self-service — the view
+> Roles are scoped server-side: `platform-admin` sees every role, every other identity
+> only its own roles. The portal renders roles as columns and permissions as rows.
+> "Why was I denied?" is therefore self-service — the view
 > always reflects the bundle the gateway actually enforces.
 
 > **Note:** The `read-only-observer` tool grants assume all registered tools are read-only

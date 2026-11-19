@@ -117,9 +117,10 @@ Current browser baseline capabilities:
   by `incident:create` / `incident:triage` (SPEC-015)
 - Permissions view: the live role × action matrix evaluated from the policy
   bundle platform-gateway actually enforces (`GET /api/v1/policy/matrix`),
-  with bundle version/source provenance and server-side row scoping
-  (platform-admin sees all roles, everyone else their own rows); visible to
-  every signed-in user under `policy:read` (SPEC-019)
+  with bundle version/source provenance and server-side role scoping.
+  Permissions run down the first column and roles across the header
+  (platform-admin sees all role columns, everyone else only their own);
+  visible to every signed-in user under `policy:read` (SPEC-019, SPEC-079)
 - Workspace resource views: read-only Tools catalog
   (`GET /api/v1/tools`, delegated-bearer proxy to tool-gateway under
   `tools:list`) and Skills inventory (`GET /api/v1/skills`, gateway-held

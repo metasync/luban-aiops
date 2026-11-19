@@ -5,7 +5,8 @@
 > banner is lifted (the SPEC-066/069/076/077/078 pattern). Approval authorizes implementation to
 > *begin* — **not** to merge, commit/push, deploy, or version-bump (separate gates). This is a
 > **small, purely presentational** operator-portal change: **no** backend, gateway, policy, contract,
-> schema, or authorization-model change. Target version **v0.60.0** (shared with SPEC-078).
+> schema, or authorization-model change. Release reconciliation 2026-11-19: v0.60.0 already shipped
+> with SPEC-078; SPEC-079 targets a subsequent release, with its version chosen at the release gate.
 
 ## Approach
 
@@ -55,8 +56,10 @@ three small stages mirroring R-1…R-3.
 
 - affected files: a **new**
   `products/operator-portal/web-ui/app/src/views/control/__tests__/PermissionsView.test.tsx`
-  (currently absent), mirroring the sibling control-view tests (`ApprovalsView.test.tsx`,
-  `SettingsView.test.tsx`, `SkillsView.test.tsx`); `docs/specs/README.md` (this row) and `CHANGELOG.md`.
+  (absent at approval), mirroring the sibling control-view tests (`ApprovalsView.test.tsx`,
+  `SettingsView.test.tsx`, `SkillsView.test.tsx`); `docs/specs/README.md` (this row), `CHANGELOG.md`,
+  and the four living surfaces with roles-as-rows wording (portal README; portal-user-guide,
+  user-and-role-administration, and architecture-overview).
 - chosen approach: mock `requestJson` from `../../../api/client` to return a small fixed
   `PolicyMatrixPayload` (a few roles × a few actions, including one `allow`, one `deny`, and one
   `require_approval` with `decided_by_roles`), shim `window.matchMedia` (antd probes it), render
@@ -91,5 +94,6 @@ three small stages mirroring R-1…R-3.
 - portal-only, presentational: **no** migration, **no** config knob, **no** contract or policy change.
 - rollback: revert `PermissionsView.tsx` (and its test) to the roles-as-rows orientation; nothing else is
   affected.
-- release: rides **v0.60.0** with SPEC-078 (the `VERSION` bump + spec-index `delivered` flip happen at
-  the release gate; SPEC-079 can be implemented and delivered first within that train).
+- release: a subsequent release after **v0.60.0**, which already shipped with SPEC-078. The exact
+  version, `VERSION` bump, and spec-index `delivered` flip remain separate release-gate decisions;
+  the original shared-train target is superseded for scheduling only (2026-11-19).

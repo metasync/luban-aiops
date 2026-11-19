@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `approved`
+- status: `in-progress`
 - owner: chi
 - created: 2026-11-18
 - approved: **2026-11-18** — the operator ratified all three Open Questions **exactly as
@@ -23,12 +23,11 @@
   changes, never its meaning.
 - release slice: the **operator portal** Permissions view. Independent of
   [SPEC-078](../SPEC-078-conversational-agentic-remediation/spec.md) — that spec is a
-  backend composition + entry change whose boundary explicitly adds **no** portal view — so
-  the transpose ships independently within the shared release train (it is **not** blocked by
-  SPEC-078's backend work and can be implemented and delivered first). Target version
-  **v0.60.0** — sharing the next release train with SPEC-078 (both approved over v0.59.0),
-  **pinned on approval 2026-11-18** (the operator chose to ride with SPEC-078 rather than a
-  separate PATCH/MINOR).
+  backend composition + entry change whose boundary explicitly adds **no** portal view.
+  **Release reconciliation 2026-11-19:** v0.60.0 shipped with SPEC-078 before this implementation.
+  SPEC-079 therefore moves to a subsequent release; the exact version is chosen at its separate
+  release gate. The original shared-v0.60.0 approval remains recorded in OQ-3 and the changelog,
+  superseded only for release scheduling. No version bump is part of this implementation.
 - extends / provenance: [SPEC-019](../SPEC-019-portal-transparency-navigation/spec.md) R-3
   (the role × action policy-matrix view), [SPEC-023](../SPEC-023-portal-framework-rebuild/spec.md)
   R-5 (the rebuilt control view), and [SPEC-030](../SPEC-030-require-approval-policy-semantics/spec.md)
@@ -113,8 +112,9 @@ Add the **currently absent** `PermissionsView.test.tsx`, mirroring the sibling c
 (`ApprovalsView.test.tsx`, `SettingsView.test.tsx`, `SkillsView.test.tsx` — `@testing-library/react`
 + `vitest`, mocking `requestJson` from the api client, with the antd `matchMedia` shim), asserting the
 transposed orientation and the three cell states. Reconcile the living docs: this spec index row and
-`CHANGELOG.md`. (No orientation claim was found in `authorization-matrix.md` or the guides, so the
-sweep is expected to be a no-op beyond the index + changelog.)
+`CHANGELOG.md`. The implementation sweep found stale roles-as-rows wording in the portal,
+role-administration, and architecture guides plus the portal README; update those living surfaces.
+The authorization-matrix reference itself needs no orientation change.
 
 - **Acceptance:** `PermissionsView.test.tsx` asserts roles render as column headers, permissions as
   the first-column rows, and all three cell states (allow/deny/require_approval with the deciders
@@ -130,7 +130,7 @@ sweep is expected to be a no-op beyond the index + changelog.)
 - **No change to server-side row-scoping or the `policy:read` gate** — the view still renders
   whatever the gateway returns.
 - **Not bundled into [SPEC-078](../SPEC-078-conversational-agentic-remediation/spec.md)** — that
-  spec adds **no** portal view; the transpose ships independently and can land sooner.
+  spec adds **no** portal view; the transpose ships independently in a subsequent release.
 - **No redesign** of the Permissions page beyond the table orientation (the title, bundle-version
   line, and footer stay, subject only to the OQ-1 wording).
 
@@ -156,7 +156,9 @@ sweep is expected to be a no-op beyond the index + changelog.)
   every sibling control view already has one); target version pinned **v0.60.0** — the operator
   chose to ride the shared release train with
   [SPEC-078](../SPEC-078-conversational-agentic-remediation/spec.md) rather than a separate
-  PATCH/MINOR, so SPEC-079 can be implemented and delivered first within v0.60.0.
+  PATCH/MINOR, so SPEC-079 could have been delivered within v0.60.0.
+  **Scheduling supersession 2026-11-19:** v0.60.0 shipped without SPEC-079; its implementation
+  remains approved, but it now targets a subsequent release selected at the release gate.
 
 ## Changelog
 
@@ -177,3 +179,10 @@ sweep is expected to be a no-op beyond the index + changelog.)
   release train with SPEC-078 rather than a separate PATCH/MINOR). The binding [plan](plan.md) /
   [tasks](tasks.md) are authored. Approval authorizes implementation to *begin* — not to merge,
   commit/push, deploy, or version-bump (each a separate gate).
+- 2026-11-19 — implementation started (`approved → in-progress`) on the operator's go-ahead.
+  Reconciled the release schedule: v0.60.0 already shipped with SPEC-078, so SPEC-079 moves to a
+  subsequent release whose version is chosen at the separate release gate. R-1…R-3 scope and the
+  approved presentation/semantics decisions are unchanged. The living-doc sweep found four stale
+  roles-as-rows claims, correcting the earlier expectation of a no-op guide sweep. Added failure-first
+  DOM coverage (five failures before the transpose, all nine cases passing afterward); verification
+  and release-gate state are tracked in [tasks](tasks.md).

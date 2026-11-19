@@ -514,8 +514,10 @@ gateway actually enforces — not hand-maintained documentation. The header
 shows the bundle version and source; the API response also carries a
 SHA-256 fingerprint of the exact loaded bundle text (as does each
 gateway's readiness surface), so a deployment can be confirmed against
-the canonical file. Platform admins see all roles;
-everyone else sees their own rows. Visible to every signed-in user under
+the canonical file. Permissions run down the first column and roles across
+the header; the long permission list scrolls with the page. Platform admins
+see all role columns; everyone else sees only their own roles, scoped by the
+server. Visible to every signed-in user under
 `policy:read`. Cells under an approval requirement render a third state —
 **self-approval** (`tier_1`) or **approver required** (`tier_2`, hovering
 names the decider roles) — instead of plain allow/deny.
