@@ -426,7 +426,10 @@ async def chat(
         return AgentChatResponse(
             session_id=session.session_id,
             request_id=request_id,
-            status="partial" if result.diagnosis.budget_limited else "ok",
+            status="partial" if (result.diagnosis.budget_limited
+                                 or result.staging_reply.confirmation_request
+                                 or result.staging_reply.authorization_required) else "ok",
+            authorization_required=result.staging_reply.authorization_required,
             content=result.narrative,
             model=getattr(result.staging_reply, "effective_model", None)
             or resolved_model,
@@ -625,7 +628,8 @@ async def remediate(
         session_id=session.session_id,
         request_id=request_id,
         authorization_required=getattr(reply, "authorization_required", None),
-        status="partial" if getattr(reply, "authorization_required", None) else "ok",
+        status="partial" if (getattr(reply, "authorization_required", None)
+                             or getattr(reply, "confirmation_request", None)) else "ok",
         content=content,
         structured_output=structured_output,
         model=effective_model,
@@ -737,7 +741,17 @@ async def chat_stream(
                 # terminal frame, consistent with the unscoped stream_events path
                 # (rides the existing ``model`` field — no schema change).
                 if chunk.get("event") == "message_end":
-                    chunk = {**chunk, "model": serving_model}
+                    if result.staging_reply.confirmation_request:
+                        chunk = result.staging_reply.confirmation_request
+                    else:
+                        if result.staging_reply.authorization_required:
+                            challenge = result.staging_reply.authorization_required.model_dump(mode="json")
+                            auth_frame = {"type": "authorization_required",
+                                          "auth_challenge_id": challenge.pop("challenge_id"),
+                                          **challenge}
+                            event = _normalize_stream_event(auth_frame, session.session_id, request_id)
+                            yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
+                        chunk = {**chunk, "model": serving_model}
                 event = _normalize_stream_event(
                     chunk, session.session_id, request_id
                 )

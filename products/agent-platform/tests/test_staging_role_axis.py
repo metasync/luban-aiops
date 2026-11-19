@@ -188,7 +188,7 @@ class TestAxisWiredAtStagingSeam:
             )
         )
         content, _structured = reply
-        assert content == "parked::ses-60::orch::staging"
+        assert content == "parked::ses-60"
         assert len(kernel.calls) == 1
         assert kernel.calls[0].role == "executor"
         assert kernel.calls[0].read_only is False

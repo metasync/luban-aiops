@@ -117,6 +117,64 @@
       row), `CHANGELOG.md`
 - [x] Root `make verify` green across every leg
 
+## Post-delivery parking correction (operator-authorized 2026-11-19)
+
+The first paid check did not establish positive parking: its success assertion only
+proved completion and absence of dispatch. The blocking executor path bypassed the
+HITL event handler, and its virtual staging session could not be opened by the
+approval API. The original delivery evidence above does not prove this integration.
+
+- [x] Add failure-first coverage using the real kernel/confirmation coordinator and SDK events.
+      Both blocking/SSE real-SDK cases failed on missing owner-session park before the fix.
+      Script negative cases also reproduced false success for missing cards, decisions, and cleanup failure.
+- [x] Route executor staging through existing HITL handling, on the owning chat session;
+      keep diagnostic member memory isolated and prevent reuse of prior flow approval.
+      The card is visible through the pending API; another turn is blocked while pending;
+      real-SDK denial resumes the same agent without dispatch. SSE emits the existing card
+      instead of a misleading message_end. This corrects the historical derived-staging-session design.
+- [x] Require a durable pending card before live-check cleanup, plus zero execution and decisions;
+      add negative cases for missing, unrelated, resolved, empty, wrong-owner, and read-only cards.
+      Audit pagination is bounded/fail-closed; cleanup failures cannot print success. The paid fixture
+      is an explicit approval-only rehearsal against existing scratch-restart-demo, not a fabricated outage.
+- [x] Run affected test suites and record the results here.
+      Agent-platform: **1,910 passed**; platform-gateway: **536 passed**;
+      focused composition/HITL/middleware set: **280 passed**; live-check scenarios: **16 passed**.
+      L3 security review returned no findings. These are targeted correction results, not a new full make verify run.
+- [x] Rebuild the affected local service and rerun one paid check without approving any mutation.
+      Local agent-service image: `0.60.0-dev-k8s-6e492758-parking-fix`; rollout succeeded.
+      Paid rerun positively proved one pending mutation card on owner session
+      `ses-74a83116-201c-47ca-97b8-b68ab2e96e4d`, confirmation
+      `f7d29fa8-bb55-47c8-9b2b-7db12dbb65fa`; zero execution/decision events before disposal.
+      The script then failed cleanup with HTTP 409 (the correct pending-session deletion guard),
+      so this is **not** a clean end-to-end script exit. The same card was subsequently denied
+      through the existing API (HTTP 200, durable `denied`); audit records only that intentional
+      `deny` for `k8s.delete_pod`, with zero `execution_requested`/`execution_completed` across the
+      session family. Session deletion returned 200, and a subsequent lookup returned 404.
+      No second remediation scenario was started to retry cleanup.
+- [x] Reproduce the cleanup HTTP 409 in the mocked pipeline and correct the harness lifecycle.
+      Preserve the application guard; drain the denial stream (or close expiry), verify durable
+      denial/expiry and no new pending card, recheck zero execution and only the exact cleanup
+      denial, then check deletion. Added expiry/racing-denial and failed/unresolved/reparked/
+      approved/dispatched/foreign-decision cases: **24 pipeline scenarios passed**.
+      Real-SDK blocking/SSE tests now also prove DELETE 409 while pending and 200 after denial.
+- [x] Rerun the complete affected suites and documentation/version checks after the cleanup correction.
+      `make -C products/agent-platform test`: **1,918 passed** (including all 24 pipeline scenarios);
+      `make -C products/platform-gateway test`: **536 passed**; both exited 0.
+      `make docs-check validate-version` and `git diff --check`: **PASS**, version remains 0.60.0.
+      Existing deprecation/OTLP shutdown warnings were nonfatal. The rebuilt agent deployment remains
+      1/1 Ready, and the two temporary port-forwards were stopped after cleanup.
+      Added the correction under `CHANGELOG.md` Unreleased; no release gate was performed.
+
+- [x] Complete the full pre-commit `make verify` gate (2026-11-19): every leg passed.
+      The execution-failure campaign finished **795 passed, 2 deselected, exit 0** in **0:45:17**;
+      the complete root run finished successfully in **50m33s**, including all product suites,
+      baseline portal **546** + build, validation, audit-contract, and delegated integration proofs.
+      Campaign evidence: `.workspaces/spec063-evidence/20261119T135649Z-3fb3626b507a`.
+      No new live acceptance or paid remediation scenario was performed by this gate.
+
+The operator authorized a separate correction commit on 2026-11-19 before SPEC-079 implementation.
+Version bump, tag, and push remain separate, unrequested gates for this correction.
+
 ## Delivery Gate
 
 - [x] all acceptance criteria in `spec.md` verified (R-1…R-7); **R-3 reverts to deferred** (recorded, not

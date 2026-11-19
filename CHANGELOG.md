@@ -11,6 +11,17 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## Unreleased
+
+### Fixed
+
+- SPEC-078 conversational remediation now consumes the real SDK confirmation event
+  and parks executor proposals on the owning chat session, exposing the existing
+  approval card without reusing an earlier browser-flow approval. Regression tests
+  cover blocking/SSE parking, denial, and the pending-session deletion guard. The
+  live-check requires a durable pending mutation card and zero dispatch, then safely
+  denies or expires its test proposal before checked session cleanup.
+
 ## 0.60.0 — 2026-11-19
 
 [SPEC-078](docs/specs/SPEC-078-conversational-agentic-remediation/spec.md)

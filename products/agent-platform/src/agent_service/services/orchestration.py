@@ -336,7 +336,11 @@ def _staging_prompt(goal: str, profile: DiagnosisProfile, diagnosis: str) -> str
         "Propose the single mutating action that would remediate this. You cannot "
         "and must not dispatch it yourself: the proposal parks on a human-approval "
         "card, and only a distinct human approver (never you, never the original "
-        "requester) may authorize execution."
+        "requester) may authorize execution. To stage an actionable proposal, "
+        "submit the single mutating tool call: the runtime intercepts it BEFORE "
+        "execution and creates the approval card. Prose alone does not stage a "
+        "proposal. If evidence or target details are missing, explain the limitation "
+        "instead of inventing a target or claiming a card was created."
     )
 
 
@@ -447,7 +451,9 @@ async def stage_remediation(
         _enforce_staging_role_axis()
         reply = await kernel.reply_text(
             message=_staging_prompt(goal, profile, diagnosis),
-            session_id=f"{session_id}::orch::staging",
+            # A confirmation must belong to a real owner session so the
+            # existing pending lookup, inbox, resume, and deletion can reach it.
+            session_id=session_id,
             user_name=user_name,
             bearer_token=bearer_token,
             model_id=model_id,
@@ -470,14 +476,12 @@ class ConversationalRemediationResult:
     """The conversational composition's outcome (SPEC-078 R-1/R-2).
 
     Carries the bounded read-only :class:`DiagnosisResult` (SPEC-076) and the
-    ``executor`` staging turn's ``BlockingReply`` (SPEC-077). By the time this is
-    returned the single proposed mutating call has **already parked** on the
-    existing HITL card (``staged_by_role="executor"``) through the delivered
-    ``stage_remediation`` → ``ConfirmationCoordinator`` seam, so this result
-    carries only the narrative to project — never a dispatch handle. The route
-    projects :attr:`narrative` into the **one** session stream (single-voice,
-    R-5); the parked card rides the existing SPEC-031 registry + approval inbox
-    exactly as ``POST /api/v2/remediate`` does. No ``agent_role`` crosses here.
+    ``executor`` staging turn's ``BlockingReply`` (SPEC-077). An actual SDK ASK
+    carries ``confirmation_request`` from the existing confirmation coordinator;
+    prose-only replies do not establish parking. The internal frame is projected
+    onto the existing SSE contract and its durable card belongs to the owner's
+    chat session. Neither result nor narrative carries a dispatch handle. No
+    ``agent_role`` crosses the wire.
     """
 
     diagnosis: DiagnosisResult
@@ -513,7 +517,8 @@ async def run_conversational_remediation(
     read-only ``diagnostician`` members, bounded by
     ``AGENT_ORCHESTRATION_MAX_STEPS``, failing closed to a partial diagnosis)
     then :func:`stage_remediation` (SPEC-077 — **one** ``executor``
-    ``read_only=False`` turn on ``{session_id}::orch::staging``) **verbatim**,
+    ``read_only=False`` turn on the owning chat session, consuming the existing
+    streaming HITL handler through ``reply_text``),
     over the *same* delegated token and requester identity (R-3). Both delivered
     functions bind their own roles in-process; this composition binds **none**
     itself and the caller's body carries none (SPEC-073 R-3 — the role never

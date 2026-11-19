@@ -758,7 +758,7 @@ class TestExecutorStaging:
             )
         )
         content, _structured = reply
-        assert content == "parked::ses-40::orch::staging"
+        assert content == "parked::ses-40"
         assert len(kernel.calls) == 1
         call = kernel.calls[0]
         # The staging turn binds the executor and runs read_only=False so it can
@@ -892,7 +892,7 @@ class TestDiagnoseActBridgeAttribution:
         # Exactly one executor turn, on the derived staging session.
         assert len(kernel.calls) == 1
         call = kernel.calls[0]
-        assert call.session_id == "ses-50::orch::staging"
+        assert call.session_id == "ses-50"
         # The delivered emitter seam threads the bound role verbatim: the audit
         # event and the persisted evidence turn both carry agent_role="executor"
         # (SPEC-075), with no new event_type minted for the bridge.
@@ -939,7 +939,7 @@ class TestDiagnoseActBridgeAttribution:
         # staging session.
         final = kernel.calls[-1]
         assert final.event["agent_role"] == "executor"
-        assert final.session_id == "ses-51::orch::staging"
+        assert final.session_id == "ses-51"
 
 
 # ---------------------------------------------------------------------------

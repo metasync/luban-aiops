@@ -94,6 +94,8 @@ class BlockingReply:
     # routing fired; ``None`` when the turn kept its resolved model. Additive —
     # the two-value ``__iter__`` unpacking contract below is unchanged.
     effective_model: str | None = None
+    # Internal projection of the existing HITL frame, never a new wire field.
+    confirmation_request: dict | None = None
 
     def __iter__(self):
         """Preserve the existing two-value internal unpacking contract."""

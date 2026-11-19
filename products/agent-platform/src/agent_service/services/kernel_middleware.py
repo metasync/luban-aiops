@@ -582,8 +582,13 @@ class GatewayPermissionMiddleware(MiddlewareBase):
         # call site staying the only one (SPEC-055 R-5). The tool-gateway
         # deviation guard still bounds the write.
         gateway_tool_name = getattr(tool, "gateway_tool_name", None)
+        from agent_service.services.agent_role import AgentRole, current_agent_role
+
+        # A newly staged executor proposal always needs its own human decision,
+        # even when this chat session holds authority for an earlier browser flow.
         if (
-            self._flow_signer is not None
+            current_agent_role() != AgentRole.EXECUTOR
+            and self._flow_signer is not None
             and gateway_tool_name in BROWSER_WRITE_TOOLS
             and not getattr(tool, "is_read_only", False)
         ):

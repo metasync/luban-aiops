@@ -180,6 +180,40 @@ class TurnStreamer:
         (automated diagnostic turns such as incident triage).
         """
         from agent_service.runtime_kernel import BlockingReply, extract_text
+        from agent_service.services.agent_role import AgentRole, current_agent_role
+
+        # Executor staging must consume the ASK event through the same handler
+        # as SSE. SDK reply() discards it and returns only the last message.
+        # Read-only and unscoped blocking turns retain their existing behavior.
+        if not read_only and current_agent_role() == AgentRole.EXECUTOR:
+            from contextlib import aclosing
+            from agent_service.schemas.v2 import AuthorizationRequired
+
+            text: list[str] = []
+            confirmation = None
+            challenge = None
+            effective_model = None
+            async with aclosing(self._kernel.stream_events(
+                message=message, request_id="staging", session_id=session_id,
+                user_name=user_name, bearer_token=bearer_token,
+                model_id=model_id, routing_allowed=routing_allowed,
+            )) as stream:
+                async for frame in stream:
+                    if frame.get("delta"):
+                        text.append(str(frame["delta"]))
+                    if frame.get("type") == "confirmation_request":
+                        confirmation = frame
+                        text.append(str(frame.get("message") or "Awaiting human approval."))
+                    if frame.get("type") == "authorization_required":
+                        challenge = AuthorizationRequired(
+                            challenge_id=frame["auth_challenge_id"], target=frame["target"],
+                            expires_at=frame.get("expires_at"),
+                        )
+                    if frame.get("model"):
+                        effective_model = str(frame["model"])
+            return BlockingReply("".join(text), authorization_required=challenge,
+                                 effective_model=effective_model,
+                                 confirmation_request=confirmation)
 
         if not self._kernel.is_configured():
             return BlockingReply(self._kernel.build_unconfigured_message(message, session_id))

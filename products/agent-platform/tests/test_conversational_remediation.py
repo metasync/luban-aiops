@@ -124,6 +124,132 @@ class ConversationalFakeKernel:
 # ---------------------------------------------------------------------------
 # R-2: the composition reuses the delivered machinery verbatim
 # ---------------------------------------------------------------------------
+@pytest.mark.parametrize("streaming", [False, True])
+def test_real_sdk_composition_parks_on_owner_session(monkeypatch, streaming):
+    """Real SDK permission ASK -> streamer -> durable card; no fake park."""
+    import json
+    from types import SimpleNamespace
+    from agentscope.agent import Agent, ReActConfig
+    from agentscope.message import TextBlock, ToolCallBlock, UserMsg
+    from agentscope.model import ChatModelBase, ChatResponse
+    from agentscope.tool import FunctionTool, Toolkit
+    from agent_service.api.v2 import routes
+    from agent_service.runtime_kernel import AgentKernel
+    from agent_service.services.confirmation_records import CONFIRMATION_RECORD_STORE
+    from agent_service.services.hitl_confirmations import CONFIRMATION_REGISTRY
+    from agent_service.services.delegated_identity import REQUESTER_IDENTITY
+    from agent_service.tools.gateway_tools import DELEGATED_TOKEN
+
+    dispatches = []
+    roles = []
+    kernel = AgentKernel(settings=_settings(hitl_confirm_timeout=600))
+
+    async def mutate(namespace: str):
+        dispatches.append(namespace)
+        raise AssertionError("a staging turn must never invoke the mutation")
+
+    tool = FunctionTool(mutate, name="k8s_restart_service", is_read_only=False)
+    tool.gateway_tool_name = "k8s.restart_service"
+    tool.risk_level = "write"
+
+    class Model(ChatModelBase):
+        def __init__(self, executor):
+            super().__init__(None, "fixture", self.Parameters(), stream=False)
+            self.formatter = SimpleNamespace(supported_input_media_types=[])
+            self.executor = executor
+            self.calls = 0
+
+        async def __call__(self, *args, **kwargs):
+            self.calls += 1
+            content = [ToolCallBlock(id="proposed-1", name=tool.name,
+                                     input=json.dumps({"namespace": "fixture"}))]
+            return ChatResponse(content=content if self.executor and self.calls == 1 else [
+                TextBlock(text="Observed fixture degradation; propose a restart.")
+            ], is_last=True)
+
+    async def ensure_toolkit(bearer_token=None, read_only=False):
+        roles.append((current_agent_role_value(), read_only, bearer_token))
+        return Toolkit(tools=[] if read_only else [tool])
+
+    monkeypatch.setattr(kernel, "_ensure_toolkit", ensure_toolkit)
+    monkeypatch.setattr(kernel, "_build_model", lambda model_id=None: Model(
+        current_agent_role_value() == "executor"))
+    monkeypatch.setattr(routes, "get_runtime_kernel", lambda: kernel)
+    client = _client()
+    session = _new_session(client)
+    payload = {"message": "diagnose and stage a restart", "session_id": session,
+               "remediation_intent": True, "remediation_profile": "k8s-pod-degradation"}
+    headers = {"X-User-ID": "alice", "Authorization": "Bearer fixture-token"}
+    try:
+        response = (client.get("/api/v2/chat/stream", params=payload, headers=headers)
+                    if streaming else client.post("/api/v2/chat", json=payload, headers=headers))
+        assert response.status_code == 200, response.text
+        pending = CONFIRMATION_REGISTRY.peek_parked(session)
+        assert pending is not None, "no real pending confirmation on the owning session"
+        assert pending.staged_by_role == "executor"
+        assert pending.requester_delegated_token == "fixture-token"
+        assert pending.user_id == "alice"
+        assert pending.tool_names() == ["k8s_restart_service"]
+        record = CONFIRMATION_RECORD_STORE.load_pending_for_session(session)
+        assert record is not None and record["confirm_id"] == pending.confirm_id
+        assert record["pending_calls"] and record["status"] == "pending"
+        metadata = client.get("/api/v2/chat/pending-confirmation",
+                              params={"session_id": session}, headers=headers)
+        assert metadata.status_code == 200
+        assert metadata.json()["confirm_id"] == pending.confirm_id
+        blocked = client.post("/api/v2/chat", json=payload, headers=headers)
+        assert blocked.status_code == 409
+        blocked_delete = client.delete("/api/v2/sessions/" + session, headers=headers)
+        assert blocked_delete.status_code == 409
+        if streaming:
+            assert '"type":"confirmation_request"' in response.text
+            assert pending.confirm_id in response.text
+            assert '"type":"message_end"' not in response.text
+        else:
+            assert response.json()["status"] == "partial"
+        assert "agent_role" not in response.text
+        assert dispatches == []
+        assert [r for r, _, _ in roles] == ["diagnostician"] * 4 + ["orchestrator", "executor"]
+        assert all(t == "fixture-token" for _, _, t in roles)
+        assert current_agent_role_value() is None
+        assert REQUESTER_IDENTITY.get() is None and DELEGATED_TOKEN.get() is None
+        # The existing resume API reaches the same SDK agent, not a virtual
+        # session missing from the store. Denial exercises resume without writing.
+        denied = client.post("/api/v2/chat/confirm", json={
+            "session_id": session, "confirm_id": pending.confirm_id, "decision": "deny",
+        }, headers={"X-User-ID": "bob"})
+        assert denied.status_code == 200, denied.text
+        assert '"status":"denied"' in denied.text
+        assert CONFIRMATION_REGISTRY.peek_parked(session) is None
+        assert dispatches == []
+        deleted = client.delete("/api/v2/sessions/" + session, headers=headers)
+        assert deleted.status_code == 200
+    finally:
+        CONFIRMATION_REGISTRY._by_session.pop(session, None)
+        client.delete("/api/v2/sessions/" + session, headers=headers)
+
+
+def test_executor_staging_does_not_reuse_prior_flow_approval():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from agentscope.message import ToolCallBlock
+    from agentscope.permission import PermissionBehavior
+    from agent_service.services.agent_role import agent_role_scope
+    from agent_service.services.kernel_middleware import GatewayPermissionMiddleware
+
+    signer = Mock(return_value={"signed": "old-authority"})
+    middleware = GatewayPermissionMiddleware([], flow_signer=signer)
+    tool = SimpleNamespace(name="web_click", gateway_tool_name="web.click", is_read_only=False)
+    call = ToolCallBlock(id="new-proposal", name="web_click", input='{"ref":1}')
+
+    async def exercise():
+        with agent_role_scope(AgentRole.EXECUTOR):
+            return await middleware.on_check_permission(None, {"tool": tool, "tool_call": call}, None)
+
+    assert _run(exercise()).behavior == PermissionBehavior.ASK
+    signer.assert_not_called()
+
+
 class TestConversationalComposition:
     def test_composes_diagnose_then_stage_and_parks_one_executor_proposal(self):
         profile = get_profile("k8s-pod-degradation")  # 4 read steps + a shape
@@ -148,7 +274,7 @@ class TestConversationalComposition:
         assert len(kernel.staging_calls) == 1
         staging = kernel.staging_calls[0]
         assert staging.read_only is False
-        assert staging.session_id == "ses-conv::orch::staging"
+        assert staging.session_id == "ses-conv"
         assert staging.pending is not None
         assert staging.pending.staged_by_role == "executor"
         # R-2: the team proposes, a human disposes — nothing dispatched.
@@ -159,7 +285,7 @@ class TestConversationalComposition:
         assert result.diagnosis.budget_limited is False
         assert result.narrative == (
             "observed::ses-conv::orch::synthesis\n\n"
-            "parked::ses-conv::orch::staging"
+            "parked::ses-conv"
         )
         # The composition binds no role itself and leaves none bound afterwards.
         assert current_agent_role_value() is None
@@ -605,7 +731,7 @@ class TestConversationalAttribution:
         # The executor proposal is the final turn, on the derived staging session.
         final = kernel.calls[-1]
         assert final.event["agent_role"] == "executor"
-        assert final.session_id == "ses-attr::orch::staging"
+        assert final.session_id == "ses-attr"
 
     def test_staged_proposal_parks_with_executor_provenance_and_never_dispatches(
         self,

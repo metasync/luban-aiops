@@ -47,8 +47,13 @@ DIAGNOSIS_ONLY = "servicenow-incident"
 DENIED_ROLE = "approver"
 
 # Scenarios that set the gated paid leg.
-_DRIVE = {"live-drive", "mutation-detected", "policy-gate-open", "failclosed-open"}
-_SUCCESS = {"live-preflight", "live-drive"}
+_PARK_FAILURES = {"missing-card", "foreign-card", "resolved-card", "empty-card", "wrong-owner", "read-card"}
+_CLEANUP = {"cleanup-expired", "cleanup-already-denied", "cleanup-deny-failed",
+            "cleanup-unresolved", "cleanup-reparked", "cleanup-unexpected-approval",
+            "cleanup-dispatch", "cleanup-foreign-decision"}
+_DRIVE = {"live-drive", "mutation-detected", "policy-gate-open", "failclosed-open",
+          "approval-detected", "cleanup-failed", *_PARK_FAILURES, *_CLEANUP}
+_SUCCESS = {"live-preflight", "live-drive", "cleanup-expired", "cleanup-already-denied"}
 
 
 def _pipeline_source() -> str:
@@ -76,6 +81,7 @@ class _Response:
 @pytest.mark.parametrize("scenario", [
     "live-preflight", "live-drive", "missing-agent-route", "missing-gateway-route",
     "mutation-detected", "policy-gate-open", "failclosed-open", "agent-pod-down",
+    "approval-detected", "cleanup-failed", *sorted(_PARK_FAILURES), *sorted(_CLEANUP),
 ])
 def test_conversational_remediation_livecheck_pipeline(
     scenario, monkeypatch, capsys
@@ -85,6 +91,7 @@ def test_conversational_remediation_livecheck_pipeline(
     deleted: list[str] = []
     chat_calls: list[dict] = []
     counter = [0]
+    disposed: list[str] = []
 
     def open_request(request, timeout):
         parts = urlsplit(request.full_url)
@@ -105,9 +112,55 @@ def test_conversational_remediation_livecheck_pipeline(
             sid = "ses-conv-%d" % counter[0]
             created.append(sid)
             return _Response({"session_id": sid})
+        if path.startswith("/api/v1/sessions/") and method == "GET":
+            assert not deleted, "parking must be checked before cleanup"
+            sid = path.rsplit("/", 1)[-1]
+            card = {"session_id": sid, "confirm_id": "cf-1", "status": "pending",
+                    "owner_user_id": "luban-conversational-livecheck",
+                    "decision": None, "decider_user_id": None,
+                    "pending_calls": [{"tool_name": "k8s.restart_service", "risk_level": "write"}]}
+            if disposed:
+                card.update(status="denied", decision="deny",
+                            decider_user_id="luban-conversational-livecheck")
+                if scenario == "cleanup-expired":
+                    card.update(status="expired", decision=None, decider_user_id=None)
+                if scenario == "cleanup-unresolved":
+                    card.update(status="pending", decision=None, decider_user_id=None)
+                if scenario == "cleanup-unexpected-approval":
+                    card.update(status="approved", decision="approve")
+                if scenario == "cleanup-reparked":
+                    return _Response({"confirmations": [card, {
+                        **card, "confirm_id": "cf-2", "status": "pending", "decision": None,
+                    }]})
+            if scenario == "foreign-card":
+                card["session_id"] = "unrelated"
+            if scenario == "resolved-card":
+                card["status"] = "approved"
+            if scenario == "empty-card":
+                card["pending_calls"] = []
+            if scenario == "wrong-owner":
+                card["owner_user_id"] = "someone-else"
+            if scenario == "read-card":
+                card["pending_calls"][0]["risk_level"] = "read"
+            return _Response({"confirmations": [] if scenario == "missing-card" else [card]})
+        if path == "/api/v1/chat/confirm" and method == "POST":
+            payload = json.loads(request.data)
+            assert payload == {"session_id": created[0], "confirm_id": "cf-1", "decision": "deny"}
+            assert request.headers["Authorization"] == "Bearer " + TOKEN
+            assert not disposed, "cleanup must not retry decisions or follow a new proposal"
+            if scenario == "cleanup-deny-failed":
+                return _Response({}, status=502)
+            disposed.append(payload["confirm_id"])
+            if scenario == "cleanup-expired":
+                return _Response({"detail": "confirmation expired"}, status=410)
+            if scenario == "cleanup-already-denied":
+                return _Response({"detail": {"reason": "already_resolved"}}, status=409)
+            return _Response('data: {"type":"confirmation_result","status":"denied"}\n\n')
         if path.startswith("/api/v1/sessions/") and method == "DELETE":
+            if not disposed and scenario not in {"missing-card", "resolved-card"}:
+                return _Response({"detail": "session has a parked confirmation"}, status=409)
             deleted.append(path.rsplit("/", 1)[-1])
-            return _Response({})
+            return _Response({}, status=500 if scenario == "cleanup-failed" else 200)
         if path == "/api/v1/chat" and method == "POST":
             payload = json.loads(request.data)
             auth = request.headers.get("Authorization", "")
@@ -151,12 +204,23 @@ def test_conversational_remediation_livecheck_pipeline(
                 return _Response({"events": [{
                     "event_type": "chat_completed", "session_id": sid,
                 }], "next_cursor": None})
+            if event_type in ("confirmation_decided", "execution_completed"):
+                events = ([{"event_type": event_type, "session_id": created[0]}]
+                          if scenario == "approval-detected" and event_type == "confirmation_decided" else [])
+                if disposed and event_type == "confirmation_decided" and not events:
+                    if scenario != "cleanup-expired":
+                        events = [{"event_type": event_type, "session_id": created[0],
+                                   "outcome": "deny", "details": {
+                                       "confirm_id": "other" if scenario == "cleanup-foreign-decision" else "cf-1",
+                                       "decision": "deny"}}]
+                if disposed and scenario == "cleanup-dispatch" and event_type == "execution_completed":
+                    events = [{"event_type": event_type, "session_id": created[0]}]
+                return _Response({"events": events, "next_cursor": None})
             if event_type == "execution_requested":
                 # POINT 3 sensitivity: the script queries this event type
                 # cluster-wide (no session_id) and prefix-matches the session
-                # family, because the staging turn audits under
-                # "<session>::orch::staging", never the bare parent id. Fabricate
-                # the mutation under the DERIVED staging id so the test proves the
+                # family, including isolated diagnostic turns. Fabricate
+                # the mutation under a DERIVED id so the test proves the
                 # prefix match catches it — an exact parent-scoped query would miss
                 # this and pass vacuously.
                 if scenario == "mutation-detected":
@@ -221,6 +285,8 @@ def test_conversational_remediation_livecheck_pipeline(
                     and chat_calls[2]["session_id"])
             # Only the paid turn opens a session, and it is cleaned up.
             assert len(created) == 1 and deleted == created
+            assert disposed == ["cf-1"]
+            assert out.index("PARK_PROOF:") < out.index("CLEANUP_PROOF:")
     else:
         with pytest.raises(SystemExit) as excinfo:
             exec(compiled, {"__name__": "__main__"})
