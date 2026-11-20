@@ -515,7 +515,10 @@ shows the bundle version and source; the API response also carries a
 SHA-256 fingerprint of the exact loaded bundle text (as does each
 gateway's readiness surface), so a deployment can be confirmed against
 the canonical file. Permissions run down the first column and roles across
-the header; the long permission list scrolls with the page. Platform admins
+the header; the long permission list scrolls with the page. On narrow screens,
+scroll the matrix sideways to reach remaining roles; the permission column stays
+pinned and the title, bundle metadata, and footer stay in place. The matrix region
+can receive keyboard focus. Platform admins
 see all role columns; everyone else sees only their own roles, scoped by the
 server. Visible to every signed-in user under
 `policy:read`. Cells under an approval requirement render a third state —

@@ -11,7 +11,8 @@
 ## Approach
 
 Transpose the rendering in
-`products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx` and change nothing else.
+`products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx`, with scoped CSS for the
+operator-authorized narrow-layout correction. Change only presentation.
 The `GET /api/v1/policy/matrix` request, its payload shape, the server-side row-scoping, and the
 `policy:read` gate are untouched; the view simply addresses the same payload by **(row = action,
 column = role)** instead of **(row = role, column = action)**. All three cell states (`allow` / `deny`
@@ -22,7 +23,8 @@ three small stages mirroring R-1…R-3.
 
 ### R-1: Transpose the rendered orientation (permissions as rows, roles as columns)
 
-- affected file: `PermissionsView.tsx` only.
+- affected files: `PermissionsView.tsx`; the operator-authorized narrow-layout correction
+  additionally scopes horizontal overflow in `src/theme/global.css`.
 - chosen approach:
   - `dataSource` becomes the actions (`actions.map((action) => ({ action }))`); `rowKey="action"`.
   - the first column is the permission name, `fixed: "left"`, header **`permission`** (OQ-1).
@@ -33,11 +35,11 @@ three small stages mirroring R-1…R-3.
   - the footer re-orders to `{actions} permissions × {roles} roles · evaluated from the enforced
     bundle` (OQ-1); the page title and the bundle-version line stay.
   - scroll (OQ-2): drop the forced `scroll={{ x: "max-content" }}` and let the long permission list
-    scroll **with the page**. Note the antd constraint that a `fixed` column normally wants a `scroll`
-    prop — keep the permission column `fixed: "left"` and, if antd needs a `scroll` to honor it, use a
-    bounded `scroll={{ y: … }}` (fixed-height body, page still scrolls) rather than re-introducing a
-    forced horizontal `x`; with only a handful of role columns the table should not overflow
-    horizontally. The test asserts the first-column labels stay visible.
+    scroll **with the page**. Keep the permission column `fixed: "left"`; no bounded table body.
+    The initial assumption that six role columns always fit was disproved by the 830px live check.
+    Operator-authorized correction: wrap only the table in a named, keyboard-focusable region with
+    `max-width: 100%` and `overflow-x: auto`. Any narrow-screen overflow stays in that region, not
+    on the page title, bundle metadata, or footer. No forced table width or height is introduced.
 - alternatives rejected: transposing server-side (the payload is unchanged and other consumers rely on
   its shape); keeping roles-as-rows with a wider scroll (that is the papercut the operator raised).
 

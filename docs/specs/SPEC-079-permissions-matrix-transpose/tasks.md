@@ -63,6 +63,73 @@
 The operator authorized commit/push, local rebuild/redeploy, and then browser visual verification
 following a clear review. Version bump and the `delivered` release closure remain separate gates.
 
+### Authorized handoff progress
+
+- [x] Code/doc review and L3 security review passed; parking correction `b98de18d` and
+      SPEC-079 `d32f79b0` committed and pushed to `origin/main`.
+- [x] Coordinated build completed: all nine product images and `.images.env` use
+      `0.60.0-dev-k8s-d32f79b0` (no version bump).
+- [x] `make deploy` completed with exit 0, including final realm and browser-client reconciliation.
+      OpenObserve credential provisioning was skipped because bootstrap credentials were absent.
+- [x] Complete `make deploy-sample-app` and final cluster health verification. Initial follow-up
+      hit Kubernetes TLS/Docker timeouts; the operator authorized an OrbStack restart. All 15
+      namespace pods recovered to Ready; the sample deploy then exited 0 with health, authentication,
+      credential-set, and network-policy checks passing. Product/sample images match the built tag.
+- [x] Browser visual check performed using the operator-authenticated `luban-admin` session
+      (`platform-admin`, full scope), at 830 × 535 CSS pixels. Confirmed 27 permission rows,
+      six role columns, allow/deny/approval colors, `deciders: approver, platform-admin` tooltip,
+      and `27 permissions × 6 roles` footer. No console warnings/errors; all 24 observed fetch/XHR
+      requests returned 200. Preserved the signed-in session; no chat/model or mutation actions.
+      Local evidence: `.qoder/spec079-permissions-viewport.png`,
+      `.qoder/spec079-permissions-approval-tooltip-footer.png`, and
+      `.qoder/spec079-permissions-bottom-right.png`.
+      **Visual concern:** at this width the observer column is initially offscreen. Horizontal
+      scrolling (88 px) reveals it and keeps the permission column pinned, but scrolls the whole
+      content region, clipping the heading/footer on the left. This is not a clean visual pass.
+      Other role scopes and wider viewports remain untested; browser resizing was unavailable.
+      The full-page screenshot does not capture the entire internally scrolling matrix.
+
+### Narrow-layout correction (operator authorized 2026-11-20)
+
+- [x] Wrap only the matrix in a named, focusable region. Scoped `overflow-x: auto` and
+      `max-width: 100%` keep the heading, metadata, and footer out of horizontal scrolling.
+      Preserve `fixed: "left"`, natural table width, page-level vertical scrolling, and all data paths.
+- [x] Failure-first regression: the new region test failed with the nine existing cases passing;
+      after the fix all ten pass. It checks keyboard focusability, chrome outside the region,
+      the real CSS containment rules, and absence of a fixed-height table body.
+- [x] Final `make portal-test docs-check validate-version` and `git diff --check` passed:
+      **556 tests across 41 files**, including all ten matrix cases with the final CSS-rule assertions;
+      TypeScript and Vite production build passed. Docs remain link-clean; version remains 0.60.0.
+      The first run had all assertions passing but exited on the existing React/jsdom
+      `window is not defined` teardown race; subsequent full runs passed without changing shared
+      test setup. CSS is read directly because Vitest stubs CSS imports, including query imports.
+- [x] Local browser fixture measurements: real component/theme/CSS, six roles and 36 actions
+      (including four synthetic long labels), 845 × 535 viewport. Main client/scroll width both
+      781px; matrix 733px client / 900px scroll width. Horizontal scrolling reached the last role
+      while the permission column, heading, and footer stayed at x=88px. No production DOM,
+      authentication, or deployment changes were used for the fixture.
+- [ ] Complete screenshot/interaction and wide-viewport verification. Browser capture was blocked
+      by a hidden/detached view; hover timed out and arrow-key scrolling was inconclusive. The
+      wrapper had a 1px vertical scroll range despite no imposed height; main-page vertical range
+      was 1106px, but bottom reach was not verified. This is partial geometry evidence, not a full
+      visual pass or a deployed-fix check.
+      Operator-requested full visual retry on 2026-11-20 remained blocked, including after the
+      operator opened/focused the Browser view and confirmed readiness. Screenshot capture still
+      returned `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE` (`visible=false`, `attached=false`,
+      `visibilityState=hidden`) after supported page activation. No new screenshots or layout/
+      interaction results were obtained; the production page and signed-in session were unchanged.
+- [x] Reconcile the spec/plan narrow-width assumption, operator guide, and Unreleased changelog.
+      Version and release closure are unchanged.
+- [x] Pre-handoff recheck (2026-11-20): **556 tests across 41 files**, TypeScript, Vite build,
+      docs-check, and version lockstep passed again. The unchanged backend retains the full
+      2026-11-19 root-gate evidence above; this is affected-scope re-verification, not a new full run.
+      A first retry was terminated by the terminal tool's one-second execution timeout; the
+      complete rerun passed with a sufficient timeout and no code changes.
+
+The operator subsequently authorized committing/pushing this correction, a coordinated local
+rebuild/redeploy, and renewed browser testing (2026-11-20). This authorization does not close the
+pending screenshot/interaction check above or the separate version/release gates below.
+
 ## Delivery Gate
 
 - [x] all acceptance criteria in `spec.md` verified (R-1…R-3):

@@ -106,13 +106,20 @@ export default function PermissionsView() {
       ) : null}
       <Spin spinning={loading}>
         {payload ? (
-          <Table
-            size="small"
-            rowKey="action"
-            columns={columns}
-            dataSource={actions.map((action) => ({ action }))}
-            pagination={false}
-          />
+          <div
+            className="permissions-matrix-scroll"
+            role="region"
+            aria-label="Permissions matrix"
+            tabIndex={0}
+          >
+            <Table
+              size="small"
+              rowKey="action"
+              columns={columns}
+              dataSource={actions.map((action) => ({ action }))}
+              pagination={false}
+            />
+          </div>
         ) : null}
       </Spin>
       {payload ? (

@@ -696,6 +696,14 @@ body {
   }
 }
 
+/* SPEC-079: narrow layouts scroll only the matrix horizontally, keeping
+   the title, bundle metadata, and footer in place. No height bound: the
+   long permission list still scrolls vertically with the page. */
+.permissions-matrix-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 /* --- Shared view chrome (SPEC-023 R-5) --- */
 .view-toolbar {
   display: flex;

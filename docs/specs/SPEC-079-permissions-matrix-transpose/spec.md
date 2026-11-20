@@ -55,8 +55,8 @@ browse and to compare role-by-role at a glance.
 
 ## Approach
 
-Transpose the rendering in `PermissionsView.tsx` and change nothing else. The payload keeps its
-shape (`actions[]`, `roles[]`, `matrix: Record<role, Record<action, boolean>>`, and the optional
+Transpose the rendering in `PermissionsView.tsx`, with scoped CSS for matrix-only overflow.
+Change only presentation. The payload keeps its shape (`actions[]`, `roles[]`, `matrix: Record<role, Record<action, boolean>>`, and the optional
 `approval_requirements: Record<role, Record<action, {tier, decided_by_roles, rule_id}>>`); the
 view simply addresses it by **(row = action, column = role)** instead of **(row = role, column =
 action)**:
@@ -67,8 +67,9 @@ action)**:
 - each cell resolves the **same** lookups as today — `approval_requirements[role][action]` for the
   `require_approval` state, else `matrix[role][action]` for allow/deny — so all three cell states
   (and the tier + deciders tooltip) render identically;
-- the scroll axis flips: the permission column stays `fixed: "left"`, the few role columns need no
-  horizontal scroll, and the long permission list scrolls vertically (per OQ-2).
+- the scroll axis flips: the permission column stays `fixed: "left"` and the long permission list
+  scrolls vertically (per OQ-2). If role columns exceed the available width, only the matrix scrolls
+  horizontally; the title, bundle metadata, and footer stay outside that scroll region.
 
 This is a **presentational** change only: the request, the payload contract, the server-side
 row-scoping, and the gateway's `policy:read` re-enforcement are untouched, and no backend,
@@ -151,6 +152,10 @@ The authorization-matrix reference itself needs no orientation change.
   "max-content" }}`, and let the long permission list scroll **with the page** (the natural
   vertical axis); a bounded `scroll={{ y: … }}` stays an implementation-detail fallback if a
   fixed-height viewport proves preferable.
+  **Narrow-layout correction authorized 2026-11-20:** the live 830px check showed that six roles
+  can still overflow. Keep the removed forced width and page-level vertical scrolling; contain
+  conditional horizontal overflow in a keyboard-focusable matrix-only region so page chrome
+  does not slide or clip. This does not change the request, scope, or cell semantics.
 - **OQ-3 — Test coverage + target version.** **Resolved (ratified 2026-11-18):** add the missing
   `PermissionsView.test.tsx` **now** (the transpose is exactly what a DOM assertion guards, and
   every sibling control view already has one); target version pinned **v0.60.0** — the operator
@@ -186,3 +191,7 @@ The authorization-matrix reference itself needs no orientation change.
   roles-as-rows claims, correcting the earlier expectation of a no-op guide sweep. Added failure-first
   DOM coverage (five failures before the transpose, all nine cases passing afterward); verification
   and release-gate state are tracked in [tasks](tasks.md).
+- 2026-11-20 — operator authorized the narrow-layout correction after browser verification found
+  whole-page horizontal overflow. Contain overflow in a focusable matrix-only region while keeping
+  the permission column pinned and the long list at page height. Added a failure-first containment
+  regression and updated the operator guide; verification limits remain explicit in [tasks](tasks.md).

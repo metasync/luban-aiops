@@ -3,6 +3,14 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PermissionsView from "../PermissionsView";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const globalStyles = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../../../theme/global.css"),
+  "utf8",
+);
 
 const { mockRequestJson } = vi.hoisted(() => ({ mockRequestJson: vi.fn() }));
 vi.mock("../../../api/client", () => ({ requestJson: mockRequestJson }));
@@ -109,6 +117,35 @@ describe("PermissionsView transpose (SPEC-079)", () => {
     expect(table.style.width).not.toBe("max-content");
     expect(table.closest(".ant-table")?.querySelector(".ant-table-body")).toBeNull();
     expect(document.querySelector(".ant-pagination")).toBeNull();
+  });
+
+  it("isolates horizontal overflow in a keyboard-accessible matrix region, outside page chrome", async () => {
+    const table = await openMatrix();
+    const region = screen.getByRole("region", { name: "Permissions matrix" });
+    expect(region.classList.contains("permissions-matrix-scroll")).toBe(true);
+    expect(region.tabIndex).toBe(0);
+    expect(region.contains(table)).toBe(true);
+    expect(region.contains(screen.getByRole("heading", { name: "Permissions" }))).toBe(false);
+    expect(region.contains(screen.getByText("Policy bundle v3 · fixture-bundle · scope: all"))).toBe(false);
+    expect(region.contains(screen.getByText("4 permissions × 3 roles · evaluated from the enforced bundle"))).toBe(false);
+    expect(table.style.width).not.toBe("max-content");
+    expect(region.querySelector(".ant-table-body")).toBeNull();
+
+    // Load the real CSS so losing containment cannot pass on markup alone.
+    // jsdom checks the rule wiring; browser geometry is verified separately.
+    expect(globalStyles).toContain(".permissions-matrix-scroll");
+    const style = document.createElement("style");
+    style.textContent = globalStyles;
+    document.head.appendChild(style);
+    try {
+      const computed = getComputedStyle(region);
+      expect(computed.overflowX).toBe("auto");
+      expect(computed.maxWidth).toBe("100%");
+      expect(["", "none"]).toContain(computed.maxHeight);
+      expect(["", "auto"]).toContain(computed.height);
+    } finally {
+      style.remove();
+    }
   });
 
   it("falls back to boolean allow/deny when optional approval metadata is absent", async () => {
