@@ -40,6 +40,8 @@ three small stages mirroring R-1…R-3.
     Operator-authorized correction: wrap only the table in a named, keyboard-focusable region with
     `max-width: 100%` and `overflow-x: auto`. Any narrow-screen overflow stays in that region, not
     on the page title, bundle metadata, or footer. No forced table width or height is introduced.
+    Keep the table-container shadow pseudo-elements inside this borderless matrix with scoped
+    `bottom: 0`; Ant's negative bottom inset otherwise creates a second vertical scroll range.
 - alternatives rejected: transposing server-side (the payload is unchanged and other consumers rely on
   its shape); keeping roles-as-rows with a wider scroll (that is the papercut the operator raised).
 
@@ -86,7 +88,11 @@ three small stages mirroring R-1…R-3.
 
 - DOM/unit: the transposed orientation (roles as column headers, permissions as first-column rows), the
   three cell states, and the footer wording, via `PermissionsView.test.tsx` with a mocked `requestJson`
-  payload.
+  payload. CSS-rule coverage also pins the matrix-only overflow and contained shadow insets;
+  jsdom cannot prove pseudo-element geometry.
+- browser: require zero matrix vertical scroll range and immediate page movement on PageDown
+  with the region focused; verify keyboard horizontal scrolling and pinned page chrome under
+  actual overflow. Label temporary CSS experiments separately from deployed-build acceptance.
 - regression: the operator-portal suite stays green; root `make verify` green (the portal leg).
 - manual/live (optional, at the operator's discretion): reload the Permissions page on the local cluster
   and confirm the transposed layout reads well with the full action list.

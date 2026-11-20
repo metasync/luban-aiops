@@ -108,7 +108,8 @@ following a clear review. Version bump and the `delivered` release closure remai
       781px; matrix 733px client / 900px scroll width. Horizontal scrolling reached the last role
       while the permission column, heading, and footer stayed at x=88px. No production DOM,
       authentication, or deployment changes were used for the fixture.
-- [ ] Complete screenshot/interaction and wide-viewport verification. Browser capture was blocked
+- [ ] Complete deployed horizontal-overflow and wide-viewport verification. Initial fixture
+      screenshot/interaction checks were incomplete: browser capture was blocked
       by a hidden/detached view; hover timed out and arrow-key scrolling was inconclusive. The
       wrapper had a 1px vertical scroll range despite no imposed height; main-page vertical range
       was 1106px, but bottom reach was not verified. This is partial geometry evidence, not a full
@@ -128,7 +129,83 @@ following a clear review. Version bump and the `delivered` release closure remai
 
 The operator subsequently authorized committing/pushing this correction, a coordinated local
 rebuild/redeploy, and renewed browser testing (2026-11-20). This authorization does not close the
-pending screenshot/interaction check above or the separate version/release gates below.
+pending horizontal-overflow/wide-viewport check above or the separate version/release gates below.
+
+### Correction handoff and deployed verification
+
+- [x] Correction `b046f143` committed and pushed after the authorized L3 security review passed.
+      All nine product images and the sample application rebuilt at `0.60.0-dev-k8s-b046f143`.
+      The initial deploy stopped on a same-second `tool-gateway` rollout-restart collision after
+      applying the Ansible credential Secrets. Resuming the missing restarts and remaining stages
+      completed deployment; sample checks passed, all 15 pods were Ready, and gateway/agent health
+      returned 200. This was a recovered deployment, not a clean initial `make deploy` exit.
+- [x] Subsequently authorized OpenObserve credential provisioning from the namespace Secret
+      completed for all eight Python services; authenticated streams API returned 200 and all
+      15 pods remained Ready. This proves configuration and API authentication, not end-to-end
+      telemetry ingestion. No credential values were printed or recorded here.
+- [x] Deployed authenticated browser check after manual sign-in (2026-11-21): `luban-admin`,
+      `platform-admin`, full scope; expected assets `index-CMis_fPs.js` and `index-B4S1aXRs.css`.
+      Actual viewport **945 × 535 CSS pixels**, DPR 2. Confirmed 27 permissions × six roles,
+      allow/deny/approval colors, and hover tooltip `deciders: approver, platform-admin`.
+      Real Tab focused the named matrix region with a visible cyan 2px outline. Page-level vertical
+      scrolling reached the final row and footer; no fixed-height table body. No console errors or
+      warnings; the matrix GET and subsequent observed requests returned 200.
+      Document client/scroll width was 945/945px, main 881/881px, matrix 833/833px. Main height was
+      535/1286px and bottom scrollTop 750.5px; matrix height was 1150/1151px with no max-height.
+      Evidence: `.qoder/spec079-fix-deployed-narrow-left.png`,
+      `.qoder/spec079-fix-deployed-focus.png`, `.qoder/spec079-fix-deployed-tooltip.png`, and
+      `.qoder/spec079-fix-deployed-footer.png`. These are actual 945px captures despite the
+      historical `narrow-left` filename; no 830px viewport is claimed.
+- [ ] Verify horizontal keyboard scrolling, pinned permission column, and stationary page chrome
+      during actual matrix overflow, plus a genuine wide viewport. The matrix fit at 945px, so
+      ArrowRight/Left left scrollLeft at zero; unchanged x positions do not prove containment.
+      Browser resize requests did not change the actual viewport. Opening navigation produced a
+      260px overlay drawer, not narrower content; matrix width stayed 833px. The `narrow-right-attempt`
+      and `expanded-left` screenshots document these limits, not successful horizontal scrolling.
+      Earlier local-fixture geometry remains separate evidence. Other deployed role scopes were
+      not tested. The authenticated session was preserved; no model requests, mutations, or
+      production DOM/CSS fixtures were used. Full visual verification remains open.
+      A further operator-ready retry still measured 945 × 535 and matrix width 833/833px;
+      ArrowRight left scrollLeft at zero. Genuine keyboard focus and ordinary footer reach passed
+      again (`.qoder/spec079-fix-deployed-resized-focus.png` and
+      `.qoder/spec079-fix-deployed-resized-footer.png`), but these filenames do not imply a changed
+      viewport. Page-specific browser zoom was unavailable; no global IDE zoom or settings were
+      changed. No console messages were observed; all 102 recorded requests returned 200.
+
+### Duplicate vertical scrollbar follow-up
+
+- [x] Reproduced the operator-reported nested vertical scrolling. The earlier 1px range was a
+      defect, not harmless rounding: Ant's `.ant-table-container::after` has `bottom: -1px`,
+      extending its generated box below the borderless table. `overflow-x: auto` makes the
+      matrix's Y overflow compute to `auto`. The first PageDown moved the matrix 0→1px while
+      the page stayed at zero; only the second PageDown moved the page. Ordinary footer reach
+      therefore did not prove the intended single vertical scroll owner.
+- [x] Scoped `bottom: 0` to both table-container shadow pseudo-elements inside
+      `.permissions-matrix-scroll`. No scrollbar hiding, height constraint, table markup,
+      payload, authorization, or shared-table change. New CSS-rule regression failed before
+      the fix (one failed, ten passed). The first post-fix run exposed CSSOM's `0px` normalization;
+      corrected the assertion from `0` to `0px`, then the complete gate passed.
+- [x] Final affected-scope gate: **557 tests across 41 files**, TypeScript, Vite build, docs-check,
+      and version lockstep passed. All eleven matrix tests pass. Backend root-gate evidence
+      remains historical; no new full-root run or release/version change is claimed.
+- [x] Browser A/B diagnostic using the exact temporary CSS rule at 945 × 535: matrix
+      client/scroll height changed 1150/1151→1150/1150px. Real Tab focus remained visible;
+      the first PageDown moved the page 0→515px while matrix scrollTop stayed zero. Subsequent
+      PageDown reached the final row/footer. This confirms removal of the matrix's extra range,
+      not all document/body geometric excess. Both scrollbar thumbs were not visible in captures.
+- [x] Separate synthetic-width diagnostic: temporarily constrained only the matrix to 720px,
+      giving 830px scroll width. Real ArrowRight/Left moved 0→40→0px and reached the 110px
+      rightmost offset. All first-column cells, title, metadata, and footer stayed at x=88px;
+      main/document had no horizontal overflow and the matrix had no vertical range. Actual
+      browser viewport remained 945 × 535; this is not responsive-viewport acceptance.
+      Labeled evidence: `.qoder/spec079-shadow-fix-diagnostic-focus.png`,
+      `.qoder/spec079-shadow-fix-diagnostic-footer.png`, and
+      `.qoder/spec079-shadow-fix-diagnostic-right.png`. All temporary CSS/labels were removed
+      and original scroll/focus restored; the deployed baseline was remeasured unchanged.
+- [ ] Commit and redeploy this follow-up, then verify the unmodified deployed build. The operator
+      authorized this handoff after the local-fix report; a new Git push, version bump, and release
+      tag were not requested. At authorization the site still serves `b046f143`. Genuine narrow
+      and wide viewport acceptance and the separate release gates remain open.
 
 ## Delivery Gate
 

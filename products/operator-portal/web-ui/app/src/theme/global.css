@@ -704,6 +704,14 @@ body {
   overflow-x: auto;
 }
 
+/* SPEC-079: Ant's table-edge shadows extend one border-width below the
+   container. Keep them inside this borderless matrix so the horizontal
+   scroller does not acquire a vertical scrollbar or consume PageDown. */
+.permissions-matrix-scroll .ant-table-container::before,
+.permissions-matrix-scroll .ant-table-container::after {
+  bottom: 0;
+}
+
 /* --- Shared view chrome (SPEC-023 R-5) --- */
 .view-toolbar {
   display: flex;

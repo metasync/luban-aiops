@@ -148,6 +148,35 @@ describe("PermissionsView transpose (SPEC-079)", () => {
     }
   });
 
+  it("keeps decorative table shadows inside the matrix without a second vertical scroll range", async () => {
+    await openMatrix();
+    const region = screen.getByRole("region", { name: "Permissions matrix" });
+    const container = region.querySelector(".ant-table-container");
+    expect(container).not.toBeNull();
+
+    // Ant's container shadow extends 1px below the table by default. jsdom
+    // cannot lay out pseudo-elements; assert the real scoped rule here and
+    // verify zero vertical scroll range and PageDown behavior in a browser.
+    const style = document.createElement("style");
+    style.textContent = globalStyles;
+    document.head.appendChild(style);
+    try {
+      const rules = Array.from(style.sheet!.cssRules).filter(
+        (rule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE,
+      );
+      for (const pseudo of ["::before", "::after"]) {
+        const selector = `.permissions-matrix-scroll .ant-table-container${pseudo}`;
+        const rule = rules.find((candidate) =>
+          candidate.selectorText.split(",").some((part) => part.trim() === selector),
+        );
+        expect(container!.matches(selector.replace(pseudo, ""))).toBe(true);
+        expect(rule?.style.bottom).toBe("0px");
+      }
+    } finally {
+      style.remove();
+    }
+  });
+
   it("falls back to boolean allow/deny when optional approval metadata is absent", async () => {
     mockRequestJson.mockResolvedValue({ ...PAYLOAD, approval_requirements: undefined });
     const table = await openMatrix();
