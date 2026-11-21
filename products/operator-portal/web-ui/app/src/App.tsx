@@ -225,7 +225,7 @@ function SidebarContent({
   }, [roles, signedIn, pendingApprovals]);
 
   return (
-    <>
+    <div className="sidebar-content">
       {collapsed ? (
         // Folded rail: the brand shrinks to a spacer keeping the icon
         // menu clear of the pinned trigger; the version tag returns
@@ -243,62 +243,64 @@ function SidebarContent({
           </div>
         </div>
       )}
-      <Menu
-        mode="inline"
-        theme="dark"
-        selectedKeys={[active]}
-        items={items}
-        onClick={({ key }) => onNavigate(key as ViewId)}
-        style={{ flex: 1, borderInlineEnd: "none" }}
-      />
-      <div
-        className={
-          collapsed
-            ? "sidebar-footer sidebar-footer-collapsed"
-            : "sidebar-footer"
-        }
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Avatar size="small">
-            {username ? userInitials(username) : "?"}
-          </Avatar>
-          {!collapsed && (
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <Typography.Text ellipsis style={{ display: "block" }}>
-                {username || "Not signed in"}
-              </Typography.Text>
-              <Typography.Text
-                type="secondary"
-                ellipsis
-                style={{ display: "block", fontSize: 12 }}
-              >
-                {roles.length > 0 ? roles.join(", ") : "no role"}
-              </Typography.Text>
-            </div>
-          )}
-          {session ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<LogoutOutlined />}
-              aria-label="Sign out"
-              onClick={() => void logout()}
-            />
-          ) : (
-            <Button
-              type="text"
-              size="small"
-              icon={<LoginOutlined />}
-              aria-label="Sign in"
-              onClick={() => void login()}
-            />
-          )}
+      <nav className="sidebar-scroll" aria-label="Primary navigation">
+        <Menu
+          mode="inline"
+          theme="dark"
+          selectedKeys={[active]}
+          items={items}
+          onClick={({ key }) => onNavigate(key as ViewId)}
+          style={{ flex: "1 0 auto", borderInlineEnd: "none" }}
+        />
+        <div
+          className={
+            collapsed
+              ? "sidebar-footer sidebar-footer-collapsed"
+              : "sidebar-footer"
+          }
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Avatar size="small">
+              {username ? userInitials(username) : "?"}
+            </Avatar>
+            {!collapsed && (
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <Typography.Text ellipsis style={{ display: "block" }}>
+                  {username || "Not signed in"}
+                </Typography.Text>
+                <Typography.Text
+                  type="secondary"
+                  ellipsis
+                  style={{ display: "block", fontSize: 12 }}
+                >
+                  {roles.length > 0 ? roles.join(", ") : "no role"}
+                </Typography.Text>
+              </div>
+            )}
+            {session ? (
+              <Button
+                type="text"
+                size="small"
+                icon={<LogoutOutlined />}
+                aria-label="Sign out"
+                onClick={() => void logout()}
+              />
+            ) : (
+              <Button
+                type="text"
+                size="small"
+                icon={<LoginOutlined />}
+                aria-label="Sign in"
+                onClick={() => void login()}
+              />
+            )}
+          </div>
+          {authError && !collapsed ? (
+            <Alert type="error" showIcon title={authError} />
+          ) : null}
         </div>
-        {authError && !collapsed ? (
-          <Alert type="error" showIcon title={authError} />
-        ) : null}
-      </div>
-    </>
+      </nav>
+    </div>
   );
 }
 

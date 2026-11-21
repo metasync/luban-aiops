@@ -27,6 +27,10 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   sideways. The permission column stays pinned; vertical scrolling remains
   page-level without a fixed-height table body. Table-edge shadows stay inside
   the matrix to prevent a second vertical scrollbar and an intercepted PageDown.
+- SPEC-079 visual follow-up bounds sidebar navigation and account controls in
+  their own scroll area, preventing low-control focus from scrolling the document
+  on short windows. Expanded/collapsed navigation and the narrow drawer share the
+  boundary; role gates and sign-in/out behavior are unchanged.
 - SPEC-078 conversational remediation now consumes the real SDK confirmation event
   and parks executor proposals on the owning chat session, exposing the existing
   approval card without reusing an earlier browser-flow approval. Regression tests

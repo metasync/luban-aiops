@@ -202,10 +202,68 @@ pending horizontal-overflow/wide-viewport check above or the separate version/re
       `.qoder/spec079-shadow-fix-diagnostic-footer.png`, and
       `.qoder/spec079-shadow-fix-diagnostic-right.png`. All temporary CSS/labels were removed
       and original scroll/focus restored; the deployed baseline was remeasured unchanged.
-- [ ] Commit and redeploy this follow-up, then verify the unmodified deployed build. The operator
-      authorized this handoff after the local-fix report; a new Git push, version bump, and release
-      tag were not requested. At authorization the site still serves `b046f143`. Genuine narrow
-      and wide viewport acceptance and the separate release gates remain open.
+- [x] Commit and redeploy the shadow correction: `58a5a473`, with L3 security review passed.
+      After terminal-dispatch and Docker sandbox failures were resolved, all nine product images
+      built at `0.60.0-dev-k8s-58a5a473`; product/sample deployment and sample assertions passed.
+      All 15 namespace pods were Ready; gateway/agent health returned 200. OpenObserve credential
+      provisioning completed for eight services without exposing credentials. No Git push,
+      version bump, release tag, or delivered-status change occurred in this handoff.
+- [x] Authenticated check of the unmodified deployed shadow correction at **945 × 535**:
+      assets `index-ITcYrYZh.js` / `index-kD13PatA.css`; matrix height **1150/1150px** and
+      width **833/833px**, pseudo-element bottoms `0px`. First PageDown moved main scrollTop
+      **0→515px**, then **750.5px** at the final row/footer; matrix/document remained at zero.
+      Visible 2px focus outline and approval tooltip passed. No relevant console errors/warnings;
+      observed requests returned 200. Evidence: `.qoder/spec079-shadow-deployed-focus.png` and
+      `.qoder/spec079-shadow-deployed-footer.png`. The matrix fit at this actual viewport, so
+      genuine narrow/wide horizontal-overflow acceptance remains open.
+      **Separate defect:** focusing sidebar Sign out moved document scrollTop **0→80px**
+      (document height 535/615px). The matrix fix did not resolve sidebar content overflow.
+
+### Sidebar focus-containment follow-up (operator authorized 2026-11-21)
+
+- [x] Bound shared `SidebarContent` in `App.tsx` to the available height. Keep the brand/spacer
+      outside a named `Primary navigation` region containing the menu and account controls.
+      Scoped CSS gives this region shrinkable vertical scrolling and prevents menu/footer
+      shrinkage. The inline expanded/collapsed sidebar and Drawer reuse the same structure;
+      main content and matrix scrolling stay separate. Role gates, authentication handlers,
+      navigation behavior, backend, policy, and payloads are unchanged.
+- [x] Six failure-first cases in `App.studio.test.tsx`: expanded/collapsed × signed-in/out,
+      Drawer containment/navigation close, and authentication-error placement. All six failed
+      before the fix while the existing 25 passed; all 31 passed afterward. Tests load the real
+      CSS and assert structure, focusability, and scroll rules; jsdom does not prove geometry.
+- [x] Affected-scope verification before the final assertion refinement: **563 tests across
+      41 files**, TypeScript, Vite production build, docs-check, version lockstep, and whitespace
+      checks passed. No new full-root backend run is claimed; version remains **0.60.0**.
+- [x] Isolated local fixture used the real App/bootstrap/theme with mocked identity and read-only
+      API responses, not the deployed portal. Actual iframe CSS viewports were **390×535,
+      830×535, 945×535, 1440×800, and 1440×320**. Document/body/root had zero scroll ranges;
+      programmatic Sign out focus moved only navigation (80px at the three narrow sizes,
+      322px at 1440×320, zero at 1440×800), leaving document and main scroll positions unchanged.
+      Narrow Drawer DOM checks likewise moved only its navigation (164px). Matrix Y range was
+      zero throughout. No auth control was activated and no model/remediation calls were made.
+- [ ] Complete visible real-keyboard and settled narrow/wide acceptance. The native browser view
+      was hidden/detached, preventing screenshots and real-keypress proof. Transitions stayed
+      frozen: narrow Sider state/inline width was collapsed/64px but rendered width remained
+      230px; the Drawer stayed translated offscreen. Programmatic matrix scrolling preserved
+      the first-column x position at 830/945px, but not at 390px where the frozen sidebar left
+      only 112px for the matrix. These measurements are **partial DOM evidence**, not a responsive
+      pass or proof of a settled-production defect. No new sidebar screenshots were captured.
+      Live portal and Kubernetes API checks returned connection refused during this follow-up;
+      earlier deployment health is historical, not current availability. Infrastructure/IDE
+      recovery was not attempted. Temporary fixture data was cleared and its HTML file removed.
+- [x] Final affected-scope recheck after strengthening the main-content exclusion assertion:
+      **563 tests across 41 files**, TypeScript/Vite build, docs-check, version lockstep, and
+      whitespace checks passed. The first attempt passed all assertions but exited on the
+      previously observed React/jsdom `window is not defined` teardown error (reported from
+      `DraftAsSkillButton.test.tsx`); an unchanged full rerun passed. No shared test setup change.
+- [x] Code/doc review of the seven-file sidebar follow-up completed with **no blocking findings**.
+      Review confirmed scroll boundaries, unchanged auth/role/navigation behavior, regression
+      coverage, and explicit evidence limits. Local commit is authorized. A new push/redeploy,
+      release/version change, and deployed sidebar verification remain separate gates outside
+      this authorization.
+- [x] Temporary fixture cleanup complete: session data cleared, HTML removed, owned Vite server
+      stopped, and no listener remains on localhost:5173. Shutdown required a background retry
+      after terminal-dispatch failures; no unrelated process or service was stopped.
 
 ## Delivery Gate
 

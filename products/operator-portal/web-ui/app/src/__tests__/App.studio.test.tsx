@@ -9,7 +9,10 @@
 //
 // Every view is replaced by a marker reporting what it was handed: this suite
 // asserts App's wiring, not the views' internals (those have their own).
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, { type ViewId } from "../App";
 import type { SessionWorkspace } from "../sessions/useSessionWorkspace";
@@ -123,6 +126,10 @@ function workspaceStub(tag: string): SessionWorkspace {
 
 const operationStub = workspaceStub("operation");
 const developmentStub = workspaceStub("development");
+const globalStyles = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../theme/global.css"),
+  "utf8",
+);
 
 function signIn(roles: string[], username: string | null = "op-one") {
   mockUseAuth.mockReturnValue({
@@ -206,6 +213,94 @@ describe("App nav — the Studio entry (SPEC-056 R-2)", () => {
     const studio: ViewId = "studio";
     const chat: ViewId = "chat";
     expect([chat, studio]).toEqual(["chat", "studio"]);
+  });
+});
+
+describe("App sidebar scroll containment (SPEC-079 visual follow-up)", () => {
+  let style: HTMLStyleElement;
+
+  beforeEach(() => {
+    // Vitest stubs CSS imports; use the real rules. jsdom cannot prove layout
+    // or focus-induced scrolling, so browser checks remain a separate gate.
+    style = document.createElement("style");
+    style.textContent = globalStyles;
+    document.head.appendChild(style);
+  });
+
+  afterEach(() => style.remove());
+
+  function assertScrollOwner(root: HTMLElement, signedIn: boolean) {
+    const navigation = within(root).getByRole("navigation", { name: "Primary navigation" });
+    const content = navigation.parentElement!;
+    expect(content.classList.contains("sidebar-content")).toBe(true);
+    const brand = content.querySelector(".sidebar-brand, .sidebar-brand-spacer")!;
+    expect(brand).not.toBeNull();
+    expect(navigation.contains(brand)).toBe(false);
+    const main = document.querySelector(".view-container");
+    expect(main).not.toBeNull();
+    expect(navigation.contains(main)).toBe(false);
+    const menu = within(navigation).getByRole("menu");
+    const footer = navigation.querySelector(".sidebar-footer")!;
+    expect(footer).not.toBeNull();
+    const button = within(navigation).getByRole("button", { name: signedIn ? "Sign out" : "Sign in" });
+    expect(footer.contains(button)).toBe(true);
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    expect(mockUseAuth().logout).not.toHaveBeenCalled();
+    expect(mockUseAuth().login).not.toHaveBeenCalled();
+
+    const containerStyle = getComputedStyle(content);
+    expect(containerStyle.height).toBe("100%");
+    expect(containerStyle.minHeight).toMatch(/^0(px)?$/);
+    expect(containerStyle.display).toBe("flex");
+    expect(containerStyle.flexDirection).toBe("column");
+    const scrollStyle = getComputedStyle(navigation);
+    expect(scrollStyle.flexGrow).toBe("1");
+    expect(scrollStyle.minHeight).toMatch(/^0(px)?$/);
+    expect(scrollStyle.overflowY).toBe("auto");
+    expect(scrollStyle.overflowX).toBe("hidden");
+    expect(getComputedStyle(menu).flexShrink).toBe("0");
+    expect(getComputedStyle(footer).flexShrink).toBe("0");
+    expect(getComputedStyle(brand).flexShrink).toBe("0");
+    expect(within(navigation).getAllByRole("menuitem")).toHaveLength(signedIn ? 10 : 2);
+  }
+
+  it.each([
+    ["expanded", true], ["collapsed", true],
+    ["expanded", false], ["collapsed", false],
+  ] as const)("bounds %s navigation and account controls (signed in: %s)", async (mode, signedIn) => {
+    signIn(signedIn ? ["platform-admin"] : [], signedIn ? "luban-admin" : null);
+    const { container } = render(<App />);
+    if (mode === "collapsed") {
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Hide navigation" })));
+    }
+    const sider = container.querySelector<HTMLElement>(".ant-layout-sider")!;
+    expect(sider.classList.contains("ant-layout-sider-collapsed")).toBe(mode === "collapsed");
+    assertScrollOwner(sider, signedIn);
+  });
+
+  it("uses the same scroll boundary in the narrow drawer and still closes on navigation", async () => {
+    const originalMatchMedia = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...originalMatchMedia(query), matches: query.includes("max-width"),
+    }));
+    signIn(["platform-admin"]);
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open navigation" })));
+    const drawer = await screen.findByRole("dialog");
+    assertScrollOwner(drawer, true);
+    await act(async () => fireEvent.click(within(drawer).getByText("Settings")));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByTestId("settings-view")).not.toBeNull();
+  });
+
+  it("keeps authentication errors inside the reachable account scroll area", () => {
+    signIn(["platform-admin"]);
+    mockUseAuth.mockReturnValue({ ...mockUseAuth(), authError: "Session refresh failed. Please sign in again." });
+    render(<App />);
+    const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(navigation).getByRole("alert").textContent).toContain("Session refresh failed");
+    expect(within(navigation).getByRole("button", { name: "Sign out" })).not.toBeNull();
   });
 });
 

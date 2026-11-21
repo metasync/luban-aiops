@@ -12,7 +12,8 @@
 
 Transpose the rendering in
 `products/operator-portal/web-ui/app/src/views/control/PermissionsView.tsx`, with scoped CSS for the
-operator-authorized narrow-layout correction. Change only presentation.
+operator-authorized narrow-layout correction. A subsequent operator-authorized sidebar focus
+follow-up also updates `src/App.tsx` and its shared styles, as detailed below. Change only presentation.
 The `GET /api/v1/policy/matrix` request, its payload shape, the server-side row-scoping, and the
 `policy:read` gate are untouched; the view simply addresses the same payload by **(row = action,
 column = role)** instead of **(row = role, column = action)**. All three cell states (`allow` / `deny`
@@ -75,6 +76,24 @@ three small stages mirroring R-1…R-3.
 - alternatives rejected: leaving the view untested (every sibling control view has a test, and the
   transpose is exactly what a DOM assertion guards).
 
+## Authorized Sidebar Focus Follow-up
+
+The operator authorized this separate presentation correction on 2026-11-21 after the deployed
+shadow fix exposed an 80px document shift when focusing sidebar Sign out. Scope includes the
+shared sidebar, its regression tests, living notes, review, and a local commit; **not** a new push,
+redeployment, version bump, or delivered-status change.
+
+- In `src/App.tsx`, wrap `SidebarContent` in a full-height column and put the menu/account footer
+  together in a named `Primary navigation` region. Keep brand/spacer outside the scrolling area.
+- In `src/theme/global.css`, make that region shrinkable (`min-height: 0`) with `overflow-y: auto`;
+  keep menu, brand, and footer from shrinking. Reuse this structure in expanded/collapsed inline
+  navigation and the narrow Drawer. Main content and matrix retain their own scroll ownership.
+- Preserve role gates, authentication handlers, view routing, Drawer close-on-navigation, and
+  all backend/policy behavior. Do not suppress focus scrolling or add global clipping rules.
+- Extend `src/__tests__/App.studio.test.tsx` with expanded/collapsed signed-in/out cases, Drawer
+  navigation, and authentication errors; pin the actual CSS and ownership boundaries. Update the
+  operator guide, Unreleased changelog, and task evidence without closing browser acceptance.
+
 ## Sequencing And Dependencies
 
 1. **Stage 1 — transpose the component (R-1, R-2)** — swap `columns`/`dataSource`, keep the fetch +
@@ -93,6 +112,12 @@ three small stages mirroring R-1…R-3.
 - browser: require zero matrix vertical scroll range and immediate page movement on PageDown
   with the region focused; verify keyboard horizontal scrolling and pinned page chrome under
   actual overflow. Label temporary CSS experiments separately from deployed-build acceptance.
+- sidebar follow-up: require visible keyboard focus through low menu items and Sign in/out at
+  short, narrow, and wide viewports, with only navigation scrolling and document/main stationary.
+  Check both inline states and Drawer, including navigation close behavior. A real-App iframe
+  fixture with mocked API data provides supplemental geometry only: hidden/frozen transitions,
+  programmatic focus, and iframe sizes do not establish visible top-level responsive acceptance.
+  Keep these limitations and unavailable deployed checks explicit in `tasks.md`.
 - regression: the operator-portal suite stays green; root `make verify` green (the portal leg).
 - manual/live (optional, at the operator's discretion): reload the Permissions page on the local cluster
   and confirm the transposed layout reads well with the full action list.
@@ -100,8 +125,10 @@ three small stages mirroring R-1…R-3.
 ## Rollout And Migration
 
 - portal-only, presentational: **no** migration, **no** config knob, **no** contract or policy change.
-- rollback: revert `PermissionsView.tsx` (and its test) to the roles-as-rows orientation; nothing else is
-  affected.
+- rollback: revert the relevant presentation changes and tests together. The transpose lives in
+  `PermissionsView.tsx`; matrix overflow/shadow rules live in `src/theme/global.css`. The independent
+  sidebar follow-up can be reverted in `src/App.tsx`, its scoped styles, and `App.studio.test.tsx`
+  without reverting the matrix fixes. No data migration is involved.
 - release: a subsequent release after **v0.60.0**, which already shipped with SPEC-078. The exact
   version, `VERSION` bump, and spec-index `delivered` flip remain separate release-gate decisions;
   the original shared-train target is superseded for scheduling only (2026-11-19).

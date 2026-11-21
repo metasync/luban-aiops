@@ -39,8 +39,14 @@ switch — a half-typed chat draft survives a detour into the audit trail.
 - **Workspace** gathers Documents, Tools, Skills, and Settings.
 
 Entries you lack the role for are hidden, and a section header disappears
-when everything under it is hidden. On narrow screens the sidebar collapses
-into a hamburger-triggered drawer.
+when everything under it is hidden. On narrow screens the sidebar folds to
+an icon rail; the hamburger opens a drawer with the full labeled menu.
+Selecting a view closes the drawer.
+
+When the window is short, the navigation list and account controls scroll
+together inside the sidebar or drawer, independently of the main view. Scroll
+the navigation area to reach **Sign in** or **Sign out**; keyboard focus can
+also bring those controls into view. The brand stays outside that scroll area.
 
 ## Chat
 
