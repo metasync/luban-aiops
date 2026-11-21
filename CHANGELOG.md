@@ -11,7 +11,13 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## Unreleased
+## 0.61.0 — 2026-11-22
+
+[SPEC-079](docs/specs/SPEC-079-permissions-matrix-transpose/spec.md)
+permissions matrix transpose — a purely presentational operator-portal change
+that flips the Permissions-page table so the long permission list runs down the
+first column and the few roles run across the top header row. Includes overflow
+containment, nested-scrollbar correction, and sidebar scroll-boundary fixes.
 
 ### Changed
 

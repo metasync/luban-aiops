@@ -2,7 +2,8 @@
 
 ## Status
 
-- status: `in-progress`
+- status: `delivered`
+- delivered: **2026-11-22** as v0.61.0
 - owner: chi
 - created: 2026-11-18
 - approved: **2026-11-18** — the operator ratified all three Open Questions **exactly as
@@ -191,6 +192,9 @@ The authorization-matrix reference itself needs no orientation change.
   roles-as-rows claims, correcting the earlier expectation of a no-op guide sweep. Added failure-first
   DOM coverage (five failures before the transpose, all nine cases passing afterward); verification
   and release-gate state are tracked in [tasks](tasks.md).
+- 2026-11-22 — **delivered** as v0.61.0. All three requirements verified; the transpose, overflow
+  containment, shadow correction, and sidebar scroll boundary are deployed to the local cluster.
+  Version bumped across the 27-surface lockstep; spec index, CHANGELOG, and tasks gate closed.
 - 2026-11-20 — operator authorized the narrow-layout correction after browser verification found
   whole-page horizontal overflow. Contain overflow in a focusable matrix-only region while keeping
   the permission column pinned and the long list at page height. Added a failure-first containment

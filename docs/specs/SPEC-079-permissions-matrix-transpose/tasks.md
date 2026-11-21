@@ -279,7 +279,7 @@ pending horizontal-overflow/wide-viewport check above or the separate version/re
       and the `policy:read` gate are unchanged; the three cell states render identically; **no**
       backend/gateway/policy/schema/contract change; the transpose is presentational only
 - [x] living docs updated; `CHANGELOG.md` entry added referencing SPEC-079
-- [ ] spec index and spec status set to `delivered` at the separate release gate, version-stamped
+- [x] spec index and spec status set to `delivered` at the separate release gate, version-stamped
       with the subsequent release selected by the operator (not the already-shipped v0.60.0)
-- [ ] version selected and bumped at the separate release gate (`VERSION` + products + portal
+- [x] version selected and bumped at the separate release gate (`VERSION` + products + portal
       lockstep, proven by `validate-version`); no version bump authorized by implementation approval
