@@ -25,7 +25,7 @@ platform-gateway = "platform_gateway.main:run"
 [dependency-groups]
 dev = [
   "jsonschema>=4.23,<5.0",
-  "pytest>=8.3,<9.0"
+  "pytest>=8.3,<10.0"
 ]
 
 [build-system]
