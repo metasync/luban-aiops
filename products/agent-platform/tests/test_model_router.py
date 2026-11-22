@@ -45,7 +45,7 @@ from agent_service.runtime_settings import ModelRouterCandidateSpec, RuntimeSett
 from agent_service.services.kernel_middleware import TokenUsageMiddleware
 from agent_service.services.runtime_dependencies import get_runtime_kernel
 
-from agentscope.event import ReplyStartEvent
+from agentscope.event import ReplyStartEvent, UserInterruptEvent
 from agentscope.message import UserMsg
 from agentscope.middleware import ChatModelCandidate, ModelRouterMiddleware
 
@@ -369,10 +369,12 @@ class TestResumeSafety:
         agent = _fake_agent(
             reply_id="r1", middle_context={_ROUTER_KEY: {"r1": "fast"}}
         )
-        # Resume: ``inputs`` is not a fresh Msg/list and the reply does not
-        # restart, so no new ReplyStartEvent and no re-route.
+        # Resume: a HITL event (not a fresh Msg/list) signals resumption;
+        # agentscope ≥2.0.12 checks isinstance(inputs, HITL_EVENT_TYPES)
+        # rather than the absence of ReplyStartEvent.
         observed = _drive(
-            middleware, agent, object(), emit_reply_start=False, reply_id="r1"
+            middleware, agent, UserInterruptEvent(reply_id="r1"),
+            emit_reply_start=False, reply_id="r1"
         )
         assert observed == [_ROUTED_MODEL]  # the same model serves post-resume
         assert classifier.calls == 0  # the classifier was not re-invoked
