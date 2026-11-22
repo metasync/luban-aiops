@@ -213,7 +213,9 @@ describe("ApprovalsView history pagination (SPEC-035 R-7 / SPEC-036 R-5)", () =>
     );
     const { container } = render(<ServerPagedHarness records={records} />);
     fireEvent.click(screen.getByText("History (23)"));
-    const pageThree = container.querySelector('li[title="3"]');
+    // antd ≥6.7 moved the pagination click handler from the <li> to an
+    // inner <a role="button">; target the anchor to match real user clicks.
+    const pageThree = container.querySelector('li[title="3"] a');
     expect(pageThree).toBeTruthy();
     fireEvent.click(pageThree as HTMLElement);
     expect(screen.getAllByText(/^Session \d+$/)).toHaveLength(3);
