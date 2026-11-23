@@ -11,7 +11,11 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
-## [Unreleased]
+## 0.61.1 — 2026-11-23
+
+A maintenance release: dependency hygiene across the Python services and the
+operator portal, plus one small operator-facing enhancement (a dark/light theme
+toggle). No API, contract, schema, policy, or deployment-behavior changes.
 
 ### Added
 
@@ -23,6 +27,27 @@ Release 1 entries are grouped retrospectively under 0.1.0.
   and never sent to the backend. The light palette swaps the `:root` design
   tokens via a `[data-theme="light"]` block and an antd `defaultAlgorithm`
   `ThemeConfig`, so navigation, banners, and the sidebar rail all follow.
+
+### Changed
+
+- Dependency hygiene (no functional change; full `make test` and portal suites
+  green throughout). Python services: `redis` 6.4.0→8.1.0 and `pytest`
+  8.4.2→9.2.0 majors (caps widened to `<9.0` / `<10.0`), plus within-range
+  refreshes including `agentscope` 2.0.12, `charset-normalizer` 3.5.3,
+  `pycryptodome` 4.6.0, and `sse-starlette` 3.7.1. Operator portal: `antd`
+  6.7.1, and test/build-stack majors `vitest` 5.1.1, `jsdom` 31.0.1, and
+  `typescript` 7.0.2 (the native Go compiler). `@types/node` is intentionally
+  held at `^22` to match the Node 22 runtime.
+
+### Fixed
+
+- Light-theme polish on the new toggle: body-size accent text (markdown links,
+  the turn-request banner label) now uses an `--accent-text` token that clears
+  WCAG AA 4.5:1 on light surfaces; drop shadows soften to a slate tint in light
+  mode; and a pre-paint bootstrap script in `index.html` applies the persisted
+  mode (or OS preference) before the bundle loads, removing the dark flash on
+  cold reload. Test-only adaptations track the antd 6.7 pagination DOM and the
+  agentscope ≥2.0.12 `UserInterruptEvent` HITL API.
 
 ## 0.61.0 — 2026-11-22
 
