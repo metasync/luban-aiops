@@ -12,6 +12,10 @@
   --text-muted: #94a3b8;
   --accent: #38bdf8;
   --accent-hover: #7dd3fc;
+  /* Accent used as body-size text (links, small labels). Equal to --accent in
+     dark mode (already high-contrast on the dark surface); overridden in light
+     mode with a darker tone that clears WCAG AA 4.5:1 for normal text. */
+  --accent-text: #38bdf8;
   --success: #4ade80;
   --error: #f87171;
   --warning: #fbbf24;
@@ -21,6 +25,10 @@
      Kept as a token so the light override can swap it without touching the
      rule below. */
   --banner-start: #2a4d68;
+  /* Drop shadows: black reads correctly on the dark surfaces; light mode
+     softens to a slate tint so floating chrome is not harsh. */
+  --shadow-soft: rgba(0, 0, 0, 0.35);
+  --shadow-strong: rgba(0, 0, 0, 0.45);
 }
 
 /* Light mode: mirrors src/theme/tokens.ts lightPalette. Applied by toggling
@@ -36,11 +44,14 @@
   --text-muted: #64748b;
   --accent: #0284c7;
   --accent-hover: #0369a1;
+  --accent-text: #0369a1;
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
   --code-bg: #f1f5f9;
   --banner-start: #e0f2fe;
+  --shadow-soft: rgba(15, 23, 42, 0.12);
+  --shadow-strong: rgba(15, 23, 42, 0.18);
 }
 
 * {
@@ -131,7 +142,7 @@ body {
   z-index: 100;
   background: var(--surface);
   border: 1px solid var(--border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 8px var(--shadow-soft);
 }
 
 /* Clear the pinned trigger out of the inline sidebar's brand block
@@ -489,7 +500,7 @@ body {
 }
 
 .md-content a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: none;
 }
 .md-content a:hover { text-decoration: underline; }
@@ -586,7 +597,7 @@ body {
   /* Fully opaque: the banner floats over scrolling transcript content,
      so any translucency bleeds text through and hurts readability. */
   background: linear-gradient(90deg, var(--banner-start) 0%, var(--surface) 60%);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 3px 10px var(--shadow-strong);
   font-size: 0.8rem;
 }
 
@@ -600,7 +611,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .turn-request-banner-text {

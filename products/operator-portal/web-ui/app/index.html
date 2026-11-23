@@ -5,6 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>Luban AIOps Operator Portal</title>
+    <!-- Pre-paint theme bootstrap: applies the persisted mode (or the OS
+         preference) to <html data-theme> and the color-scheme meta before the
+         bundle loads, so a persisted-light user never sees a dark flash. Mirrors
+         the resolution in src/theme/mode.ts; keep the two in sync. -->
+    <script>
+      (function () {
+        var mode;
+        try {
+          var stored = localStorage.getItem("luban.portal.themeMode");
+          mode = stored === "light" || stored === "dark" ? stored : null;
+        } catch (e) {
+          mode = null;
+        }
+        if (!mode) {
+          mode =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        }
+        document.documentElement.dataset.theme = mode;
+        var meta = document.querySelector('meta[name="color-scheme"]');
+        if (meta) meta.setAttribute("content", mode);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
