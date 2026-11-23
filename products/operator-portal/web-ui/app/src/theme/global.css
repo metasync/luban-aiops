@@ -17,6 +17,30 @@
   --warning: #fbbf24;
   --code-bg: #1a2332;
   --radius: 8px;
+  /* Banner gradient start: a bespoke navy that is not part of the palette.
+     Kept as a token so the light override can swap it without touching the
+     rule below. */
+  --banner-start: #2a4d68;
+}
+
+/* Light mode: mirrors src/theme/tokens.ts lightPalette. Applied by toggling
+   the data-theme attribute on <html> (see src/theme/ThemeContext.tsx). Only
+   the tokens differ — every rule below consumes them via var(--*). */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-alt: #e2e8f0;
+  --border: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --success: #16a34a;
+  --error: #dc2626;
+  --warning: #d97706;
+  --code-bg: #f1f5f9;
+  --banner-start: #e0f2fe;
 }
 
 * {
@@ -198,7 +222,7 @@ body {
 
 .session-item.active {
   border-color: var(--accent);
-  background: rgba(56, 189, 248, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .session-item-main {
@@ -556,12 +580,12 @@ body {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  border: 1px solid rgba(56, 189, 248, 0.55);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   /* Fully opaque: the banner floats over scrolling transcript content,
      so any translucency bleeds text through and hurts readability. */
-  background: linear-gradient(90deg, #2a4d68 0%, var(--surface) 60%);
+  background: linear-gradient(90deg, var(--banner-start) 0%, var(--surface) 60%);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   font-size: 0.8rem;
 }

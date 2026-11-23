@@ -11,6 +11,19 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## [Unreleased]
+
+### Added
+
+- The operator portal gains a dark/light theme toggle. A sun/moon button in the
+  sidebar footer switches the whole shell between the shipped dark palette and a
+  new light palette (same slate/sky family) across antd components and bespoke
+  styles. The choice respects the OS `prefers-color-scheme` on first visit and
+  persists in `localStorage` (`luban.portal.themeMode`); it is presentation-only
+  and never sent to the backend. The light palette swaps the `:root` design
+  tokens via a `[data-theme="light"]` block and an antd `defaultAlgorithm`
+  `ThemeConfig`, so navigation, banners, and the sidebar rail all follow.
+
 ## 0.61.0 — 2026-11-22
 
 [SPEC-079](docs/specs/SPEC-079-permissions-matrix-transpose/spec.md)

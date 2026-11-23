@@ -23,12 +23,15 @@ import {
   LogoutOutlined,
   MenuOutlined,
   MessageOutlined,
+  MoonOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  SunOutlined,
   ToolOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "./auth/AuthContext";
+import { useThemeMode } from "./theme/ThemeContext";
 import ChatView from "./chat/ChatView";
 import {
   APPROVAL_DECIDER_ROLES,
@@ -102,6 +105,7 @@ function SidebarContent({
   pendingApprovals: number;
 }) {
   const { username, roles, session, login, logout, authError } = useAuth();
+  const { mode, toggleTheme } = useThemeMode();
   const signedIn = Boolean(username);
   // SPEC-056 R-2/R-6: Studio is the authoring power — visible exactly to the
   // roles that hold session:skill_graduate (the gateway dual-gates opening a
@@ -246,7 +250,7 @@ function SidebarContent({
       <nav className="sidebar-scroll" aria-label="Primary navigation">
         <Menu
           mode="inline"
-          theme="dark"
+          theme={mode}
           selectedKeys={[active]}
           items={items}
           onClick={({ key }) => onNavigate(key as ViewId)}
@@ -277,6 +281,18 @@ function SidebarContent({
                 </Typography.Text>
               </div>
             )}
+            {/* Theme toggle: the icon previews the target mode (sun → light,
+                moon → dark). Sits left of the auth button so both stay pinned
+                to the footer's end. */}
+            <Button
+              type="text"
+              size="small"
+              icon={mode === "light" ? <MoonOutlined /> : <SunOutlined />}
+              aria-label={
+                mode === "light" ? "Switch to dark theme" : "Switch to light theme"
+              }
+              onClick={toggleTheme}
+            />
             {session ? (
               <Button
                 type="text"
@@ -312,6 +328,9 @@ export default function App() {
   const [siderCollapsed, setSiderCollapsed] = useState(false);
   const narrow = useNarrowViewport();
   const { booting, username, roles } = useAuth();
+  // Theme mode (aliased to keep it distinct from the operation/development
+  // "mode" the workspaces and ChatView use below).
+  const { mode: themeMode } = useThemeMode();
   // SPEC-056 R-2 / plan §7: App owns TWO mode-scoped workspace instances.
   // The operation instance backs Chat and is reused by Incidents/Documents/
   // Settings (all deal in operation sessions); the development instance backs
@@ -383,7 +402,7 @@ export default function App() {
   return (
     <Layout className="app-shell">
       <Layout.Sider
-        theme="dark"
+        theme={themeMode}
         width={230}
         breakpoint="lg"
         // Folded keeps a 64px icon rail (antd renders the inline menu
