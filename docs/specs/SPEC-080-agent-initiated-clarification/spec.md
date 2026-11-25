@@ -2,16 +2,17 @@
 
 ## Status
 
-- status: `draft`
+- status: `approved`
 - owner: chi
 - created: 2026-11-24
 - promoted from: the [AskUser clarification spike](../../workspace/ask-user-clarification-spike.md),
   reviewed by the operator and **promoted to `draft` 2026-11-24**. The memo's seven ratification
-  asks (§8) are carried below as **Open Questions** — each **recommended, not yet ratified**.
-  Ratification (`draft → approved`) is the operator's next gate; only then are the binding
-  `plan.md` / `tasks.md` authored (per the README Spec Structure rule and the
-  SPEC-066/069/076/077/078 pattern). Promotion authorizes **no** implementation, **no** merge,
-  **no** commit/push, **no** deploy, and **no** version bump — each a separate gate.
+  asks (§8) are carried below as **Open Questions** and were **ratified exactly as recommended
+  2026-11-25** (`draft → approved`), on which the binding [plan](plan.md) / [tasks](tasks.md) were
+  authored (per the README Spec Structure rule and the SPEC-066/069/076/077/078 pattern).
+- approved: **2026-11-25** — the operator ratified all seven Open Questions **exactly as recommended**
+  (`draft → approved`). Approval authorizes implementation to *begin* — **not** to merge, commit/push,
+  deploy, or version-bump (each a separate gate).
 - release slice: the **HITL-bridging family** (an extension of
   [SPEC-020](../SPEC-020-hitl-confirmation-bridging/spec.md)/[SPEC-030](../SPEC-030-require-approval-policy-semantics/spec.md)/[SPEC-031](../SPEC-031-approval-inbox-persistent-confirmation/spec.md)/[SPEC-032](../SPEC-032-owner-side-live-decision-sync/spec.md)),
   raised from the [Exploration Backlog](../../agentic-aiops-platform/delivery-roadmap.md#exploration-backlog)
@@ -19,8 +20,8 @@
   headline-feature review; recorded **not adopted** in the
   [2.0.11 dependency-refresh note](../../agentic-aiops-platform/release-notes/2026-10-31-dependency-refresh-agentscope-2-0-11.md)
   and kept out of scope by [SPEC-071](../SPEC-071-agentscope-model-router/spec.md) Non-Goals).
-  Provisional target **v0.62.0** — a **MINOR** bump over v0.61.1 (a new operator-facing
-  capability), per the SPEC-070…079 release-train pattern, **pinned only on approval**.
+  Target **v0.62.0** — a **MINOR** bump over v0.61.1 (a new operator-facing capability), per the
+  SPEC-070…079 release-train pattern, **pinned on approval 2026-11-25**.
 - related ADRs: **none new** — composes delivered HITL machinery and adds a *read-only* park kind;
   touches no control-flow, trust-model, or autonomy ceiling.
   [ADR-0011](../../adr/0011-composition-carries-no-authority.md) (composition carries no authority)
@@ -59,9 +60,9 @@ widen the read-only posture.
 
 ## Requirements
 
-> Draft note: per the README Spec Structure rule, these requirements become **stable only at
-> `approved`**. Each carries its recommended shape from the spike; the seven Open Questions below
-> gate that shape. Requirement IDs (`R-1`…) are provisional until approval.
+> These requirements are **stable as of approval (2026-11-25)**: the seven Open Questions below were
+> ratified exactly as recommended and are recorded as the resolved design basis. Requirement IDs
+> (`R-1`…) are now stable and map to the binding [tasks](tasks.md).
 
 ### R-1: A clarification park *kind* on the shared substrate
 
@@ -241,28 +242,36 @@ Acceptance criteria:
 
 ## Open Questions
 
-> Each carries its **recommended** resolution from the [spike](../../workspace/ask-user-clarification-spike.md)
-> §8. All seven must be resolved (ratified as-recommended, or amended) before this spec advances to
-> `approved`; this list must be empty at approval.
+> All seven were **ratified by the operator exactly as recommended 2026-11-25** (`draft → approved`),
+> on which the binding [plan](plan.md) / [tasks](tasks.md) were authored. Each is recorded below as the
+> **resolved design basis** (per the SPEC-077/078 pattern); the section is retained for traceability
+> rather than emptied.
 
 - **OQ-1 — Park model (R-1).** Ratify a **parallel park kind on the shared substrate** (reuse the
   registry / TTL / guard / interrupt + the durable-record *pattern*; **not** the SPEC-031 approval
-  lifecycle; **not** SPEC-032 owner-side sync in v1)? *Recommended: yes.*
+  lifecycle; **not** SPEC-032 owner-side sync in v1)? **Resolved (ratified 2026-11-25): yes** — one
+  registry slot with a `park_kind` discriminator; the approval lifecycle is not reused (a clarification
+  has no approver; the owner answers in-line).
 - **OQ-2 — Contract (R-3).** Ratify the additive **v13 → v14** `clarification_request` /
-  `clarification_result` frame pair as platform-owned projections? *Recommended: yes.*
+  `clarification_result` frame pair as platform-owned projections? **Resolved (ratified 2026-11-25):
+  yes** — two new `type` values; `additionalProperties: false` holds; no existing frame changes.
 - **OQ-3 — Audit (R-8).** Ratify **no new `event_type`** in v1 (ride `chat_started` /
   `chat_completed`), or does governance want a first-class `clarification_asked` /
-  `clarification_answered` signal (a deliberate enum bump + six-emitter change)? *Recommended: no
-  new type in v1; revisit only on a named governance need.*
+  `clarification_answered` signal (a deliberate enum bump + six-emitter change)? **Resolved (ratified
+  2026-11-25): no new type in v1** — the enum stays closed at 23 (the SPEC-077 R-5 precedent); revisit
+  only on a named governance need.
 - **OQ-4 — Guard (R-4).** Ratify the **park-kind-aware 409** + preserved one-park-per-session mutual
-  exclusion (a session holds a confirmation *or* a clarification, never both)? *Recommended: yes.*
+  exclusion (a session holds a confirmation *or* a clarification, never both)? **Resolved (ratified
+  2026-11-25): yes** — mutual exclusion is structural via the shared slot.
 - **OQ-5 — Answer surface (R-1, R-7).** Is **owner-in-line** answering sufficient for v1, or is a
-  cross-surface / second-tab answer (SPEC-032-style sync) a v1 requirement? *Recommended: owner-in-line
-  for v1; cross-surface a fast-follow.*
+  cross-surface / second-tab answer (SPEC-032-style sync) a v1 requirement? **Resolved (ratified
+  2026-11-25): owner-in-line for v1** — cross-surface sync is a named fast-follow.
 - **OQ-6 — Feature surface (R-6).** Ratify shipping the full `AskUserParams` shape **minus
-  `preview`** in v1, with `preview` a named fast-follow? *Recommended: yes.*
+  `preview`** in v1, with `preview` a named fast-follow? **Resolved (ratified 2026-11-25): yes** —
+  `preview` is deferred until the portal component that renders it exists.
 - **OQ-7 — Wiring (R-5).** Ratify **opt-in, flag-gated** wiring with the unscoped path
-  byte-identical, and **no default-on flip** in v1? *Recommended: yes.*
+  byte-identical, and **no default-on flip** in v1? **Resolved (ratified 2026-11-25): yes** —
+  `AGENT_ASKUSER_ENABLED` defaults off; a default-on flip is a separate measurement-gated decision.
 
 ## Changelog
 
@@ -276,3 +285,10 @@ Acceptance criteria:
   full `AskUserParams` shape minus `preview`) as R-1…R-8, and the spike's seven ratification asks as
   **Open Questions** (recommended, **not yet ratified**). Four-point gate scored **passes**; **no new
   ADR**. Provisional target v0.62.0, pinned only on approval. Promotion authorizes no implementation.
+- 2026-11-25: **approved** — the operator ratified all seven Open Questions **exactly as recommended**
+  (`draft → approved`); the seven are recorded above as the resolved design basis and R-1…R-8 are now
+  stable. The binding [plan](plan.md) / [tasks](tasks.md) are authored (contract-first sequencing:
+  v14 frames → park substrate → the kernel external-execution handler → the guard/answer endpoint →
+  flag-gated toolkit + v1 surface → the portal card → audit/evidence). Target **v0.62.0** pinned on
+  approval. Approval authorizes implementation to *begin* — not to merge, commit/push, deploy, or
+  version-bump (each a separate gate).

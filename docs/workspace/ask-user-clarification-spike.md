@@ -1,10 +1,10 @@
 # Spike: Agent-Initiated Clarification (`AskUser` tool) — Design Exploration
 
-Status: exploration / design framing (2026-11-24) — **reviewed by the operator and promoted to
-`draft` [SPEC-080](../specs/SPEC-080-agent-initiated-clarification/spec.md) 2026-11-24**; body frozen
-per the Tier-1 assessment-memo lifecycle. The seven ratification asks (§8) are carried into the draft
-spec as its **Open Questions** (recommended, not yet ratified); OQ ratification (`draft → approved`)
-is the operator's next gate.
+Status: exploration / design framing (2026-11-24) — **reviewed by the operator, promoted to
+`draft` [SPEC-080](../specs/SPEC-080-agent-initiated-clarification/spec.md) 2026-11-24, and approved
+2026-11-25** (all seven §8 ratification asks resolved exactly as recommended); body frozen per the
+Tier-1 assessment-memo lifecycle. The spec is now the source of truth for status; see its Open
+Questions for the resolved design basis.
 This memo resolves the questions the [Exploration Backlog](../agentic-aiops-platform/delivery-roadmap.md#exploration-backlog)
 parked on the **"Agent-initiated clarification (`AskUser` tool)"** row and recommends a
 decision-complete shape for a **SPEC-080 candidate**. On its own this memo authorizes **no**
@@ -399,3 +399,6 @@ it touches no control-flow, trust-model, or autonomy ceiling (ADR-0011 / ADR-001
   on operator approval. The seven §8 ratification asks are carried into the draft spec as its Open
   Questions (recommended, not yet ratified); the memo body is frozen per the Tier-1 lifecycle.
   Promotion authorizes no implementation, merge, commit/push, deploy, or version bump.
+- 2026-11-25: SPEC-080 **approved** — the operator ratified all seven Open Questions exactly as
+  recommended (`draft → approved`); the binding plan/tasks are authored and target v0.62.0 is pinned.
+  The spec, not this frozen memo, is now the source of truth for status and the resolved design basis.
