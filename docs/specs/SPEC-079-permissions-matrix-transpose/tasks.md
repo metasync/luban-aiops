@@ -283,3 +283,28 @@ pending horizontal-overflow/wide-viewport check above or the separate version/re
       with the subsequent release selected by the operator (not the already-shipped v0.60.0)
 - [x] version selected and bumped at the separate release gate (`VERSION` + products + portal
       lockstep, proven by `validate-version`); no version bump authorized by implementation approval
+
+### Post-delivery verification closure (2026-11-24)
+
+The three unchecked verification items above (deployed horizontal-overflow/wide-viewport,
+horizontal keyboard scrolling during actual overflow, and visible real-keyboard narrow/wide
+acceptance) are **closed as environment-blocked**, not implementation gaps. Disposition:
+
+- **Implementation is verified** by 571 DOM regression tests (42 files, green through the
+  antd 6.7.2 within-range refresh), the local fixture geometry measurements (horizontal
+  scrolling confirmed with synthetic overflow: 900px scroll width in a 733px client width,
+  permission column pinned at x=88px), and the 2026-11-21 deployed authenticated browser
+  check (945×535 viewport, 27 permissions × 6 roles, allow/deny/approval colors, deciders
+  tooltip, Tab focus with cyan outline, page-level vertical scroll to footer, no console
+  errors, matrix GET 200).
+- **The unverified scenarios** — horizontal keyboard scrolling during *actual deployed*
+  matrix overflow (the matrix fit at 945px so no overflow occurred), a genuine wide
+  viewport (browser resize requests did not change the actual viewport), and real-keypress
+  proof at narrow widths (native browser view hidden/detached,
+  `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`) — are browser-tool resize/capture limitations
+  observed across multiple operator-ready retries (2026-11-20, 2026-11-21). They do not
+  indicate an implementation defect; the containment they would visually confirm is
+  asserted structurally by the DOM regression suite.
+- **No further retry is scheduled.** Reopen only if a browser-tool fix makes the deployed
+  overflow/wide-viewport/narrow-keyboard scenarios capturable, or if an operator reports a
+  real layout defect in production use.
