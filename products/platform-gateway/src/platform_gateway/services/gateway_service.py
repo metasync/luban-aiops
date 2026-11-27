@@ -1194,7 +1194,10 @@ async def chat_stream(
             kind = _frame_type(chunk)
             if kind == "message_delta":
                 saw_delta = True
-            elif kind == "confirmation_request":
+            elif kind in ("confirmation_request", "clarification_request"):
+                # SPEC-080 R-3: a parked clarification, like a parked
+                # confirmation, ends the stream with no message_end — the turn
+                # is not complete, so it stays unattributed until it resumes.
                 parked = True
             frame_session = _frame_session_id(chunk)
             if frame_session is not None:
@@ -1308,6 +1311,106 @@ async def chat_confirm(
                         approval_context,
                     )
             yield chunk
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+async def answer_clarification(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    identity: IdentityContext,
+    session_id: str,
+    clarification_id: str,
+    answers: list[dict],
+    delegated_token: str | None = None,
+    model: str | None = None,
+) -> StreamingResponse:
+    """Proxy an owner's clarification answer to agent-service (SPEC-080 R-4).
+
+    The sibling to ``chat_confirm`` for the read-only clarification park kind —
+    but with NO approval-tier bridge: the session OWNER answers in-line (OQ-5),
+    so there is no approver, no distinct-human routing, and no self-approval
+    concern to enforce (a clarification carries no authority and admits no
+    action). The route gates admission on the existing ``chat`` action (no new
+    policy action); this proxy just relays the answers and streams the resumed
+    SAME turn.
+
+    Upstream 4xx (unknown/expired/parked, an answer that fails validation, a
+    mis-routed confirmation park, a structured ``already_resolved`` race) passes
+    through unchanged so the portal can render it; transport failures and
+    upstream 5xx map to 502. The resumed turn's ``chat_completed`` audit rides
+    the tee when its ``message_end`` frame flows through (R-8: no new
+    ``event_type`` — the parking/resuming turn stays bracketed by
+    ``chat_started`` / ``chat_completed``); a turn that re-parks
+    (``clarification_request`` / ``confirmation_request``) or produces no
+    completion stays unattributed, exactly as the chat stream tee does.
+    """
+    try:
+        upstream = await agent_client.open_clarification_answer_stream(
+            settings,
+            request_id,
+            identity.username,
+            session_id,
+            clarification_id,
+            answers,
+            delegated_token,
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if 400 <= status < 500:
+            # Pass client errors through unchanged (unknown/expired/parked,
+            # validation, mis-routed kind). SPEC-031 R-4: a structured upstream
+            # body (already_resolved with the decider and outcome) rides through
+            # untouched so the portal can render the resolution.
+            raise HTTPException(
+                status_code=status,
+                detail=_upstream_error_detail(
+                    exc.response,
+                    "agent service rejected the clarification answer",
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail="agent service clarification answer failed"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail="agent service unavailable"
+        ) from exc
+
+    audited = False
+    saw_delta = False
+    parked = False
+    last_frame_session: str | None = None
+
+    async def _stream() -> AsyncIterator[str]:
+        nonlocal audited, saw_delta, parked, last_frame_session
+        async for chunk in upstream:
+            if not audited:
+                frame = _extract_message_end(chunk)
+                if frame is not None:
+                    audited = True
+                    _emit_stream_chat_completed(
+                        settings, request_id, identity,
+                        session_id, "text", frame,
+                    )
+            kind = _frame_type(chunk)
+            if kind == "message_delta":
+                saw_delta = True
+            elif kind in ("confirmation_request", "clarification_request"):
+                # SPEC-080 R-8: a re-park ends the stream with no message_end —
+                # the turn is not complete, so it stays unattributed until it
+                # resumes, exactly as the chat stream tee treats a park.
+                parked = True
+            frame_session = _frame_session_id(chunk)
+            if frame_session is not None:
+                last_frame_session = frame_session
+            yield chunk
+        if not audited and saw_delta and not parked:
+            _emit_stream_chat_completed(
+                settings, request_id, identity,
+                last_frame_session or session_id, "text", None,
+                fallback_model=model,
+            )
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

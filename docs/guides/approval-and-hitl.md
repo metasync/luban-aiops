@@ -427,6 +427,68 @@ the submitted turn is tagged `input_modality: "voice"`. The modality is
 
 Invalid modalities are rejected with `422` before any upstream call.
 
+## Agent-Initiated Clarification (a read-only park beside confirmation, SPEC-080)
+
+The four layers above govern **mutating** actions. SPEC-080 adds a second,
+strictly **read-only** park *kind* that is *not* an approval: an
+**agent-initiated clarification**. Behind the opt-in `AGENT_ASKUSER_ENABLED`
+flag (default **off**), the agent can pause mid-turn to ask the operator a
+bounded multiple-choice question — “which cluster?”, “restart or rollback?”,
+“include the sidecar?” — and resume on the answer. It composes the *mechanism*
+of the confirmation park (the per-session registry slot, the park TTL, the
+`peek_parked` 409 guard, the `expire_confirmation` → `UserInterruptEvent`
+abort, and the durable-record-for-re-login pattern) but **not** the SPEC-031
+approval lifecycle.
+
+What a clarification is **not**:
+
+- **No approver, no inbox, no distinct-human routing, no tier / self-approval
+  gate.** The **session owner answers in-line**; a clarification never appears in
+  the Approvals inbox and never routes to a designated approver.
+- **No mutation, no authority, no execution.** `AskUser` is read-only and
+  always-ALLOW: admitting it to a toolkit executes nothing and cannot widen the
+  mutation surface or bypass the gateway. A clarification is strictly *less* than
+  the confirmation path.
+- **No new audit `event_type`.** A clarification carries no security decision, so
+  the parking/resuming turn rides the existing `chat_started` / `chat_completed`
+  events; the closed enum stays at **23** (the SPEC-077 R-5 precedent).
+  Governance attribution (`clarification_asked` / `clarification_answered`) is
+  deferred.
+
+How it works:
+
+- **One park per session, structurally.** A session holds a confirmation *or* a
+  clarification, never both — they share the one registry slot. A new chat turn
+  while a clarification is parked is rejected with the same **409**, naming the
+  parked kind (“clarification pending: answer or expire the parked question”),
+  and the SPEC-022 `has_pending` badge covers both kinds.
+- **The wire is a platform-owned projection.** The park surfaces as an additive
+  **v13 → v14** `clarification_request` frame (`clarification_id` + a `questions`
+  array of `{question, header, context?, multi_select, options:[{label,
+  description}]}`); the resume echoes a `clarification_result` frame
+  (`clarification_id`, the `answers`, and a closed `status` of `answered` /
+  `expired` / `interrupted`). No agentscope event or tool type crosses the wire —
+  the kernel catches `RequireExternalExecutionEvent`, projects the question, and
+  resumes by injecting `ExternalExecutionResultEvent` in-process. The auto-"Other"
+  free-text affordance is a client behavior, not a wire option.
+- **The owner answers in-line.**
+  `POST /api/v1/sessions/{id}/clarification/answer` (body `{clarification_id,
+  answers:[{question, selected[], other?}]}`) resumes the **same** assistant turn
+  (SPEC-025 R-1) and streams it to completion. A stale/duplicate answer is
+  race-resilient (the SPEC-031 `already_resolved` posture); a TTL-expired
+  clarification closes via the same `UserInterruptEvent` path. The card survives a
+  refresh via the durable record.
+- **v1 surface.** 1–4 questions × 2–4 options, `multi_select`, a ≤12-char
+  `header`, optional `context`, and the auto-"Other" answer. The
+  single-select-only `preview` field (a side-by-side mockup) is a named
+  fast-follow, deferred.
+
+With the flag off — the default — `AskUser` is wired into no deployed toolkit and
+the unscoped single-agent chat path stays **byte-identical**: no new frame, no new
+park, no new event handling. See the
+[configuration reference](configuration-reference.md) for `AGENT_ASKUSER_ENABLED`
+and the [portal user guide](portal-user-guide.md) for the operator's card.
+
 ## The Road Ahead
 
 Today's layers map onto the Tier-1

@@ -111,6 +111,40 @@ class ChatConfirmRequest(BaseModel):
     recipient_warning_acknowledged: bool = Field(default=False, strict=True)
 
 
+class ClarificationAnswer(BaseModel):
+    """One question's answer in a clarification response (SPEC-080 R-4).
+
+    The gateway passthrough mirror of the agent-platform
+    ``AgentClarificationAnswer`` (kept in lockstep): the question text verbatim
+    (so the answer correlates to the parked question), the labels the owner
+    chose, and the optional free text typed via the client's auto-"Other"
+    affordance. A request body is a pydantic model, never a new JSON contract
+    file (the packaged contract-parity discipline).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1)
+    selected: list[str] = Field(default_factory=list)
+    other: str | None = None
+
+
+class ClarificationAnswerRequest(BaseModel):
+    """Body for ``POST /api/v1/sessions/{id}/clarification/answer`` (SPEC-080 R-4).
+
+    Answers a parked read-only clarification. The session OWNER answers in-line
+    (OQ-5) — there is no approver and no approval-tier bridge — so this rides the
+    existing ``chat`` action under the same delegated token (no new policy
+    action). Relayed verbatim to agent-service, which validates the answer
+    against the parked questions and resumes the SAME turn.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    clarification_id: str = Field(min_length=1)
+    answers: list[ClarificationAnswer] = Field(min_length=1)
+
+
 class ChatResponse(BaseModel):
     """Mirror of `shared-contracts/schemas/agent-chat-response.schema.json` (v2)."""
 

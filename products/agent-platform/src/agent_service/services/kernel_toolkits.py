@@ -98,6 +98,19 @@ class ToolkitAssembler:
                 if self.settings.task_tools_enabled
                 else []
             )
+            # SPEC-080 R-5: admit the read-only ``AskUser`` external tool only
+            # behind the default-off flag. Builtins ride the same bucket as the
+            # task tools — added to the toolkit directly, never through the
+            # discovered-gateway-definition filters (``AskUser`` is read-only +
+            # always-ALLOW, so it needs no HITL / read-only / role narrowing and
+            # is excluded from ``count_gateway_tools``). With the flag off
+            # ``builtin_tools`` is exactly ``task_tools``, so the unscoped chat
+            # path is byte-identical.
+            builtin_tools = task_tools + (
+                self.build_askuser_tool()
+                if self.settings.askuser_enabled
+                else []
+            )
 
             if self.settings.tool_gateway_url:
                 from agent_service.tools.gateway_tools import (
@@ -122,16 +135,16 @@ class ToolkitAssembler:
                             definitions,
                             self.settings.tool_gateway_url,
                         )
-                        if task_tools:
-                            toolkit.tool_groups[0].tools.extend(task_tools)
+                        if builtin_tools:
+                            toolkit.tool_groups[0].tools.extend(builtin_tools)
                         self._toolkits[cache_key] = toolkit
                         return toolkit
                 except Exception as exc:
                     LOGGER.warning("failed to build gateway toolkit: %s", exc)
 
-            # No gateway (or nothing discovered): task tools only, returned
+            # No gateway (or nothing discovered): builtin tools only, returned
             # uncached so a later turn can retry discovery.
-            return Toolkit(tools=task_tools)
+            return Toolkit(tools=builtin_tools)
 
     def filter_mutating_for_hitl(self, definitions: list[dict]) -> list[dict]:
         """Drop non-read tools when HITL bridging is disabled (SPEC-021 R-3).
@@ -222,6 +235,22 @@ class ToolkitAssembler:
         from agentscope.tool import TaskCreate, TaskGet, TaskList, TaskUpdate
 
         return [TaskCreate(), TaskGet(), TaskList(), TaskUpdate()]
+
+    def build_askuser_tool(self) -> list:
+        """The agentscope ``AskUser`` external tool, opt-in (SPEC-080 R-5).
+
+        ``AskUser`` is ``is_read_only=True`` + ``is_external_tool=True`` and is
+        always-ALLOW at the tool gateway, so admitting it neither widens the
+        mutation surface nor bypasses the gateway — it executes nothing. When
+        the agent calls it, the kernel parks the reply as a read-only
+        clarification (R-2) the session owner answers in-line; the resumed turn
+        re-drives the SAME reply via an injected ``ExternalExecutionResultEvent``.
+        Admitted only behind ``AGENT_ASKUSER_ENABLED`` (default off), so an unset
+        deployment never sees the tool and the unscoped chat path is unchanged.
+        """
+        from agentscope.tool import AskUser
+
+        return [AskUser()]
 
     def count_gateway_tools(self, toolkit) -> int:
         """Count gateway-backed tools in a toolkit.

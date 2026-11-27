@@ -132,7 +132,8 @@ def test_runtime_metadata_uses_provider_defaults_when_unset():
     assert metadata["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
-# The curated nine (SPEC-072 R-4), in the fixed order ``feature_flags()`` emits.
+# The curated ten (SPEC-072 R-4; the tenth, ``askuser``, is added by SPEC-080
+# R-5), in the fixed order ``feature_flags()`` emits.
 _FEATURE_FLAG_NAMES = [
     "model_routing",
     "model_discovery",
@@ -140,6 +141,7 @@ _FEATURE_FLAG_NAMES = [
     "outbound_delegated_identity",
     "kernel_tracing",
     "task_tools",
+    "askuser",
     "reply_token_budget",
     "hitl_bridging",
     "signed_execution",
@@ -151,7 +153,7 @@ def _flags_by_name(kernel) -> dict:
 
 
 def test_feature_flags_report_each_knob():
-    """SPEC-072 R-4 (F1): the inventory is a curated allowlist of the nine
+    """SPEC-072 R-4 (F1): the inventory is a curated allowlist of the ten
     toggles in a stable order, each reporting its knob's correct ``enabled`` —
     and every entry carries a human label (the portal renders ``label ?? name``).
     """
@@ -170,6 +172,7 @@ def test_feature_flags_report_each_knob():
         "outbound_delegated_identity",
         "kernel_tracing",
         "task_tools",
+        "askuser",
         "reply_token_budget",
         "signed_execution",
     ):
@@ -191,6 +194,7 @@ def test_feature_flags_report_each_knob():
             compress_context_enabled=True,
             kernel_tracing=True,
             task_tools_enabled=True,
+            askuser_enabled=True,
             reply_token_budget=1024.0,
             hitl_confirm_timeout=0,
             execution_signing_key="hmac-key",
@@ -202,6 +206,7 @@ def test_feature_flags_report_each_knob():
     assert on["context_compression"] is True
     assert on["kernel_tracing"] is True
     assert on["task_tools"] is True
+    assert on["askuser"] is True
     assert on["reply_token_budget"] is True
     assert on["hitl_bridging"] is False  # a 0 timeout disables the bridge
     assert on["signed_execution"] is True
@@ -674,6 +679,53 @@ class TestToolkitRegistration:
         assert names == {"TaskCreate", "TaskGet", "TaskList", "TaskUpdate"}
         assert kernel._count_gateway_tools(toolkit) == 0
         # Empty gateway discovery stays uncached even with task tools.
+        assert asyncio.run(kernel._ensure_toolkit("token-a")) is not toolkit
+
+    def test_askuser_absent_when_flag_off_keeps_toolkit_byte_identical(self, monkeypatch):
+        """SPEC-080 R-5: with ``AGENT_ASKUSER_ENABLED`` off (the default) the
+        ``AskUser`` external tool is never admitted, so the unscoped toolkit is
+        byte-identical to the pre-clarification build — the agent cannot park a
+        clarification because it has no tool to do it with."""
+        kernel = self._kernel()
+        self._patch_discover(monkeypatch, [self.DEFINITION])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"k8s_list_pods"}
+        assert "AskUser" not in names
+        assert kernel._count_gateway_tools(toolkit) == 1
+
+    def test_askuser_admitted_when_flag_on_and_excluded_from_gateway_count(self, monkeypatch):
+        """SPEC-080 R-5: behind the flag the read-only ``AskUser`` joins the
+        cached toolkit beside the gateway tools, but never counts as a gateway
+        tool (it grounds nothing in live data), so the no-tools guard stays
+        accurate exactly as it does for the opt-in task tools."""
+        kernel = self._kernel(askuser_enabled=True)
+        self._patch_discover(monkeypatch, [self.DEFINITION])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"k8s_list_pods", "AskUser"}
+        assert kernel._count_gateway_tools(toolkit) == 1
+
+    def test_askuser_only_toolkit_when_gateway_empty(self, monkeypatch):
+        """SPEC-080 R-5: with no gateway tools discovered the flagged toolkit is
+        the ``AskUser`` builtin alone, stays out of the gateway count, and (like
+        the task-tools-only case) is returned uncached so a later turn retries
+        discovery."""
+        kernel = self._kernel(askuser_enabled=True)
+        self._patch_discover(monkeypatch, [])
+
+        toolkit = asyncio.run(kernel._ensure_toolkit("token-a"))
+
+        schemas = asyncio.run(toolkit.get_tool_schemas())
+        names = {schema["function"]["name"] for schema in schemas}
+        assert names == {"AskUser"}
+        assert kernel._count_gateway_tools(toolkit) == 0
         assert asyncio.run(kernel._ensure_toolkit("token-a")) is not toolkit
 
     def test_count_gateway_tools(self):

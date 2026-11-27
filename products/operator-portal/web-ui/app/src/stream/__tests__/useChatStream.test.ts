@@ -563,6 +563,232 @@ describe("useChatStream", () => {
     });
   });
 
+  // SPEC-080 R-7: a read-only AskUser parks the turn exactly like a
+  // confirmation, but the OWNER answers in-line (POST
+  // .../clarification/answer) and the response IS the resumed same-turn
+  // stream, opening with the answered clarification_result. No approver and
+  // no approve/deny verb ride the request.
+  describe("clarification park/resume (SPEC-080 R-7)", () => {
+    const clQuestion = {
+      question: "Which environment?",
+      header: "Environment",
+      multi_select: false,
+      options: [
+        { label: "staging", description: "non-production" },
+        { label: "production", description: "customer-facing" },
+      ],
+    };
+    // A fresh response per call: an async-generator body can only be consumed
+    // once, so tests must not share a single FakeResponse instance.
+    const parkResponse = () =>
+      okStream(
+        sse(
+          { type: "message_delta", delta: "Checking ", session_id: "s-1" },
+          {
+            type: "clarification_request",
+            clarification_id: "cl-1",
+            session_id: "s-1",
+            questions: [clQuestion],
+          },
+        ),
+      );
+    const stagingAnswer = [
+      { question: "Which environment?", selected: ["staging"] },
+    ];
+
+    it("parks on clarification_request and resumes via POST answer", async () => {
+      const calls = queueFetch(
+        parkResponse(),
+        okStream(
+          sse(
+            {
+              type: "clarification_result",
+              clarification_id: "cl-1",
+              status: "answered",
+              answers: stagingAnswer,
+            },
+            {
+              type: "tool_call",
+              call_id: "c-9",
+              tool_name: "k8s.deploy",
+              session_id: "s-1",
+            },
+            {
+              type: "tool_result",
+              call_id: "c-9",
+              tool_name: "k8s.deploy",
+              status: "success",
+              session_id: "s-1",
+            },
+            {
+              type: "message_delta",
+              delta: "Deployed to staging.",
+              session_id: "s-1",
+            },
+            { type: "message_end", session_id: "s-1" },
+          ),
+        ),
+      );
+
+      const { result } = renderHook(() => useChatStream());
+      await act(async () => {
+        await result.current.send("deploy it", { userId: "amy" });
+      });
+
+      const turn = result.current.turns[0];
+      expect(turn?.clarificationPending).toBe(true);
+      expect(turn?.completed).toBe(false);
+      // A clarification never touches the confirmation surface.
+      expect(turn?.confirmations).toEqual([]);
+      expect(turn?.clarifications[0]).toMatchObject({
+        clarificationId: "cl-1",
+        status: "pending",
+        sessionId: "s-1",
+      });
+      expect(turn?.clarifications[0].questions[0]).toEqual({
+        question: "Which environment?",
+        header: "Environment",
+        multiSelect: false,
+        options: [
+          { label: "staging", description: "non-production" },
+          { label: "production", description: "customer-facing" },
+        ],
+      });
+
+      await act(async () => {
+        await result.current.answer("cl-1", stagingAnswer);
+      });
+
+      // The answer POSTs to the session-scoped clarification endpoint carrying
+      // ONLY the owner's selections — no decision verb, no approver id.
+      const answerCall = calls[1];
+      expect(answerCall?.url).toContain(
+        "/api/v1/sessions/s-1/clarification/answer",
+      );
+      expect(answerCall?.init?.method).toBe("POST");
+      expect(JSON.parse(String(answerCall?.init?.body))).toEqual({
+        clarification_id: "cl-1",
+        answers: stagingAnswer,
+      });
+
+      const after = result.current.turns[0];
+      expect(after?.clarifications[0]).toMatchObject({
+        status: "answered",
+        note: "Answered — the parked reply resumed.",
+        answers: stagingAnswer,
+      });
+      // The resumed frames attach to the SAME parked turn.
+      expect(after?.replyText).toBe("Checking \n\nDeployed to staging.");
+      expect(after?.toolCalls).toHaveLength(1);
+      expect(after?.toolResults).toHaveLength(1);
+      expect(after?.completed).toBe(true);
+      expect(after?.clarificationPending).toBe(false);
+    });
+
+    it("locks the clarification as expired on HTTP 410", async () => {
+      queueFetch(parkResponse(), { ok: false, status: 410, body: null });
+      const { result } = renderHook(() => useChatStream());
+      await act(async () => {
+        await result.current.send("deploy it", { userId: "amy" });
+      });
+      await act(async () => {
+        await result.current.answer("cl-1", stagingAnswer);
+      });
+      expect(result.current.turns[0]?.clarifications[0]).toMatchObject({
+        status: "expired",
+        note: "This clarification expired before an answer was applied.",
+      });
+      expect(result.current.turns[0]?.completed).toBe(true);
+      expect(result.current.turns[0]?.clarificationPending).toBe(false);
+    });
+
+    it("flips the clarification to the winner's outcome on a 409 already_resolved", async () => {
+      queueFetch(parkResponse(), {
+        ok: false,
+        status: 409,
+        body: null,
+        json: () =>
+          Promise.resolve({
+            detail: {
+              reason: "already_resolved",
+              status: "answered",
+              decider_user_id: "luban-operator",
+              decided_at: "2026-08-25T10:05:00Z",
+            },
+          }),
+      });
+      const { result } = renderHook(() => useChatStream());
+      await act(async () => {
+        await result.current.send("deploy it", { userId: "amy" });
+      });
+      await act(async () => {
+        await result.current.answer("cl-1", [
+          { question: "Which environment?", selected: ["production"] },
+        ]);
+      });
+      expect(result.current.turns[0]?.clarifications[0]).toMatchObject({
+        status: "answered",
+        note: "Already resolved by luban-operator at 2026-08-25T10:05:00Z.",
+      });
+      expect(result.current.turns[0]?.completed).toBe(true);
+      expect(result.current.turns[0]?.clarificationPending).toBe(false);
+    });
+
+    it("locks the clarification as error when the resumed stream ends without clarification_result", async () => {
+      queueFetch(
+        parkResponse(),
+        okStream(
+          sse({ type: "message_delta", delta: "partial", session_id: "s-1" }),
+        ),
+      );
+      const { result } = renderHook(() => useChatStream());
+      await act(async () => {
+        await result.current.send("deploy it", { userId: "amy" });
+      });
+      await act(async () => {
+        await result.current.answer("cl-1", stagingAnswer);
+      });
+      expect(result.current.turns[0]?.clarifications[0]).toMatchObject({
+        status: "error",
+        note: "The clarification stream ended unexpectedly.",
+      });
+      expect(result.current.turns[0]?.completed).toBe(true);
+    });
+
+    it("ignores an answer for a clarification that is no longer pending", async () => {
+      // Locked-card guard: once answered, a second answer() is a no-op (opens
+      // no third stream), mirroring decide()'s guard against a doomed retry.
+      const calls = queueFetch(
+        parkResponse(),
+        okStream(
+          sse(
+            {
+              type: "clarification_result",
+              clarification_id: "cl-1",
+              status: "answered",
+              answers: stagingAnswer,
+            },
+            { type: "message_end", session_id: "s-1" },
+          ),
+        ),
+      );
+      const { result } = renderHook(() => useChatStream());
+      await act(async () => {
+        await result.current.send("deploy it", { userId: "amy" });
+      });
+      await act(async () => {
+        await result.current.answer("cl-1", stagingAnswer);
+      });
+      expect(calls).toHaveLength(2);
+      await act(async () => {
+        await result.current.answer("cl-1", [
+          { question: "Which environment?", selected: ["production"] },
+        ]);
+      });
+      expect(calls).toHaveLength(2);
+    });
+  });
+
   it("clears turns and repoints the session on setSession (switch abort)", async () => {
     queueFetch(
       okStream(

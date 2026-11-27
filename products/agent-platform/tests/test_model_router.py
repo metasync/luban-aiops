@@ -603,9 +603,9 @@ class TestContractBoundary:
     def test_schema_is_unchanged_and_carries_the_model_field(self):
         # SPEC-071 adds no schema version and no routing event type; the routed
         # id rides the existing SPEC-024 ``model`` field. (test_contract_adapter
-        # holds the full v13 byte-stability guard; this pins the SPEC-071 view.)
+        # holds the full v14 byte-stability guard; this pins the SPEC-071 view.)
         schema = load_schema("agent-stream-event.schema.json")
-        assert schema["title"] == "Agent Stream Event (v13)"
+        assert schema["title"] == "Agent Stream Event (v14)"
         assert "model" in schema["properties"]
         assert not any("rout" in t for t in schema["properties"]["type"]["enum"])
 

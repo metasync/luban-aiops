@@ -15,13 +15,20 @@ import type {
 } from "../api/sessions";
 import type {
   ChangeRequest,
+  ClarificationQuestion,
+  ClarificationStatus,
+  ConfirmationStatus,
   ExecutionReceipt,
   FlowSummary,
   PendingCall,
   ToolCallFrame,
   ToolResultFrame,
 } from "../stream/models";
-import type { ChatTurn, ConfirmationCard } from "../stream/useChatStream";
+import type {
+  ChatTurn,
+  ClarificationCard,
+  ConfirmationCard,
+} from "../stream/useChatStream";
 import { toAuthorizationRequiredFrame, toSecretDeliveryFrame } from "../stream/decoder";
 
 // Frame mapping mirrors the live decoder's tool_call/tool_result handling
@@ -190,6 +197,26 @@ function toChangeRequest(
   };
 }
 
+// SPEC-080 R-7: narrow the durable record's shared status union to the
+// confirmation card's vocabulary. A confirmation resolves pending/approved/
+// denied/expired; "answered" is a clarification-only resolution and can't
+// legitimately land on a confirmation park, so it degrades to "error" rather
+// than rendering a bogus approve/deny state (the sibling of
+// clarificationRecordStatus below).
+function confirmationRecordStatus(
+  status: ConfirmationRecord["status"],
+): ConfirmationStatus {
+  if (
+    status === "pending" ||
+    status === "approved" ||
+    status === "denied" ||
+    status === "expired"
+  ) {
+    return status;
+  }
+  return "error";
+}
+
 // Shared by transcript seeding and the approvals inbox (SPEC-031 R-5):
 // both surfaces render the same durable record through one card mapping.
 export function confirmationRecordToCard(
@@ -221,7 +248,7 @@ export function confirmationRecordToCard(
     mutating: pendingCalls.some(
       (call) => Boolean(call.riskLevel) && call.riskLevel !== "read",
     ),
-    status: record.status,
+    status: confirmationRecordStatus(record.status),
     sessionId: record.session_id,
     deciderUserId: record.decider_user_id ?? undefined,
     decidedAt: record.decided_at ?? undefined,
@@ -260,6 +287,66 @@ export function confirmationRecordToCard(
   return card;
 }
 
+// SPEC-080 R-7: map a durable clarification record (park_kind="clarification")
+// to the owner-answerable card — the read-only sibling of
+// confirmationRecordToCard. The persisted questions ride the wire shape
+// (snake_case multi_select); project them to the ClarificationQuestion view-
+// model exactly as the live decoder does, so a re-login renders prop-identically
+// to the live card. The owner's specific selections are NOT persisted on the
+// record, so an answered card replays its prompt + attribution read-only
+// (never an invented answer).
+export function clarificationRecordToCard(
+  record: ConfirmationRecord,
+): ClarificationCard {
+  const questions: ClarificationQuestion[] = (record.questions ?? []).map(
+    (question) => ({
+      question: question.question,
+      header: question.header,
+      multiSelect: question.multi_select === true,
+      options: (question.options ?? []).map((option) => ({
+        label: option.label,
+        description: option.description,
+      })),
+      ...(question.context ? { context: question.context } : {}),
+    }),
+  );
+  const status = clarificationRecordStatus(record.status);
+  const card: ClarificationCard = {
+    clarificationId: record.confirm_id,
+    questions,
+    status,
+    sessionId: record.session_id,
+  };
+  if (status !== "pending") {
+    card.note = clarificationNote(record);
+  }
+  return card;
+}
+
+function clarificationRecordStatus(status: string): ClarificationStatus {
+  // A durable clarification is pending, answered, or expired; anything else
+  // (a confirmation outcome leaking onto a clarification record) degrades to
+  // "error" rather than rendering a bogus state.
+  if (status === "pending" || status === "answered" || status === "expired") {
+    return status;
+  }
+  return "error";
+}
+
+// Attribution note for a replayed answered/expired clarification (SPEC-080
+// R-7): the read-only sibling of attributionNote. A clarification is answered
+// in-line by its owner (never approved/denied), so the wording reflects that.
+function clarificationNote(record: ConfirmationRecord): string {
+  if (record.status === "expired") {
+    return "This clarification expired before an answer was applied.";
+  }
+  const who = record.decider_user_id ? ` by ${record.decider_user_id}` : "";
+  const when = record.decided_at ? ` at ${record.decided_at}` : "";
+  const verb =
+    record.status === "answered" ? "Answered" : `Resolved (${record.status})`;
+  return `${verb}${who}${when}.`;
+}
+
 function attachConfirmations(
   turns: ChatTurn[],
   records: ConfirmationRecord[],
@@ -267,7 +354,11 @@ function attachConfirmations(
 ): void {
   const transcriptLength = turns.length;
   for (const record of records ?? []) {
-    const card = confirmationRecordToCard(record);
+    // SPEC-080 R-7: a clarification park (park_kind="clarification") re-renders
+    // as an owner-answerable ClarificationCard; every other record stays a
+    // ConfirmationCard. Both share the anchoring logic below — a session parks
+    // one kind per slot, so a turn carries one or the other, never both.
+    const isClarification = record.park_kind === "clarification";
     // SPEC-033 R-3: records parked after the anchoring spec carry the
     // parking turn ordinal and land under the exchange that created them.
     // Records without a usable ordinal (predating the field, or pointing
@@ -284,9 +375,18 @@ function attachConfirmations(
       turns.push(synthetic);
       return synthetic;
     })();
-    target.confirmations.push(card);
-    if (card.status === "pending") {
-      target.confirmationPending = true;
+    if (isClarification) {
+      const card = clarificationRecordToCard(record);
+      target.clarifications.push(card);
+      if (card.status === "pending") {
+        target.clarificationPending = true;
+      }
+    } else {
+      const card = confirmationRecordToCard(record);
+      target.confirmations.push(card);
+      if (card.status === "pending") {
+        target.confirmationPending = true;
+      }
     }
   }
 }
@@ -303,6 +403,8 @@ export function transcriptToTurns(
     replyText: "",
     completed: true,
     confirmationPending: false,
+    clarificationPending: false,
+    clarifications: [],
     toolCalls: [],
     toolResults: [],
     confirmations: [],

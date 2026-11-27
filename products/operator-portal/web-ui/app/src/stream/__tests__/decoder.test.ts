@@ -421,6 +421,202 @@ describe("decodeEventBlock", () => {
     });
   });
 
+  // SPEC-080 R-3/R-6: the v14 clarification frames. The decoder projects the
+  // wire questions to the card view-model, mirrors the agentscope bound the
+  // kernel already enforced (>=2 options), and NEVER reads ``preview`` — a
+  // named fast-follow that does not ride v14.
+  it("maps clarification_request questions to the card view-model", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "clarification_request",
+        clarification_id: "cl-1",
+        questions: [
+          {
+            question: "Which environment?",
+            header: "Environment",
+            context: "pick one",
+            multi_select: true,
+            options: [
+              { label: "staging", description: "non-production" },
+              { label: "production", description: "customer-facing" },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toEqual({
+      kind: "clarification_request",
+      clarificationId: "cl-1",
+      questions: [
+        {
+          question: "Which environment?",
+          header: "Environment",
+          context: "pick one",
+          multiSelect: true,
+          options: [
+            { label: "staging", description: "non-production" },
+            { label: "production", description: "customer-facing" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("defaults multiSelect, omits an empty context, and never reads preview", () => {
+    const frame = decodeEventBlock(
+      sseBlock({
+        type: "clarification_request",
+        clarification_id: "cl-1",
+        questions: [
+          {
+            question: "Which environment?",
+            header: "Environment",
+            context: "",
+            preview: "question-preview-must-not-survive",
+            options: [
+              {
+                label: "staging",
+                description: "non-production",
+                preview: "option-preview-must-not-survive",
+              },
+              { label: "production", description: "customer-facing" },
+            ],
+          },
+        ],
+      }),
+    )?.frame;
+    expect(frame).toEqual({
+      kind: "clarification_request",
+      clarificationId: "cl-1",
+      questions: [
+        {
+          question: "Which environment?",
+          header: "Environment",
+          multiSelect: false,
+          options: [
+            { label: "staging", description: "non-production" },
+            { label: "production", description: "customer-facing" },
+          ],
+        },
+      ],
+    });
+    const json = JSON.stringify(frame);
+    expect(json).not.toContain("question-preview-must-not-survive");
+    expect(json).not.toContain("option-preview-must-not-survive");
+  });
+
+  it("drops a clarification question with fewer than two options", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "clarification_request",
+        clarification_id: "cl-1",
+        questions: [
+          {
+            question: "Solo?",
+            header: "Solo",
+            options: [{ label: "a", description: "only one" }],
+          },
+          {
+            question: "Pair?",
+            header: "Pair",
+            options: [
+              { label: "a", description: "first" },
+              { label: "b", description: "second" },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toEqual({
+      kind: "clarification_request",
+      clarificationId: "cl-1",
+      questions: [
+        {
+          question: "Pair?",
+          header: "Pair",
+          multiSelect: false,
+          options: [
+            { label: "a", description: "first" },
+            { label: "b", description: "second" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("defaults clarification_request id to empty and questions to [] when absent", () => {
+    expect(
+      decodeEventBlock(sseBlock({ type: "clarification_request" }))?.frame,
+    ).toEqual({
+      kind: "clarification_request",
+      clarificationId: "",
+      questions: [],
+    });
+  });
+
+  it("maps clarification_result answers and status", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "clarification_result",
+        clarification_id: "cl-1",
+        status: "answered",
+        answers: [
+          {
+            question: "Which environment?",
+            selected: ["staging", "qa"],
+            other: "and prod",
+          },
+          { question: "How verbose?", selected: [] },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toEqual({
+      kind: "clarification_result",
+      clarificationId: "cl-1",
+      status: "answered",
+      answers: [
+        {
+          question: "Which environment?",
+          selected: ["staging", "qa"],
+          other: "and prod",
+        },
+        { question: "How verbose?", selected: [] },
+      ],
+    });
+  });
+
+  it("defaults clarification_result status, filters non-string selections, omits absent answers", () => {
+    const decoded = decodeEventBlock(
+      sseBlock({
+        type: "clarification_result",
+        clarification_id: "cl-1",
+        answers: [
+          { question: "Which environment?", selected: ["staging", 42, null] },
+        ],
+      }),
+    );
+    expect(decoded?.frame).toEqual({
+      kind: "clarification_result",
+      clarificationId: "cl-1",
+      status: "answered",
+      answers: [{ question: "Which environment?", selected: ["staging"] }],
+    });
+    // No answers array at all => the frame omits it (an expiry/interrupt).
+    expect(
+      decodeEventBlock(
+        sseBlock({
+          type: "clarification_result",
+          clarification_id: "cl-1",
+          status: "expired",
+        }),
+      )?.frame,
+    ).toEqual({
+      kind: "clarification_result",
+      clarificationId: "cl-1",
+      status: "expired",
+    });
+  });
+
   it("maps error frames preferring error.message, then message", () => {
     const nested = decodeEventBlock(
       sseBlock({

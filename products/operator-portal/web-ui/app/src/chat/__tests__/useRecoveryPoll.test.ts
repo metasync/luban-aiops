@@ -66,6 +66,8 @@ function turnWith(recovery?: ExecutionRecovery): ChatTurn {
     replyText: "Done.",
     completed: true,
     confirmationPending: false,
+    clarificationPending: false,
+    clarifications: [],
     toolCalls: [],
     toolResults: [],
     confirmations: [

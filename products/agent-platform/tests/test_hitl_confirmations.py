@@ -9,11 +9,13 @@ from types import SimpleNamespace
 
 import pytest
 from agentscope.event import (
+    ExternalExecutionResultEvent,
+    RequireExternalExecutionEvent,
     RequireUserConfirmEvent,
     UserConfirmResultEvent,
     UserInterruptEvent,
 )
-from agentscope.message import ToolCallBlock
+from agentscope.message import ToolCallBlock, ToolResultBlock
 from fastapi.testclient import TestClient
 
 from agent_service.api.v2 import routes as v2_routes
@@ -109,6 +111,39 @@ def _park_event() -> RequireUserConfirmEvent:
 def _secret_park_event() -> RequireUserConfirmEvent:
     return RequireUserConfirmEvent(
         reply_id="reply-1", tool_calls=[SECRET_TOOL_CALL]
+    )
+
+
+# SPEC-080 R-2/R-6: a parked ``AskUser`` external-execution call. The input is
+# the raw JSON of agentscope's ``AskUserParams`` (as the model fills it from
+# ``AskUser.input_schema``); it carries a ``preview`` on an option to pin the
+# R-6 guarantee that ``preview`` is NEVER projected onto the v14 wire.
+ASK_USER_INPUT = json.dumps(
+    {
+        "questions": [
+            {
+                "question": "Which cluster should I inspect?",
+                "header": "Cluster",
+                "context": "prod is degraded",
+                "multi_select": False,
+                "options": [
+                    {
+                        "label": "prod",
+                        "description": "Production",
+                        "preview": "PREVIEW-MUST-NOT-LEAK",
+                    },
+                    {"label": "stage", "description": "Staging"},
+                ],
+            }
+        ]
+    }
+)
+ASK_USER_CALL = ToolCallBlock(id="call-ask", name="AskUser", input=ASK_USER_INPUT)
+
+
+def _clarification_park_event() -> RequireExternalExecutionEvent:
+    return RequireExternalExecutionEvent(
+        reply_id="reply-1", tool_calls=[ASK_USER_CALL]
     )
 
 
@@ -263,6 +298,80 @@ def test_registry_take_for_expiry_rejects_claimed_entry() -> None:
     with pytest.raises(ConfirmationNotFound):
         registry.take_for_expiry("s1", pending.confirm_id)
     assert registry.is_parked("s1", 600)
+
+
+# --- SPEC-080 R-1: the clarification park kind on the shared slot ---
+
+
+def test_registry_park_kind_defaults_to_confirmation() -> None:
+    """SPEC-080 R-1: the deployed confirmation path stays byte-identical — a
+    park registered without an explicit kind is a ``confirmation`` carrying
+    ``tool_calls`` and no clarification questions."""
+    registry = ConfirmationRegistry()
+    pending = registry.register("s1", "alice", "r1", [TOOL_CALL], timeout=600)
+    assert pending.park_kind == "confirmation"
+    assert pending.questions == []
+    assert pending.tool_calls == [TOOL_CALL]
+
+
+def test_registry_clarification_park_occupies_shared_slot() -> None:
+    """SPEC-080 R-1: a clarification park lands in the SAME one-per-session
+    slot with ``park_kind="clarification"`` and carries the projected
+    questions (no tool_calls); ``is_parked``/``peek_parked``/``get`` observe
+    it exactly as they observe a confirmation, so the shared 409 guard and
+    single-flight claim/resume machinery cover both kinds unchanged."""
+    registry = ConfirmationRegistry()
+    questions = [
+        {
+            "question": "Which cluster should I inspect?",
+            "header": "Cluster",
+            "options": [
+                {"label": "prod", "description": "Production"},
+                {"label": "stage", "description": "Staging"},
+            ],
+        }
+    ]
+    pending = registry.register(
+        "s1", "alice", "r1", [], timeout=600,
+        park_kind="clarification", questions=questions,
+    )
+    assert pending.park_kind == "clarification"
+    assert pending.questions == questions
+    assert pending.tool_calls == []
+    assert registry.is_parked("s1", 600)
+    assert registry.peek_parked("s1") is pending
+    assert registry.get("s1", pending.confirm_id, 600) is pending
+
+
+def test_registry_one_slot_holds_either_kind_not_both() -> None:
+    """SPEC-080 R-1: mutual exclusion is STRUCTURAL, not guarded — the
+    session maps to a single ``PendingConfirmation``, so it holds one park of
+    either kind, never two at once; resolving frees the slot for the next
+    park of either kind."""
+    registry = ConfirmationRegistry()
+    confirm = registry.register("s1", "alice", "r1", [TOOL_CALL], timeout=600)
+    clarify = registry.register(
+        "s1", "alice", "r2", [], timeout=600,
+        park_kind="clarification",
+        questions=[
+            {
+                "question": "Which namespace?",
+                "header": "Namespace",
+                "options": [
+                    {"label": "ops", "description": "Operations"},
+                    {"label": "dev", "description": "Development"},
+                ],
+            }
+        ],
+    )
+    # The single slot now holds the clarification; the displaced
+    # confirmation id no longer resolves there.
+    assert registry.peek_parked("s1") is clarify
+    assert registry.peek_parked("s1").park_kind == "clarification"
+    with pytest.raises(ConfirmationNotFound):
+        registry.get("s1", confirm.confirm_id, 600)
+    registry.resolve("s1", clarify.confirm_id)
+    assert not registry.is_parked("s1", 600)
 
 
 def test_pending_calls_payload_parses_tool_call_input() -> None:
@@ -1156,6 +1265,240 @@ def test_resume_confirmation_repark_owner_defaults_to_decider(monkeypatch):
     assert reparked.user_id == "bob-approver"
 
 
+# --- SPEC-080 R-2: the kernel's first external-execution (clarification) park ---
+
+
+def test_stream_events_parks_and_emits_clarification_request(monkeypatch):
+    """SPEC-080 R-2: a parked ``AskUser`` surfaces as a ``clarification_request``
+    frame carrying the projected questions, registers on the shared slot as a
+    ``clarification`` park, writes a durable record, and ends the stream WITHOUT
+    ``message_end`` — the answer endpoint resumes it."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(
+        events=[
+            {"type": "TEXT_BLOCK_DELTA", "delta": "let me check"},
+            _clarification_park_event(),
+        ]
+    )
+    _patch_agent(monkeypatch, kernel, agent)
+
+    frames = _drain(
+        kernel.stream_events(
+            message="why is it slow",
+            request_id="req-1",
+            session_id="s1",
+            user_name="alice",
+        )
+    )
+    clarify_frames = [f for f in frames if f.get("type") == "clarification_request"]
+    assert len(clarify_frames) == 1
+    frame = clarify_frames[0]
+    assert frame["questions"][0]["question"] == "Which cluster should I inspect?"
+    assert frame["clarification_id"]
+    # The stream ends without message_end after parking.
+    assert not any(f.get("event") == "message_end" for f in frames)
+    # Registered on the shared slot as a clarification park.
+    assert CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    pending = CONFIRMATION_REGISTRY.peek_parked("s1")
+    assert pending.park_kind == "clarification"
+    assert frame["clarification_id"] == pending.confirm_id
+    # Durable record carries the park kind + questions and excludes the inbox.
+    record = CONFIRMATION_RECORD_STORE.load_pending_for_session("s1")
+    assert record is not None
+    assert record["park_kind"] == "clarification"
+    assert record["questions"][0]["header"] == "Cluster"
+    assert CONFIRMATION_RECORD_STORE.load_pending_inbox() == []
+
+
+def test_build_clarification_frame_projects_ask_user_minus_preview(monkeypatch):
+    """SPEC-080 R-6: the projection mirrors the ``AskUserParams`` constraints
+    (question, header<=12, context?, multi_select, options[2-4]{label,
+    description}) and NEVER carries ``preview`` — no preview field exists in v14."""
+    kernel = _configured_kernel()
+    frame = kernel._build_clarification_frame(
+        _clarification_park_event(), "s1", "alice", turn_index=0
+    )
+    assert frame is not None
+    assert frame["type"] == "clarification_request"
+    question = frame["questions"][0]
+    assert question["header"] == "Cluster"
+    assert question["context"] == "prod is degraded"
+    assert question["multi_select"] is False
+    assert question["options"] == [
+        {"label": "prod", "description": "Production"},
+        {"label": "stage", "description": "Staging"},
+    ]
+    # The option-level ``preview`` never rides the wire.
+    assert "PREVIEW-MUST-NOT-LEAK" not in json.dumps(frame)
+    assert "preview" not in json.dumps(frame)
+
+
+def test_build_clarification_frame_truncates_long_header(monkeypatch):
+    """SPEC-080 R-6: a header longer than the agentscope bound (12 chars) is
+    truncated in the projection so the v14 frame never exceeds the contract."""
+    kernel = _configured_kernel()
+    raw = json.dumps(
+        {
+            "questions": [
+                {
+                    "question": "Pick one?",
+                    "header": "ABCDEFGHIJKLMNOP",
+                    "options": [
+                        {"label": "a", "description": "A"},
+                        {"label": "b", "description": "B"},
+                    ],
+                }
+            ]
+        }
+    )
+    event = RequireExternalExecutionEvent(
+        reply_id="reply-1",
+        tool_calls=[ToolCallBlock(id="c", name="AskUser", input=raw)],
+    )
+    frame = kernel._build_clarification_frame(event, "s1", "alice")
+    assert frame["questions"][0]["header"] == "ABCDEFGHIJKL"
+
+
+def test_build_clarification_frame_ignores_confirmation_and_non_askuser():
+    """SPEC-080 R-2: the clarification builder is inert for a confirmation park
+    event (the confirmation branch stays byte-identical) and for an external
+    tool other than ``AskUser`` (v1 admits only the read-only builtin)."""
+    kernel = _configured_kernel()
+    # A RequireUserConfirmEvent is not an external-execution park.
+    assert kernel._build_clarification_frame(_park_event(), "s1", "alice") is None
+    # An external-execution event for a non-AskUser tool does not park here.
+    other = RequireExternalExecutionEvent(
+        reply_id="reply-1",
+        tool_calls=[ToolCallBlock(id="c", name="SomeOtherExternal", input="{}")],
+    )
+    assert kernel._build_clarification_frame(other, "s1", "alice") is None
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+
+
+def test_build_clarification_frame_silent_when_bridging_disabled():
+    """SPEC-080 R-2: with HITL bridging off (``hitl_confirm_timeout == 0``) the
+    clarification builder returns None, preserving the legacy silent-park posture."""
+    kernel = _configured_kernel(hitl_confirm_timeout=0)
+    assert kernel._build_clarification_frame(
+        _clarification_park_event(), "s1", "alice"
+    ) is None
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+
+
+def test_resume_clarification_injects_external_execution_result(monkeypatch):
+    """SPEC-080 R-2: answering a parked clarification injects an
+    ``ExternalExecutionResultEvent`` (one ``ToolResultBlock`` per parked AskUser
+    call, prose ``output`` + ``AskUserMetadata{answers}``) that re-drives the
+    SAME turn; the stream opens with an ``answered`` ``clarification_result``,
+    resolves the park, and persists the resolution as ``answered``."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[{"type": "REPLY_END"}])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [ASK_USER_CALL], 600,
+        park_kind="clarification",
+        questions=[{"question": "Which cluster should I inspect?", "header": "Cluster",
+                    "options": [{"label": "prod", "description": "Production"},
+                                {"label": "stage", "description": "Staging"}]}],
+    )
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+    CONFIRMATION_RECORD_STORE.save_parked(
+        make_record(pending.confirm_id, "s1", "alice", [], None,
+                    park_kind="clarification", questions=pending.questions)
+    )
+    answers = [
+        {"question": "Which cluster should I inspect?", "selected": ["prod"], "other": None}
+    ]
+
+    frames = _drain(
+        kernel.resume_clarification(
+            session_id="s1",
+            pending=claimed,
+            answers=answers,
+            user_name="alice",
+            request_id="req-2",
+            bearer_token="tok-alice",
+        )
+    )
+    assert frames[0]["type"] == "clarification_result"
+    assert frames[0]["status"] == "answered"
+    assert frames[0]["clarification_id"] == pending.confirm_id
+    assert frames[0]["answers"] == answers
+    # The injected event re-drives the parked reply with the answers.
+    fed = agent.inputs[0]
+    assert isinstance(fed, ExternalExecutionResultEvent)
+    assert fed.reply_id == "reply-1"
+    assert len(fed.execution_results) == 1
+    result = fed.execution_results[0]
+    assert isinstance(result, ToolResultBlock)
+    assert result.id == "call-ask"
+    assert result.name == "AskUser"
+    assert result.metadata == {"answers": [
+        {"question": "Which cluster should I inspect?", "selected": ["prod"], "other": None}
+    ]}
+    assert "prod" in result.output
+    # The park is resolved and the durable record states the answered outcome.
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", pending.confirm_id)
+    assert record["status"] == "answered"
+    assert record["park_kind"] == "clarification"
+
+
+def test_resume_clarification_resolves_entry_on_stream_error(monkeypatch):
+    """SPEC-080 R-2: a resume whose re-driven stream fails still resolves the
+    parked entry (the session cannot wedge) and surfaces a deterministic error."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(raise_on_stream=True)
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [ASK_USER_CALL], 600,
+        park_kind="clarification", questions=[{"question": "Q?", "header": "H",
+        "options": [{"label": "a", "description": "A"}, {"label": "b", "description": "B"}]}],
+    )
+    claimed = CONFIRMATION_REGISTRY.claim("s1", pending.confirm_id, 600)
+
+    frames = _drain(
+        kernel.resume_clarification(
+            "s1", claimed, [{"question": "Q?", "selected": ["a"]}], "alice", "req-x"
+        )
+    )
+    errors = [frame for frame in frames if frame.get("type") == "error"]
+    assert errors == [{
+        "type": "error",
+        "message": "The resumed turn failed. Start a new turn.",
+        "request_id": "req-x",
+        "session_id": "s1",
+    }]
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    assert pending.requester_delegated_token is None
+
+
+def test_expire_confirmation_closes_parked_clarification(monkeypatch):
+    """SPEC-080 R-2: TTL expiry / operator cancel of a parked clarification
+    reuses ``expire_confirmation`` -> ``UserInterruptEvent`` (which aborts either
+    park kind), resolving the entry and recording it as ``expired``."""
+    kernel = _configured_kernel()
+    agent = FakeAgent(events=[])
+    _patch_agent(monkeypatch, kernel, agent)
+    pending = CONFIRMATION_REGISTRY.register(
+        "s1", "alice", "reply-1", [ASK_USER_CALL], 600,
+        park_kind="clarification", questions=[{"question": "Q?", "header": "H",
+        "options": [{"label": "a", "description": "A"}, {"label": "b", "description": "B"}]}],
+    )
+    pending.created_at = time.monotonic() - 601
+    CONFIRMATION_RECORD_STORE.save_parked(
+        make_record(pending.confirm_id, "s1", "alice", [], None,
+                    park_kind="clarification", questions=pending.questions)
+    )
+
+    asyncio.run(kernel.expire_confirmation("s1", pending.confirm_id))
+    # The parked reply was closed via UserInterruptEvent.
+    assert any(isinstance(inp, UserInterruptEvent) for inp in agent.inputs)
+    assert not CONFIRMATION_REGISTRY.is_parked("s1", 600)
+    record = CONFIRMATION_RECORD_STORE.load_record("s1", pending.confirm_id)
+    assert record["status"] == "expired"
+
+
 # --- Kernel: expiry closes parked calls via UserInterruptEvent ---
 
 
@@ -1339,6 +1682,39 @@ def _park_registered(session_id: str, user_id: str = "alice", age: float = 0.0):
     )
     if age:
         pending.created_at = time.monotonic() - age
+    return pending
+
+
+def _park_clarification(
+    session_id: str,
+    user_id: str = "alice",
+    *,
+    with_record: bool = True,
+    questions: list[dict] | None = None,
+):
+    """Register a clarification park on the shared one-per-session slot
+    (SPEC-080 R-1) and, by default, save the durable record the real
+    ``_build_clarification_frame`` writes — so the claim-time ``answered``
+    outcome and the ``already_resolved`` race response have a record to read."""
+    parked_questions = questions if questions is not None else [
+        {
+            "question": "Which cluster should I inspect?",
+            "header": "Cluster",
+            "options": [
+                {"label": "prod", "description": "Production"},
+                {"label": "stage", "description": "Staging"},
+            ],
+        }
+    ]
+    pending = CONFIRMATION_REGISTRY.register(
+        session_id, user_id, "reply-1", [ASK_USER_CALL], 600,
+        park_kind="clarification", questions=parked_questions,
+    )
+    if with_record:
+        CONFIRMATION_RECORD_STORE.save_parked(
+            make_record(pending.confirm_id, session_id, user_id, [], None,
+                        park_kind="clarification", questions=pending.questions)
+        )
     return pending
 
 
@@ -1617,6 +1993,216 @@ def test_parked_session_rejects_auto_model_change_with_409() -> None:
         headers={"X-User-ID": "alice"},
     )
     assert blocked_stream.status_code == 409
+
+
+# --- SPEC-080 R-4: park-kind-aware 409 guard + clarification answer endpoint ---
+
+
+def test_parked_clarification_rejects_new_turns_naming_kind() -> None:
+    """SPEC-080 R-4: the shared one-per-session 409 guard names the parked
+    KIND — a read-only clarification says so, routing the client to the answer
+    endpoint instead of the approval bridge."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    _park_clarification(session_id)
+
+    blocked = client.post(
+        "/api/v2/chat",
+        json={"message": "hello", "session_id": session_id},
+        headers={"X-User-ID": "alice"},
+    )
+    assert blocked.status_code == 409
+    assert "clarification pending" in blocked.json()["detail"]
+
+
+def test_parked_confirmation_409_still_names_confirmation_kind() -> None:
+    """SPEC-080 R-4: the park-kind-aware guard leaves the deployed confirmation
+    wording byte-identical — a mutating confirmation still says
+    ``confirmation pending``, never the clarification wording."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    _park_registered(session_id)
+
+    blocked = client.post(
+        "/api/v2/chat",
+        json={"message": "hello", "session_id": session_id},
+        headers={"X-User-ID": "alice"},
+    )
+    assert blocked.status_code == 409
+    assert "confirmation pending" in blocked.json()["detail"]
+    assert "clarification pending" not in blocked.json()["detail"]
+
+
+def test_answer_endpoint_rejects_confirmation_park_with_409() -> None:
+    """SPEC-080 R-4: the answer endpoint is clarification-only — pointing it at
+    a mutating confirmation park is a 409 naming the confirmation kind, so the
+    client routes to the approval bridge instead of answering in-line."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    pending = _park_registered(session_id)
+
+    response = client.post(
+        f"/api/v2/sessions/{session_id}/clarification/answer",
+        json={
+            "clarification_id": pending.confirm_id,
+            "answers": [{"question": "Q?", "selected": ["a"]}],
+        },
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 409
+    assert "confirmation pending" in response.json()["detail"]
+    # The mis-routed answer never consumed the confirmation's single-flight claim.
+    assert CONFIRMATION_REGISTRY.peek_parked(session_id) is pending
+
+
+def test_answer_clarification_rejects_unknown_question(monkeypatch) -> None:
+    """SPEC-080 R-4: an answer naming a question the agent never parked is a
+    422, and the pre-claim validation leaves the park intact for a corrected
+    retry (the single-flight claim is never consumed)."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    pending = _park_clarification(session_id)
+    resumed: list = []
+
+    async def fake_resume(**kwargs):
+        resumed.append(kwargs)
+        yield {
+            "type": "clarification_result",
+            "clarification_id": kwargs["pending"].confirm_id,
+            "status": "answered",
+        }
+
+    monkeypatch.setattr(get_runtime_kernel(), "resume_clarification", fake_resume)
+    response = client.post(
+        f"/api/v2/sessions/{session_id}/clarification/answer",
+        json={
+            "clarification_id": pending.confirm_id,
+            "answers": [{"question": "Which namespace?", "selected": ["ops"]}],
+        },
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 422
+    assert not resumed
+    assert CONFIRMATION_REGISTRY.peek_parked(session_id) is pending
+
+
+def test_answer_clarification_rejects_unknown_option(monkeypatch) -> None:
+    """SPEC-080 R-4: a selected label outside the question's projected options
+    is a 422; the park stays answerable for a corrected retry."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    pending = _park_clarification(session_id)
+    resumed: list = []
+
+    async def fake_resume(**kwargs):
+        resumed.append(kwargs)
+        yield {
+            "type": "clarification_result",
+            "clarification_id": kwargs["pending"].confirm_id,
+            "status": "answered",
+        }
+
+    monkeypatch.setattr(get_runtime_kernel(), "resume_clarification", fake_resume)
+    response = client.post(
+        f"/api/v2/sessions/{session_id}/clarification/answer",
+        json={
+            "clarification_id": pending.confirm_id,
+            "answers": [
+                {"question": "Which cluster should I inspect?", "selected": ["canary"]}
+            ],
+        },
+        headers={"X-User-ID": "alice"},
+    )
+    assert response.status_code == 422
+    assert not resumed
+    assert CONFIRMATION_REGISTRY.peek_parked(session_id) is pending
+
+
+def test_answer_clarification_streams_clarification_result_first(monkeypatch) -> None:
+    """SPEC-080 R-4: a valid answer claims the park, persists the ``answered``
+    outcome at claim time, and streams the resumed SAME turn — the first frame
+    is the ``answered`` ``clarification_result``."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    pending = _park_clarification(session_id)
+
+    async def fake_resume(**kwargs):
+        yield {
+            "type": "clarification_result",
+            "clarification_id": kwargs["pending"].confirm_id,
+            "status": "answered",
+        }
+        yield {"event": "message_end", "message": "complete"}
+
+    monkeypatch.setattr(get_runtime_kernel(), "resume_clarification", fake_resume)
+    response = client.post(
+        f"/api/v2/sessions/{session_id}/clarification/answer",
+        json={
+            "clarification_id": pending.confirm_id,
+            "answers": [
+                {"question": "Which cluster should I inspect?", "selected": ["prod"]}
+            ],
+        },
+        headers={"X-User-ID": "alice", "x-request-id": "req-answer"},
+    )
+    assert response.status_code == 200
+    frames = [
+        line.removeprefix("data: ")
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert '"clarification_result"' in frames[0]
+    assert '"answered"' in frames[0]
+    assert '"message_end"' in frames[1]
+    # The claim-time write persisted the answered outcome on the durable record.
+    record = CONFIRMATION_RECORD_STORE.load_record(session_id, pending.confirm_id)
+    assert record["status"] == "answered"
+
+
+def test_duplicate_answer_clarification_fails_closed_already_resolved(monkeypatch) -> None:
+    """SPEC-080 R-4: a second answer after the park resolved fails closed with
+    the structured ``already_resolved`` 409 (the SPEC-031 R-4 posture) — the
+    claim is single-flight and the outcome irrevocable once written."""
+    client = _client()
+    session_id = client.post(
+        "/api/v2/sessions", headers={"X-User-ID": "alice"}
+    ).json()["session_id"]
+    pending = _park_clarification(session_id)
+
+    async def fake_resume(**kwargs):
+        yield {
+            "type": "clarification_result",
+            "clarification_id": kwargs["pending"].confirm_id,
+            "status": "answered",
+        }
+
+    monkeypatch.setattr(get_runtime_kernel(), "resume_clarification", fake_resume)
+    payload = {
+        "clarification_id": pending.confirm_id,
+        "answers": [
+            {"question": "Which cluster should I inspect?", "selected": ["prod"]}
+        ],
+    }
+    url = f"/api/v2/sessions/{session_id}/clarification/answer"
+    first = client.post(url, json=payload, headers={"X-User-ID": "alice"})
+    assert first.status_code == 200
+    second = client.post(url, json=payload, headers={"X-User-ID": "alice"})
+    assert second.status_code == 409
+    detail = second.json()["detail"]
+    assert detail["reason"] == "already_resolved"
+    assert detail["status"] == "answered"
 
 
 def test_confirm_approve_streams_confirmation_result_first(monkeypatch) -> None:

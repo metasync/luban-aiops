@@ -2,7 +2,12 @@
 
 ## Status
 
-- status: `approved`
+- status: `delivered`
+- delivered: **2026-11-27** as **v0.62.0** — R-1…R-8 + the Evidence section delivered. `VERSION`
+  bumped 0.61.1 → 0.62.0 across the 27-file lockstep surface (`make validate-version` + `make sync`
+  green), `CHANGELOG.md` closed into `## 0.62.0 — 2026-11-27`, the dated release note written and
+  indexed, and the guides / roadmap / specs index updated; root `make verify` green. Commit/tag/push
+  and deployment remain separate gates.
 - owner: chi
 - created: 2026-11-24
 - promoted from: the [AskUser clarification spike](../../workspace/ask-user-clarification-spike.md),
@@ -13,6 +18,14 @@
 - approved: **2026-11-25** — the operator ratified all seven Open Questions **exactly as recommended**
   (`draft → approved`). Approval authorizes implementation to *begin* — **not** to merge, commit/push,
   deploy, or version-bump (each a separate gate).
+- implementation: **2026-11-25** — R-1…R-8 and the Evidence section are implemented and green
+  (`approved → in-progress`): the v14 contract + parity, the `park_kind` substrate + additive migration,
+  the kernel `RequireExternalExecutionEvent` handler + `resume_clarification`, the park-kind-aware 409
+  guard + answer endpoint + gateway proxy, the flag-gated `AskUser` toolkit + `AskUserParams` projection,
+  the portal owner-answerable clarification card + v14 SSE adapter, and the closed-enum audit drift guard
+  + gated `clarification-livecheck.sh` (mocked leg collected by `make test`). The Delivery Gate items
+  (living state docs, `CHANGELOG.md`, the index/`delivered` flip, the **v0.62.0** version bump, root
+  `make verify`, and commit/push/deploy) remain **separate gates**, not authorized by approval.
 - release slice: the **HITL-bridging family** (an extension of
   [SPEC-020](../SPEC-020-hitl-confirmation-bridging/spec.md)/[SPEC-030](../SPEC-030-require-approval-policy-semantics/spec.md)/[SPEC-031](../SPEC-031-approval-inbox-persistent-confirmation/spec.md)/[SPEC-032](../SPEC-032-owner-side-live-decision-sync/spec.md)),
   raised from the [Exploration Backlog](../../agentic-aiops-platform/delivery-roadmap.md#exploration-backlog)

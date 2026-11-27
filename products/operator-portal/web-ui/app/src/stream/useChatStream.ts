@@ -6,6 +6,9 @@ import { useCallback, useReducer, useRef, useState } from "react";
 import { currentAuthenticatedUser } from "../api/client";
 import type {
   AuthorizationRequiredFrame,
+  ClarificationAnswer,
+  ClarificationQuestion,
+  ClarificationStatus,
   ConfirmationStatus,
   DecodedEvent,
   ExecutionReceipt,
@@ -52,6 +55,23 @@ export interface ConfirmationCard {
   approvalKind?: "flow" | "action";
 }
 
+// SPEC-080 R-7: a parked read-only clarification the session OWNER answers
+// in-line (never routed to an approver). Mirrors ConfirmationCard's anchoring
+// and lifecycle but carries the projected questions instead of pending calls,
+// and resolves to "answered" rather than approved/denied.
+export interface ClarificationCard {
+  clarificationId: string;
+  questions: ClarificationQuestion[];
+  status: ClarificationStatus;
+  note?: string;
+  // The card stays bound to the session that parked it (SPEC-023 R-3 parity),
+  // so answering resumes that session even after the operator switches away.
+  sessionId: string | null;
+  // The owner's answers, echoed from clarification_result or replayed from the
+  // durable record on re-login; undefined on a live pending card.
+  answers?: ClarificationAnswer[];
+}
+
 export interface ChatTurn {
   id: string;
   userMessage: string;
@@ -60,12 +80,18 @@ export interface ChatTurn {
   // A parked confirmation ends the stream without message_end; views use
   // this to suppress the "no response received" placeholder (legacy parity).
   confirmationPending: boolean;
+  // SPEC-080 R-7: a parked clarification ends the stream the same way (no
+  // message_end); views suppress the placeholder/spinner exactly as they do
+  // for confirmationPending. Distinct flag so the two card kinds stay
+  // independently inspectable (mirrors the backend park_kind discriminator).
+  clarificationPending: boolean;
   error?: string;
   toolCalls: ToolCallFrame[];
   toolResults: ToolResultFrame[];
   secretDeliveries?: SecretDeliveryFrame[];
   authorizations?: AuthorizationRequiredFrame[];
   confirmations: ConfirmationCard[];
+  clarifications: ClarificationCard[];
   // Transcript-seeded turns carry chat text only unless persisted tool
   // evidence is attached (SPEC-025 R-3); the request id correlates the
   // replayed evidence with the audit trail.
@@ -104,6 +130,36 @@ function resultStatus(raw: string): ConfirmationStatus {
   return "error";
 }
 
+// SPEC-080 R-7: the clarification card's lifecycle mirrors ConfirmationCard's
+// but resolves to "answered" (the read-only analogue of approved/denied) — a
+// clarification is owner-answered in-line, never routed to an approver, so
+// there is no denied state.
+const CLARIFICATION_FINAL_NOTES: Partial<Record<ClarificationStatus, string>> = {
+  answered: "Answered — the parked reply resumed.",
+  expired: "This clarification expired before an answer was applied.",
+};
+
+function lockClarificationCard(
+  card: ClarificationCard,
+  status: ClarificationStatus,
+  note?: string,
+): void {
+  if (card.status !== "pending") return;
+  card.status = status;
+  card.note =
+    note || CLARIFICATION_FINAL_NOTES[status] || `Clarification ${status}.`;
+}
+
+function clarificationResultStatus(raw: string): ClarificationStatus {
+  // v14 clarification_result status enum: "answered" | "expired" |
+  // "interrupted". The portal collapses both non-answer terminal states to
+  // "expired"; anything unrecognized degrades to "error" exactly as
+  // resultStatus does for a confirmation.
+  if (raw === "answered") return "answered";
+  if (raw === "expired" || raw === "interrupted") return "expired";
+  return "error";
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -125,6 +181,9 @@ export interface ChatStreamApi {
   lastRequestId: string | null;
   send: (message: string, options?: SendOptions) => Promise<void>;
   decide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => Promise<void>;
+  // SPEC-080 R-7: answer a parked read-only clarification; the response is
+  // the resumed SAME-turn stream (the decide() sibling for clarifications).
+  answer: (clarificationId: string, answers: ClarificationAnswer[]) => Promise<void>;
   // Session-switch support (SPEC-023 R-3): aborts any in-flight stream,
   // stashes the current session's turns, and restores the target session's
   // cached turns — or seeds them from `history` (the loaded transcript).
@@ -168,11 +227,15 @@ export function useChatStream(): ChatStreamApi {
   // Frame dispatch for one turn. `fallbackCard` is the card being decided
   // during a confirm-resume stream: error frames and a bare
   // confirmation_result lock it when they carry no matching confirm_id.
+  // `fallbackClarification` is the SPEC-080 R-7 sibling for an answer-resume
+  // stream — the clarification card being answered when a frame carries no
+  // matching clarification_id.
   const handleEvent = useCallback(
     (
       turn: ChatTurn,
       event: DecodedEvent,
       fallbackCard?: ConfirmationCard,
+      fallbackClarification?: ClarificationCard,
     ) => {
       if (event.sessionId) {
         sessionIdRef.current = event.sessionId;
@@ -246,12 +309,56 @@ export function useChatStream(): ChatStreamApi {
           }
           break;
         }
+        case "clarification_request":
+          // SPEC-080 R-7: the agent parked a read-only AskUser clarification
+          // the session OWNER answers in-line (never routed to an approver).
+          // The card anchors to the parking session; the stream ends without
+          // message_end, so mark the turn clarification-pending — the sibling
+          // of confirmationPending, kept a distinct flag so the two park kinds
+          // stay independently inspectable.
+          turn.clarifications.push({
+            clarificationId: frame.clarificationId,
+            questions: frame.questions,
+            status: "pending",
+            sessionId: sessionIdRef.current,
+          });
+          turn.clarificationPending = true;
+          break;
+        case "clarification_result": {
+          // The resumed stream opens with the answered clarification_result
+          // (kernel parity), echoing the owner's answers; match the parked
+          // card by id, else lock the card being answered during the resume.
+          const target = frame.clarificationId
+            ? turn.clarifications.find(
+                (c) => c.clarificationId === frame.clarificationId,
+              )
+            : undefined;
+          const card = target ?? fallbackClarification;
+          if (card) {
+            lockClarificationCard(
+              card,
+              clarificationResultStatus(frame.status),
+              undefined,
+            );
+            if (frame.answers) {
+              card.answers = frame.answers;
+            }
+          }
+          break;
+        }
         case "error":
           // Mid-stream guard (e.g. owner mismatch): the confirm stream
           // ends without a confirmation_result, so lock the pending card
-          // explicitly instead of leaving it on "Approving…/Denying…".
+          // explicitly instead of leaving it on "Approving…/Denying…". The
+          // clarification resume gets the same treatment for its card.
           if (fallbackCard && fallbackCard.status === "pending") {
             lockCard(fallbackCard, "error", frame.message);
+          }
+          if (
+            fallbackClarification &&
+            fallbackClarification.status === "pending"
+          ) {
+            lockClarificationCard(fallbackClarification, "error", frame.message);
           }
           turn.error = frame.message;
           break;
@@ -272,9 +379,11 @@ export function useChatStream(): ChatStreamApi {
         replyText: "",
         completed: false,
         confirmationPending: false,
+        clarificationPending: false,
         toolCalls: [],
         toolResults: [],
         confirmations: [],
+        clarifications: [],
       };
       turnsRef.current.push(turn);
       beginStream();
@@ -299,8 +408,8 @@ export function useChatStream(): ChatStreamApi {
         // Natural stream end completes the turn even when no terminal
         // frame arrives (legacy parity: the kernel may close the stream
         // after its last delta without a message_end). Parked
-        // confirmations keep their pending marker instead.
-        if (!turn.confirmationPending) {
+        // confirmations and clarifications keep their pending marker instead.
+        if (!turn.confirmationPending && !turn.clarificationPending) {
           turn.completed = true;
         }
       };
@@ -479,6 +588,124 @@ export function useChatStream(): ChatStreamApi {
     [handleEvent],
   );
 
+  // SPEC-080 R-7: submit the owner's answers to a parked read-only
+  // clarification. The response IS the resumed SAME-turn SSE stream, exactly
+  // as decide() is for a confirmation — deltas and tool frames re-attach to
+  // the parked turn and the card flips to "answered" from the echoed
+  // clarification_result. Mirrors decide()'s 410/409/abort handling.
+  const answer = useCallback(
+    async (clarificationId: string, answers: ClarificationAnswer[]) => {
+      if (streamingRef.current) return;
+      let owner: ChatTurn | undefined;
+      let card: ClarificationCard | undefined;
+      for (const turn of turnsRef.current) {
+        const match = turn.clarifications.find(
+          (c) => c.clarificationId === clarificationId && c.status === "pending",
+        );
+        if (match) {
+          owner = turn;
+          card = match;
+          break;
+        }
+      }
+      // Locked-card guard: answers only act on pending cards.
+      if (!owner || !card) return;
+
+      const sessionId = card.sessionId ?? sessionIdRef.current;
+      if (!sessionId) {
+        card.note = "No active session for this clarification.";
+        bump();
+        return;
+      }
+
+      const decided = card;
+      const turn = owner;
+      decided.note = "Submitting…";
+      bump();
+
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      beginStream();
+      try {
+        const opened = await openStream(
+          `/api/v1/sessions/${encodeURIComponent(sessionId)}/clarification/answer`,
+          {
+            method: "POST",
+            body: { clarification_id: clarificationId, answers },
+            signal: controller.signal,
+          },
+        );
+        requestIdRef.current = opened.requestId;
+        // The response IS the resumed SAME-turn stream; it drives the parked
+        // turn so tool frames and deltas attach to the same turn group.
+        await consumeStream(opened.chunks, (event) =>
+          handleEvent(turn, event, undefined, decided),
+        );
+        // Guarantee a final card state even when the stream ends without a
+        // clarification_result (truncated stream, upstream outage).
+        if (decided.status === "pending") {
+          lockClarificationCard(
+            decided,
+            "error",
+            "The clarification stream ended unexpectedly.",
+          );
+        }
+        // A resumed stream that closes without a terminal frame still
+        // completes the parked turn (legacy parity).
+        turn.completed = true;
+        turn.clarificationPending = false;
+      } catch (error) {
+        if (error instanceof StreamOpenError && error.status === 410) {
+          lockClarificationCard(
+            decided,
+            "expired",
+            "This clarification expired before an answer was applied.",
+          );
+          // Terminal: this card can never be answered again, so settle the
+          // turn exactly as the confirmation 410 branch does.
+          turn.completed = true;
+          turn.clarificationPending = false;
+        } else if (error instanceof StreamOpenError && error.status === 409) {
+          // SPEC-080 R-4 / SPEC-031 R-4 posture: a racing second answer (or a
+          // mis-routed confirmation park) flips the card to the winner's
+          // outcome with attribution instead of inviting a doomed retry.
+          const race = alreadyResolvedDetail(error.detail);
+          if (race) {
+            lockClarificationCard(
+              decided,
+              clarificationResultStatus(race.status ?? ""),
+              `Already resolved${
+                race.decider_user_id ? ` by ${race.decider_user_id}` : ""
+              }${race.decided_at ? ` at ${race.decided_at}` : ""}.`,
+            );
+            turn.completed = true;
+            turn.clarificationPending = false;
+          } else {
+            // Retryable: the card stays pending, so the turn stays parked.
+            decided.note = `Clarification answer failed (409).`;
+          }
+        } else if (error instanceof StreamOpenError) {
+          // Legacy parity: the card stays pending so the owner can retry.
+          decided.note = `Clarification answer failed (${error.status}).`;
+        } else if (!isAbortError(error)) {
+          decided.note =
+            error instanceof Error ? error.message : String(error);
+        } else {
+          // Aborted by a session switch: settle the parked turn and drop the
+          // transient "Submitting…" note so the card renders as plain pending
+          // (retryable) when the session comes back.
+          decided.note = undefined;
+          if (!turn.clarificationPending) {
+            turn.completed = true;
+          }
+        }
+      } finally {
+        endStream(controller);
+      }
+    },
+    [handleEvent],
+  );
+
   const setSession = useCallback(
     (sessionId: string | null, history?: ChatTurn[]) => {
       controllerRef.current?.abort();
@@ -520,6 +747,7 @@ export function useChatStream(): ChatStreamApi {
     lastRequestId: requestIdRef.current,
     send,
     decide,
+    answer,
     setSession,
     reseedTurns,
   };

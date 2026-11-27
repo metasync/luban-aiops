@@ -68,13 +68,17 @@ _FROZEN_SCHEMAS = (
     "execution-request.schema.json",
 )
 
-# R-8 "byte-unchanged", encoded literally: the phase-5 sha256 baseline of each
-# frozen canonical schema. Stronger than the vocabulary scan below — it fails on
-# *any* byte edit — so phase 6 must re-pin these deliberately when the
-# multi-agent wire frame lands, never silently.
+# R-8 "byte-unchanged", encoded literally: the sha256 baseline of each frozen
+# canonical schema. Stronger than the vocabulary scan below — it fails on *any*
+# byte edit — so a contract change must re-pin these deliberately, never
+# silently. SPEC-080 re-pinned ``agent-stream-event.schema.json`` on 2026-11-25
+# when it added the additive v14 ``clarification_request`` /
+# ``clarification_result`` frames (a read-only park-resume, no multi-agent
+# vocabulary); ``execution-request.schema.json`` is untouched, so the phase-5
+# mutation-path freeze still holds byte-for-byte.
 _FROZEN_SCHEMA_SHA256 = {
     "agent-stream-event.schema.json": (
-        "f2d663d9db94f0b2e8754065e53cd07abffc5ddd09ab1d97fa6e0d0d67bf4044"
+        "3e0beb7aa67dcce2003ebaaf3f9311d45ec2591b5d22374d5224969bf0dd0425"
     ),
     "execution-request.schema.json": (
         "c31b5ba0e7e3491fc0b7a3fa7816024528c75f06d8a452baca36d5f374369c8d"
@@ -107,8 +111,11 @@ _EXECUTION_REQUEST_REPLICAS = (
     "products/execution-runtime/src/execution_runtime/contracts/execution-request.schema.json",
 )
 
-# The v13 stream-frame vocabulary (SPEC-070 OQ-7 was the last additive frame).
-# Phase 5 adds **no** frame type; phase 6 will deliberately extend this set.
+# The v14 stream-frame vocabulary. SPEC-070 OQ-7 (authorization_required) was
+# the last additive frame through v13; SPEC-080 R-3 deliberately extended the
+# set with the two read-only clarification frames at v14. Phase 5 of SPEC-076
+# added **no** frame type — this set is the post-SPEC-080 contract, and the
+# multi-agent wire frame (SPEC-076 phase 6) will extend it again deliberately.
 _STREAM_FRAME_TYPES = {
     "message_start",
     "message_delta",
@@ -120,6 +127,8 @@ _STREAM_FRAME_TYPES = {
     "confirmation_result",
     "secret_delivery",
     "authorization_required",
+    "clarification_request",
+    "clarification_result",
 }
 
 
@@ -150,7 +159,8 @@ class TestNoNewFrameContractBoundary:
 
     def test_stream_event_frame_vocabulary_is_unchanged(self) -> None:
         # No orchestration/member/diagnosis frame type was added: the stream
-        # contract's closed ``type`` enum is exactly the v13 set.
+        # contract's closed ``type`` enum is exactly the v14 set (SPEC-080's two
+        # read-only clarification frames are the only addition over v13).
         doc = json.loads(
             (_SCHEMA_DIR / "agent-stream-event.schema.json").read_text()
         )
@@ -304,3 +314,82 @@ class TestConversationalRemediationContractBoundary:
         )
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate({"message": "hi", "agent_role": "executor"}, schema)
+
+
+# The closed audit ``event_type`` vocabulary, pinned literally at the 23 values
+# that predate SPEC-080. A clarification is read-only, non-mutating, and carries
+# no security decision, so SPEC-080 R-8 mints **no** new type: its park/resume
+# turn rides the existing ``chat_started`` / ``chat_completed`` bracket. Any
+# widening (the deferred OQ-3 ``clarification_asked`` / ``clarification_answered``
+# leaking in unnamed) fails here first.
+_AUDIT_EVENT_TYPES = {
+    "tool_invoked",
+    "policy_decision",
+    "token_exchange",
+    "session_created",
+    "session_deleted",
+    "chat_started",
+    "chat_completed",
+    "confirmation_decided",
+    "incident_triaged",
+    "skill_searched",
+    "skill_retrieved",
+    "skills_synced",
+    "execution_requested",
+    "execution_completed",
+    "execution_rejected",
+    "document_created",
+    "document_published",
+    "document_read",
+    "skill_draft_generated",
+    "incident_skill_draft_generated",
+    "skill_graduated",
+    "secret_delivered",
+    "target_authorization",
+}
+
+
+class TestClarificationRidesTheClosedAuditEnum:
+    """SPEC-080 R-8: the clarification park/resume turn is audited through the
+    **existing** ``chat_started`` / ``chat_completed`` bracket and mints **no**
+    new ``event_type`` — the closed enum stays at 23, mirroring the SPEC-077 R-5
+    diagnose→act precedent. Governance attribution
+    (``clarification_asked`` / ``clarification_answered``) is deferred (OQ-3)
+    pending a named need. The runtime emission is pinned gateway-side
+    (``test_clarification_answer.py::ClarificationAnswerAuditTests``); these
+    assertions pin the *contract* the emitter draws from, so the enum cannot
+    silently widen underneath the deferral.
+    """
+
+    def _enum(self) -> list[str]:
+        doc = json.loads((_SCHEMA_DIR / "audit-event.schema.json").read_text())
+        return doc["properties"]["event_type"]["enum"]
+
+    def test_audit_event_type_enum_is_unchanged_at_23(self) -> None:
+        enum = self._enum()
+        assert set(enum) == _AUDIT_EVENT_TYPES
+        assert len(enum) == len(_AUDIT_EVENT_TYPES) == 23
+
+    def test_the_chat_turn_brackets_a_clarification_rides_are_present(self) -> None:
+        # The two types a parked/resumed clarification turn is bracketed by must
+        # exist in the closed enum — the clarification rides them, it does not
+        # add a sibling.
+        assert {"chat_started", "chat_completed"} <= set(self._enum())
+
+    def test_no_clarification_specific_event_type_was_minted(self) -> None:
+        enum = set(self._enum())
+        for deferred in (
+            "clarification_asked",
+            "clarification_answered",
+            "clarification",
+            "ask_user",
+            "askuser",
+        ):
+            assert deferred not in enum, (
+                f"{deferred!r} leaked into the closed audit enum — SPEC-080 R-8 "
+                f"defers clarification attribution (OQ-3); a clarification rides "
+                f"chat_started/chat_completed and mints no new event_type"
+            )
+        # Sensitivity: no member even mentions the concept, so the deferral is
+        # total (not a rename that smuggles attribution in under another word).
+        assert not any("clarif" in event or "ask_user" in event for event in enum)

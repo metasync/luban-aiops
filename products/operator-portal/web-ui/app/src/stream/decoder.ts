@@ -4,6 +4,9 @@
 import type {
   ChangeRequest,
   ChangeRequestField,
+  ClarificationAnswer,
+  ClarificationOption,
+  ClarificationQuestion,
   DecodedEvent,
   FlowSummary,
   PendingCall,
@@ -209,6 +212,79 @@ function toFrame(payload: RawPayload): StreamFrame | null {
       kind: "confirmation_result",
       confirmId: asString(payload.confirm_id),
       status: asString(payload.status) || "resolved",
+    };
+  }
+  if (eventType === "clarification_request") {
+    // SPEC-080 R-3/R-6: the agent parked a read-only AskUser clarification.
+    // Project the wire questions to the card view-model, defensively mirroring
+    // the agentscope bounds the kernel already enforced (2-4 options) and NEVER
+    // reading ``preview`` — a named fast-follow that does not ride v14.
+    const questions: ClarificationQuestion[] = (
+      Array.isArray(payload.questions) ? payload.questions : []
+    )
+      .map((raw): ClarificationQuestion | undefined => {
+        const record = asRecord(raw);
+        const question = asString(record?.question);
+        const header = asString(record?.header);
+        if (!record || question === undefined || header === undefined) {
+          return undefined;
+        }
+        const options: ClarificationOption[] = (
+          Array.isArray(record.options) ? record.options : []
+        )
+          .map((rawOption): ClarificationOption | undefined => {
+            const option = asRecord(rawOption);
+            const label = asString(option?.label);
+            const description = asString(option?.description);
+            if (!option || label === undefined || description === undefined) {
+              return undefined;
+            }
+            // ``preview`` is deliberately not read: it never rides v14 (R-6).
+            return { label, description };
+          })
+          .filter((option): option is ClarificationOption => option !== undefined);
+        if (options.length < 2) {
+          return undefined;
+        }
+        const context = asString(record.context);
+        return {
+          question,
+          header,
+          multiSelect: record.multi_select === true,
+          options,
+          ...(context ? { context } : {}),
+        };
+      })
+      .filter((item): item is ClarificationQuestion => item !== undefined);
+    return {
+      kind: "clarification_request",
+      clarificationId: asString(payload.clarification_id) || "",
+      questions,
+    };
+  }
+  if (eventType === "clarification_result") {
+    // SPEC-080 R-3: the owner's answers echoed back on the resumed turn.
+    const answers: ClarificationAnswer[] | undefined = Array.isArray(payload.answers)
+      ? payload.answers
+          .map((raw): ClarificationAnswer | undefined => {
+            const record = asRecord(raw);
+            const question = asString(record?.question);
+            if (!record || question === undefined) {
+              return undefined;
+            }
+            const selected = Array.isArray(record.selected)
+              ? record.selected.filter((item): item is string => typeof item === "string")
+              : [];
+            const other = asString(record.other);
+            return { question, selected, ...(other ? { other } : {}) };
+          })
+          .filter((item): item is ClarificationAnswer => item !== undefined)
+      : undefined;
+    return {
+      kind: "clarification_result",
+      clarificationId: asString(payload.clarification_id),
+      status: asString(payload.status) || "answered",
+      ...(answers ? { answers } : {}),
     };
   }
   if (eventType === "error") {

@@ -77,6 +77,17 @@ from agent_service.services.prose_redaction import (
 
 LOGGER = logging.getLogger(__name__)
 
+# SPEC-080 R-2/R-6: the agentscope ``AskUser`` builtin's tool name and the
+# ``AskUserParams`` projection bounds. The projector mirrors agentscope's own
+# constraints (questions 1-4, header <=12 chars, options 2-4) so the platform-
+# owned v14 wire frame never carries a shape the builtin would reject.
+# ``preview`` is a named fast-follow (R-6): it is NEVER projected onto v14.
+ASK_USER_TOOL_NAME = "AskUser"
+CLARIFICATION_QUESTIONS_MAX = 4
+CLARIFICATION_HEADER_MAX = 12
+CLARIFICATION_OPTIONS_MIN = 2
+CLARIFICATION_OPTIONS_MAX = 4
+
 
 class ConfirmationCoordinator:
     """The HITL park / resume / expire path, assembled by ``AgentKernel``.
@@ -265,6 +276,250 @@ class ConfirmationCoordinator:
         if flow_summary is not None:
             frame["flow_summary"] = flow_summary
         return frame
+
+    def _build_clarification_frame(
+        self,
+        event: object,
+        session_id: str,
+        user_name: str,
+        turn_index: int = 0,
+        run_id: str | None = None,
+    ) -> dict[str, object] | None:
+        """Register a read-only ``AskUser`` park and build its clarification frame.
+
+        SPEC-080 R-2: the sibling to ``_build_confirmation_frame`` for the
+        kernel's FIRST external-execution park. Returns ``None`` for non-park
+        events, for an external tool other than ``AskUser`` (v1 admits only the
+        read-only ``AskUser`` builtin), for a call carrying no projectable
+        question, and when bridging is disabled (``hitl_confirm_timeout == 0``)
+        — preserving the legacy silent-park posture. A parked clarification
+        registers on the SAME one-per-session slot with
+        ``park_kind="clarification"`` (R-1) and the stream ends WITHOUT
+        ``message_end``; the clarification answer endpoint resumes it via
+        ``resume_clarification`` (R-4). Nothing is executed, signed, or
+        dispatched: ``AskUser`` is ``is_read_only=True`` and always-ALLOW.
+        """
+        if self.settings.hitl_confirm_timeout <= 0:
+            return None
+        from agentscope.event import RequireExternalExecutionEvent
+
+        if not isinstance(event, RequireExternalExecutionEvent):
+            return None
+        tool_calls = list(getattr(event, "tool_calls", None) or [])
+        # v1 admits only the read-only AskUser builtin as an external tool, so
+        # the park is projected from the first AskUser call. Any other external
+        # tool is never admitted (flag-gated toolkit, R-5) and never parks here.
+        ask_call = next(
+            (
+                call
+                for call in tool_calls
+                if str(getattr(call, "name", "") or "") == ASK_USER_TOOL_NAME
+            ),
+            None,
+        )
+        if ask_call is None:
+            return None
+        questions = self._project_ask_user_questions(getattr(ask_call, "input", None))
+        if not questions:
+            # A park that projects no valid question cannot be answered, so it
+            # is left unparked rather than wedging the session behind an empty
+            # card; the event falls through to normalize_event and the reply
+            # ends without a registry park (the model fills AskUser.input from
+            # the builtin's schema, so this is the pathological path).
+            LOGGER.warning(
+                "external-execution park carried no projectable AskUser "
+                "questions for session %s; leaving the reply unparked",
+                session_id,
+            )
+            return None
+        pending = CONFIRMATION_REGISTRY.register(
+            session_id=session_id,
+            user_id=user_name,
+            reply_id=str(getattr(event, "reply_id", "") or ""),
+            tool_calls=tool_calls,
+            timeout=self.settings.hitl_confirm_timeout,
+            run_id=run_id,
+            park_kind="clarification",
+            questions=questions,
+        )
+        # A clarification is read-only and executes nothing, so it captures no
+        # execution signing, no risk tiers, and no gateway names. It DOES carry
+        # the owner's held portal_copy deliveries across the park exactly as a
+        # confirmation does (SPEC-062 R-3), so a secret handle generated before
+        # the AskUser call is neither lost nor double-emitted; the resume
+        # releases it on a gated commit or burns it. Ephemeral: never persisted.
+        from agent_service.tools.gateway_tools import generation_bearer_token
+
+        pending.requester_delegated_token = generation_bearer_token()
+        pending.requester_identity = REQUESTER_IDENTITY.get()
+        pending.pending_deliveries = self._kernel._drain_held_deliveries()
+        # SPEC-031 R-1: the durable record is written before the frame reaches
+        # the client, so the owner's card survives re-login and restarts and
+        # re-renders from ``questions`` (R-7). Best-effort: a store failure
+        # degrades to a live-only card, never blocks the park. A clarification
+        # carries no mutating ``pending_calls`` and no ``action``, and never
+        # enters the approver inbox (park_kind filter, R-1).
+        try:
+            CONFIRMATION_RECORD_STORE.save_parked(
+                make_confirmation_record(
+                    confirm_id=pending.confirm_id,
+                    session_id=session_id,
+                    owner_user_id=user_name,
+                    pending_calls=[],
+                    action=None,
+                    turn_index=turn_index,
+                    park_kind="clarification",
+                    questions=questions,
+                )
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "clarification record persistence failed for session %s: %s",
+                session_id,
+                exc,
+            )
+        LOGGER.info(
+            "kernel clarification parked",
+            extra={
+                "session_id": session_id,
+                "clarification_id": pending.confirm_id,
+                "question_count": len(questions),
+            },
+        )
+        # The wire projects the shared park's ``confirm_id`` as the
+        # ``clarification_id`` correlator (R-1): no separate id field is needed,
+        # so registry get/claim/resolve stay byte-identical across both kinds.
+        return {
+            "type": "clarification_request",
+            "clarification_id": pending.confirm_id,
+            "questions": questions,
+        }
+
+    @staticmethod
+    def _project_ask_user_questions(raw_input: object) -> list[dict[str, object]]:
+        """Project an ``AskUser`` call's raw input onto the v14 wire questions.
+
+        SPEC-080 R-6: the platform-owned projection of agentscope's
+        ``AskUserParams`` — ``questions[1-4]{question, header<=12, context?,
+        multi_select, options[2-4]{label, description}}`` — mirroring the
+        builtin's constraints and NEVER carrying ``preview`` (a named
+        fast-follow: no ``preview`` field exists in v14). Lenient by design: a
+        malformed question or option is dropped rather than raising, so a park
+        projects the valid subset.
+        """
+        import json
+
+        if isinstance(raw_input, str):
+            try:
+                parsed = json.loads(raw_input)
+            except (ValueError, TypeError):
+                return []
+        elif isinstance(raw_input, dict):
+            parsed = raw_input
+        else:
+            return []
+        raw_questions = parsed.get("questions") if isinstance(parsed, dict) else None
+        if not isinstance(raw_questions, list):
+            return []
+        projected: list[dict[str, object]] = []
+        for raw_question in raw_questions[:CLARIFICATION_QUESTIONS_MAX]:
+            if not isinstance(raw_question, dict):
+                continue
+            question = raw_question.get("question")
+            header = raw_question.get("header")
+            if not isinstance(question, str) or not isinstance(header, str):
+                continue
+            options: list[dict[str, str]] = []
+            raw_options = raw_question.get("options")
+            if isinstance(raw_options, list):
+                for raw_option in raw_options[:CLARIFICATION_OPTIONS_MAX]:
+                    if not isinstance(raw_option, dict):
+                        continue
+                    label = raw_option.get("label")
+                    description = raw_option.get("description")
+                    if not isinstance(label, str) or not isinstance(description, str):
+                        continue
+                    # ``preview`` is deliberately not read: it never rides v14.
+                    options.append({"label": label, "description": description})
+            if len(options) < CLARIFICATION_OPTIONS_MIN:
+                continue
+            entry: dict[str, object] = {
+                "question": question,
+                "header": header[:CLARIFICATION_HEADER_MAX],
+                "multi_select": bool(raw_question.get("multi_select", False)),
+                "options": options,
+            }
+            context = raw_question.get("context")
+            if isinstance(context, str) and context:
+                entry["context"] = context
+            projected.append(entry)
+        return projected
+
+    @staticmethod
+    def _clarification_output_prose(answers: list[dict[str, object]]) -> str:
+        """The model-visible prose for an answered clarification (R-2/R-6).
+
+        ``ToolResultBlock.output`` is the half the model reads; the structured
+        ``AskUserMetadata{answers}`` rides ``metadata`` for a program that must
+        branch on the choice. Deterministic and secret-free: it restates only
+        the question, the selected option labels, and any free-text "Other".
+        """
+        lines: list[str] = []
+        for answer in answers:
+            if not isinstance(answer, dict):
+                continue
+            question = str(answer.get("question", "") or "")
+            selected = answer.get("selected")
+            chosen = (
+                [str(option) for option in selected]
+                if isinstance(selected, list)
+                else []
+            )
+            other = answer.get("other")
+            parts: list[str] = []
+            if chosen:
+                parts.append(", ".join(chosen))
+            if isinstance(other, str) and other:
+                parts.append(f"Other: {other}")
+            detail = "; ".join(parts) if parts else "(no selection)"
+            lines.append(f"{question} -> {detail}")
+        return "\n".join(lines) if lines else "The user answered the clarification."
+
+    @staticmethod
+    def _clarification_result_metadata(
+        answers: list[dict[str, object]]
+    ) -> dict[str, object]:
+        """Shape the answers as agentscope's ``AskUserMetadata`` (R-6).
+
+        Built through the agentscope model so the metadata the resumed reply
+        receives is exactly what ``AskUser`` declares
+        (``{answers: [{question, selected[], other?}]}``); a malformed answer is
+        dropped rather than reaching the model.
+        """
+        from agentscope.tool import AskUserAnswer, AskUserMetadata
+
+        parsed: list[AskUserAnswer] = []
+        for answer in answers:
+            if not isinstance(answer, dict):
+                continue
+            question = answer.get("question")
+            if not isinstance(question, str):
+                continue
+            selected = answer.get("selected")
+            chosen = (
+                [str(option) for option in selected]
+                if isinstance(selected, list)
+                else []
+            )
+            other = answer.get("other")
+            parsed.append(
+                AskUserAnswer(
+                    question=question,
+                    selected=chosen,
+                    other=other if isinstance(other, str) else None,
+                )
+            )
+        return AskUserMetadata(answers=parsed).model_dump()
 
     @staticmethod
     def _extract_browser_element_map(
@@ -716,6 +971,17 @@ class ConfirmationCoordinator:
                     evidence_frames=evidence_frames,
                     run_id=pending.run_id,
                 )
+                if frame is None:
+                    # SPEC-080 R-2: a confirmation-resumed turn can also park a
+                    # read-only ``AskUser`` clarification; attribute it to the
+                    # session owner exactly as the confirmation re-park above.
+                    frame = self._kernel._build_clarification_frame(
+                        event,
+                        session_id,
+                        owner_user_name or user_name,
+                        turn_index=turn_index,
+                        run_id=pending.run_id,
+                    )
                 if frame is not None:
                     # A re-park ends this stream without a terminal frame, so
                     # this is its only chance to release the held-back tail.
@@ -827,6 +1093,302 @@ class ConfirmationCoordinator:
                 decision,
             )
             self._kernel._snapshot_state(session_id, agent, prose.literals)
+
+    async def resume_clarification(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        answers: list[dict[str, object]],
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+        routing_allowed: bool = False,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Own the claimed clarification park's cleanup (sibling to resume_confirmation).
+
+        SPEC-080 R-2: wraps ``_resume_clarification`` in ``aclosing`` so an
+        early ``aclose()`` reaches the inner ``finally``, and guarantees the
+        parked entry is resolved and its held deliveries discarded even if the
+        inner generator fails before its own ``finally`` runs.
+        """
+        from contextlib import aclosing
+
+        try:
+            async with aclosing(self._kernel._resume_clarification(
+                session_id, pending, answers, user_name, request_id,
+                bearer_token, model_id, routing_allowed,
+            )) as stream:
+                async for frame in stream:
+                    yield frame
+        except Exception:
+            LOGGER.warning("clarification resume unavailable")
+            yield {"type": "error", "message": "The resumed turn failed. Start a new turn.",
+                   "request_id": request_id, "session_id": pending.session_id}
+        finally:
+            try:
+                if pending.pending_deliveries:
+                    await self._kernel._discard_burned_deliveries(
+                        list(pending.pending_deliveries), pending.requester_delegated_token
+                    )
+            finally:
+                pending.requester_delegated_token = None
+                pending.requester_identity = None
+                pending.pending_deliveries = ()
+                CONFIRMATION_REGISTRY.resolve(pending.session_id, pending.confirm_id)
+
+    async def _resume_clarification(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        answers: list[dict[str, object]],
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+        routing_allowed: bool = False,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Resume a parked ``AskUser`` reply with the owner's answers (SPEC-080 R-2).
+
+        The sibling to ``_resume_confirmation`` for the read-only clarification
+        park. The owner answers in-line (OQ-5), so the resumed turn continues
+        as the OWNER's own turn — identity is re-established from the answerer's
+        bearer token exactly as ``stream_events`` does for a fresh turn (no
+        approver/decider split, no parked-token recovery). The answer is
+        injected IN-PROCESS as an ``ExternalExecutionResultEvent`` carrying one
+        ``ToolResultBlock`` per parked ``AskUser`` call — prose ``output`` for
+        the model plus ``AskUserMetadata{answers}`` for a program that branches
+        on the choice — and re-drives the SAME assistant turn (SPEC-025 R-1).
+        The agentscope event is never serialized to the wire (gate 4); only the
+        projected ``clarification_result`` frame is. Nothing is executed, signed,
+        dispatched, or auto-approved here: ``AskUser`` is ``is_read_only=True``
+        and the resumed turn's own tool calls sign and park exactly as they would
+        on a fresh turn.
+        """
+        from agentscope.event import ExternalExecutionResultEvent
+        from agentscope.message import ToolResultBlock
+
+        from agent_service.services.kernel_middleware import (
+            PENDING_RELEASE_DELIVERIES,
+            RELEASE_PERMITS,
+            STREAM_PENDING_DELIVERIES,
+            TOOL_EVIDENCE_SINK,
+        )
+        from agent_service.services.execution_run_guard import CURRENT_RUN_GUARD
+        from agent_service.tools.gateway_tools import (
+            CHAT_SESSION_ID,
+            DELEGATED_TOKEN,
+            EXECUTION_AUDIT_CONTEXT,
+            EXECUTION_REQUESTS,
+            GENERATION_OWNER_TOKEN,
+        )
+        from agent_service.runtime_kernel import (
+            TERMINAL_STREAM_EVENTS,
+            flush_prose_frames,
+        )
+
+        session_id = pending.session_id
+        reply_stream = None
+        # The answerer IS the requester (owner-answered in-line), so identity is
+        # re-established for the resumed turn exactly as a fresh turn does.
+        requester = await asyncio.to_thread(
+            self._kernel._requester_for_turn, session_id, user_name, bearer_token
+        )
+        # Pass the session's pinned model (SPEC-024 R-3) so the resumed stream
+        # rebuilds against the same model that parked it.
+        agent, _user_msg_cls, _bound_model_id = await self._kernel.ensure_agent(
+            session_id, bearer_token, model_id, False, routing_allowed
+        )
+        # SPEC-025 R-1: the resumed frames belong to the same assistant turn as
+        # the pre-park frames; subtract 1 to align with the pre-park ordinal
+        # (the user message is already in context here), as the confirm resume does.
+        turn_index = max(0, self._kernel._count_user_turns(agent) - 1)
+        evidence_frames: list[dict[str, object]] = []
+        prose = self._kernel._prose_redactor(agent, "", session_id)
+
+        # Build the injected external-execution result: one ToolResultBlock per
+        # parked AskUser call, prose ``output`` for the model + AskUserMetadata
+        # for a program. The block ids/names echo the parked calls so agentscope
+        # closes the submitted tool calls and re-drives the reply.
+        output_prose = self._clarification_output_prose(answers)
+        metadata = self._clarification_result_metadata(answers)
+        execution_results = [
+            ToolResultBlock(
+                id=str(getattr(call, "id", "") or ""),
+                name=str(getattr(call, "name", "") or ASK_USER_TOOL_NAME),
+                output=output_prose,
+                state="success",
+                metadata=metadata,
+            )
+            for call in pending.tool_calls
+        ]
+        result_event = ExternalExecutionResultEvent(
+            reply_id=pending.reply_id,
+            execution_results=execution_results,
+        )
+
+        # Arm the resumed turn's execution plumbing as a fresh owner turn: an
+        # empty pre-signed request map (the parked AskUser executes nothing; any
+        # NEW tool call the resumed turn makes signs and parks in-stream) and the
+        # SPEC-063 R-4 run guard bound to the parked batch's originating run (a
+        # resume never mints a replacement). Inert when admission is disabled.
+        execution_requests: dict[str, dict] = {}
+        resume_recovery = self._kernel._execution_recovery()
+        resume_guard = (
+            self._kernel._bind_guard(
+                resume_recovery, pending.run_id, session_id, pending.user_id
+            )
+            if resume_recovery is not None and pending.run_id is not None
+            else None
+        )
+        trace_queue: asyncio.Queue = asyncio.Queue()
+        auth_turn = AuthorizationTurn() if self.settings.target_authorization_enabled else None
+        auth_var = CURRENT_AUTHORIZATION_TURN.set(auth_turn)
+        sink_var = TOOL_EVIDENCE_SINK.set(trace_queue)
+        # The owner answered (proceed), so the parked card's held deliveries ride
+        # into PENDING_RELEASE and reveal only if the resumed turn commits a gated
+        # mutation — the same reveal-on-commit posture as an approved confirmation.
+        release_deliveries_var = PENDING_RELEASE_DELIVERIES.set(
+            list(pending.pending_deliveries)
+        )
+        pending_deliveries_var = STREAM_PENDING_DELIVERIES.set([])
+        permits_var = RELEASE_PERMITS.set({})
+        prose_var = CURRENT_PROSE_REDACTOR.set(prose)
+        token_var = DELEGATED_TOKEN.set(bearer_token)
+        requester_var = REQUESTER_IDENTITY.set(requester)
+        decider_var = DECIDER_IDENTITY.set(requester)
+        session_var = CHAT_SESSION_ID.set(session_id)
+        owner_token_var = GENERATION_OWNER_TOKEN.set((pending.requester_delegated_token,))
+        requests_var = EXECUTION_REQUESTS.set(execution_requests)
+        audit_var = EXECUTION_AUDIT_CONTEXT.set(
+            {
+                "settings": self.settings,
+                "confirm_id": pending.confirm_id,
+                "session_id": session_id,
+                "request_id": request_id,
+                "decider_user_id": user_name,
+                "observe_original": self._kernel._observe_original_step_origin,
+            }
+        )
+        guard_var = CURRENT_RUN_GUARD.set(resume_guard) if resume_guard is not None else None
+        try:
+            yield {
+                "type": "clarification_result",
+                "clarification_id": pending.confirm_id,
+                "status": "answered",
+                "answers": answers,
+                "request_id": request_id,
+                "session_id": session_id,
+            }
+            reply_stream = agent.reply_stream(result_event)
+            async for event in reply_stream:
+                self._kernel.clear_error()
+                drained = list(
+                    self._kernel._drain_trace_queue(
+                        trace_queue,
+                        request_id,
+                        session_id,
+                        evidence_frames,
+                        execution_requests,
+                    )
+                )
+                if drained:
+                    for flushed in flush_prose_frames(prose, request_id, session_id):
+                        yield flushed
+                for decorated in drained:
+                    yield decorated
+                # A resumed turn can park again on EITHER kind. The answerer is
+                # the owner, so a re-parked card is attributed to ``user_name``.
+                frame = self._kernel._build_confirmation_frame(
+                    event,
+                    session_id,
+                    user_name,
+                    agent.toolkit,
+                    turn_index=turn_index,
+                    evidence_frames=evidence_frames,
+                    run_id=pending.run_id,
+                )
+                if frame is None:
+                    frame = self._kernel._build_clarification_frame(
+                        event,
+                        session_id,
+                        user_name,
+                        turn_index=turn_index,
+                        run_id=pending.run_id,
+                    )
+                if frame is not None:
+                    for flushed in flush_prose_frames(prose, request_id, session_id):
+                        yield flushed
+                    yield {**frame, "request_id": request_id, "session_id": session_id}
+                    return
+                frame = self._kernel.normalize_event(
+                    event, request_id, session_id, redactor=prose
+                )
+                if frame.get("event") in TERMINAL_STREAM_EVENTS:
+                    for flushed in flush_prose_frames(prose, request_id, session_id):
+                        yield flushed
+                yield frame
+            for flushed in flush_prose_frames(prose, request_id, session_id):
+                yield flushed
+            self._kernel._flush_pending_deliveries(trace_queue)
+            for decorated in self._kernel._drain_trace_queue(
+                trace_queue,
+                request_id,
+                session_id,
+                evidence_frames,
+                execution_requests,
+            ):
+                yield decorated
+            # Discard any held delivery that never released (no gated commit in
+            # the resumed turn), so the handle is not redeemable during the hold
+            # TTL — the same deny/failure posture as the confirmation resume.
+            burned = list(PENDING_RELEASE_DELIVERIES.get() or [])
+            if burned:
+                await self._kernel._discard_burned_deliveries(
+                    burned, pending.requester_delegated_token
+                )
+        except Exception as exc:
+            self._kernel.remember_error(exc, prose.literals if prose is not None else ())
+            LOGGER.error("AgentScope clarification resume failed: %s", self._kernel._last_error)
+            yield {"type": "error", "message": "The resumed turn failed. Start a new turn.",
+                   "request_id": request_id, "session_id": session_id}
+        finally:
+            if auth_turn is not None:
+                await self._kernel._finish_authorization_stream(auth_turn, reply_stream)
+                self._kernel._drain_trace_queue(trace_queue, request_id, session_id, evidence_frames, execution_requests)
+            self._kernel._persist_evidence(
+                session_id, request_id, turn_index, evidence_frames
+            )
+            CURRENT_PROSE_REDACTOR.reset(prose_var)
+            DELEGATED_TOKEN.reset(token_var)
+            REQUESTER_IDENTITY.reset(requester_var)
+            DECIDER_IDENTITY.reset(decider_var)
+            CHAT_SESSION_ID.reset(session_var)
+            EXECUTION_REQUESTS.reset(requests_var)
+            EXECUTION_AUDIT_CONTEXT.reset(audit_var)
+            GENERATION_OWNER_TOKEN.reset(owner_token_var)
+            pending.requester_delegated_token = None
+            pending.requester_identity = None
+            pending.pending_deliveries = ()
+            STREAM_PENDING_DELIVERIES.reset(pending_deliveries_var)
+            PENDING_RELEASE_DELIVERIES.reset(release_deliveries_var)
+            RELEASE_PERMITS.reset(permits_var)
+            if guard_var is not None:
+                CURRENT_RUN_GUARD.reset(guard_var)
+            TOOL_EVIDENCE_SINK.reset(sink_var)
+            if auth_turn is not None:
+                auth_turn.close()
+            CURRENT_AUTHORIZATION_TURN.reset(auth_var)
+            CONFIRMATION_REGISTRY.resolve(session_id, pending.confirm_id)
+            # SPEC-080 R-1: an answered clarification resolves as ``answered``
+            # (the wire ``clarification_result`` status), never ``approved`` —
+            # it carries no security decision and never enters the inbox.
+            self._kernel._record_resolution(
+                session_id, pending.confirm_id, "answered", user_name, "answer"
+            )
+            self._kernel._snapshot_state(
+                session_id, agent, prose.literals if prose is not None else ()
+            )
 
     async def expire_confirmation(
         self,

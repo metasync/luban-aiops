@@ -42,7 +42,12 @@ PER_SESSION_CAP = 50
 HISTORY_WINDOW_DAYS = 30
 INBOX_LIMIT = 100
 
-CONFIRMATION_STATUSES = frozenset({"pending", "approved", "denied", "expired"})
+# SPEC-080 R-1: ``answered`` is the clarification resolution status (a
+# read-only park carries no approve/deny decision), so the durable-record
+# status vocabulary spans both park kinds.
+CONFIRMATION_STATUSES = frozenset(
+    {"pending", "approved", "denied", "expired", "answered"}
+)
 
 
 def _utc_now_iso() -> str:
@@ -59,6 +64,8 @@ def make_record(
     flow_summary: dict[str, Any] | None = None,
     approval_kind: str | None = None,
     message: str | None = None,
+    park_kind: str = "confirmation",
+    questions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Shape the parked record written before the request frame flows."""
     return {
@@ -83,6 +90,14 @@ def make_record(
         # for records that predate the columns.
         "approval_kind": approval_kind,
         "message": message,
+        # SPEC-080 R-1: the park discriminator ("confirmation" | "clarification")
+        # so the shared durable store tells a mutating approval card from a
+        # read-only clarification card, and ``questions`` carries the projected
+        # clarification batch so the owner's card survives re-login. A
+        # clarification never enters the approver inbox (it has no approver);
+        # existing rows default to "confirmation" via the column DEFAULT.
+        "park_kind": park_kind,
+        "questions": list(questions) if questions else None,
         "status": "pending",
         "parked_at": _utc_now_iso(),
         "decider_user_id": None,
@@ -203,6 +218,9 @@ class InMemoryConfirmationRecordStore:
             dict(record)
             for record in self._by_confirm_id.values()
             if record["status"] == "pending"
+            # SPEC-080 R-1: a clarification has no approver, so it never
+            # enters the approver inbox — only confirmation cards do.
+            and record.get("park_kind", "confirmation") == "confirmation"
         ]
         rows.sort(key=lambda record: record["parked_at"], reverse=True)
         return rows[:INBOX_LIMIT]
@@ -214,6 +232,10 @@ class InMemoryConfirmationRecordStore:
         rows = []
         for record in self._by_confirm_id.values():
             if record["status"] == "pending":
+                continue
+            # SPEC-080 R-1: inbox history is the approver's; a clarification
+            # (no approver) is excluded, matching the Postgres WHERE filter.
+            if record.get("park_kind", "confirmation") != "confirmation":
                 continue
             decided = record.get("decided_at") or ""
             try:
@@ -271,7 +293,9 @@ CREATE TABLE IF NOT EXISTS confirmation_records (
     turn_index      INTEGER,
     flow_summary    JSONB,
     approval_kind   TEXT,
-    message         TEXT
+    message         TEXT,
+    park_kind       TEXT NOT NULL DEFAULT 'confirmation',
+    questions       JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_confirmation_records_session
     ON confirmation_records (session_id, parked_at);
@@ -309,15 +333,31 @@ ALTER TABLE confirmation_records
     ADD COLUMN IF NOT EXISTS message TEXT
 """
 
+# SPEC-080 R-1: clusters whose table predates the park-kind discriminator and
+# the projected-clarification-questions column migrate in place at startup.
+# ``park_kind`` defaults to 'confirmation' so every pre-spec row stays a
+# confirmation card (never a broken or empty artifact); ``questions`` stays
+# NULL for confirmations, which carry no clarification batch.
+_ADD_PARK_KIND_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS park_kind TEXT NOT NULL DEFAULT 'confirmation'
+"""
+
+_ADD_QUESTIONS_COLUMN = """
+ALTER TABLE confirmation_records
+    ADD COLUMN IF NOT EXISTS questions JSONB
+"""
+
 _INSERT_PARKED = """
 INSERT INTO confirmation_records (
     confirm_id, session_id, owner_user_id, pending_calls, action,
-    status, parked_at, turn_index, flow_summary, approval_kind, message
+    status, parked_at, turn_index, flow_summary, approval_kind, message,
+    park_kind, questions
 )
 VALUES (
     %(confirm_id)s, %(session_id)s, %(owner_user_id)s, %(pending_calls)s,
     %(action)s, 'pending', now(), %(turn_index)s, %(flow_summary)s,
-    %(approval_kind)s, %(message)s
+    %(approval_kind)s, %(message)s, %(park_kind)s, %(questions)s
 )
 ON CONFLICT (confirm_id) DO NOTHING
 """
@@ -349,7 +389,7 @@ UPDATE confirmation_records
 _LOAD_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary, approval_kind, message
+       turn_index, flow_summary, approval_kind, message, park_kind, questions
   FROM confirmation_records
  WHERE session_id = %(session_id)s
  ORDER BY parked_at ASC
@@ -358,7 +398,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_RECORD = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary, approval_kind, message
+       turn_index, flow_summary, approval_kind, message, park_kind, questions
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND confirm_id = %(confirm_id)s
@@ -367,7 +407,7 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_PENDING_FOR_SESSION = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary, approval_kind, message
+       turn_index, flow_summary, approval_kind, message, park_kind, questions
   FROM confirmation_records
  WHERE session_id = %(session_id)s
    AND status = 'pending'
@@ -382,9 +422,10 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_PENDING = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary, approval_kind, message
+       turn_index, flow_summary, approval_kind, message, park_kind, questions
   FROM confirmation_records
  WHERE status = 'pending'
+   AND park_kind = 'confirmation'
  ORDER BY parked_at DESC
  LIMIT %(limit)s
 """
@@ -392,9 +433,10 @@ SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
 _LOAD_INBOX_HISTORY = """
 SELECT confirm_id, session_id, owner_user_id, pending_calls, action,
        status, parked_at, decider_user_id, decision, decided_at,
-       turn_index, flow_summary, approval_kind, message
+       turn_index, flow_summary, approval_kind, message, park_kind, questions
   FROM confirmation_records
  WHERE status <> 'pending'
+   AND park_kind = 'confirmation'
    AND decided_at >= now() - make_interval(days => %(history_days)s)
  ORDER BY parked_at DESC, confirm_id DESC
  LIMIT %(limit)s OFFSET %(offset)s
@@ -404,6 +446,7 @@ _COUNT_INBOX_HISTORY = """
 SELECT COUNT(*)
   FROM confirmation_records
  WHERE status <> 'pending'
+   AND park_kind = 'confirmation'
    AND decided_at >= now() - make_interval(days => %(history_days)s)
 """
 
@@ -459,6 +502,8 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         flow_summary,
         approval_kind,
         message,
+        park_kind,
+        questions,
     ) = row
     return {
         "confirm_id": confirm_id,
@@ -475,6 +520,11 @@ def _row_to_record(row: Any) -> dict[str, Any]:
         "flow_summary": flow_summary,
         "approval_kind": approval_kind,
         "message": message,
+        # SPEC-080 R-1: a NULL park_kind (a row written before the column
+        # existed) is a confirmation; the projection defaults it so downstream
+        # consumers never see None.
+        "park_kind": park_kind or "confirmation",
+        "questions": questions,
     }
 
 
@@ -534,6 +584,8 @@ class PostgresConfirmationRecordStore:
                 cur.execute(_ADD_FLOW_SUMMARY_COLUMN)
                 cur.execute(_ADD_APPROVAL_KIND_COLUMN)
                 cur.execute(_ADD_MESSAGE_COLUMN)
+                cur.execute(_ADD_PARK_KIND_COLUMN)
+                cur.execute(_ADD_QUESTIONS_COLUMN)
                 cur.execute(
                     _CLOSE_STALE_PENDING,
                     {"stale_after_seconds": max(stale_after_seconds, 0)},
@@ -566,6 +618,16 @@ class PostgresConfirmationRecordStore:
                         # record parked before the columns existed stays valid.
                         "approval_kind": record.get("approval_kind"),
                         "message": record.get("message"),
+                        # SPEC-080 R-1: the park discriminator is plain TEXT
+                        # (never NULL — make_record defaults it to
+                        # 'confirmation'); the projected clarification
+                        # questions wrap as JSONB when present, else SQL NULL.
+                        "park_kind": record.get("park_kind", "confirmation"),
+                        "questions": (
+                            Jsonb(record["questions"])
+                            if record.get("questions") is not None
+                            else None
+                        ),
                     },
                 )
                 cur.execute(

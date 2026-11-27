@@ -60,9 +60,9 @@ def test_runtime_metadata_conforms_to_contract() -> None:
 
 def test_runtime_flags_conforms_to_contract() -> None:
     """X1: the new authenticated endpoint validates against
-    ``feature-flags.schema.json`` and reports the curated nine in order; it
-    requires ``X-User-ID`` (the ``list_models`` posture), rejecting a missing
-    header with 401."""
+    ``feature-flags.schema.json`` and reports the curated ten in order (the
+    tenth, ``askuser``, added by SPEC-080 R-5); it requires ``X-User-ID`` (the
+    ``list_models`` posture), rejecting a missing header with 401."""
     client = _client()
     assert client.get("/api/v2/runtime/flags").status_code == 401
     response = client.get("/api/v2/runtime/flags", headers={"X-User-ID": "alice"})
@@ -76,6 +76,7 @@ def test_runtime_flags_conforms_to_contract() -> None:
         "outbound_delegated_identity",
         "kernel_tracing",
         "task_tools",
+        "askuser",
         "reply_token_budget",
         "hitl_bridging",
         "signed_execution",
@@ -340,12 +341,12 @@ def test_chat_response_does_not_leak_framework_types() -> None:
 # --- Stream event adapter (SPEC-011 R-1 evidence frames) ---
 
 
-def test_authorization_frame_v13_contract_and_consumer_parity() -> None:
+def test_stream_frame_v14_contract_and_consumer_parity() -> None:
     from agent_service.schemas.v2 import AgentStreamEvent
     from agent_service.api.v2.routes import _STREAM_EVENT_TYPES
 
     schema = load_schema("agent-stream-event.schema.json")
-    assert schema["title"] == "Agent Stream Event (v13)"
+    assert schema["title"] == "Agent Stream Event (v14)"
     assert set(schema["properties"]["type"]["enum"]) == _STREAM_EVENT_TYPES
     assert set(AgentStreamEvent.model_fields["type"].annotation.__args__) == _STREAM_EVENT_TYPES
     assert set(AgentStreamEvent.model_fields) == set(schema["properties"])
@@ -362,6 +363,75 @@ def test_authorization_frame_v13_contract_and_consumer_parity() -> None:
     legacy = _normalize_stream_event({"type": "message_end"}, "ses-1", "req-1")
     assert "auth_challenge_id" not in legacy.model_dump(exclude_none=True)
     assert "target" not in legacy.model_dump(exclude_none=True)
+
+
+def test_clarification_frames_v14_contract_and_projection_parity() -> None:
+    """SPEC-080 R-3/R-6: the read-only clarification park-resume frame pair.
+
+    Both frames normalize to the v14 contract and validate against it; the
+    projection keeps only the platform-owned fields (the deferred ``preview``
+    never reaches the wire), and a malformed question is dropped rather than
+    passed through. No agentscope event/block type appears on the wire.
+    """
+    schema = load_schema("agent-stream-event.schema.json")
+    request_raw = {
+        "type": "clarification_request",
+        "clarification_id": "clr-1",
+        "questions": [
+            {
+                "question": "Which cluster?",
+                "header": "Cluster",
+                "context": "two are healthy",
+                "multi_select": False,
+                "options": [
+                    {"label": "prod", "description": "Production", "preview": "drop-me"},
+                    {"label": "stage", "description": "Staging"},
+                ],
+            }
+        ],
+        # a smuggled agentscope-shaped field must not survive the projection
+        "tool_calls": [{"id": "x", "name": "AskUser"}],
+    }
+    dumped = _normalize_stream_event(request_raw, "ses-1", "req-1").model_dump(
+        mode="json", exclude_none=True
+    )
+    assert dumped["type"] == "clarification_request"
+    assert dumped["clarification_id"] == "clr-1"
+    assert "tool_calls" not in dumped
+    option = dumped["questions"][0]["options"][0]
+    assert option == {"label": "prod", "description": "Production"}
+    assert "preview" not in option
+    jsonschema.validate(dumped, schema, format_checker=jsonschema.FormatChecker())
+
+    result_raw = {
+        "type": "clarification_result",
+        "clarification_id": "clr-1",
+        "status": "answered",
+        "answers": [
+            {"question": "Which cluster?", "selected": ["prod"], "other": None}
+        ],
+    }
+    result = _normalize_stream_event(result_raw, "ses-1", "req-1").model_dump(
+        mode="json", exclude_none=True
+    )
+    assert result["status"] == "answered"
+    assert result["answers"] == [{"question": "Which cluster?", "selected": ["prod"]}]
+    jsonschema.validate(result, schema, format_checker=jsonschema.FormatChecker())
+
+    # A question whose option batch is out of the 2-4 bound is dropped, so the
+    # frame stays schema-conformant (or omits ``questions`` entirely).
+    malformed = _normalize_stream_event(
+        {
+            "type": "clarification_request",
+            "clarification_id": "clr-2",
+            "questions": [
+                {"question": "q", "header": "h", "options": [{"label": "only", "description": "one"}]}
+            ],
+        },
+        "ses-1",
+        "req-1",
+    ).model_dump(mode="json", exclude_none=True)
+    assert "questions" not in malformed
 
 
 def test_tool_call_frame_passes_through() -> None:
@@ -642,6 +712,75 @@ def test_confirmation_record_with_flow_summary_conforms_to_session_contract() ->
     assert dumped["flow_summary"]["flow_intent"] == (
         "Submit the password reset for the user."
     )
+
+
+def test_answered_clarification_record_conforms_to_session_contract() -> None:
+    """SPEC-080 R-7: a resolved clarification park (``park_kind="clarification"``,
+    ``status="answered"``, the projected ``questions``) must serialize through the
+    durable card model and validate against the session-detail contract's
+    confirmation item. Before R-7d the model had no ``park_kind``/``questions``
+    fields and its ``status`` Literal rejected ``answered``, so serving a re-login
+    over a session with an answered clarification would have failed the
+    confirmation item's ``additionalProperties:false`` / status enum. This locks
+    the model<->schema parity for the clarification vocabulary."""
+    from agent_service.schemas.v2 import ConfirmationRecordModel
+
+    card = ConfirmationRecordModel(
+        confirm_id="cl-1",
+        session_id="ses-1",
+        owner_user_id="alice",
+        # A clarification parks no tool batch; the questions ride instead.
+        pending_calls=[],
+        park_kind="clarification",
+        questions=[
+            {
+                "question": "Which environment should I target?",
+                "header": "Environment",
+                "multi_select": False,
+                "options": [
+                    {"label": "staging", "description": "non-production"},
+                    {"label": "production", "description": "customer-facing"},
+                ],
+            }
+        ],
+        status="answered",
+        decider_user_id="alice",
+        decided_at="2026-08-25T10:05:00Z",
+    )
+    dumped = json.loads(card.model_dump_json())
+    item_schema = load_schema("agent-session.schema.json")["properties"][
+        "confirmations"
+    ]["items"]
+    jsonschema.validate(dumped, item_schema)
+    # The clarification vocabulary survives serialization (never dropped): the
+    # park-kind discriminator, the answered status, and the projected questions.
+    assert dumped["park_kind"] == "clarification"
+    assert dumped["status"] == "answered"
+    assert dumped["questions"][0]["header"] == "Environment"
+    assert dumped["questions"][0]["multi_select"] is False
+    assert dumped["questions"][0]["options"][1]["label"] == "production"
+
+
+def test_confirmation_record_park_kind_defaults_to_confirmation() -> None:
+    """SPEC-080 R-1: every pre-spec / confirmation record defaults ``park_kind``
+    to ``confirmation`` and ``questions`` to null, so the additive discriminator
+    never reclassifies an existing approval card as a clarification."""
+    from agent_service.schemas.v2 import ConfirmationRecordModel
+
+    card = ConfirmationRecordModel(
+        confirm_id="cf-legacy",
+        session_id="ses-1",
+        owner_user_id="alice",
+        pending_calls=[{"call_id": "c1", "tool_name": "k8s.restart_pod"}],
+        status="approved",
+    )
+    dumped = json.loads(card.model_dump_json())
+    item_schema = load_schema("agent-session.schema.json")["properties"][
+        "confirmations"
+    ]["items"]
+    jsonschema.validate(dumped, item_schema)
+    assert dumped["park_kind"] == "confirmation"
+    assert dumped["questions"] is None
 
 
 def test_flow_summary_field_parity_across_coercion_and_both_schemas() -> None:

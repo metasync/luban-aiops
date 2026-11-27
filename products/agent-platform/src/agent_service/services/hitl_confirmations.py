@@ -53,6 +53,20 @@ class PendingConfirmation:
     session_id: str
     user_id: str
     reply_id: str
+    # SPEC-080 R-1: the park discriminator on the SHARED one-per-session slot.
+    # ``"confirmation"`` (default) is the mutating HITL approval park
+    # (SPEC-020/030/031); ``"clarification"`` is the read-only agent-initiated
+    # question park. Both occupy the same slot, so a session holds one or the
+    # other, never both — mutual exclusion is structural, not guarded. The
+    # resume path branches on it. Defaults to ``"confirmation"`` so every
+    # existing caller and the deployed path stay byte-identical.
+    park_kind: str = "confirmation"
+    # SPEC-080 R-1/R-6: the projected clarification questions carried by a
+    # ``"clarification"`` park (the platform-owned ``AskUserParams`` projection,
+    # minus the deferred ``preview``). Empty for a confirmation park, which
+    # carries ``tool_calls`` instead. The wire projects ``confirm_id`` as the
+    # ``clarification_id`` correlator, so no separate id field is needed.
+    questions: list = field(default_factory=list)
     # Kernel ToolCallBlock instances, held opaquely until resume feeds them
     # back into ``reply_stream`` — no agentscope types leak past this module.
     tool_calls: list = field(default_factory=list)
@@ -610,12 +624,16 @@ class ConfirmationRegistry:
         browser_flow: dict | None = None,
         approval_kind: str | None = None,
         run_id: str | None = None,
+        park_kind: str = "confirmation",
+        questions: list | None = None,
     ) -> PendingConfirmation:
         pending = PendingConfirmation(
             confirm_id=str(uuid.uuid4()),
             session_id=session_id,
             user_id=user_id,
             reply_id=reply_id,
+            park_kind=park_kind,
+            questions=list(questions or []),
             tool_calls=list(tool_calls),
             risk_levels=dict(risk_levels or {}),
             gateway_names=dict(gateway_names or {}),

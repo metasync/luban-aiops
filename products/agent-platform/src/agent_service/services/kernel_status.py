@@ -128,6 +128,15 @@ class KernelStatus:
                 "label": "Task tools",
             },
             {
+                # SPEC-080 R-5: sibling to ``task_tools`` — both are opt-in
+                # agentscope-builtin toolkit-admission toggles. Reports whether
+                # the read-only ``AskUser`` external tool is admitted, letting an
+                # agent park a clarification the owner answers in-line.
+                "name": "askuser",
+                "enabled": bool(settings.askuser_enabled),
+                "label": "Agent-initiated clarification",
+            },
+            {
                 "name": "reply_token_budget",
                 "enabled": settings.reply_token_budget is not None,
                 "label": "Reply token budget",

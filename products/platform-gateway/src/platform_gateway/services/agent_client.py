@@ -439,6 +439,68 @@ async def open_chat_confirm_stream(
     return _iter()
 
 
+async def open_clarification_answer_stream(
+    settings: PlatformGatewaySettings,
+    request_id: str,
+    user_id: str,
+    session_id: str,
+    clarification_id: str,
+    answers: list[dict],
+    delegated_token: str | None = None,
+) -> AsyncIterator[str]:
+    """Open the clarification-answer stream and return an SSE iterator (SPEC-080 R-4).
+
+    The sibling to ``open_chat_confirm_stream`` for the read-only clarification
+    park kind: POSTs the owner's answers to agent-service
+    ``/api/v2/sessions/{id}/clarification/answer`` and streams the resumed SAME
+    turn. The upstream status is checked eagerly, before any frame is yielded, so
+    the caller can map 4xx (unknown/expired/parked, an answer that fails
+    validation, a mis-routed confirmation park) and outages to HTTP responses
+    instead of corrupting an already-open SSE stream. Raises
+    ``httpx.HTTPStatusError`` on upstream 4xx/5xx and ``httpx.HTTPError`` on
+    transport failure.
+    """
+    timeout = httpx.Timeout(connect=5.0, read=None, write=None, pool=None)
+    payload = {
+        "clarification_id": clarification_id,
+        "answers": answers,
+    }
+    client = httpx.AsyncClient(timeout=timeout)
+    try:
+        request = client.build_request(
+            "POST",
+            f"{settings.agent_service_url}/api/v2/sessions/{session_id}"
+            "/clarification/answer",
+            json=payload,
+            headers=_headers(request_id, user_id, delegated_token),
+        )
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError:
+        await client.aclose()
+        raise
+    if response.status_code >= 400:
+        # Read the body to release the connection, then surface the status.
+        # Cleanup is finally-guarded so a failed error-body read cannot leak
+        # the response or client.
+        try:
+            await response.aread()
+        finally:
+            await response.aclose()
+            await client.aclose()
+        response.raise_for_status()
+
+    async def _iter() -> AsyncIterator[str]:
+        try:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    yield line + "\n\n"
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return _iter()
+
+
 async def fetch_pending_confirmation(
     settings: PlatformGatewaySettings,
     request_id: str,

@@ -44,6 +44,10 @@ EXPECTED_ROUTES = {
     ("GET", "/api/v1/chat/stream"),
     # HITL confirmation bridging (SPEC-020): answers a parked kernel ASK.
     ("POST", "/api/v1/chat/confirm"),
+    # Agent-initiated clarification answer (SPEC-080 R-4): the owner answers a
+    # parked read-only AskUser in-line and the SAME turn resumes. Rides the
+    # reused ``chat`` action — no approval-tier bridge, no new policy action.
+    ("POST", "/api/v1/sessions/{session_id}/clarification/answer"),
     # Bounded autonomous diagnosis trigger (SPEC-076 R-7): operator-invoked
     # read-only fan-out over a declared runbook profile. Admitted at the reused
     # ``chat`` action — no new policy vocabulary; the orchestration frame inside

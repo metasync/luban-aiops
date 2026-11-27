@@ -9,6 +9,7 @@ import {
   Collapse,
   Input,
   Modal,
+  Radio,
   Select,
   Spin,
   Tag,
@@ -27,6 +28,7 @@ import {
   ExperimentOutlined,
   FileTextOutlined,
   PlusOutlined,
+  QuestionCircleOutlined,
   SafetyCertificateOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
@@ -60,12 +62,14 @@ import type {
 } from "../sessions/useSessionWorkspace";
 import type {
   AuthorizationRequiredFrame,
+  ClarificationAnswer,
   ExecutionReceipt,
   ToolResultFrame,
 } from "../stream/models";
 import {
   useChatStream,
   type ChatTurn,
+  type ClarificationCard,
   type ConfirmationCard,
   type ConfirmationDecision,
 } from "../stream/useChatStream";
@@ -333,6 +337,16 @@ const CARD_STATUS: Record<string, { color: string; label: string }> = {
   pending: { color: "warning", label: "Pending" },
   approved: { color: "success", label: "Approved" },
   denied: { color: "error", label: "Denied" },
+  expired: { color: "default", label: "Expired" },
+  error: { color: "error", label: "Error" },
+};
+
+// SPEC-080 R-7: clarification card lifecycle labels — the read-only sibling
+// of CARD_STATUS. A clarification resolves to "answered" (never approved/
+// denied: the owner answers in-line and there is no approver).
+const CLARIFICATION_STATUS: Record<string, { color: string; label: string }> = {
+  pending: { color: "warning", label: "Pending" },
+  answered: { color: "success", label: "Answered" },
   expired: { color: "default", label: "Expired" },
   error: { color: "error", label: "Error" },
 };
@@ -932,6 +946,203 @@ export function ConfirmationCardView({
   );
 }
 
+// SPEC-080 R-7: a parked read-only clarification the session OWNER answers
+// in-line — the sibling of ConfirmationCardView for the clarification park
+// kind. It renders the projected questions (header tag, optional context,
+// 2-4 options, single- vs multi-select) with an always-available optional
+// "Other" free-text affordance, submits the answers to the R-4 endpoint
+// (which resumes the SAME turn), and replays read-only from the echoed
+// answers once resolved. There is NO approver surface and NO approve/deny:
+// the owner simply answers, and the client gate mirrors the composer (which
+// rides the same ``chat`` action), never the ``chat:confirm`` decision gate.
+export function ClarificationCardView({
+  card,
+  canAnswer,
+  busy,
+  onAnswer,
+}: {
+  card: ClarificationCard;
+  canAnswer: boolean;
+  busy: boolean;
+  onAnswer: (clarificationId: string, answers: ClarificationAnswer[]) => void;
+}) {
+  const status =
+    CLARIFICATION_STATUS[card.status] ?? CLARIFICATION_STATUS.error;
+  const pending = card.status === "pending";
+  const submitting = pending && card.note === "Submitting…";
+  // Per-question owner input, keyed by question index: the chosen option
+  // labels plus the optional "Other" free text. Local to the card so a
+  // half-answered clarification survives re-renders but never leaves the
+  // browser until Submit.
+  const [selected, setSelected] = useState<Record<number, string[]>>({});
+  const [other, setOther] = useState<Record<number, string>>({});
+
+  // Submittable once EVERY question carries at least one chosen label or a
+  // non-blank "Other" — mirrors the backend's per-question validation so the
+  // owner is not met with a 4xx after the fact.
+  const answerable =
+    pending &&
+    canAnswer &&
+    card.questions.every((_question, index) => {
+      const chosen = selected[index] ?? [];
+      const freeText = (other[index] ?? "").trim();
+      return chosen.length > 0 || freeText.length > 0;
+    });
+
+  const submit = () => {
+    const answers: ClarificationAnswer[] = card.questions.map(
+      (question, index) => {
+        const freeText = (other[index] ?? "").trim();
+        return {
+          question: question.question,
+          selected: selected[index] ?? [],
+          ...(freeText ? { other: freeText } : {}),
+        };
+      },
+    );
+    onAnswer(card.clarificationId, answers);
+  };
+
+  return (
+    <div
+      className={`confirm-card clarification-card${pending ? " pending" : ""}`}
+      data-testid="clarification-card"
+    >
+      <div className="confirm-card-title">
+        <QuestionCircleOutlined />
+        <span>Clarification requested</span>
+        <Tag color={status.color}>{status.label}</Tag>
+        <Tag color="blue">you answer</Tag>
+      </div>
+      {card.questions.map((question, index) => {
+        const answer = card.answers?.find(
+          (item) => item.question === question.question,
+        );
+        const disabled = busy || !canAnswer;
+        return (
+          <div className="confirm-call" key={`${question.header}-${index}`}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Tag color="geekblue">{question.header}</Tag>
+              {question.multiSelect ? <Tag>Select all that apply</Tag> : null}
+            </div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>
+              {question.question}
+            </div>
+            {question.context ? (
+              <div style={{ opacity: 0.75, fontSize: 13, marginTop: 2 }}>
+                {question.context}
+              </div>
+            ) : null}
+            {pending ? (
+              <>
+                <div style={{ marginTop: 8 }}>
+                  {question.multiSelect ? (
+                    <Checkbox.Group
+                      value={selected[index] ?? []}
+                      disabled={disabled}
+                      onChange={(checked) =>
+                        setSelected((prev) => ({
+                          ...prev,
+                          [index]: checked.map((value) => String(value)),
+                        }))
+                      }
+                    >
+                      <div
+                        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                      >
+                        {question.options.map((option) => (
+                          <Checkbox key={option.label} value={option.label}>
+                            <span style={{ fontWeight: 500 }}>{option.label}</span>
+                            <span style={{ opacity: 0.75 }}> — {option.description}</span>
+                          </Checkbox>
+                        ))}
+                      </div>
+                    </Checkbox.Group>
+                  ) : (
+                    <Radio.Group
+                      value={(selected[index] ?? [])[0]}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        setSelected((prev) => ({
+                          ...prev,
+                          [index]: event.target.value
+                            ? [String(event.target.value)]
+                            : [],
+                        }))
+                      }
+                    >
+                      <div
+                        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                      >
+                        {question.options.map((option) => (
+                          <Radio key={option.label} value={option.label}>
+                            <span style={{ fontWeight: 500 }}>{option.label}</span>
+                            <span style={{ opacity: 0.75 }}> — {option.description}</span>
+                          </Radio>
+                        ))}
+                      </div>
+                    </Radio.Group>
+                  )}
+                </div>
+                <Input
+                  className="clarification-other"
+                  style={{ marginTop: 8 }}
+                  placeholder="Other (optional) — type a custom answer…"
+                  value={other[index] ?? ""}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    setOther((prev) => ({ ...prev, [index]: event.target.value }))
+                  }
+                />
+              </>
+            ) : (
+              // Read-only replay of the owner's answer (from clarification_result
+              // or the durable record on re-login).
+              <div className="confirm-call-hint" style={{ marginTop: 6 }}>
+                {answer && (answer.selected.length > 0 || answer.other) ? (
+                  <>
+                    {answer.selected.length > 0 ? (
+                      <span>Selected: {answer.selected.join(", ")}</span>
+                    ) : null}
+                    {answer.other ? (
+                      <span
+                        style={{ marginLeft: answer.selected.length > 0 ? 8 : 0 }}
+                      >
+                        Other: {answer.other}
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span>{status.label}</span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {pending ? (
+        canAnswer ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <Button
+              type="primary"
+              icon={<CheckOutlined />}
+              disabled={busy || !answerable}
+              onClick={submit}
+            >
+              {submitting ? "Submitting…" : "Submit answer"}
+            </Button>
+          </div>
+        ) : (
+          <div className="confirm-note">
+            Sign in to answer this clarification.
+          </div>
+        )
+      ) : null}
+      {card.note ? <div className="confirm-note">{card.note}</div> : null}
+    </div>
+  );
+}
+
 // --- Turn rendering -------------------------------------------------------
 
 // SPEC-035 R-4: the arrival window bounds both the typewriter reveal of
@@ -1139,8 +1350,10 @@ export function AuthorizationCardView({
 export function TurnGroup({
   turn,
   canDecide,
+  canAnswer,
   busy,
   onDecide,
+  onAnswer,
   justArrived,
   revealFromChars,
   agentWorking,
@@ -1148,8 +1361,15 @@ export function TurnGroup({
 }: {
   turn: ChatTurn;
   canDecide: boolean;
+  // SPEC-080 R-7: whether the current user may answer a parked clarification
+  // in-line. Mirrors the composer gate (the answer rides the same ``chat``
+  // action), never the ``chat:confirm`` decision gate.
+  canAnswer: boolean;
   busy: boolean;
   onDecide: (confirmId: string, decision: ConfirmationDecision, recipientWarningAcknowledged?: boolean) => void;
+  // SPEC-080 R-7: submit the owner's answers; the response resumes the SAME
+  // turn (the onDecide sibling for clarifications).
+  onAnswer: (clarificationId: string, answers: ClarificationAnswer[]) => void;
   justArrived?: boolean;
   // SPEC-035 R-4: when set, the reply bubble re-types itself from this
   // char offset so the operator watches the new content land instead of
@@ -1171,7 +1391,7 @@ export function TurnGroup({
   // shows the "(no response received)" placeholder.
   const reply =
     turn.replyText ||
-    (turn.completed && !turn.confirmationPending
+    (turn.completed && !turn.confirmationPending && !turn.clarificationPending
       ? "(no response received)"
       : "");
   const [revealedChars, setRevealedChars] = useState<number | null>(null);
@@ -1205,7 +1425,11 @@ export function TurnGroup({
   }, [revealFromChars, turn.replyText]);
   const displayReply =
     revealedChars === null ? reply : turn.replyText.slice(0, revealedChars);
-  const loading = !turn.completed && !turn.confirmationPending && !turn.error;
+  const loading =
+    !turn.completed &&
+    !turn.confirmationPending &&
+    !turn.clarificationPending &&
+    !turn.error;
   // Sticky request banner: while this turn's user bubble has scrolled out
   // of the transcript viewport, a pinned one-liner restates the request so
   // long replies (and expanded evidence) stay correlated with it.
@@ -1304,6 +1528,18 @@ export function TurnGroup({
           canDecide={canDecide}
           busy={busy}
           onDecide={onDecide}
+        />
+      ))}
+      {/* SPEC-080 R-7: parked read-only clarifications render as owner-
+          answerable cards below the confirmation cards. A turn carries one
+          park kind or the other (one-per-session slot), never both. */}
+      {turn.clarifications.map((card) => (
+        <ClarificationCardView
+          key={card.clarificationId}
+          card={card}
+          canAnswer={canAnswer}
+          busy={busy}
+          onAnswer={onAnswer}
         />
       ))}
     </div>
@@ -2035,7 +2271,7 @@ export default function ChatView({
   // instead of waiting for the 30s cadence — this is why the tag used
   // to appear only after the next list poll.
   const pendingCardCount = chat.turns.filter(
-    (turn) => turn.confirmationPending,
+    (turn) => turn.confirmationPending || turn.clarificationPending,
   ).length;
   const prevPendingCountRef = useRef(pendingCardCount);
   useEffect(() => {
@@ -2050,13 +2286,20 @@ export default function ChatView({
   // are decided locally, suppress the stale backend flag immediately.
   const localDecisionApplied =
     pendingCardCount === 0 &&
-    chat.turns.some((turn) =>
-      turn.confirmations.some(
-        (card) =>
-          card.status === "approved" ||
-          card.status === "denied" ||
-          card.status === "expired",
-      ),
+    chat.turns.some(
+      (turn) =>
+        turn.confirmations.some(
+          (card) =>
+            card.status === "approved" ||
+            card.status === "denied" ||
+            card.status === "expired",
+        ) ||
+        // SPEC-080 R-7: an answered/expired clarification clears the stale
+        // backend pending flag exactly as a decided confirmation does (both
+        // occupy the one-per-session park slot).
+        turn.clarifications.some(
+          (card) => card.status === "answered" || card.status === "expired",
+        ),
     );
 
   // Keep the newest turn visible while streaming. While an arrival reveal
@@ -2305,6 +2548,7 @@ export default function ChatView({
                 key={turn.id}
                 turn={turn}
                 canDecide={canDecide}
+                canAnswer={authenticated}
                 busy={chat.streaming || historyLoading || recoveryPageBusy}
                 justArrived={arrival !== null && index >= arrival.from}
                 // Only the span's start group re-types its reply (from
@@ -2322,6 +2566,9 @@ export default function ChatView({
                 }
                 onDecide={(confirmId, decision, acknowledged) =>
                   void chat.decide(confirmId, decision, acknowledged)
+                }
+                onAnswer={(clarificationId, answers) =>
+                  void chat.answer(clarificationId, answers)
                 }
                 onContinue={continueAfterAuthorization}
               />

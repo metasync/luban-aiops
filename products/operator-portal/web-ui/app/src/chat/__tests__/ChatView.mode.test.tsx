@@ -380,6 +380,8 @@ describe("ChatView shared core is mode-invariant (SPEC-056 R-5)", () => {
         "I opened the admin console and **parked** the reset for approval.",
       completed: false,
       confirmationPending: true,
+      clarificationPending: false,
+      clarifications: [],
       history: true,
       toolCalls: [
         {

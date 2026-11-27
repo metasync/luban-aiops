@@ -303,6 +303,32 @@ original tool output, a held password, continuation authority, or a successful
 authoring origin. Newly generated documents retain uncertainty and incomplete
 coverage; published documents remain historical snapshots, not live status.
 
+## Answering an Agent's Question (Clarifications)
+
+Sometimes the agent needs a decision from you before it can continue — “which
+cluster?”, “restart or rollback?”, “include the sidecar?”. When the
+**agent-initiated clarification** feature is enabled (it is opt-in and off by
+default — see [Approval and HITL Governance](approval-and-hitl.md)), the chat
+parks and renders a **question card** instead of a reply.
+
+- The card lists one or more questions, each with a short header, optional
+  context, and a set of options. Pick one option, or several when the question
+  allows **multiple selection**. An **Other** box lets you type a free-text answer
+  when none of the options fit.
+- **Submit** sends your answers back and the agent resumes **in the same turn** —
+  the reply continues right where it paused. There is no Approve/Deny here: a
+  clarification is a question, not a mutating action, so it never runs a tool,
+  never changes state, and never appears in the Approvals inbox.
+- **You answer your own question.** Only the session owner sees and answers the
+  card; it is not routed to a designated approver.
+- The card is **durable**: it survives a page reload or re-login, and an answered
+  card stays in the transcript showing what you chose. If it sits unanswered past
+  its time limit it locks as **expired** and the agent moves on.
+- A session holds **one parked item at a time** — a confirmation *or* a
+  clarification, never both — so the amber **awaiting** badge and the “answer or
+  expire before continuing” behaviour match the confirmation cards you already
+  know.
+
 ## Approvals (Control)
 
 The Approvals view is the designated approver's cross-session inbox

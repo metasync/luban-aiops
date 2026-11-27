@@ -263,6 +263,22 @@ remediation-livecheck: ## Remediation-staging live-check (SPEC-077 R-8): mocked 
 conversational-remediation-livecheck: ## Conversational-remediation live-check (SPEC-078 R-7): mocked proof by default; LIVE=1 read-only cluster pre-flight; LIVE=1 DRIVE_TURN=1 the gated billable one-turn park + zero-dispatch proof
 	@LUBAN_CONVERSATIONAL_REMEDIATION_DRIVE_PAID_TURN="$(DRIVE_TURN)" sh $(E2E_DIR)/conversational-remediation-livecheck.sh $(if $(LIVE),--live,--local)
 
+# SPEC-080 R-8: the agent-initiated-clarification live-check proves a read-only
+# AskUser park → owner answer → SAME-turn resume runs end to end and never
+# mutates, dispatches, or auto-approves (the four-point gate's point 3 — a
+# clarification is strictly *less* than the confirmation path). The default
+# (--local) runs the mocked-I/O pytest proof of the pipeline logic — no cluster,
+# no network, no paid call — which is also collected by `make test`. LIVE=1 runs
+# the read-only two-tier chat-route + answer-route pre-flight; LIVE=1 DRIVE_TURN=1
+# additionally (with AGENT_ASKUSER_ENABLED committed on) drives ONE gated,
+# billable clarification turn and asserts it parks on clarification_request, the
+# owner answers in-line, the same turn resumes to message_end audited as
+# chat_completed (the closed enum), and ZERO execution_requested /
+# confirmation_decided surface across the session family.
+.PHONY: clarification-livecheck
+clarification-livecheck: ## Agent-initiated-clarification live-check (SPEC-080 R-8): mocked proof by default; LIVE=1 read-only cluster pre-flight; LIVE=1 DRIVE_TURN=1 the gated billable park → owner-answer → same-turn resume + zero-mutation proof
+	@LUBAN_CLARIFICATION_DRIVE_PAID_TURN="$(DRIVE_TURN)" sh $(E2E_DIR)/clarification-livecheck.sh $(if $(LIVE),--live,--local)
+
 .PHONY: secret-delivery-demo
 secret-delivery-demo: ## Run the local sample handoff proof (uv + installed portal npm dependencies; no cluster)
 	@sh $(SAMPLES_DIR)/acme-admin/password-reset/demo/demo.sh --secret-delivery-local
@@ -341,7 +357,7 @@ e2e: ## Run the e2e demo scripts against the deployed dev cluster
 	@echo "The acme-admin suite additionally needs 'make deploy-sample-app' and"
 	@echo "'make deploy-samples' to have been run; it fails loudly naming them if not."
 	@status=0; \
-	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(E2E_DIR)/ansible-mcp-check.sh $(E2E_DIR)/servicenow-check.sh $(E2E_DIR)/secret-delivery-demo.sh $(E2E_DIR)/observability-livecheck.sh $(E2E_DIR)/diagnosis-livecheck.sh $(E2E_DIR)/remediation-livecheck.sh $(E2E_DIR)/conversational-remediation-livecheck.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
+	for script in $(E2E_DIR)/skills-demo.sh $(E2E_DIR)/incident-demo.sh $(E2E_DIR)/mutating-demo.sh $(E2E_DIR)/http-check-demo.sh $(E2E_DIR)/ansible-mcp-check.sh $(E2E_DIR)/servicenow-check.sh $(E2E_DIR)/secret-delivery-demo.sh $(E2E_DIR)/observability-livecheck.sh $(E2E_DIR)/diagnosis-livecheck.sh $(E2E_DIR)/remediation-livecheck.sh $(E2E_DIR)/conversational-remediation-livecheck.sh $(E2E_DIR)/clarification-livecheck.sh $(SAMPLES_DIR)/acme-admin/demo-suite.sh; do \
 		echo "==> $$script"; \
 		sh $$script || status=1; \
 	done; \

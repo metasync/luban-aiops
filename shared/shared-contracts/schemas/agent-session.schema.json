@@ -156,9 +156,21 @@
               "risk_class": { "type": "string" }
             }
           },
+          "park_kind": {
+            "type": "string",
+            "enum": ["confirmation", "clarification"],
+            "description": "SPEC-080 R-1/R-7: the park-kind discriminator — \"confirmation\" for a tool batch routed to the approval bridge, \"clarification\" for a read-only AskUser the owner answers in-line. Both occupy the one-per-session park slot; the discriminator tells the portal which card to render on re-login and keeps a clarification out of the approver inbox. Defaults to \"confirmation\" so every pre-spec record stays a confirmation card."
+          },
+          "questions": {
+            "type": ["array", "null"],
+            "description": "SPEC-080 R-6/R-7: the projected clarification questions (the platform-owned AskUserParams projection, wire shape — question, header<=12, multi_select, options[2-4]{label,description}, optional context) persisted at park time so a re-login re-renders the owner-answerable card. Null for a confirmation park and for records that predate the column.",
+            "items": {
+              "type": "object"
+            }
+          },
           "status": {
             "type": "string",
-            "enum": ["pending", "approved", "denied", "expired"]
+            "enum": ["pending", "approved", "denied", "expired", "answered"]
           },
           "parked_at": {
             "type": ["string", "null"]

@@ -18,6 +18,8 @@ function turnOf(id: string, overrides: Partial<ChatTurn> = {}): ChatTurn {
     replyText: "",
     completed: false,
     confirmationPending: false,
+    clarificationPending: false,
+    clarifications: [],
     toolCalls: [],
     toolResults: [],
     confirmations: [],

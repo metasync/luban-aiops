@@ -90,6 +90,25 @@ export interface ConfirmationFlowSummary {
   risk_class?: string;
 }
 
+// SPEC-080 R-6/R-7: one projected clarification option on the durable record
+// (wire shape). ``preview`` is a named fast-follow that never rides v14, so it
+// is absent here by construction.
+export interface ConfirmationClarificationOption {
+  label: string;
+  description: string;
+}
+
+// SPEC-080 R-6/R-7: one projected clarification question as persisted on the
+// durable record (wire shape — snake_case ``multi_select``), re-rendered into
+// the owner-answerable card on re-login.
+export interface ConfirmationClarificationQuestion {
+  question: string;
+  header: string;
+  context?: string | null;
+  multi_select?: boolean;
+  options: ConfirmationClarificationOption[];
+}
+
 export interface ConfirmationRecord {
   confirm_id: string;
   session_id: string;
@@ -115,7 +134,18 @@ export interface ConfirmationRecord {
   // persisted so a re-login and the approver inbox render the same lead line
   // the live card showed; absent/null for legacy records.
   message?: string | null;
-  status: "pending" | "approved" | "denied" | "expired";
+  // SPEC-080 R-1/R-7: the park-kind discriminator — "confirmation" (a tool
+  // batch routed to the approval bridge) or "clarification" (a read-only
+  // AskUser the owner answers in-line). Absent/null for records parked before
+  // the column existed, which are always confirmations.
+  park_kind?: "confirmation" | "clarification" | null;
+  // SPEC-080 R-6/R-7: the projected clarification questions persisted at park
+  // time (wire shape) so a re-login re-renders the owner-answerable card;
+  // null for a confirmation park and for records that predate the column.
+  questions?: ConfirmationClarificationQuestion[] | null;
+  // SPEC-080 R-1: "answered" is the clarification resolution (a read-only park
+  // carries no approve/deny decision); confirmations resolve approved/denied.
+  status: "pending" | "approved" | "denied" | "expired" | "answered";
   parked_at?: string | null;
   decider_user_id?: string | null;
   decision?: string | null;

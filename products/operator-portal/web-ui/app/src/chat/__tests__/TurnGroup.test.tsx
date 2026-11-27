@@ -125,8 +125,10 @@ describe("Copy password (SPEC-062)", () => {
       <TurnGroup
         turn={turnOf({ secretDeliveries: [delivery], completed: true })}
         canDecide={false}
+        canAnswer={false}
         busy={false}
         onDecide={() => {}}
+        onAnswer={() => {}}
         agentWorking={false}
       />,
     );
@@ -143,6 +145,8 @@ function turnOf(overrides: Partial<ChatTurn> = {}): ChatTurn {
     replyText: "Resuming the reset flow now.",
     completed: false,
     confirmationPending: false,
+    clarificationPending: false,
+    clarifications: [],
     toolCalls: [],
     // One landed tool frame is enough to render the evidence panel, which
     // is what the indicator must sit above.
@@ -164,8 +168,10 @@ function renderTurn(agentWorking: boolean) {
     <TurnGroup
       turn={turnOf()}
       canDecide={false}
+      canAnswer={false}
       busy={false}
       onDecide={() => {}}
+      onAnswer={() => {}}
       agentWorking={agentWorking}
     />,
   );

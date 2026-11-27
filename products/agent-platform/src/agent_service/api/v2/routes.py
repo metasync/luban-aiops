@@ -24,6 +24,8 @@ from agent_service.schemas.v2 import (
     AgentChatConfirmRequest,
     AgentChatRequest,
     AgentChatResponse,
+    AgentClarificationAnswer,
+    AgentClarificationAnswerRequest,
     AgentDiagnoseRequest,
     AgentFeatureFlags,
     AgentHealth,
@@ -246,6 +248,25 @@ async def _reject_if_parked(
     pending = get_confirmation_registry().peek_parked(session_id)
     if pending is None:
         return
+    # SPEC-080 R-4: name the parked kind in the 409 so the client routes to the
+    # right resolution — a read-only clarification is answered in-line by its
+    # owner, a mutating confirmation goes through the approval bridge. Both
+    # occupy the same one-per-session slot (R-1), so one guard covers both.
+    is_clarification = pending.park_kind == "clarification"
+    busy_detail = (
+        "clarification pending: the parked question is being resolved; "
+        "retry shortly"
+        if is_clarification
+        else "confirmation pending: the parked tool confirmation "
+        "is being resolved; retry shortly"
+    )
+    parked_detail = (
+        "clarification pending: answer or expire the parked question "
+        "before sending a new message"
+        if is_clarification
+        else "confirmation pending: answer or expire the parked "
+        "tool confirmation before sending a new message"
+    )
     if pending.is_expired(kernel.settings.hitl_confirm_timeout):
         try:
             expire_model, expire_selected_by = _resolve_model(
@@ -263,14 +284,12 @@ async def _reject_if_parked(
             # turn stays rejected until that stream resolves the entry.
             raise HTTPException(
                 status_code=409,
-                detail="confirmation pending: the parked tool confirmation "
-                "is being resolved; retry shortly",
+                detail=busy_detail,
             ) from None
         return
     raise HTTPException(
         status_code=409,
-        detail="confirmation pending: answer or expire the parked "
-        "tool confirmation before sending a new message",
+        detail=parked_detail,
     )
 
 
@@ -898,6 +917,162 @@ async def chat_confirm(
     return StreamingResponse(_events(), media_type="text/event-stream")
 
 
+@router.post("/sessions/{session_id}/clarification/answer")
+async def answer_clarification(
+    session_id: str,
+    body: AgentClarificationAnswerRequest,
+    x_user_id: str | None = Header(None),
+    x_request_id: str | None = Header(None),
+    authorization: str | None = Header(None),
+) -> StreamingResponse:
+    """Answer a parked read-only clarification and stream the resumed turn.
+
+    SPEC-080 R-4: the sibling to ``chat_confirm`` for the clarification park
+    kind. The session OWNER answers in-line (OQ-5) — there is no approver and no
+    approval-tier bridge — so the session lookup asserts ownership. The answer is
+    validated against the parked questions BEFORE the single-flight claim (a bad
+    answer never consumes the claim, so the park stays answerable for a corrected
+    retry); a duplicate/stale answer fails closed with the structured
+    ``already_resolved`` 409 (the SPEC-031 R-4 posture). The resumed turn re-drives
+    the SAME assistant turn (SPEC-025 R-1) and mutates nothing on its own: AskUser
+    is read-only (R-2).
+    """
+    user_id = _user_id(x_user_id)
+    request_id = x_request_id or "untracked"
+    session = get_session(session_id, user_id)
+    kernel = get_runtime_kernel()
+    await _verified_requester(authorization, user_id)
+    registry = get_confirmation_registry()
+    # Peek (never claim) to check the park kind and validate the answers, so a
+    # mis-routed or malformed answer leaves the park intact for the right
+    # endpoint / a corrected retry. A replica that did not park (candidate None)
+    # skips the pre-checks; ``claim`` below raises the authoritative error.
+    candidate = registry.peek_parked(session.session_id)
+    if candidate is not None and candidate.confirm_id == body.clarification_id:
+        if candidate.park_kind != "clarification":
+            raise HTTPException(
+                status_code=409,
+                detail="confirmation pending: this park is a tool confirmation; "
+                "answer it via the confirmation endpoint",
+            )
+        _validate_clarification_answers(candidate.questions, body.answers)
+    try:
+        pending = registry.claim(
+            session.session_id,
+            body.clarification_id,
+            kernel.settings.hitl_confirm_timeout,
+        )
+    except ConfirmationExpired:
+        try:
+            expire_model, expire_selected_by = _resolve_model(
+                None, session.model, kernel.routing_available()
+            )
+            await kernel.expire_confirmation(
+                session.session_id,
+                body.clarification_id,
+                expire_model,
+                expire_selected_by in _ROUTING_SELECTED_BY,
+            )
+        except ConfirmationNotFound:
+            pass
+        raise HTTPException(
+            status_code=410, detail="clarification expired"
+        ) from None
+    except ConfirmationNotFound:
+        # SPEC-031 R-4 posture: a clarification that already resolved answers
+        # with its outcome (stale tab, racing retry) instead of an opaque 404;
+        # genuinely unknown ids stay 404 for anti-enumeration.
+        record = _resolved_record(session.session_id, body.clarification_id)
+        if record is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "already_resolved",
+                    "status": record["status"],
+                    "decider_user_id": record["decider_user_id"],
+                    "decision": record["decision"],
+                    "decided_at": record["decided_at"],
+                },
+            ) from None
+        raise HTTPException(
+            status_code=404, detail="clarification not found"
+        ) from None
+
+    answers = [answer.model_dump(exclude_none=True) for answer in body.answers]
+    # SPEC-031 R-4: persist the ``answered`` outcome at claim time so a racing
+    # second answer during the resumed stream gets the structured 409 above;
+    # the resume's ``finally`` write remains an idempotent safety net.
+    _persist_claimed_outcome(
+        session.session_id, body.clarification_id, "answer", user_id,
+        status="answered",
+    )
+
+    async def _events() -> AsyncIterator[str]:
+        # SPEC-071 R-2 / SPEC-024 R-3: the resumed turn reuses the parked turn's
+        # routing posture and stays on the model that parked it, exactly as the
+        # confirmation resume does.
+        resume_model, resume_selected_by = _resolve_model(
+            None, session.model, kernel.routing_available()
+        )
+        async for chunk in kernel.resume_clarification(
+            session_id=session.session_id,
+            pending=pending,
+            answers=answers,
+            user_name=user_id,
+            request_id=request_id,
+            bearer_token=_bearer_token(authorization),
+            model_id=resume_model,
+            routing_allowed=resume_selected_by in _ROUTING_SELECTED_BY,
+        ):
+            event = _normalize_stream_event(
+                chunk, session.session_id, request_id
+            )
+            yield f"data: {event.model_dump_json(exclude_none=True)}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+def _validate_clarification_answers(
+    parked_questions: list[dict] | None,
+    answers: list[AgentClarificationAnswer],
+) -> None:
+    """Validate an answer batch against the parked questions (SPEC-080 R-4).
+
+    Every answer must name a question the agent actually parked, and every
+    selected label must be one of that question's projected options; the
+    free-text ``other`` is always allowed (the client's auto-"Other"
+    affordance). A mismatch is a 422 — an answer that cannot be correlated to
+    the park is rejected rather than silently resumed.
+    """
+    options_by_question: dict[str, set[str]] = {}
+    for question in parked_questions or []:
+        if not isinstance(question, dict):
+            continue
+        text = question.get("question")
+        if not isinstance(text, str):
+            continue
+        options_by_question[text] = {
+            option.get("label")
+            for option in (question.get("options") or [])
+            if isinstance(option, dict) and isinstance(option.get("label"), str)
+        }
+    for answer in answers:
+        allowed = options_by_question.get(answer.question)
+        if allowed is None:
+            raise HTTPException(
+                status_code=422,
+                detail="answer names a question that was not asked: "
+                f"{answer.question!r}",
+            )
+        unknown = [label for label in answer.selected if label not in allowed]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail="answer selects unknown option(s) for "
+                f"{answer.question!r}: {unknown}",
+            )
+
+
 @router.get("/chat/pending-confirmation")
 async def get_pending_confirmation(
     session_id: str,
@@ -948,18 +1123,24 @@ async def get_pending_confirmation(
 
 
 def _persist_claimed_outcome(
-    session_id: str, confirm_id: str, decision: str, decider_user_id: str
+    session_id: str,
+    confirm_id: str,
+    decision: str,
+    decider_user_id: str,
+    status: str | None = None,
 ) -> None:
     """Best-effort durable outcome write at claim time (SPEC-031 R-4).
 
     Mirrors the kernel's resolution write posture: a store failure only
     degrades the race response and persisted history, never the decision
-    itself (the resumed stream still flows).
+    itself (the resumed stream still flows). ``status`` overrides the
+    approve/deny mapping for a park kind with its own outcome vocabulary —
+    SPEC-080 R-4 writes an answered clarification as ``answered``.
     """
-    status = "approved" if decision == "approve" else "denied"
+    resolved_status = status or ("approved" if decision == "approve" else "denied")
     try:
         CONFIRMATION_RECORD_STORE.mark_resolved(
-            session_id, confirm_id, status, decider_user_id, decision
+            session_id, confirm_id, resolved_status, decider_user_id, decision
         )
     except Exception as exc:
         LOGGER.warning(
@@ -1002,11 +1183,13 @@ _STREAM_EVENT_TYPES = frozenset(
         "confirmation_result",
         "secret_delivery",
         "authorization_required",
+        "clarification_request",
+        "clarification_result",
     }
 )
 
 _TOOL_RESULT_STATUSES = frozenset(
-    {"success", "error", "denied", "approved", "expired", "interrupted"}
+    {"success", "error", "denied", "approved", "expired", "interrupted", "answered"}
 )
 
 # v6 stream schema allows these risk levels on pending_calls entries.
@@ -1100,6 +1283,16 @@ def _normalize_stream_event(
         # middleware, so pass it through untouched.
         data=raw.get("data"),
         error=raw.get("error") if isinstance(raw.get("error"), dict) else None,
+        # SPEC-080 R-3: the read-only clarification park's correlator and its
+        # projected questions / answers ride clarification_request /
+        # clarification_result frames; coerced to the contract shape or None.
+        clarification_id=(
+            raw.get("clarification_id")
+            if isinstance(raw.get("clarification_id"), str)
+            else None
+        ),
+        questions=_coerce_questions(raw.get("questions")),
+        answers=_coerce_answers(raw.get("answers")),
     )
 
 
@@ -1110,6 +1303,88 @@ def _coerce_data_summary(value: object) -> dict[str, object] | None:
     if isinstance(value, dict):
         return value
     return {"value": value}
+
+
+# SPEC-080 R-3/R-6: the wire bounds of a projected clarification question,
+# mirroring agentscope ``AskUserParams`` minus the deferred ``preview`` field.
+_CLARIFICATION_HEADER_MAX = 12
+_CLARIFICATION_OPTIONS_MIN = 2
+_CLARIFICATION_OPTIONS_MAX = 4
+
+
+def _coerce_questions(value: object) -> list[dict[str, object]] | None:
+    """Keep a clarification_request question batch schema-conformant (R-3).
+
+    A platform-owned projection: only the contract fields survive, an option
+    keeps ``label``/``description`` (never the deferred ``preview``), and a
+    malformed question is dropped rather than passed through. Returns ``None``
+    for a non-list so the field is omitted on every other frame type.
+    """
+    if not isinstance(value, list):
+        return None
+    questions: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        header = item.get("header")
+        raw_options = item.get("options")
+        if not isinstance(question, str) or not isinstance(header, str):
+            continue
+        if not isinstance(raw_options, list):
+            continue
+        options: list[dict[str, object]] = []
+        for option in raw_options:
+            if not isinstance(option, dict):
+                continue
+            label = option.get("label")
+            description = option.get("description")
+            if not isinstance(label, str) or not isinstance(description, str):
+                continue
+            options.append({"label": label, "description": description})
+        if not (_CLARIFICATION_OPTIONS_MIN <= len(options) <= _CLARIFICATION_OPTIONS_MAX):
+            continue
+        entry: dict[str, object] = {
+            "question": question,
+            "header": header[:_CLARIFICATION_HEADER_MAX],
+            "options": options,
+        }
+        context = item.get("context")
+        if isinstance(context, str) and context:
+            entry["context"] = context
+        entry["multi_select"] = bool(item.get("multi_select", False))
+        questions.append(entry)
+    return questions or None
+
+
+def _coerce_answers(value: object) -> list[dict[str, object]] | None:
+    """Keep a clarification_result answer batch schema-conformant (R-3).
+
+    Each answer carries the verbatim ``question``, the ``selected`` labels and
+    the optional ``other`` free text (the auto-Other affordance). A malformed
+    entry is dropped; ``None`` omits the field on every other frame type.
+    """
+    if not isinstance(value, list):
+        return None
+    answers: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        if not isinstance(question, str):
+            continue
+        raw_selected = item.get("selected")
+        selected = (
+            [label for label in raw_selected if isinstance(label, str)]
+            if isinstance(raw_selected, list)
+            else []
+        )
+        entry: dict[str, object] = {"question": question, "selected": selected}
+        other = item.get("other")
+        if isinstance(other, str) and other:
+            entry["other"] = other
+        answers.append(entry)
+    return answers or None
 
 
 def _coerce_pending_calls(value: object) -> list[dict[str, object]] | None:

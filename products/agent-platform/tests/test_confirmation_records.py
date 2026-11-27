@@ -46,6 +46,8 @@ def _record(
     flow_summary: dict | None = None,
     approval_kind: str | None = None,
     message: str | None = None,
+    park_kind: str = "confirmation",
+    questions: list | None = None,
 ) -> dict:
     record = make_record(
         confirm_id,
@@ -57,6 +59,8 @@ def _record(
         flow_summary=flow_summary,
         approval_kind=approval_kind,
         message=message,
+        park_kind=park_kind,
+        questions=questions,
     )
     if parked_at is not None:
         record["parked_at"] = _iso(parked_at)
@@ -139,6 +143,86 @@ class TestInMemoryStore:
         assert rows[1]["message"] is None
         assert store.load_pending_for_session("ses-1")["message"] is None
         assert store.load_record("ses-1", "cf-1")["approval_kind"] == "action"
+
+    def test_save_and_load_round_trips_park_kind_and_questions(self) -> None:
+        """SPEC-080 R-1: the park discriminator and the projected
+        clarification questions survive the store, so a parked clarification
+        re-renders from the durable record after a simulated re-login; a
+        confirmation round-trips ``park_kind="confirmation"`` and no
+        questions (the deployed path is unchanged)."""
+        store = InMemoryConfirmationRecordStore()
+        questions = [
+            {
+                "question": "Which cluster should I inspect?",
+                "header": "Cluster",
+                "multi_select": False,
+                "options": [
+                    {"label": "prod", "description": "Production"},
+                    {"label": "stage", "description": "Staging"},
+                ],
+            }
+        ]
+        store.save_parked(
+            _record(
+                "cf-clarify",
+                park_kind="clarification",
+                questions=questions,
+            )
+        )
+        store.save_parked(_record("cf-confirm"))
+        by_id = {row["confirm_id"]: row for row in store.load_for_session("ses-1")}
+        # The clarification carries its kind + questions back verbatim.
+        assert by_id["cf-clarify"]["park_kind"] == "clarification"
+        assert by_id["cf-clarify"]["questions"] == questions
+        # A confirmation defaults its kind and carries no questions.
+        assert by_id["cf-confirm"]["park_kind"] == "confirmation"
+        assert by_id["cf-confirm"]["questions"] is None
+        # Simulated re-login: the owner's session view still holds the
+        # parked clarification with its questions intact.
+        reloaded = store.load_record("ses-1", "cf-clarify")
+        assert reloaded["park_kind"] == "clarification"
+        assert reloaded["questions"] == questions
+        assert reloaded["status"] == "pending"
+
+    def test_clarification_never_enters_approver_inbox(self) -> None:
+        """SPEC-080 R-1: a clarification has no approver, so it is excluded
+        from the approver inbox (pending queue and history) while remaining
+        visible in the owner's session view — matching the Postgres
+        ``AND park_kind = 'confirmation'`` inbox filter."""
+        store = InMemoryConfirmationRecordStore()
+        now = datetime.now(timezone.utc)
+        store.save_parked(
+            _record(
+                "cf-clarify",
+                park_kind="clarification",
+                questions=[
+                    {
+                        "question": "Which namespace?",
+                        "header": "Namespace",
+                        "options": [
+                            {"label": "ops", "description": "Operations"},
+                            {"label": "dev", "description": "Development"},
+                        ],
+                    }
+                ],
+                parked_at=now,
+            )
+        )
+        store.save_parked(_record("cf-confirm", parked_at=now))
+        # The approver pending inbox holds only the confirmation card.
+        pending_ids = [row["confirm_id"] for row in store.load_pending_inbox()]
+        assert pending_ids == ["cf-confirm"]
+        # The owner's session view still holds both (the clarification is
+        # answerable in-line by its owner, not routed to an approver).
+        session_ids = [row["confirm_id"] for row in store.load_for_session("ses-1")]
+        assert set(session_ids) == {"cf-clarify", "cf-confirm"}
+        # Once answered, the clarification stays out of the inbox history.
+        store.mark_resolved("ses-1", "cf-clarify", "approved", "alice", "answer")
+        store.mark_resolved("ses-1", "cf-confirm", "approved", "bob", "approve")
+        history, total = store.load_inbox_history(50, 0)
+        history_ids = [row["confirm_id"] for row in history]
+        assert history_ids == ["cf-confirm"]
+        assert total == 1
 
     def test_mark_resolved_attributes_decider_and_outcome(self) -> None:
         store = InMemoryConfirmationRecordStore()
@@ -435,6 +519,8 @@ class TestPostgresStore:
             summary,
             "flow",
             "Submit the password reset for the user.",
+            "confirmation",
+            None,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -451,6 +537,10 @@ class TestPostgresStore:
         # their columns, so a replayed card states its own kind and top line.
         assert record["approval_kind"] == "flow"
         assert record["message"] == "Submit the password reset for the user."
+        # SPEC-080 R-1: a confirmation row maps its park kind and carries no
+        # clarification questions.
+        assert record["park_kind"] == "confirmation"
+        assert record["questions"] is None
 
     def test_load_record_maps_legacy_row_without_turn_index(self) -> None:
         """SPEC-033 R-1 / SPEC-051 R-6 / SPEC-054 R-1/R-4: rows parked before
@@ -474,6 +564,8 @@ class TestPostgresStore:
             None,
             None,
             None,
+            None,
+            None,
         )
         store = PostgresConfirmationRecordStore(
             db_url="postgresql://fake", connect=_fake_connect(calls, rows=[row])
@@ -486,6 +578,10 @@ class TestPostgresStore:
         # line, never an empty artifact).
         assert record["approval_kind"] is None
         assert record["message"] is None
+        # SPEC-080 R-1: a NULL park_kind (a row written before the column
+        # existed) defaults to a confirmation, never None.
+        assert record["park_kind"] == "confirmation"
+        assert record["questions"] is None
 
     def test_load_record_returns_none_without_row(self) -> None:
         calls: list[dict] = []

@@ -314,14 +314,47 @@ class AgentChatConfirmRequest(BaseModel):
     recipient_warning_acknowledged: bool = Field(default=False, strict=True)
 
 
+class AgentClarificationAnswer(BaseModel):
+    """One question's answer in a clarification response (SPEC-080 R-4/R-6).
+
+    The platform-owned mirror of agentscope's ``AskUserAnswer``: the question
+    text verbatim (so the answer correlates to the parked question), the labels
+    of the options the owner chose, and the optional free text typed via the
+    client's auto-"Other" affordance (a client behavior, never a wire option).
+    """
+
+    question: str = Field(min_length=1)
+    selected: list[str] = Field(default_factory=list)
+    other: str | None = None
+
+
+class AgentClarificationAnswerRequest(BaseModel):
+    """Body for ``POST /api/v2/sessions/{id}/clarification/answer`` (SPEC-080 R-4).
+
+    Answers a parked read-only clarification. The session OWNER answers in-line
+    (OQ-5) — there is no approver and no approval-tier bridge — so identity stays
+    in headers and the session lookup asserts ownership. The answer resumes the
+    SAME assistant turn (SPEC-025 R-1) and mutates nothing on its own: ``AskUser``
+    is read-only (R-2).
+    """
+
+    clarification_id: str = Field(min_length=1)
+    answers: list[AgentClarificationAnswer] = Field(min_length=1)
+
+
 # --- Streaming ---
 
 
 class AgentStreamEvent(BaseModel):
-    """SSE frame payload conforming to agent-stream-event.schema.json (v13).
+    """SSE frame payload conforming to agent-stream-event.schema.json (v14).
 
     v12 adds secret-delivery metadata; v13 adds authorization-required metadata,
-    a separate signal with no confirmation or execution authority.
+    a separate signal with no confirmation or execution authority. v14 adds the
+    clarification_request / clarification_result frames (SPEC-080 R-3): a
+    read-only park in which the agent poses bounded multiple-choice questions
+    and resumes on the session owner's answer. The frames are platform-owned
+    projections of agentscope ``AskUserParams`` / ``AskUserMetadata`` — never
+    the agentscope event/block shapes — and a clarification mutates nothing.
 
     v3 added tool_call/tool_result frames for evidence panel rendering
     (SPEC-011 R-1). v4 adds confirmation_request/confirmation_result frames
@@ -361,6 +394,8 @@ class AgentStreamEvent(BaseModel):
         "confirmation_result",
         "secret_delivery",
         "authorization_required",
+        "clarification_request",
+        "clarification_result",
     ]
     session_id: str
     request_id: str
@@ -392,7 +427,15 @@ class AgentStreamEvent(BaseModel):
     call_id: str | None = None
     parameters: dict[str, Any] | None = None
     status: (
-        Literal["success", "error", "denied", "approved", "expired", "interrupted"]
+        Literal[
+            "success",
+            "error",
+            "denied",
+            "approved",
+            "expired",
+            "interrupted",
+            "answered",
+        ]
         | None
     ) = None
     evidence: dict[str, Any] | None = None
@@ -403,6 +446,16 @@ class AgentStreamEvent(BaseModel):
     # message_end frames (stream schema v7) so downstream tees can attribute
     # the turn.
     model: str | None = None
+    # SPEC-080 R-3: the read-only clarification park's correlator (the analogue
+    # of ``confirm_id``) plus the projected questions (clarification_request)
+    # and the owner's answers (clarification_result). Platform-owned
+    # projections of agentscope ``AskUserParams`` / ``AskUserMetadata`` minus
+    # the deferred ``preview`` field (R-6); never the agentscope shapes. Kept
+    # in lockstep with the schema by the contract-parity drift guard (the
+    # ``model_fields == schema.properties`` assertion).
+    clarification_id: str | None = None
+    questions: list[dict[str, Any]] | None = None
+    answers: list[dict[str, Any]] | None = None
 
 
 # --- Sessions ---
@@ -583,7 +636,25 @@ class ConfirmationRecordModel(BaseModel):
     # shows the same message the live card did; null for records that predate
     # the column, which degrade to no message line (never an empty artifact).
     message: str | None = None
-    status: Literal["pending", "approved", "denied", "expired"] = "pending"
+    # SPEC-080 R-1/R-7: additive park-kind discriminator — ``confirmation`` (a
+    # tool batch routed to the approval bridge) or ``clarification`` (a
+    # read-only AskUser the owner answers in-line). Both occupy the one-per-
+    # session park slot; the discriminator tells the portal which card to
+    # render on re-login and keeps a clarification out of the approver inbox.
+    # Defaults to ``confirmation`` so every pre-spec record stays a
+    # confirmation card (never a broken or empty artifact).
+    park_kind: Literal["confirmation", "clarification"] = "confirmation"
+    # SPEC-080 R-6/R-7: additive projected clarification questions (the
+    # platform-owned ``AskUserParams`` projection persisted at park time) so a
+    # re-login re-renders the owner-answerable card from the durable record.
+    # Null for a confirmation park and for records that predate the column.
+    questions: list[dict[str, Any]] | None = None
+    # SPEC-080 R-1: ``answered`` is the clarification resolution (the wire
+    # ``clarification_result`` status) — a read-only park carries no security
+    # decision, so it resolves to ``answered``, never ``approved``/``denied``.
+    status: Literal["pending", "approved", "denied", "expired", "answered"] = (
+        "pending"
+    )
     parked_at: str | None = None
     decider_user_id: str | None = None
     decision: str | None = None

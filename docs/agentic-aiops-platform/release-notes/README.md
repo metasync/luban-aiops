@@ -10,6 +10,33 @@ waves and validation outcomes rather than published product releases.
 
 ## Available Notes
 
+- `2026-11-27-spec-080-agent-initiated-clarification.md`
+  - minor (v0.62.0) — agent-initiated clarification (SPEC-080). Adds a second,
+    **read-only** HITL park *kind* beside the mutating confirmation: behind the
+    opt-in `AGENT_ASKUSER_ENABLED` flag (default **off**), the agent can pose a
+    bounded multiple-choice question mid-turn (agentscope's `AskUser` builtin —
+    1–4 questions × 2–4 options, `multi_select`, a ≤12-char `header`, optional
+    `context`, and an auto-"Other" free-text answer) and resume on the **session
+    owner's** in-line answer. A clarification mutates nothing, carries no
+    authority, and never enters the approver inbox (owner-answered, not
+    approver-routed); it composes the delivered park / resume / expire substrate
+    but **not** the SPEC-031 approval lifecycle. Rides agentscope's
+    external-execution event pair (the kernel's first
+    `RequireExternalExecutionEvent` handler), surfaced through an additive
+    **v13 → v14** `agent-stream-event` frame pair (`clarification_request` /
+    `clarification_result`) and a new
+    `POST /api/v1/sessions/{id}/clarification/answer` resume endpoint. Audit rides
+    the existing `chat_started` / `chat_completed` turn events — **no new
+    `event_type`**; the closed enum stays at **23**. With the flag off (the
+    default) the unscoped single-agent chat path stays **byte-identical** and
+    `execution-request.schema.json` is unchanged. The single-select-only `preview`
+    field and governance attribution are named fast-follows, deferred. Validated
+    across agent-platform (the park / resume / expire legs, the projection, the
+    v14 contract-parity pins, the flag-gating byte-identical proofs, and a mocked
+    live-check), platform-gateway (the answer proxy + route inventory +
+    `ClarificationAnswerAuditTests`), audit-service (the enum-closed-at-23 drift
+    guard), and operator-portal Vitest; root `make verify` green across all legs
+    (incl. the SPEC-063 campaign **795**, exit 0).
 - `2026-11-10-spec-076-bounded-autonomous-diagnosis.md`
   - minor (v0.57.0) — bounded autonomous diagnosis (SPEC-076), phase 5 of the
     ADR-0017 six-phase bounded read-only multi-agent program and the **producer**

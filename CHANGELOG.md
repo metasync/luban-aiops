@@ -11,6 +11,45 @@ portal is enforced by `make validate-version`.
 Versions prior to 0.1.0 were not numbered; Release 0 foundation work and
 Release 1 entries are grouped retrospectively under 0.1.0.
 
+## 0.62.0 — 2026-11-27
+
+A feature release: **agent-initiated clarification** (SPEC-080) — a second,
+read-only HITL park *kind* beside the mutating confirmation, opt-in behind
+`AGENT_ASKUSER_ENABLED` (default **off**). Additive only: the `agent-stream-event`
+contract bumps **v13 → v14** (two new frames) and the audit `event_type` enum stays
+closed at **23**; with the flag off every deployed path stays byte-identical, so
+there is no breaking change.
+
+### Added
+
+- **Agent-initiated clarification (SPEC-080).** A second, **read-only** HITL park
+  kind beside the mutating confirmation: behind the opt-in `AGENT_ASKUSER_ENABLED`
+  flag (default **off**), the agent can pose a bounded multiple-choice question
+  mid-turn (agentscope's `AskUser` builtin — 1–4 questions × 2–4 options,
+  `multi_select`, a ≤12-char `header`, optional `context`, and an auto-"Other"
+  free-text answer) and resume on the **session owner's** in-line answer. A
+  clarification mutates nothing, carries no authority, and cannot widen the
+  read-only posture. It composes the delivered park / resume / expire substrate
+  (one per-session slot — a confirmation *or* a clarification, never both) and the
+  kernel's first external-execution handler, surfaced through an additive
+  **v13 → v14** `agent-stream-event` frame pair (`clarification_request` /
+  `clarification_result`) and a new
+  `POST /api/v1/sessions/{id}/clarification/answer` resume endpoint. The operator
+  portal renders the parked question as a card the owner answers in-line; it
+  survives a refresh and never appears in the approver inbox (a clarification is
+  owner-answered, not approver-routed). Audit rides the existing `chat_started` /
+  `chat_completed` turn events — **no new `event_type`**; the closed enum stays at
+  **23**. With the flag off (the default) the unscoped single-agent chat path stays
+  **byte-identical**. The single-select-only `preview` field is a named fast-follow,
+  deferred.
+
+### Changed
+
+- The Settings ▸ Platform **feature-flag inventory** (`runtime:flags`) gains an
+  `askuser` entry ("Agent-initiated clarification") reporting the
+  `AGENT_ASKUSER_ENABLED` knob, and the configuration reference documents the flag.
+  No default flips: the kernel flag stays **off**.
+
 ## 0.61.1 — 2026-11-23
 
 A maintenance release: dependency hygiene across the Python services and the

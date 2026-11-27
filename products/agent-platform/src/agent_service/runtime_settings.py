@@ -253,6 +253,16 @@ class RuntimeSettings:
     reply_input_token_weight: float = 1.0
     reply_output_token_weight: float = 1.0
     task_tools_enabled: bool = False
+    # Agent-initiated clarification (SPEC-080 R-5): opt-in admission of the
+    # agentscope ``AskUser`` external tool to the kernel toolkit. ``AskUser`` is
+    # ``is_read_only=True`` + ``is_external_tool=True`` and always-ALLOW at the
+    # tool gateway, so admitting it neither widens the mutation surface nor
+    # bypasses the gateway — it executes nothing; when the agent calls it the
+    # kernel parks the reply as a read-only clarification the owner answers
+    # in-line (R-2). Default off — with the flag off (or the agent never calling
+    # ``AskUser``) the unscoped single-agent chat path is byte-identical: no new
+    # tool, frame, park, or event handling.
+    askuser_enabled: bool = False
     # Agent-driven context compression (SPEC-064 R-2): opt-in tool that lets
     # the kernel agent compress its own working context between tasks. It
     # reuses the identical ``_compress_context_impl`` the threshold trigger
@@ -672,6 +682,9 @@ class RuntimeSettings:
             ),
             task_tools_enabled=(
                 _optional_bool("AGENTSCOPE_TASK_TOOLS_ENABLED") or False
+            ),
+            askuser_enabled=(
+                _optional_bool("AGENT_ASKUSER_ENABLED") or False
             ),
             compress_context_enabled=(
                 _optional_bool("AGENTSCOPE_COMPRESS_CONTEXT_ENABLED") or False

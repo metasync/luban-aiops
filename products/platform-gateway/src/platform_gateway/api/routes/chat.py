@@ -10,12 +10,14 @@ from platform_gateway.core.request_context import resolve_request_id
 from platform_gateway.schemas.api import (
     ChatConfirmRequest,
     ChatRequest,
+    ClarificationAnswerRequest,
     DiagnoseRequest,
     RemediateRequest,
 )
 from platform_gateway.services.audit_emitter import build_audit_event, emit_audit_event
 from platform_gateway.services.delegation_client import obtain_delegated_token
 from platform_gateway.services.gateway_service import (
+    answer_clarification,
     chat,
     chat_confirm,
     chat_stream,
@@ -255,6 +257,58 @@ async def chat_confirm_route(
         decision=body.decision,
         delegated_token=delegated_token,
         recipient_warning_acknowledged=body.recipient_warning_acknowledged,
+    )
+
+
+@router.post("/api/v1/sessions/{session_id}/clarification/answer")
+async def clarification_answer_route(
+    session_id: str,
+    request: Request,
+    body: ClarificationAnswerRequest,
+    x_request_id: str | None = Header(default=None),
+    settings: PlatformGatewaySettings = Depends(get_settings),
+) -> StreamingResponse:
+    """Answer a parked read-only clarification (SPEC-080 R-4).
+
+    The sibling to ``chat_confirm_route`` for the clarification park kind — but
+    the session OWNER answers in-line (OQ-5), so there is NO approval-tier
+    bridge, no distinct-human routing, and no self-approval concern (a
+    clarification carries no authority and admits no action). Admission rides
+    the **existing** ``chat`` action — no new policy action (spec impact:
+    identity/policy/audit unchanged): an owner answering their own parked
+    question is admitted at the same trust level as the chat turn that parked
+    it. The one delegated token rides the resumed turn; the response is the
+    resumed SAME-turn SSE stream, and the ``chat_completed`` audit rides the
+    proxy tee once the turn completes (R-8: the ``event_type`` enum stays
+    closed).
+    """
+    request_id = resolve_request_id(x_request_id)
+    identity = await resolve_request_identity(settings, request, request_id)
+    enforce_policy(settings, identity, "chat", request_id)
+    delegated_token = await obtain_delegated_token(
+        settings,
+        identity.subject,  # type: ignore[union-attr]
+        _bearer_token(request),
+    )
+    log_event(
+        LOGGER,
+        "clarification_answer_started",
+        request_id=request_id,
+        session_id=session_id,
+        clarification_id=body.clarification_id,
+        user_id=identity.username,  # type: ignore[union-attr]
+        authenticated=identity.subject != "dev",  # type: ignore[union-attr]
+        roles=identity.roles,  # type: ignore[union-attr]
+    )
+    answers = [answer.model_dump(exclude_none=True) for answer in body.answers]
+    return await answer_clarification(
+        settings=settings,
+        request_id=request_id,
+        identity=identity,  # type: ignore[arg-type]
+        session_id=session_id,
+        clarification_id=body.clarification_id,
+        answers=answers,
+        delegated_token=delegated_token,
     )
 
 

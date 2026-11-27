@@ -97,6 +97,27 @@ class AuditEventContractTests(unittest.TestCase):
         model_outcomes = set(getattr(Outcome, "__args__", Outcome))
         self.assertEqual(model_outcomes, contract_outcomes)
 
+    def test_event_type_enum_is_closed_and_unchanged_at_23(self) -> None:
+        # SPEC-080 R-8: a read-only clarification rides the existing
+        # ``chat_started`` / ``chat_completed`` turn bracket and mints **no** new
+        # event_type, so the closed vocabulary stays at exactly 23 values. The
+        # parity guard above proves model and schema agree; this pins the *count*
+        # and the deferral so a widening (the OQ-3 ``clarification_asked`` /
+        # ``clarification_answered``) cannot land silently under SPEC-080.
+        contract = _load_schema(self.schema_name)
+        contract_types = contract["properties"]["event_type"]["enum"]
+        model_types = list(getattr(EventType, "__args__", EventType))
+        self.assertEqual(len(contract_types), 23)
+        self.assertEqual(len(model_types), 23)
+        self.assertEqual(len(set(contract_types)), 23)  # no duplicate members
+        # The turn brackets a parked/resumed clarification rides are present ...
+        for bracket in ("chat_started", "chat_completed"):
+            self.assertIn(bracket, contract_types)
+        # ... and no clarification-specific type was minted (attribution deferred).
+        for deferred in ("clarification_asked", "clarification_answered"):
+            self.assertNotIn(deferred, contract_types)
+            self.assertNotIn(deferred, model_types)
+
     def test_delegation_mode_vocabulary_omission_and_rejection(self) -> None:
         from audit_service.schemas.audit import AuditQuery, DelegationMode
 

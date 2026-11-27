@@ -1,6 +1,8 @@
-// Typed models for the platform SSE stream contract (stream schema v13).
+// Typed models for the platform SSE stream contract (stream schema v14).
 // SPEC-023 R-2: these models are the only representation of the wire
 // format that views consume — nothing outside src/stream/ parses frames.
+// SPEC-080 R-3: v14 adds the read-only clarification_request / clarification_
+// result frames (an agent-initiated AskUser park the owner answers in-line).
 import type { ExecutionRecovery } from "../api/sessions";
 
 export interface ToolEvidence {
@@ -147,6 +149,48 @@ export interface ConfirmationResultFrame {
   status: string;
 }
 
+// SPEC-080 R-6: one projected option on a clarification question. The
+// single-select-only ``preview`` field is a named fast-follow — it never rides
+// v14, so it is absent here by construction (the decoder drops it defensively).
+export interface ClarificationOption {
+  label: string;
+  description: string;
+}
+
+// SPEC-080 R-6: one projected question — the platform-owned view of agentscope
+// ``AskUserParams`` (header <=12 chars, 2-4 options, optional context,
+// multi_select). Never the agentscope shape and never carrying ``preview``.
+export interface ClarificationQuestion {
+  question: string;
+  header: string;
+  context?: string;
+  multiSelect: boolean;
+  options: ClarificationOption[];
+}
+
+// SPEC-080 R-3: the owner's answer to one question (the platform-owned view of
+// agentscope ``AskUserMetadata.answers``); ``selected`` holds the chosen option
+// labels and the auto-"Other" free text rides ``other``.
+export interface ClarificationAnswer {
+  question: string;
+  selected: string[];
+  other?: string;
+}
+
+export interface ClarificationRequestFrame {
+  kind: "clarification_request";
+  clarificationId: string;
+  questions: ClarificationQuestion[];
+}
+
+export interface ClarificationResultFrame {
+  kind: "clarification_result";
+  clarificationId?: string;
+  // "answered" | "expired" | "interrupted" (v14 status enum).
+  status: string;
+  answers?: ClarificationAnswer[];
+}
+
 export interface ErrorFrame {
   kind: "error";
   message: string;
@@ -161,6 +205,8 @@ export type StreamFrame =
   | AuthorizationRequiredFrame
   | ConfirmationRequestFrame
   | ConfirmationResultFrame
+  | ClarificationRequestFrame
+  | ClarificationResultFrame
   | ErrorFrame;
 
 // One decoded SSE `data:` event. Frames the decoder does not model (unknown
@@ -178,6 +224,17 @@ export type ConfirmationStatus =
   | "pending"
   | "approved"
   | "denied"
+  | "expired"
+  | "error";
+
+// SPEC-080 R-7: clarification card lifecycle — pending until a
+// clarification_result, an error frame, an HTTP 410, or an unexpected stream
+// end locks it. The resolved state is "answered" (the read-only analogue of
+// approved/denied); a clarification is owner-answered in-line, never routed to
+// an approver, so there is no denied state.
+export type ClarificationStatus =
+  | "pending"
+  | "answered"
   | "expired"
   | "error";
 

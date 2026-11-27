@@ -580,6 +580,20 @@ class TurnStreamer:
                         evidence_frames=evidence_frames,
                         run_id=run_id,
                     )
+                    if frame is None:
+                        # SPEC-080 R-2: beside the confirmation park, detect a
+                        # read-only ``AskUser`` external-execution park and
+                        # project the ``clarification_request`` frame. Inert
+                        # until an ``AskUser`` call actually parks a reply
+                        # (flag-gated, R-5), so the unscoped single-agent chat
+                        # path stays byte-identical.
+                        frame = self._kernel._build_clarification_frame(
+                            event,
+                            session_id,
+                            user_name,
+                            turn_index=turn_index,
+                            run_id=run_id,
+                        )
                     if frame is not None:
                         # A parked stream ends without message_end, so this is
                         # its only chance to release the held-back tail.

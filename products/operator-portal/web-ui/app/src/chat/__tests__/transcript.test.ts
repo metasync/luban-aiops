@@ -18,6 +18,8 @@ function turnOf(replyText: string, userMessage = "run it"): ChatTurn {
     replyText,
     completed: true,
     confirmationPending: false,
+    clarificationPending: false,
+    clarifications: [],
     toolCalls: [],
     toolResults: [],
     confirmations: [],
@@ -403,6 +405,116 @@ describe("transcriptToTurns confirmation replay (SPEC-031 R-2)", () => {
     expect(transcriptToTurns(TWO_TURNS, null, [])[0].confirmations).toEqual(
       [],
     );
+  });
+});
+
+// --- Durable clarification replay (SPEC-080 R-7) ---
+
+// The persisted question rides the wire shape (snake_case ``multi_select``);
+// ``clarificationRecordToCard`` projects it to the camelCase view-model exactly
+// as the live decoder does, so a re-login renders prop-identically.
+const CLARIFICATION_QUESTION = {
+  question: "Which environment should I target?",
+  header: "Environment",
+  context: "pick one",
+  multi_select: true,
+  options: [
+    { label: "staging", description: "non-production" },
+    { label: "production", description: "customer-facing" },
+  ],
+};
+
+function clarificationRecordOf(
+  overrides: Partial<ConfirmationRecord> = {},
+): ConfirmationRecord {
+  // A clarification park carries no tool batch, so pending_calls is empty and
+  // the projected questions ride the record instead.
+  return recordOf({
+    park_kind: "clarification",
+    pending_calls: [],
+    questions: [CLARIFICATION_QUESTION],
+    ...overrides,
+  });
+}
+
+describe("transcriptToTurns clarification replay (SPEC-080 R-7)", () => {
+  it("re-seeds a pending clarification as an owner-answerable card, not a confirmation", () => {
+    const turns = transcriptToTurns(TWO_TURNS, null, [clarificationRecordOf()]);
+    // The park_kind discriminator routes it to `clarifications` and sets the
+    // distinct pending flag — never the confirmation surface.
+    expect(turns[1].confirmations).toEqual([]);
+    expect(turns[1].confirmationPending).toBe(false);
+    expect(turns[1].clarificationPending).toBe(true);
+    expect(turns[1].clarifications[0]).toEqual({
+      clarificationId: "cf-9",
+      questions: [
+        {
+          question: "Which environment should I target?",
+          header: "Environment",
+          multiSelect: true,
+          options: [
+            { label: "staging", description: "non-production" },
+            { label: "production", description: "customer-facing" },
+          ],
+          context: "pick one",
+        },
+      ],
+      status: "pending",
+      sessionId: "s-1",
+    });
+    // A pending card carries no attribution note.
+    expect(turns[1].clarifications[0].note).toBeUndefined();
+  });
+
+  it("re-seeds an answered clarification read-only with attribution and no invented selections", () => {
+    const decidedAt = "2026-08-25T10:05:00Z";
+    const turns = transcriptToTurns(TWO_TURNS, null, [
+      clarificationRecordOf({
+        status: "answered",
+        decider_user_id: "luban-operator",
+        decided_at: decidedAt,
+      }),
+    ]);
+    const card = turns[1].clarifications[0];
+    expect(card.status).toBe("answered");
+    expect(card.note).toBe(`Answered by luban-operator at ${decidedAt}.`);
+    // The durable record persists no selections, so the card replays its prompt
+    // + attribution — never an invented answer.
+    expect(card.answers).toBeUndefined();
+    expect(turns[1].clarificationPending).toBe(false);
+  });
+
+  it("re-seeds an expired clarification with the expiry note", () => {
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      clarificationRecordOf({ status: "expired" }),
+    ])[1].clarifications[0];
+    expect(card.status).toBe("expired");
+    expect(card.note).toBe(
+      "This clarification expired before an answer was applied.",
+    );
+  });
+
+  it("keeps a confirmation park (park_kind absent or 'confirmation') off the clarification surface", () => {
+    // Legacy records (no park_kind) and explicit confirmations stay confirmations.
+    const legacy = transcriptToTurns(TWO_TURNS, null, [recordOf()])[1];
+    expect(legacy.confirmations).toHaveLength(1);
+    expect(legacy.clarifications).toEqual([]);
+    expect(legacy.clarificationPending).toBe(false);
+
+    const explicit = transcriptToTurns(TWO_TURNS, null, [
+      recordOf({ park_kind: "confirmation" }),
+    ])[1];
+    expect(explicit.confirmations).toHaveLength(1);
+    expect(explicit.clarifications).toEqual([]);
+  });
+
+  it("degrades a confirmation outcome leaking onto a clarification to 'error'", () => {
+    // A clarification resolves pending/answered/expired only; approved/denied on
+    // one is an anomaly the mapper refuses to render as a bogus state.
+    const card = transcriptToTurns(TWO_TURNS, null, [
+      clarificationRecordOf({ status: "approved" }),
+    ])[1].clarifications[0];
+    expect(card.status).toBe("error");
   });
 });
 

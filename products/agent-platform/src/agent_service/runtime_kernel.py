@@ -440,6 +440,9 @@ class AgentKernel:
     def _build_task_tools(self) -> list:
         return self._toolkit_asm.build_task_tools()
 
+    def _build_askuser_tool(self) -> list:
+        return self._toolkit_asm.build_askuser_tool()
+
     def _routed_candidate_name(self, agent) -> str | None:
         """The candidate the per-turn router chose for this reply (SPEC-071 R-2)
         — delegates to the ModelResolver collaborator."""
@@ -863,6 +866,26 @@ class AgentKernel:
             toolkit,
             turn_index=turn_index,
             evidence_frames=evidence_frames,
+            run_id=run_id,
+        )
+
+    def _build_clarification_frame(
+        self,
+        event: object,
+        session_id: str,
+        user_name: str,
+        turn_index: int = 0,
+        run_id: str | None = None,
+    ) -> dict[str, object] | None:
+        """SPEC-080 R-2: delegates to ConfirmationCoordinator (the read-only
+        ``AskUser`` park registration + ``clarification_request`` frame build).
+        Reached cross-collaborator from TurnStreamer's ``stream_events`` beside
+        ``_build_confirmation_frame``."""
+        return self._confirm._build_clarification_frame(
+            event,
+            session_id,
+            user_name,
+            turn_index=turn_index,
             run_id=run_id,
         )
 
@@ -1455,6 +1478,57 @@ class AgentKernel:
             bearer_token,
             model_id,
             owner_user_name,
+            routing_allowed,
+        )
+
+    def resume_clarification(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        answers: list[dict[str, object]],
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+        routing_allowed: bool = False,
+    ) -> AsyncIterator[dict[str, object]]:
+        """SPEC-080 R-2: returns the ConfirmationCoordinator's async generator
+        *directly* (no wrapper frame), so an early ``aclose()`` propagates into
+        the inner ``finally`` that resets the contextvars and clears the parked
+        clarification entry. Sibling to ``resume_confirmation``."""
+        return self._confirm.resume_clarification(
+            session_id,
+            pending,
+            answers,
+            user_name,
+            request_id,
+            bearer_token,
+            model_id,
+            routing_allowed,
+        )
+
+    def _resume_clarification(
+        self,
+        session_id: str,
+        pending: PendingConfirmation,
+        answers: list[dict[str, object]],
+        user_name: str,
+        request_id: str,
+        bearer_token: str | None = None,
+        model_id: str | None = None,
+        routing_allowed: bool = False,
+    ) -> AsyncIterator[dict[str, object]]:
+        """SPEC-080 R-2: returns the ConfirmationCoordinator's async generator
+        *directly* (no wrapper frame) — ``resume_clarification`` wraps it in
+        ``aclosing``, which must reach the inner ``finally``."""
+        return self._confirm._resume_clarification(
+            session_id,
+            pending,
+            answers,
+            user_name,
+            request_id,
+            bearer_token,
+            model_id,
             routing_allowed,
         )
 
